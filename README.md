@@ -83,9 +83,4 @@ echo "sdk.dir=/path/to/android-sdk" > local.properties
 > 没有时退化为 debug 签名 —— 也就是 clone 下来就能编译，只是装进 `/system/priv-app/`
 > 需要你自己的平台密钥。
 
-## 不随仓库发布的内容
 
-- `platform-key/`：平台签名私钥（`.gitignore` 排除）；
-- `preview/`：单测跑出来的离屏渲染截图（`.gitignore` 排除，跑一次单测即可重新生成）；
-- 编译产物与 `dist/*.apk`：**最新安装包通过 GitHub Release 发布**；
-- 逆向分析文档：只保留在开发机，不随本仓库发布。
