@@ -56,6 +56,8 @@ class SettingsLayoutRenderTest {
         shot(decor, overlay, "update", "x07-settings-update.png")
         // 第六十九轮：局域网传输目录改到公共 Download
         shot(decor, overlay, "lan", "x09-settings-lan.png")
+        // 第七十轮：新增「氛围灯」页（频谱预览 + 颜色设置）
+        shot(decor, overlay, "ambient", "x10-settings-ambient.png")
         // —— 滚到底：看免责声明与车辆信息
         val scroll = findField<android.widget.ScrollView>(overlay, "bodyScroll")
         scroll?.scrollTo(0, 100000)

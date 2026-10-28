@@ -111,6 +111,53 @@ class Prefs(context: Context) {
         get() = intValue("accent_color", 0)
         set(value) = setIntValue("accent_color", value)
 
+    // ------------------------------------------------------------------ 氛围灯（第七十轮）
+
+    /**
+     * 氛围灯总开关。
+     *
+     * 默认**关**：氛围灯的真实通道还没接（见 `core/ambient/AmbientLightApi.kt`），
+     * 默认开着只会让人以为「开了没反应」。
+     */
+    var ambientEnabled: Boolean
+        get() = sp.getBoolean("ambient_enabled", false)
+        set(value) { sp.edit().putBoolean("ambient_enabled", value).apply() }
+
+    /** 颜色模式（0=跟随低频 / 1=跟随频谱 / 2=固定色）。 */
+    var ambientMode: Int
+        get() = intValue("ambient_mode", 0)
+        set(value) = setIntValue("ambient_mode", value.coerceIn(0, 2))
+
+    /** 固定色的色相（0..360）。 */
+    var ambientFixedHue: Int
+        get() = intValue("ambient_fixed_hue", 30)
+        set(value) = setIntValue("ambient_fixed_hue", value.coerceIn(0, 360))
+
+    /** 灵敏度档位（0..100）。实际值见 [ambientSensitivityValue]。 */
+    var ambientSensitivity: Int
+        get() = intValue("ambient_sensitivity", 50)
+        set(value) = setIntValue("ambient_sensitivity", value.coerceIn(0, 100))
+
+    /**
+     * 灵敏度档位 → 实际灵敏度（0.3..3.0）。
+     *
+     * 灵敏度是**曲线指数**：越大 → 弱音也亮（灯更跟手）。
+     */
+    fun ambientSensitivityValue(): Float {
+        val v = ambientSensitivity.coerceIn(0, 100) / 100f
+        return 0.3f + v * (3f - 0.3f)
+    }
+
+    /** 最低亮度（0..100）。 */
+    var ambientMinBrightness: Int
+        get() = intValue("ambient_min_brightness", 20)
+        set(value) = setIntValue("ambient_min_brightness", value.coerceIn(0, 100))
+
+    /** 最高亮度（0..100）。 */
+    var ambientMaxBrightness: Int
+        get() = intValue("ambient_max_brightness", 100)
+        set(value) = setIntValue("ambient_max_brightness", value.coerceIn(0, 100))
+
     // ------------------------------------------------------------------ 卡片风格（第五十八轮）
 
     /**

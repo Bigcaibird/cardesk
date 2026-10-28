@@ -20,6 +20,7 @@ package com.cardesk.launcher.core.log
  * | `CarDesk/Window` | 车窗 |
  * | `CarDesk/Signal` | 车辆信号：胎压 / 续航 / 车门 / 油量 / 驾驶模式 |
  * | `CarDesk/Media` | 媒体会话、切歌、歌词、封面、来源 |
+ * | `CarDesk/Ambient` | 氛围灯：频谱解析、颜色映射、灯珠下发 |
  * | `CarDesk/MusicUI` | 音乐页交互 |
  * | `CarDesk/NavUI` | 导航页 / 画中画 |
  * | `CarDesk/Scene` | 场景页卡片交互 |
@@ -44,6 +45,7 @@ object LogTags {
     const val WINDOW = "CarDesk/Window"
     const val SIGNAL = "CarDesk/Signal"
     const val MEDIA = "CarDesk/Media"
+    const val AMBIENT = "CarDesk/Ambient"
     const val MUSIC_UI = "CarDesk/MusicUI"
     const val NAV_UI = "CarDesk/NavUI"
     const val SCENE = "CarDesk/Scene"
@@ -61,7 +63,7 @@ object LogTags {
 
     /** 全部 tag（导出诊断包时列出，方便排查「哪个域没日志」）。 */
     val ALL: List<String> = listOf(
-        APP, VEHICLE, HVAC, CAM360, WINDOW, SIGNAL, MEDIA, MUSIC_UI, NAV_UI, SCENE,
-        DOCK, DRAWER, SETTING, TASK, LAN, WEATHER, KEYS, SYS, THEME, FLOAT, LOG,
+        APP, VEHICLE, HVAC, CAM360, WINDOW, SIGNAL, MEDIA, AMBIENT, MUSIC_UI, NAV_UI,
+        SCENE, DOCK, DRAWER, SETTING, TASK, LAN, WEATHER, KEYS, SYS, THEME, FLOAT, LOG,
     )
 }

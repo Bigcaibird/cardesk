@@ -62,6 +62,9 @@ object Permissions {
     /** 两个定位 op 都试一下（App 拿到的权限粒度取决于系统怎么批的）。 */
     private val LOCATION_OPS = listOf(OP_FINE, OP_COARSE)
 
+    /** 录音 op 名（公开 API 里只有 `OPSTR_RECORD_AUDIO` 的字符串形式可用）。 */
+    const val OP_RECORD_AUDIO = "android:record_audio"
+
     /** 定位权限的两种。 */
     private val LOCATION_PERMISSIONS = arrayOf(
         Manifest.permission.ACCESS_FINE_LOCATION,
@@ -161,6 +164,50 @@ object Permissions {
         val ok = runCatching { m.invoke(appOps, op, uid, pkg, mode); true }.getOrDefault(false)
         if (!ok) {
             Logx.w(LogTags.WEATHER, "AppOps setMode 调用失败", "op" to op, "uid" to uid)
+        }
+        return ok
+    }
+
+    // ------------------------------------------------------------------ 录音（频谱采集用）
+
+    /**
+     * 录音权限（`RECORD_AUDIO`）当前能不能用。
+     *
+     * 抓**别的 App** 的音频输出必须要它（`Visualizer` 挂在别人会话上的前提）。
+     *
+     * 和定位一样是**两层**：permission grant + AppOps mode。
+     * system app 装在 `/system/priv-app` 且平台签名时，权限在 privapp 白名单里就给到了；
+     * 但 AppOps 那一层仍可能是 `MODE_IGNORED` —— 所以两层都要查。
+     */
+    fun hasRecordAudioAppOp(context: Context): Boolean {
+        val granted = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        if (granted) return true
+        val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager ?: return false
+        val mode = runCatching {
+            appOps.unsafeCheckOpNoThrow(OP_RECORD_AUDIO, Process.myUid(), context.packageName)
+        }.getOrNull()
+        return mode == AppOpsManager.MODE_ALLOWED
+    }
+
+    /**
+     * 用 `SET_APPOP` 特权直接把本应用的录音 AppOps 打开（system app 才行）。
+     *
+     * @return true = 已成功打开
+     */
+    fun tryGrantRecordAudioAppOps(context: Context): Boolean {
+        val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager ?: return false
+        val uid = Process.myUid()
+        val pkg = context.packageName
+        val mode = runCatching { appOps.unsafeCheckOpNoThrow(OP_RECORD_AUDIO, uid, pkg) }.getOrNull()
+            ?: return false
+        if (mode == AppOpsManager.MODE_ALLOWED) return true
+        val ok = setMode(appOps, OP_RECORD_AUDIO, uid, pkg, AppOpsManager.MODE_ALLOWED)
+        if (ok) {
+            Logx.i(
+                LogTags.AMBIENT, "已直接打开录音 AppOps",
+                "op" to OP_RECORD_AUDIO, "from" to modeName(mode), "to" to "allow",
+            )
         }
         return ok
     }

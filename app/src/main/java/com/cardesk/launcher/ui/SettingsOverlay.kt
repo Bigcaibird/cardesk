@@ -36,6 +36,7 @@ import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.ui.widget.CardStylePreviewView
 import com.cardesk.launcher.ui.widget.OverlayBackdrop
 import com.cardesk.launcher.ui.widget.QrCodeView
+import com.cardesk.launcher.ui.widget.SpectrumView
 import com.cardesk.launcher.ui.widget.WallpaperThumbView
 import com.cardesk.launcher.vehicle.DriveMode
 
@@ -158,6 +159,7 @@ class SettingsOverlay(
         NavGroup(
             "车辆功能",
             listOf(
+                NavItem("ambient", "氛围灯"),
                 NavItem("p360", "360 环影"),
                 NavItem("autostop", "启停控制"),
                 NavItem("hotspot", "自动热点"),
@@ -186,6 +188,18 @@ class SettingsOverlay(
 
     private var tab = 0
     private var selectedKey = "boot"
+
+    /**
+     * 离开当前页时要做的清理（第七十轮：氛围灯页要退订实时频谱）。
+     */
+    private var pageTeardown: (() -> Unit)? = null
+
+    override fun onDetachedFromWindow() {
+        // 面板被关掉时同样要摘监听 —— 否则会一直持有这一页的视图
+        pageTeardown?.invoke()
+        pageTeardown = null
+        super.onDetachedFromWindow()
+    }
 
     /**
      * 第四十九轮：左侧导航改成**一棵完整的树**（设计板 `s05-settings`）。
@@ -227,6 +241,7 @@ class SettingsOverlay(
         NavGroup(
             "车控",
             listOf(
+                NavItem("ambient", "氛围灯"),
                 NavItem("p360", "360 环影"),
                 NavItem("autostop", "启停控制"),
                 NavItem("hotspot", "自动热点"),
@@ -507,6 +522,10 @@ class SettingsOverlay(
             mergedGroups.flatMap { it.items }.firstOrNull { it.key == key }?.label ?: ""
         }
         pageTitle.text = label
+        // 离开上一页：把这一页挂的监听 / 定时器摘掉
+        // （第七十轮：氛围灯页订阅了实时频谱）
+        pageTeardown?.invoke()
+        pageTeardown = null
         body.removeAllViews()
         bodyScroll.scrollTo(0, 0)
         // 离开 ADB 页就把结果回调摘掉：后台操作回来时不该再去刷新已经不存在的视图
@@ -536,6 +555,7 @@ class SettingsOverlay(
             "diagnostics" -> pageDiagnostics()
             "restart" -> pageRestart()
             "logs" -> pageLogs()
+            "ambient" -> pageAmbient()
             "about" -> pageAbout()
         }
     }
@@ -2308,6 +2328,106 @@ class SettingsOverlay(
                 "caps" to report.joinToString(",") { "${it.first.label}=${if (it.second) "可用" else "不可用"}" },
             )
             Toast.makeText(context, text, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /**
+ * 氛围灯（第七十轮新增）。
+ *
+ * 这一页做两件事：
+ *
+ * 1. **设置项**：开关 / 颜色模式 / 固定色 / 灵敏度 / 亮度上下限；
+ * 2. **频谱预览**：实时显示正在采集的频段（低频在左、高频在右），
+ *    以及按当前设置算出来的颜色 —— 让「频谱解析」这件事**看得见**。
+ *
+ * 灯珠下发的通道**先留空**（见 `core/ambient/AmbientLightApi.kt`）：
+ * 现在能验收的是「频谱确实在动」「颜色确实在算」，
+ * 等氛围灯的真实 API 到位，接上实现即可点亮。
+ */
+    private fun pageAmbient() {
+        section("音乐律动氛围灯")
+        switchRow(
+            "启用氛围灯",
+            prefs.ambientEnabled,
+            "跟随正在播放的音乐改变灯光颜色与亮度",
+        ) { enabled ->
+            com.cardesk.launcher.core.ambient.AmbientLightController.setEnabled(context, enabled)
+            onApply?.invoke()
+            // 状态文字会变（启用 → 采集 / 关闭 → 未启动）→ 重建这一页
+            select(selectedKey)
+        }
+        val statusReadout = kvRow(
+            "频谱状态",
+            com.cardesk.launcher.core.ambient.AmbientLightController.statusText(),
+            true,
+        )
+        val colorReadout = kvRow("当前颜色", "（等待音乐）", true)
+
+        section("频谱预览")
+        val spectrum = SpectrumView(context)
+        bodyField(spectrum, height = 150)
+        note("左低右高：左边是鼓点（低频），右边是镲片（高频）。")
+
+        section("颜色与亮度")
+        chipRow("颜色模式", com.cardesk.launcher.core.ambient.AmbientPalette.MODE_LABELS.toList(), prefs.ambientMode) { index ->
+            val from = prefs.ambientMode
+            prefs.ambientMode = index
+            logSetting("ambient_mode", "氛围灯颜色模式", from, index)
+            onApply?.invoke()
+            // 固定色那一行只在「固定色」模式下出现 → 重建这一页
+            select(selectedKey)
+        }
+        if (prefs.ambientMode == com.cardesk.launcher.core.ambient.AmbientPalette.MODE_FIXED) {
+            val hues = com.cardesk.launcher.core.ambient.AmbientPalette.FIXED_COLORS.map { it.first }
+            val labels = com.cardesk.launcher.core.ambient.AmbientPalette.FIXED_COLOR_LABELS
+            val index = hues.indexOf(prefs.ambientFixedHue).takeIf { it >= 0 } ?: 0
+            chipRow("固定色", labels, index) { picked ->
+                val from = prefs.ambientFixedHue
+                val to = hues.getOrElse(picked) { hues[0] }
+                prefs.ambientFixedHue = to
+                logSetting("ambient_fixed_hue", "氛围灯固定色", from, to)
+                onApply?.invoke()
+            }
+        }
+        sliderRow("灵敏度", prefs.ambientSensitivity, 0, 100, "%", format = { "$it" }) { v ->
+            val from = prefs.ambientSensitivity
+            prefs.ambientSensitivity = v
+            logSetting("ambient_sensitivity", "氛围灯灵敏度", from, v)
+        }
+        sliderRow("最低亮度", prefs.ambientMinBrightness, 0, 100, "%") { v ->
+            val from = prefs.ambientMinBrightness
+            prefs.ambientMinBrightness = v
+            logSetting("ambient_min_brightness", "氛围灯最低亮度", from, v)
+        }
+        sliderRow("最高亮度", prefs.ambientMaxBrightness, 0, 100, "%") { v ->
+            val from = prefs.ambientMaxBrightness
+            prefs.ambientMaxBrightness = v
+            logSetting("ambient_max_brightness", "氛围灯最高亮度", from, v)
+        }
+        note(
+            "灵敏度越高，弱音也越亮（灯更跟手）；亮度上下限决定灯的动态范围。\n\n" +
+                "氛围灯下发通道暂未接入：频谱与颜色照常计算，接上车机通道后即可点亮。",
+        )
+
+        // —— 实时刷新（频谱条 / 颜色 / 状态）
+        val listener = object : com.cardesk.launcher.core.ambient.AmbientLightController.Listener {
+            override fun onAmbientColor(color: com.cardesk.launcher.core.ambient.AmbientColor) {
+                colorReadout.text = "${color.toHex()} · 亮度 ${color.brightness}%"
+                spectrum.barColor = android.graphics.Color.rgb(color.r, color.g, color.b)
+            }
+
+            override fun onAmbientSpectrum(bands: FloatArray, level: Float) {
+                spectrum.bands = bands
+                spectrum.level = level
+            }
+
+            override fun onAmbientStatus(text: String) {
+                statusReadout.text = text
+            }
+        }
+        com.cardesk.launcher.core.ambient.AmbientLightController.addListener(listener)
+        pageTeardown = {
+            com.cardesk.launcher.core.ambient.AmbientLightController.removeListener(listener)
         }
     }
 

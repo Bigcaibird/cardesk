@@ -61,6 +61,14 @@ class MainActivity : Activity() {
         }.onFailure { Logx.w(LogTags.TASK, "桌面内任务调度失败", it) }
         runCatching { com.cardesk.launcher.core.media.MusicController.get().start(applicationContext) }
             .onFailure { Logx.w(LogTags.MEDIA, "媒体会话启动失败", it) }
+        // 氛围灯（第七十轮）：绑上下文；上次是开着的就把频谱采集拉起来。
+        // 灯珠下发通道还没接（`core/ambient/AmbientLightApi.kt`），
+        // 所以这一步只会开始采频谱，不会真的点灯。
+        runCatching {
+            val ambient = com.cardesk.launcher.core.ambient.AmbientLightController
+            ambient.attach(applicationContext)
+            if (ambient.isEnabled(applicationContext)) ambient.start(applicationContext)
+        }.onFailure { Logx.w(LogTags.AMBIENT, "氛围灯启动失败", it) }
         // MainActivity.checkNotificationPermission():1297-1305 —— 没通知使用权就跳系统设置页。
         // 这里延后一点再判：通知监听服务是**异步绑定**的，立刻判会把「还没绑上」误判成「没授权」，
         // 白白把用户弹到系统设置页。

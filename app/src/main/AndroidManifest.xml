@@ -24,6 +24,19 @@
     <!-- 天气子系统（WeatherDesk）：需要定位权限才能取到设备位置做天气查询-->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!--
+      氛围灯（第七十轮）：频谱采集要挂在**正在播放的音频会话**上。
+
+      - RECORD_AUDIO：Visualizer 抓**别的 App** 的输出必须要它；
+      - MODIFY_AUDIO_SETTINGS：注册 AudioManager 的播放配置监听器必须要它
+        （那是唯一能拿到「别人正在放的那个会话 id」的公开入口）。
+
+      两个都是运行时 / 特权权限：
+      - system 变体（装在 /system/priv-app + 平台签名）走 privapp 白名单；
+      - 普通安装包需要用户手动授权，拿不到时频谱状态会显示「不可用」。
+    -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <!-- LAN 传输：传输期保活（WakeLock + WifiLock）需要这三个权限-->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
