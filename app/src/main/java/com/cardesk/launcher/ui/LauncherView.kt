@@ -1750,7 +1750,7 @@ private fun showCam() {
             showOverlayDialog(dialog)
         }
         overlay.onShowUpdate = {
-            val dialog = com.cardesk.launcher.ui.dialogs.UpdateDialog(context, pal, prefs.updateUrl)
+            val dialog = com.cardesk.launcher.ui.dialogs.UpdateDialog(context, pal)
             dialog.onClose = { closeOverlayDialog(dialog) }
             showOverlayDialog(dialog)
         }

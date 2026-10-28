@@ -2207,6 +2207,9 @@ class SettingsOverlay(
                 ?.sortedByDescending { it.lastModified() }
                 .orEmpty()
             section("共享目录文件（${files.size} 个）")
+            // 第六十九轮：目录路径**始终**显示 ——
+            // 传输目录搬到了公共 Download 目录，用户得一眼看到文件存哪儿
+            note("保存路径：${LanTransferServer.rootDir(context).absolutePath}")
             if (files.isEmpty()) {
                 note("目录为空。启动服务后把地址贴到电脑浏览器，即可上传/下载。")
                 return
@@ -2215,7 +2218,6 @@ class SettingsOverlay(
                 kvRow(f.name, fmtSize(f.length()), true)
             }
             if (files.size > 10) note("… 还有 ${files.size - 10} 个文件")
-            note("目录：${LanTransferServer.rootDir(context).absolutePath}")
         }
         fun paint() {
             if (LanTransferServer.running) {
@@ -2272,31 +2274,28 @@ class SettingsOverlay(
         note("端口 18765..18775、`?t=<token>`；启动后把地址贴到电脑浏览器即可上传/下载。")
     }
 
-    /** 在线更新。 */
+    /**
+ * 在线更新（第六十九轮重写）。
+ *
+ * 原来这一页让用户手填一个 APK 地址（`prefs.updateUrl`）—— 填错就更新不了，
+ * 地址变了还得重填。现在更新源固定为**本项目自己的 GitHub Release**：
+ * `github.com/Bigcaibird/cardesk` 的 releases。
+ *
+ * **检测手动触发**：只有点「检查更新」才会联网查一次，
+ * 桌面不在后台自动检测、也不会自动下载。
+ */
     private fun pageUpdate() {
-        section("在线更新")
-        note("当前版本：CarDesk 1.0\n更新通道：使用 PackageInstaller.Session 静默安装；无 INSTALL_PACKAGES 权限时回退到系统安装器。")
-        val urlField = android.widget.EditText(context).apply {
-            hint = "https://…/cardesk.apk"
-            setText(prefs.updateUrl)
-            setTextColor(pal.text)
-            setHintTextColor(pal.textDim)
-            textSize = 18f
-            setSingleLine()
-            background = Skin.solid(Skin.GLASS_STRONG_FILL, 18f)
-            setPadding(24, 12, 24, 12)
-        }
-        bodyField(urlField, height = 60)
-        actionButton("保存更新地址") {
-            val from = prefs.updateUrl
-            val to = urlField.text.toString().trim()
-            prefs.updateUrl = to
-            logSetting("update_url", "更新地址", from, to)
-            Toast.makeText(context, "已保存更新地址", Toast.LENGTH_SHORT).show()
-        }
+        section("更新通道")
+        kvRow("更新源", "GitHub Releases · Bigcaibird/cardesk", true)
+        kvRow("当前版本", com.cardesk.launcher.core.update.AppUpdate.versionLabel(context), true)
+        note(
+            "检测手动触发：只有点下面的「检查更新」才会联网查询 Release；" +
+                "桌面不会在后台自动检查，也不会自动下载。\n\n" +
+                "查到新版本后可以一键下载并安装（system 版静默安装，普通安装包转系统安装器）。",
+        )
         actionButton("检查更新", primary = true) {
             // 排障场景：点了检查更新没反应 —— 记下打开更新对话框
-            Logx.event(LogTags.SETTING, "打开在线更新对话框", "url" to prefs.updateUrl)
+            Logx.event(LogTags.SETTING, "打开在线更新对话框")
             onShowUpdate?.invoke()
         }
         actionButton("系统能力自检") {

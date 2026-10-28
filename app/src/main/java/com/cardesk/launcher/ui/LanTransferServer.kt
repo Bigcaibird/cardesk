@@ -2,6 +2,7 @@ package com.cardesk.launcher.ui
 
 import android.content.Context
 import android.net.wifi.WifiManager
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
@@ -54,8 +55,20 @@ object LanTransferServer {
     private const val PORT_FIRST = 18765
     private const val PORT_LAST = 18775
 
-    /** 共享目录名（L621、L985）。 */
-    private const val SHARE_DIR_NAME = "lan-transfer"
+    /**
+     * 传输目录名（放在公共 Download 目录下面）。
+     *
+     * 第六十九轮：传输目录从「应用私有目录」
+     * （`/storage/emulated/0/Android/data/com.ecarx.cardesk/files/lan-transfer`）
+     * 改到 **公共 Download 目录** —— 私有目录在文件管理器里很难找，
+     * 推过去的安装包还得再拷一次才能装。
+     *
+     * 放在 `Download/CarDesk/` 而不是 `Download/` 根下：
+     * 这样局域网里能看到的只有 CarDesk 自己的文件，
+     * 不会把用户自己在 Download 里下的东西一并暴露出去。
+     * （诊断包导出用的也是这个目录，见 `core/log/Diagnostics.kt`。）
+     */
+    private const val SHARE_DIR_NAME = "CarDesk"
 
     /** 单连接超时 120s（L302）。 */
     private const val SOCKET_TIMEOUT_MS = 120000
@@ -100,10 +113,16 @@ object LanTransferServer {
 
     // ---------------------------------------------------------------- 生命周期
 
-    /** 共享目录（L612-622、L985）。 */
+    /**
+ * 传输目录：公共 Download 目录下的 CarDesk 子目录。
+ *
+ * 第六十九轮从应用私有目录（`getExternalFilesDir`）搬到了公共 Download 目录。
+ *
+ * 权限：Android 9 及以下靠 `WRITE_EXTERNAL_STORAGE`（主 manifest 里已声明，
+ * `maxSdkVersion=28`）；system 变体是 uid 1000，不受 scoped storage 限制。
+ */
     private fun shareDirOf(context: Context): File {
-        val app = context.applicationContext
-        val base = app.getExternalFilesDir(null) ?: app.filesDir
+        val base = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         return File(base, SHARE_DIR_NAME)
     }
 

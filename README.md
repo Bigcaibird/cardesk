@@ -16,6 +16,7 @@ ECARX `AdaptAPI` 与 AOSP `Car` 属性通道；读不到真车数据时自动降
 | 目标平台 | Android 11+（API 30+） |
 | 包名 | `com.ecarx.cardesk` |
 | 构建变体 | `system`（平台签名 + `sharedUserId=android.uid.system`）/ `debug`（普通安装） |
+| 在线更新 | App 内「设置 → 在线更新」**手动**检测本仓库的 GitHub Release，有新版可一键下载并安装 |
 
 ## 目录结构
 

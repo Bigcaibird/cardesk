@@ -86,6 +86,13 @@ class Prefs(context: Context) {
         get() = sp.getInt("vehicle_source", 0)
         set(v) = sp.edit().putInt("vehicle_source", v).apply()
 
+    /**
+     * 自定义更新地址。
+     *
+     * 第六十九轮起**不再使用**：更新源固定为 GitHub Releases
+     * （`github.com/Bigcaibird/cardesk`），检测由用户手动触发。
+     * 键保留是为了老设备上的偏好数据不报错，将来要恢复「自定义源」直接能用。
+     */
     var updateUrl: String
         get() = sp.getString("update_url", "") ?: ""
         set(value) { sp.edit().putString("update_url", value).apply() }

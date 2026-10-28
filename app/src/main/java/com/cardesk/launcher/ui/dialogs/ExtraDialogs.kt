@@ -11,6 +11,7 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.TextView
 import android.widget.SeekBar
 import com.cardesk.launcher.core.Palette
 import com.cardesk.launcher.core.Prefs
@@ -18,6 +19,8 @@ import com.cardesk.launcher.core.Shape
 import com.cardesk.launcher.core.Skin
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
+import com.cardesk.launcher.core.update.AppUpdate
+import com.cardesk.launcher.core.update.GitHubRelease
 import com.cardesk.launcher.ui.Ui
 import com.cardesk.launcher.ui.pressFeedback
 
@@ -222,58 +225,150 @@ private fun hsvOf(color: Int): FloatArray {
 }
 
 /**
- * 在线更新：检查 → 下载 → 安装。
- * 走路径：下载到 cache → `SystemOps.installApk`（PackageInstaller 静默安装）
- * 无 INSTALL_PACKAGES 权限时返回 false 并提示改用系统安装器。
+ * 在线更新：检查 GitHub Release → 有新版本就下载并安装（第六十九轮重写）。
+ *
+ * ## 更新源
+ *
+ * 原来是让用户手填一个 APK 地址（`prefs.updateUrl`）—— 填错就更新不了。
+ * 现在固定检测**本项目自己的 GitHub Release**（`Bigcaibird/cardesk`）：
+ * 拉 release 列表 → 按版本号挑最新的那个 → 和车机上装着的版本比。
+ *
+ * ## 检测时机：**手动触发**
+ *
+ * 对话框打开后**不**自己发请求；只有用户点了「检查更新」才联网查一次。
+ * 车机常年挂在后台，自动检查既费流量又会在用户没想更新的时候弹窗。
+ *
+ * ## 安装
+ *
+ * 下载 → 优先**静默安装**（system 变体有 `INSTALL_PACKAGES`）；
+ * 静默不行就退到系统安装器（普通安装包唯一能走的路）。
  */
-class UpdateDialog(context: Context, pal: Palette, private val url: String = "") :
-    DialogSheet(context, pal, 760, 520, "在线更新") {
+class UpdateDialog(context: Context, pal: Palette) :
+    DialogSheet(context, pal, 860, 720, "在线更新") {
 
-    private var progress = -1
-    private val bar = SeekBar(context).apply { isEnabled = false }
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+
     private val status = Ui.text(context, "状态：尚未检查", 21f, pal.textDim)
+    private val detail = Ui.text(context, "", 19f, pal.textFaint).apply { setLineSpacing(8f, 1f) }
+    private val bar = SeekBar(context).apply {
+        isEnabled = false
+        // 没开始下载时不显示那条空进度条
+        visibility = View.GONE
+    }
+    private val footer = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+    }
+
+    /** 有新版时才出现的「下载并更新」。 */
+    private var downloadBtn: TextView? = null
 
     init {
         val content = flowContent()
         content.addView(section("更新详情"))
-        content.addView(note("当前版本：CarDesk 1.0"), Ui.linear(-1, 34))
-        content.addView(status, Ui.linear(-1, 34))
+        // 这几行都用可换行高度 —— `note()` 是给单行标签用的，长了会被裁掉
+        content.addView(line("当前版本：${AppUpdate.versionLabel(context)}"), Ui.linear(-1, -2))
+        content.addView(line("更新源：GitHub Releases · Bigcaibird/cardesk"), Ui.linear(-1, -2))
+        content.addView(line("检测需手动触发：不查后台、也不会自动下载。"), Ui.linear(-1, -2))
+        content.addView(status, Ui.linear(-1, 36))
+        // 详情放滚动区里 —— release 说明可能很长，不能把按钮顶出面板
+        val detailScroll = ScrollView(context)
+        detailScroll.addView(detail, FrameLayout.LayoutParams(-1, -2))
+        content.addView(detailScroll, Ui.linear(-1, 0, 1f, 0, 8))
         content.addView(bar, Ui.linear(-1, 60, 0f, 0, 12))
-        val footer = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
         content.addView(footer, Ui.linear(-1, 66, 0f, 0, 18))
-        footer.addView(primaryButton("检查更新") { download() }, Ui.linear(-2, 62))
+        footer.addView(primaryButton("检查更新") { check() }, Ui.linear(-2, 62))
     }
 
-    private fun download() {
-        if (url.isBlank()) {
-            status.text = "状态：未配置更新地址（设置 → 在线更新）"
-            // 排障场景：点了「检查更新」但没反应 —— 多半是没填地址
-            Logx.w(LogTags.SETTING, "检查更新失败：更新地址为空")
-            return
-        }
-        bar.max = 100
+    /** 一行弱文字（可换行）。 */
+    private fun line(text: String): TextView =
+        Ui.text(context, text, 19f, pal.textFaint).apply { setLineSpacing(6f, 1f) }
+
+    /** 手动触发检查。 */
+    private fun check() {
+        status.text = "状态：检查中…"
+        detail.text = ""
         bar.progress = 0
-        status.text = "状态：下载中 0%"
-        // 排障场景：检查更新的地址与耗时
-        Logx.event(LogTags.SETTING, "检查更新", "url" to url)
-        val handler = android.os.Handler(android.os.Looper.getMainLooper())
-        val started = System.currentTimeMillis()
+        bar.visibility = View.GONE
+        downloadBtn?.let { footer.removeView(it) }
+        downloadBtn = null
+        // 排障场景：用户点了检查更新 —— 记下这次是**手动**触发
+        Logx.event(LogTags.SETTING, "检查更新（手动触发）", "api" to AppUpdate.RELEASES_API)
         Thread {
-            val ok = com.cardesk.launcher.core.SystemOps.downloadAndInstall(context, url)
-            handler.post {
-                bar.progress = 100
-                status.text = if (ok) "状态：已提交安装（静默）" else "状态：缺少 INSTALL_PACKAGES 权限，请改用系统安装器"
-                // 排障场景：更新到底成没成
-                if (ok) {
-                    Logx.i(LogTags.SETTING, "检查更新结果：已提交安装", "elapsedMs" to (System.currentTimeMillis() - started))
-                } else {
-                    Logx.w(LogTags.SETTING, "检查更新结果：失败（缺少 INSTALL_PACKAGES 权限）", "elapsedMs" to (System.currentTimeMillis() - started))
-                }
-            }
+            val result = AppUpdate.check(context)
+            handler.post { onChecked(result) }
         }.start()
+    }
+
+    private fun onChecked(result: AppUpdate.CheckResult) {
+        when (result) {
+            is AppUpdate.CheckResult.UpToDate -> {
+                status.text = "状态：已是最新版本（${result.current}）"
+                detail.text = "仓库最新：${result.latestVersion}\n${AppUpdate.REPO_URL}"
+            }
+            is AppUpdate.CheckResult.Available -> {
+                val r = result.release
+                val asset = r.apk
+                status.text = "状态：发现新版本 ${r.version}"
+                val notes = r.notes.trim().take(600)
+                detail.text = buildString {
+                    append(r.name.ifBlank { r.tag })
+                    if (asset != null) {
+                        append("\n安装包：${asset.name}")
+                        if (asset.size > 0) append("（${asset.size / 1024 / 1024.0f} MB）")
+                    }
+                    if (notes.isNotEmpty()) append("\n\n$notes")
+                    append("\n\n${r.htmlUrl}")
+                }
+                val btn = primaryButton("下载并更新") { download(r) }
+                downloadBtn = btn
+                footer.addView(btn, Ui.linear(-2, 62, 0f, 12))
+            }
+            is AppUpdate.CheckResult.Failed -> {
+                status.text = "状态：检查失败"
+                detail.text = "${result.reason}\n\n检查更新需要车机能访问 api.github.com。"
+            }
+        }
+    }
+
+    private fun download(release: GitHubRelease) {
+        status.text = "状态：下载中…"
+        bar.visibility = View.VISIBLE
+        bar.progress = 0
+        downloadBtn?.let { footer.removeView(it) }
+        downloadBtn = null
+        Thread {
+            val file = AppUpdate.download(context, release) { p ->
+                handler.post { bar.progress = p }
+            }
+            if (file == null) {
+                handler.post {
+                    status.text = "状态：下载失败"
+                    detail.text = "没下下来，请检查车机网络后重试。"
+                }
+                return@Thread
+            }
+            handler.post { status.text = "状态：下载完成，正在安装…" }
+            val result = AppUpdate.install(context, file)
+            handler.post { onInstalled(result) }
+        }.start()
+    }
+
+    private fun onInstalled(result: AppUpdate.InstallResult) {
+        when (result) {
+            AppUpdate.InstallResult.Silent -> {
+                status.text = "状态：已提交静默安装"
+                detail.text = "装完重启车机生效。"
+            }
+            is AppUpdate.InstallResult.Installer -> {
+                status.text = "状态：已转交系统安装器"
+                detail.text = "安装包：${result.location}\n在弹出的安装界面确认即可。"
+            }
+            is AppUpdate.InstallResult.Fail -> {
+                status.text = "状态：安装未完成"
+                detail.text = result.reason
+            }
+        }
     }
 }
 

@@ -52,6 +52,10 @@ class SettingsLayoutRenderTest {
         shot(decor, overlay, "diagnostics", "x04-settings-diagnostics.png")
         // 第六十八轮：「开通免激活」页改成了「开源与声明」页
         shot(decor, overlay, "about", "x05-settings-about.png")
+        // 第六十九轮：「在线更新」页改成检测 GitHub Release
+        shot(decor, overlay, "update", "x07-settings-update.png")
+        // 第六十九轮：局域网传输目录改到公共 Download
+        shot(decor, overlay, "lan", "x09-settings-lan.png")
         // —— 滚到底：看免责声明与车辆信息
         val scroll = findField<android.widget.ScrollView>(overlay, "bodyScroll")
         scroll?.scrollTo(0, 100000)
@@ -68,6 +72,26 @@ class SettingsLayoutRenderTest {
         val bmp = Bitmap.createBitmap(1920, 1080, Bitmap.Config.ARGB_8888)
         decor.draw(Canvas(bmp))
         FileOutputStream(File(dir, name)).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
+    /**
+     * 在线更新对话框（第六十九轮重写）的效果图。
+     *
+     * 对话框**不会自己发请求**（检测手动触发），所以这里渲染是安全的。
+     */
+    @Test
+    fun 渲染在线更新对话框() {
+        val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        shadowOf(Looper.getMainLooper()).idle()
+        val decor = activity.window.decorView
+        layout(decor)
+        val dialog = com.cardesk.launcher.ui.dialogs.UpdateDialog(activity, com.cardesk.launcher.core.Palettes.night)
+        (decor as ViewGroup).addView(dialog, ViewGroup.LayoutParams(1920, 1080))
+        shadowOf(Looper.getMainLooper()).idle()
+        val bmp = Bitmap.createBitmap(1920, 1080, Bitmap.Config.ARGB_8888)
+        decor.draw(Canvas(bmp))
+        FileOutputStream(File(dir, "x08-update-dialog.png"))
+            .use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
     private fun layout(decor: View) {
