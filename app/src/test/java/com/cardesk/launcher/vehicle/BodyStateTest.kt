@@ -159,4 +159,10 @@ class BodyStateTest {
     fun `MC 事件属性是第四档来源`() {
         assertEquals("MC_DOOR", BodyState.SOURCE_MC)
     }
+
+    @Test
+    fun `IDoorAndWindow 是第二档来源`() {
+        // 第六十六轮新增：车机原生的 BCM 布尔通道，插在 car_signal 与 BCM_DOOR_POS 之间。
+        assertEquals("IDoorAndWindow", BodyState.SOURCE_OEM)
+    }
 }

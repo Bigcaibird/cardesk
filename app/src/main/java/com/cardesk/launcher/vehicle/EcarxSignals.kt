@@ -95,83 +95,245 @@ object EcarxSignals {
     /** connect 之后延迟这么久再去取 manager。 */
     private const val MANAGER_DELAY_MS = 1500L
 
+    /**
+     * 「这一条通道不存在」的日志限频（毫秒）。
+     *
+     * 桌面每秒调一次 [connect]，不限频的话日志会被同一条刷爆
+     * （真机诊断包里 `ECarXCar 信号通道不可用（类不存在）` 刷了几百行）。
+     */
+    private const val UNAVAILABLE_LOG_INTERVAL_MS = 60_000L
+
+    /**
+     * 直取 `CarSignalManager` 的重试间隔（毫秒）。
+     *
+     * 桌面每秒调一次 [connect]；拿不到时不用每秒都去反射一遍。
+     */
+    private const val DIRECT_RETRY_MS = 30_000L
+
+    /** `ECarXCar` 的候选类名（不同固件的包名不一样）。 */
+    private val ECARX_CAR_CLASSES = arrayOf(
+        "ecarx.car.ECarXCar",
+        "ecarx.car.hardware.ECarXCar",
+        "com.ecarx.car.ECarXCar",
+        "ecarx.vehicle.ECarXCar",
+    )
+
+    /**
+     * `CarSignalManager` 的候选类名。
+     *
+     * 文档口径（`vehicle-body-signals-read.md` §2 / §3.1）：
+     * 四门 + 机盖 + 后备箱的开合 getter 都在**这个类**上
+     * （`getDoorDrvrSts` / `getHoodSts` / `getTrSts` …），
+     * 事件回调是它嵌套类 `CarSignalEventCallback`。
+     */
+    private val SIGNAL_MANAGER_CLASSES = arrayOf(
+        "ecarx.car.hardware.signal.CarSignalManager",
+        "com.ecarx.car.hardware.signal.CarSignalManager",
+    )
+
     /** 类可用性的缓存（`null` = 还没探测过）。 */
     private var cachedAvailable: Boolean? = null
 
+    /** 找到的 `ECarXCar` 类（`null` = 这台车上没有）。 */
+    private var ecarxCarClass: Class<*>? = null
+
+    /** 找到的 `CarSignalManager` 类（`null` = 这台车上没有）。 */
+    private var signalManagerClass: Class<*>? = null
+
+    /** 上次打「通道不可用」日志的时刻。 */
+    private var lastUnavailableLogAt = 0L
+
+    /** 上次尝试直取 `CarSignalManager` 的时刻。 */
+    private var lastDirectAttemptAt = 0L
+
     /**
-     * `ecarx.car.ECarXCar` 这个类在不在。
+     * `ecarx.car.ECarXCar` / `CarSignalManager` 这两个类在不在。
      *
      * 结果**缓存**起来： 会被桌面每秒调一次
      * （`currentVehicleInfo` → `EcarxSignals.connect`），
      * 非 ECARX 车机上每次都抛一次 太浪费。
+     *
+     * 注意口径：**两个类任意一个在就算这条通道有戏** ——
+     * 就算 `ECarXCar` 不在（真机实测就是不在），
+     * 也可能是 `CarSignalManager` 能直接拿到。
      */
     fun isAvailable(): Boolean {
         cachedAvailable?.let { return it }
-        val ok = runCatching {
-            Class.forName("ecarx.car.ECarXCar")
-            true
-        }.getOrElse {
-            // 排障场景：非 ECARX 车机上必然探测不到，说明「续航/车门为什么读不到」。
-            Logx.d(LogTags.SIGNAL, "ECarXCar 信号通道探测失败", "reason" to "${it.javaClass.simpleName}: ${it.message}")
-            false
-        }
+        val car = findClass(ECARX_CAR_CLASSES)
+        val mgr = findClass(SIGNAL_MANAGER_CLASSES)
+        ecarxCarClass = car
+        signalManagerClass = mgr
+        val ok = car != null || mgr != null
         cachedAvailable = ok
+        if (!ok) {
+            // 排障场景：非 ECARX 车机上必然探测不到，说明「续航/车门为什么读不到」。
+            Logx.d(
+                LogTags.SIGNAL,
+                "ECarXCar 信号通道探测失败",
+                "reason" to "ECarXCar 与 CarSignalManager 两个类都不存在",
+            )
+        } else {
+            Logx.i(
+                LogTags.SIGNAL,
+                "ECarXCar 信号通道类可用",
+                "ecarxCar" to (car?.name ?: "无"),
+                "signalManager" to (mgr?.name ?: "无"),
+            )
+        }
         return ok
+    }
+
+    /** 在候选名单里找第一个存在的类。 */
+    private fun findClass(names: Array<String>): Class<*>? {
+        for (name in names) {
+            runCatching { Class.forName(name) }.getOrNull()?.let { return it }
+        }
+        return null
+    }
+
+    /** 「这一条通道不存在」的日志（限频，别刷屏）。 */
+    private fun logUnavailable(reason: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastUnavailableLogAt < UNAVAILABLE_LOG_INTERVAL_MS) return
+        lastUnavailableLogAt = now
+        Logx.d(LogTags.SIGNAL, "ECarXCar 信号通道不可用", "reason" to reason)
     }
 
     /** 幂等连接；返回是否可用。 */
     fun connect(context: Context): Boolean {
         if (connected && signalManager != null) return true
         if (!isAvailable()) {
-            Logx.d(LogTags.SIGNAL, "ECarXCar 信号通道不可用（类不存在）")
+            logUnavailable("类不存在")
             return false
         }
         // 已经建过连接、只是 manager 还没就绪 → 只再试一次取 manager，
         // **不要重复 createCar**（服务只允许一个连接，重复建会抛异常）。
         if (car != null) {
-            val cls = runCatching { Class.forName("ecarx.car.ECarXCar") }.getOrNull() ?: return false
+            val cls = ecarxCarClass ?: return tryDirectSignalManager(context)
             resolveManagers(cls)
             return connected
         }
         // 排障场景：信号通道是独立于空调通道的一条链路，连不上要说清楚。
         Logx.d(LogTags.SIGNAL, "连接 ECarXCar 信号通道")
-        return runCatching {
-            val cls = Class.forName("ecarx.car.ECarXCar")
-            val connection = object : ServiceConnection {
-                override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-                    // 服务连上后**立刻**取一次 manager（不等延迟）。
-                    Logx.i(LogTags.SIGNAL, "ECarXCar 服务已连接", "pkg" to (name?.packageName ?: ""))
-                    resolveManagers(cls)
-                }
+        val cls = ecarxCarClass
+        val ok = if (cls == null) {
+            // 这台车上没有 ECarXCar → 试试直接拿 CarSignalManager（第六十六轮新增）
+            logUnavailable("ECarXCar 类不存在")
+            tryDirectSignalManager(context)
+        } else {
+            runCatching {
+                val connection = object : ServiceConnection {
+                    override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+                        // 服务连上后**立刻**取一次 manager（不等延迟）。
+                        Logx.i(LogTags.SIGNAL, "ECarXCar 服务已连接", "pkg" to (name?.packageName ?: ""))
+                        resolveManagers(cls)
+                    }
 
-                override fun onServiceDisconnected(name: ComponentName?) {
-                    Logx.w(LogTags.SIGNAL, "ECarXCar 服务已断开", "pkg" to (name?.packageName ?: ""))
-                    signalManager = null
-                    phevManager = null
-                    connected = false
+                    override fun onServiceDisconnected(name: ComponentName?) {
+                        Logx.w(LogTags.SIGNAL, "ECarXCar 服务已断开", "pkg" to (name?.packageName ?: ""))
+                        signalManager = null
+                        phevManager = null
+                        connected = false
+                    }
                 }
+                car = create(cls, context, connection)
+                val instance = car ?: return false
+                instance.javaClass.methods.firstOrNull { it.name == "connect" && it.parameterTypes.isEmpty() }
+                    ?.invoke(instance)
+                // connect 之后延迟 1.5 秒再取 manager（服务那会儿还没完全就绪）。
+                main.postDelayed({ resolveManagers(cls) }, MANAGER_DELAY_MS)
+                // 立刻先试一次，manager 已经是现成的就不用等。
+                resolveManagers(cls)
+                connected = signalManager != null
+                if (connected) {
+                    Logx.i(LogTags.SIGNAL, "ECarXCar 信号通道连接成功", "phevManager" to (phevManager != null))
+                } else {
+                    Logx.w(LogTags.SIGNAL, "ECarXCar 信号通道连接失败", "reason" to "car_signal manager 未就绪")
+                }
+                connected
+            }.getOrElse {
+                lastError = it.toString()
+                Logx.w(LogTags.SIGNAL, "ECarXCar 信号通道连接异常", it, "reason" to lastError)
+                false
             }
-            car = create(cls, context, connection)
-            val instance = car ?: return false
-            instance.javaClass.methods.firstOrNull { it.name == "connect" && it.parameterTypes.isEmpty() }
-                ?.invoke(instance)
-            // connect 之后延迟 1.5 秒再取 manager（服务那会儿还没完全就绪）。
-            main.postDelayed({ resolveManagers(cls) }, MANAGER_DELAY_MS)
-            // 立刻先试一次，manager 已经是现成的就不用等。
-            resolveManagers(cls)
-            connected = signalManager != null
-            if (connected) {
-                Logx.i(LogTags.SIGNAL, "ECarXCar 信号通道连接成功", "phevManager" to (phevManager != null))
-            } else {
-                Logx.w(LogTags.SIGNAL, "ECarXCar 信号通道连接失败", "reason" to "car_signal manager 未就绪")
-            }
-            connected
-        }.getOrElse {
-            lastError = it.toString()
-            Logx.w(LogTags.SIGNAL, "ECarXCar 信号通道连接异常", it, "reason" to lastError)
-            false
         }
+        // ECarXCar 这条路走不通时，再试直接拿 CarSignalManager。
+        if (!ok) return tryDirectSignalManager(context)
+        return ok
     }
+
+    /**
+     * **直接**拿 `CarSignalManager`（不走 `ECarXCar`）。
+     *
+     * ## 为什么需要这一条（第六十六轮）
+     *
+     * 真机（领克 dcy11 / Android 9）诊断包里，
+     * `ECarXCar 信号通道不可用（类不存在）` 刷了几百行 —— 这台车机上
+     * **没有** `ecarx.car.ECarXCar`，所以「源1」整档失效。
+     *
+     * 但文档口径里，四个门的 getter 挂在 **`ecarx.car.hardware.signal.CarSignalManager`**
+     * 这个类上（事件回调还是它自己的嵌套类）。
+     * 于是这里直接试这个类：
+     * - 静态工厂方法（`getInstance` / `create` / `getCarSignalManager` …）；
+     * - 公开构造器（无参 / 带 Context）。
+     *
+     * 拿不到就安静返回 false（这一档就当没有，不影响别的档）。
+     */
+    private fun tryDirectSignalManager(context: Context): Boolean {
+        val cls = signalManagerClass ?: return false
+        if (signalManager != null) {
+            connected = true
+            return true
+        }
+        // 桌面每秒调一次 connect，拿不到就别每秒都去反射一遍
+        val now = System.currentTimeMillis()
+        if (now - lastDirectAttemptAt < DIRECT_RETRY_MS) return false
+        lastDirectAttemptAt = now
+        val instance = createSignalManager(cls, context) ?: run {
+            logUnavailable("CarSignalManager 存在但拿不到实例")
+            return false
+        }
+        signalManager = instance
+        registerSignalCallback(instance)
+        connected = true
+        Logx.i(
+            LogTags.SIGNAL,
+            "car_signal 管理器直取就绪",
+            "class" to instance.javaClass.name,
+        )
+        return true
+    }
+
+    /**
+     * 用反射造一个 `CarSignalManager` 实例。
+     *
+     * 依次试：静态工厂（无参 → 带 Context）→ 公开构造器（无参 → 带 Context）。
+     */
+    private fun createSignalManager(cls: Class<*>, context: Context): Any? {
+        val ctx: Class<*> = Context::class.java
+        for (name in SIGNAL_MANAGER_FACTORIES) {
+            val m = runCatching { cls.getMethod(name) }.getOrNull()
+            if (m != null) {
+                runCatching { m.invoke(null) }.getOrNull()?.let { return it }
+            }
+            val m1 = runCatching { cls.getMethod(name, ctx) }.getOrNull()
+            if (m1 != null) {
+                runCatching { m1.invoke(null, context) }.getOrNull()?.let { return it }
+            }
+        }
+        for (params in listOf(arrayOf<Any>(), arrayOf<Any>(context))) {
+            val types = params.map { if (it is Context) ctx else Any::class.java }.toTypedArray()
+            val ctor = runCatching { cls.getConstructor(*types) }.getOrNull() ?: continue
+            runCatching { ctor.newInstance(*params) }.getOrNull()?.let { return it }
+        }
+        return null
+    }
+
+    /** `CarSignalManager` 的候选静态工厂方法名。 */
+    private val SIGNAL_MANAGER_FACTORIES = arrayOf(
+        "getInstance", "create", "getCarSignalManager", "createSignalManager",
+        "get", "newInstance",
+    )
 
     /**
      * 取两个 manager。

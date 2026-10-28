@@ -46,7 +46,7 @@ object CarBodySignals {
     private var attached = false
 
     // 门 / 窗缓存
-    private var windowCache: BooleanArray? = null
+    private var windowCache: List<Boolean?>? = null
     private var windowCacheAt = 0L
     private var doorCache: List<Boolean?>? = null
     private var doorCacheAt = 0L
@@ -100,8 +100,20 @@ object CarBodySignals {
      *
      * 走 `WINDOW_POS` 属性；区域号先翻译成角色（见 [VehicleStats.areaRoles]），
      * 拿不到再退回 AOSP 的固定顺序（`0/1/2/3`）。
+     *
+     * 注意：**读不到的那一扇在 [readWindowsEach] 里是 null**，
+     * 这里转成布尔数组时按 `false`（关）处理 —— UI 的协议是布尔数组。
      */
-    fun readWindows(): BooleanArray? {
+    fun readWindows(): BooleanArray? =
+        readWindowsEach()?.map { it == true }?.toBooleanArray()
+
+    /**
+     * 四扇车窗的开闭（**true = 开**），**逐扇独立**；每扇读不到时那一项是 null。
+     *
+     * 走 `WINDOW_POS` 属性；区域号先翻译成角色（见 [VehicleStats.areaRoles]），
+     * 拿不到再退回 AOSP 的固定顺序（`0/1/2/3`）。
+     */
+    fun readWindowsEach(): List<Boolean?>? {
         val now = System.currentTimeMillis()
         windowCache?.let { if (now - windowCacheAt < CACHE_MS) return it }
         val roles = VehicleStats.areaRoles(
@@ -123,14 +135,14 @@ object CarBodySignals {
             Logx.d(LogTags.SIGNAL, "车窗位置读不到", "prop" to "WINDOW_POS")
             return null
         }
-        val flags = VehicleStats.windowOpenFlags(values) ?: return null
+        val flags = VehicleStats.windowOpenFlagsEach(values) ?: return null
         windowCache = flags
         windowCacheAt = now
         Logx.d(
             LogTags.SIGNAL,
             "车窗位置",
             "values" to values.joinToString(","),
-            "open" to flags.joinToString(","),
+            "open" to flags.joinToString(",") { c -> c?.let { if (it) "开" else "关" } ?: "?" },
         )
         return flags
     }

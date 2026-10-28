@@ -135,11 +135,13 @@ fun currentVehicleInfo(): VehicleInfo {
             val driveMode = driveModeRaw?.let { DriveMode.currentShortLabel(it) }
             // 胎压：AdaptAPI 的 TPMS 通道
             val tires = gw.tirePressures()
-            // 车身状态（车门 / 引擎盖 / 后备箱）：按三条来源顺序编排
-            // （car_signal → BCM_DOOR_POS → DOOR_POS 属性），见 `BodyState.resolve`。
-            val body = BodyState.resolve(gw, signalsReady)
-            // 车窗：CarPropertyManager 的 WINDOW_POS（第三十六轮新增）
-            val windowsOpen = CarBodySignals.readWindows()
+            // 车身状态（车门 / 引擎盖 / 后备箱）：按来源顺序编排
+            // （car_signal → IDoorAndWindow → BCM_DOOR_POS → DOOR_POS 属性 → MC），
+            // 见 `BodyState.resolve`。
+            val body = BodyState.resolve(gw, signalsReady, ctx)
+            // 车窗：IDoorAndWindow → BCM_FUNC_WINDOW → WINDOW_POS 属性
+            // （第六十六轮新增前只有最后一档，而那一档在这台车上不可用）
+            val windows = WindowState.resolve(gw, ctx)
             // 行程与油耗：AdaptAPI 的 ITripData
             val trip = TripDataReader.stats()
             VehicleInfo(
@@ -154,8 +156,8 @@ fun currentVehicleInfo(): VehicleInfo {
                 doorsAllClosed = if (body.valid) body.allClosed else null,
                 hoodClosed = body.hood,
                 trunkClosed = body.trunk,
-                windowsOpen = windowsOpen,
-                windowsAllClosed = windowsOpen?.let { arr -> !arr.any { it } },
+                windowsOpen = windows.open,
+                windowsAllClosed = windows.allClosed,
                 // 平均油耗优先用**真正的平均值**（onAvgEnergyInfoUpdate 回调），
                 // 拿不到才退回本行程油耗（原值透传）。
                 avgFuelConsumption = trip.avgFuelConsumption ?: trip.tripFuelConsumption,

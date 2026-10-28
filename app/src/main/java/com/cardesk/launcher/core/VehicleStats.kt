@@ -51,20 +51,39 @@ object VehicleStats {
      * @param values 四扇窗的原始值，顺序 FL/FR/RL/RR；元素为 null 表示那一扇读不到
      * @return 长度 4 的数组，**true = 开**；整组读不到时返回 null
      */
-    fun windowOpenFlags(values: DoubleArray?): BooleanArray? {
+    fun windowOpenFlags(values: DoubleArray?): BooleanArray? =
+        windowOpenFlagsEach(values)?.map { it == true }?.toBooleanArray()
+
+    /**
+     * 从四个车窗的开度原始值判断每扇窗的开闭（**逐扇独立**）。
+     *
+     * 与 [windowOpenFlags] 的唯一区别：**读不到的那一扇是 `null`**，不是 `false`。
+     *
+     * ## 为什么（第六十六轮）
+     *
+     * 「读不到」和「关着」是两回事 —— 桌面上一个假的「关」比一个 `--` 更糟。
+     * 原来的实现把 `NaN` 当成 `false`，于是「三扇读到都关、第四扇读不到」
+     * 会算成「四扇全关」。
+     *
+     * @param values 四扇窗的原始值，顺序 FL/FR/RL/RR；元素为 NaN 表示那一扇读不到
+     * @return 长度 4 的列表，**true = 开**；每项 null = 那一扇读不到；整组读不到时返回 null
+     */
+    fun windowOpenFlagsEach(values: DoubleArray?): List<Boolean?>? {
         if (values == null) return null
         if (values.size < 4) return null
         val readable = values.take(4).filter { !it.isNaN() }
         if (readable.isEmpty()) return null
         val percentMode = readable.any { it > 1.0 }
-        val out = BooleanArray(4)
+        val out = ArrayList<Boolean?>(4)
         for (i in 0 until 4) {
             val v = values[i]
-            out[i] = when {
-                v.isNaN() -> false
-                percentMode -> v > 1.0
-                else -> v > 0.01
-            }
+            out.add(
+                when {
+                    v.isNaN() -> null
+                    percentMode -> v > 1.0
+                    else -> v > 0.01
+                }
+            )
         }
         return out
     }

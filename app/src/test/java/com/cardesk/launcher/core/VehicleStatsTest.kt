@@ -83,6 +83,32 @@ class VehicleStatsTest {
         assertNull(VehicleStats.windowOpenFlags(doubleArrayOf(0.0, 0.0)))
     }
 
+    // ---------------------------------------------------- 逐扇可空版本（第六十六轮）
+
+    /** 读不到的那一扇是 null（「读不到」≠「关着」），其余照常。 */
+    @Test
+    fun windowsEachKeepsUnreadableAsNull() {
+        val flags = VehicleStats.windowOpenFlagsEach(doubleArrayOf(Double.NaN, 50.0, Double.NaN, 0.0))
+        assertEquals(listOf(null, true, null, false), flags)
+    }
+
+    /** 全都读不出来 → null。 */
+    @Test
+    fun windowsEachUnreadableIsNull() {
+        assertNull(VehicleStats.windowOpenFlagsEach(null))
+        assertNull(VehicleStats.windowOpenFlagsEach(doubleArrayOf(Double.NaN, Double.NaN, Double.NaN, Double.NaN)))
+    }
+
+    /** 布尔数组版本与逐扇版本口径一致（null → false）。 */
+    @Test
+    fun windowsEachMatchesBooleanArray() {
+        val values = doubleArrayOf(Double.NaN, 50.0, 0.0, 100.0)
+        assertArrayEquals(
+            VehicleStats.windowOpenFlags(values),
+            VehicleStats.windowOpenFlagsEach(values)!!.map { it == true }.toBooleanArray(),
+        )
+    }
+
     // ---------------------------------------------------------------- 区域号
 
     /**

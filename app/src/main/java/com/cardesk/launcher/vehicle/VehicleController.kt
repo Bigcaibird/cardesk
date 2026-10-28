@@ -456,12 +456,46 @@ object VehicleController {
             describeDoors(mc.doors) + " 后备箱=" + (mc.trunk?.let { if (it) "关" else "开" } ?: "?")
         }}"
 
+        // —— 第六十六轮新增：车机原生的 IDoorAndWindow（车门 + 车窗的唯一布尔来源）——
+        val oemOk = ctx != null && OemDoorWindowSignals.attach(ctx)
+        lines += "IDoorAndWindow 通道：${if (oemOk) "可用" else "不可用（${OemDoorWindowSignals.lastError() ?: "未知原因"}）"}"
+        val oemDoors = OemDoorWindowSignals.doorsClosed()
+        lines += "车门 IDoorAndWindow：${describeDoors(oemDoors)}"
+        val oemWindows = OemDoorWindowSignals.windowsOpenEach()
+        lines += "车窗 IDoorAndWindow：${describeEach(oemWindows, true)}"
+
+        // —— 第六十六轮新增：Adapt 常量按名解析（zone / 功能号）——
+        val doorZones = AdaptapiConstants.doorZones()
+        lines += "Adapt 门区常量：" + (
+            if (doorZones == null) "按名解析不到（退回 {1,4,16,64}）"
+            else AdaptapiConstants.DOOR_ZONE_NAMES.mapIndexed { i, n ->
+                "$n=" + (doorZones.getOrNull(i)?.toString() ?: "?")
+            }.joinToString(",")
+            )
+        val windowFunc = AdaptapiConstants.funcId(AdaptapiConstants.FUNC_WINDOW)
+        lines += "Adapt 车窗功能号 BCM_FUNC_WINDOW：${windowFunc?.toString() ?: "按名解析不到"}"
+        val windowZones = AdaptapiConstants.windowZones()
+        lines += "Adapt 窗区常量：" + (
+            if (windowZones == null) "按名解析不到"
+            else AdaptapiConstants.WINDOW_ZONE_NAMES.mapIndexed { i, n ->
+                "$n=" + (windowZones.getOrNull(i)?.toString() ?: "?")
+            }.joinToString(",")
+            )
+        val adaptWindows = AdaptapiBody.readWindowsEach(gateway)
+        lines += "车窗 BCM_FUNC_WINDOW：${describeEach(adaptWindows, true)}"
+
         // 车身状态走的是**哪一条来源**（降级链
-        // car_signal → BCM_DOOR_POS → DOOR_POS 属性。
+        // car_signal → IDoorAndWindow → BCM_DOOR_POS → DOOR_POS 属性 → MC）。
         // 真车排障最需要的就是这一行 —— 「车门状态读不到」时能立刻知道卡在哪一档。
-        val body = runCatching { BodyState.resolve(gateway, EcarxSignals.isAvailable()) }.getOrNull()
+        val body = runCatching { BodyState.resolve(gateway, EcarxSignals.isAvailable(), ctx) }.getOrNull()
         lines += "车身状态降级链：${if (body == null) "读不到" else {
             "来源=${body.source} 全关=${body.allClosed} 有效=${body.valid}"
+        }}"
+
+        // 车窗降级链：IDoorAndWindow → BCM_FUNC_WINDOW → WINDOW_POS 属性。
+        val win = runCatching { WindowState.resolve(gateway, ctx) }.getOrNull()
+        lines += "车窗状态降级链：${if (win == null) "读不到" else {
+            "来源=${win.source} 全关=${win.allClosed}"
         }}"
 
         val odo = if (carOk) CarBodySignals.readOdometerKm() else null
@@ -499,6 +533,21 @@ object VehicleController {
     private fun describeWindows(flags: BooleanArray?): String = when {
         flags == null -> "读不到"
         else -> flags.joinToString(",") { if (it) "开" else "关" }
+    }
+
+    /**
+     * 逐项描述一组可空布尔。
+     *
+     * @param openWhenTrue true 表示「true = 开」（车窗）；false 表示「true = 关」（车门）
+     */
+    private fun describeEach(flags: List<Boolean?>?, openWhenTrue: Boolean): String = when {
+        flags == null -> "读不到"
+        else -> flags.joinToString(",") { c ->
+            when {
+                c == null -> "?"
+                else -> if (c == openWhenTrue) "开" else "关"
+            }
+        }
     }
 
     private fun describeDoors(flags: List<Boolean?>?): String = when {

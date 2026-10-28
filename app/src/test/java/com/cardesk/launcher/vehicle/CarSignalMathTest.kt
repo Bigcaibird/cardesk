@@ -1,7 +1,9 @@
 package com.cardesk.launcher.vehicle
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -102,5 +104,55 @@ class CarSignalMathTest {
         assertNull(CarSignalMath.ambientTempC(81f))
         assertNull(CarSignalMath.ambientTempC(-41f))
         assertNull(CarSignalMath.ambientTempC(Float.NaN))
+    }
+
+    // ------------------------------------------------------------ 不支持值（第六十六轮）
+
+    @Test
+    fun `255 与 -1 判定为固件不支持`() {
+        // 真机实测：四个门位全部返回 255（= -1），
+        // jar 里的提示串是「is not supported for getFunctionValue ..., returns -1」。
+        assertTrue(CarSignalMath.isUnsupportedRaw(255))
+        assertTrue(CarSignalMath.isUnsupportedRaw(-1))
+        assertTrue(CarSignalMath.isUnsupportedRaw(Int.MIN_VALUE))
+    }
+
+    @Test
+    fun `正常的开闭值不算不支持`() {
+        assertFalse(CarSignalMath.isUnsupportedRaw(0))
+        assertFalse(CarSignalMath.isUnsupportedRaw(1))
+        assertFalse(CarSignalMath.isUnsupportedRaw(50))
+        assertFalse(CarSignalMath.isUnsupportedRaw(553779968))
+    }
+
+    // ------------------------------------------------------------ 车窗归一化（第六十六轮）
+
+    @Test
+    fun `车窗：0 是关 1 是开`() {
+        assertEquals(false, CarSignalMath.interpretWindowOpen(0))
+        assertEquals(true, CarSignalMath.interpretWindowOpen(1))
+    }
+
+    @Test
+    fun `车窗：BCM 的开枚举也算开`() {
+        assertEquals(true, CarSignalMath.interpretWindowOpen(553844994))
+        assertEquals(true, CarSignalMath.interpretWindowOpen(553844993))
+        assertEquals(true, CarSignalMath.interpretWindowOpen(553779457))
+    }
+
+    @Test
+    fun `车窗：不套用车门的位置百分比表`() {
+        // 车窗这一档返回的是**开 / 关**，不是开度。
+        // 把 50 解释成「开了一半」属于凭空捏造 —— 一律读不出来。
+        assertNull(CarSignalMath.interpretWindowOpen(50))
+        assertNull(CarSignalMath.interpretWindowOpen(2))
+        assertNull(CarSignalMath.interpretWindowOpen(5))
+        assertNull(CarSignalMath.interpretWindowOpen(100))
+    }
+
+    @Test
+    fun `车窗：不支持值读不出来`() {
+        assertNull(CarSignalMath.interpretWindowOpen(255))
+        assertNull(CarSignalMath.interpretWindowOpen(-1))
     }
 }

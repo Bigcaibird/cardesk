@@ -1,5 +1,6 @@
 package com.cardesk.launcher.vehicle
 
+import android.content.Context
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 
@@ -17,12 +18,14 @@ import com.cardesk.launcher.core.log.Logx
  *   │ getHoodSts / getTrSts
  *   │ 归一化：0 = 关、1 = 开（interpretDoorSignal）
  *   │ 关联 signal id：29207 / 29211 / 29206 / 29210 / 29222 / 29268
- *   ├─ 源2 adaptapi 的 BCM_DOOR_POS
- *   │ funId = 553779968，zones {1, 4, 16, 64}（驾驶 / 副驾 / 后左 / 后右）
+ *   ├─ 源2 VehicleAPI → getBcm() → getDoorAndWindowState() → IDoorAndWindow（第六十六轮新增）
+ *   │ isDoorOpened(int)：1..4 = 前左 / 前右 / 后左 / 后右
+ *   ├─ 源3 adaptapi 的 BCM_DOOR_POS
+ *   │ funId = 553779968；zone **按名解析**（DOOR_ROW_1/2_LEFT/RIGHT），兜底 {1, 4, 16, 64}
  *   │ getFunctionValue + interpretClosed（含百分比阈值）
- *   ├─ 源3 官方的 CarPropertyManager
+ *   ├─ 源4 官方的 CarPropertyManager
  *   │ propertyId = 373295872（DOOR_POS）
- *   └─ 源4 MC / Geely 事件属性（第四十五轮新增，另一个 App 的做法）
+ *   └─ 源5 MC / Geely 事件属性（第四十五轮新增，另一个 App 的做法）
  *            560993300 / 301 / 302 / 303 / 304
  *                ↓
  *           allClosed: bool
@@ -32,11 +35,15 @@ import com.cardesk.launcher.core.log.Logx
  *
  * ## 降级链顺序
  *
- * 与**逐档一致**：**源1 → 源2 → 源3 → 源4**，第一个拿到非空值的就说了算。
+ * 与**逐档一致**：**源1 → 源2 → 源3 → 源4 → 源5**，第一个拿到非空值的就说了算。
  *
  * （第四十三轮之前我们的顺序是反的：adaptapi 优先、car_signal 兜底。
  * 把 car_signal 放在第一档，因为它给的是车端**最直接**的开闭语义 —— `0`/`1`
  * 没有百分比、没有区域翻译。
+ *
+ * 第六十六轮把 `IDoorAndWindow` 插在第二档：它给的是**车机原生的布尔**，
+ * 语义最干净；而当时的 `BCM_DOOR_POS` 在这台车上四个 zone 全部返回 `-1`
+ * （jar 里的提示串：`is not supported for getFunctionValue ..., returns -1`）。
  *
  * ## 逐门独立（第四十五轮）
  *
@@ -83,13 +90,21 @@ object BodyState {
     /** 源1 的名字（诊断用）。 */
     const val SOURCE_CAR_SIGNAL = "car_signal"
 
-    /** 源2 的名字（诊断用）。 */
-    const val SOURCE_ADAPTAPI = "BCM_DOOR_POS"
+    /**
+     * 源2 的名字（诊断用）：车机原生的 `IDoorAndWindow`（第六十六轮新增）。
+     *
+     * `VehicleAPI` → `getBcm()` → `getDoorAndWindowState()` → `IDoorAndWindow`，
+     * 给的是**四门开闭 / 上锁**与**四窗开闭**（布尔）。
+     */
+    const val SOURCE_OEM = "IDoorAndWindow"
 
     /** 源3 的名字（诊断用）。 */
-    const val SOURCE_PROPERTY = "DOOR_POS"
+    const val SOURCE_ADAPTAPI = "BCM_DOOR_POS"
 
     /** 源4 的名字（诊断用）。 */
+    const val SOURCE_PROPERTY = "DOOR_POS"
+
+    /** 源5 的名字（诊断用）。 */
     const val SOURCE_MC = "MC_DOOR"
 
     /**
@@ -193,49 +208,65 @@ object BodyState {
     /**
      * 按来源顺序编排一次读取。
      *
-     * @param gw AdaptAPI 的车辆网关（源2 的读取走它）
+     * @param gw AdaptAPI 的车辆网关（源3 的读取走它）
      * @param signalsReady `car_signal` 通道是否可用（源1）
+     * @param context 车机 Context；给了就顺带把 `IDoorAndWindow` 通道挂上（源2）
      */
-    fun resolve(gw: VehicleGateway, signalsReady: Boolean): Result {
+    fun resolve(gw: VehicleGateway, signalsReady: Boolean, context: Context? = null): Result {
         // —— 源1：car_signal 的 6 项（第一档）——
         val items = if (signalsReady) EcarxSignals.bodyItems() else emptyList()
         val allClosedFromSignal = aggregateAllClosed(items)
 
-        // —— 源2：BCM_DOOR_POS（第二档）——
+        // —— 源2：IDoorAndWindow（车机原生 BCM 布尔，第六十六轮新增）——
+        if (context != null) OemDoorWindowSignals.attach(context)
+        val oem = OemDoorWindowSignals.doorsClosed()
+        val allClosedFromOem = aggregateAllClosed(oem ?: emptyList())
+
+        // —— 源3：BCM_DOOR_POS（AdaptAPI 属性通道）——
         val adapt = AdaptapiBody.readDoors(gw)
 
-        // —— 源3：DOOR_POS 属性（第三档，propertyId 373295872）——
+        // —— 源4：DOOR_POS 属性（propertyId 373295872）——
         val prop = CarBodySignals.readDoorsViaProperty()
         val hoodTrunk = CarBodySignals.readHoodTrunkViaProperty()
 
-        // —— 源4：MC / Geely 事件属性（第四十五轮新增）——
+        // —— 源5：MC / Geely 事件属性（第四十五轮新增）——
         val mc = McDoorSignals.read()
 
-        // —— 明细：逐门跨来源合并（源1 → 源2 → 源3 → 源4）——
+        // —— 明细：逐门跨来源合并（源1 → 源2 → 源3 → 源4 → 源5）——
         val doors = mergeItems(
             doorItemsFromSignal(items),
+            oem,
             adapt.eachClosed,
             prop,
             mc?.doors,
         )
 
-        // 引擎盖：car_signal → DOOR_POS 的 HOOD 区域（MC 那一组没有引擎盖）
-        val hood = items.getOrNull(HOOD_INDEX) ?: hoodTrunk?.first
-        // 后备箱：car_signal → DOOR_POS 的 TRUNK 区域 → MC 的 560993304
+        // 引擎盖：car_signal → Adapt 的 DOOR_HOOD 区域 → DOOR_POS 的 HOOD 区域
+        // （MC 那一组没有引擎盖；IDoorAndWindow 也没有）
+        val hood = mergeItems(
+            listOfNotNull(items.getOrNull(HOOD_INDEX)),
+            listOfNotNull(adapt.hood),
+            listOfNotNull(hoodTrunk?.first),
+        )?.getOrNull(0)
+        // 后备箱：car_signal → Adapt 的 DOOR_REAR 区域 → DOOR_POS 的 TRUNK 区域 → MC 的 560993304
         val trunk = mergeItems(
             listOfNotNull(items.getOrNull(TRUNK_INDEX)),
+            listOfNotNull(adapt.trunk),
             listOfNotNull(hoodTrunk?.second),
             listOfNotNull(mc?.trunk),
         )?.getOrNull(0)
 
         // 整体「全关」：按顺序取第一个非空
         val chained = allClosedFromSignal
+            ?: allClosedFromOem
             ?: adapt.allClosed
             ?: aggregateProperty(prop, hoodTrunk?.first, hoodTrunk?.second)
             ?: aggregateAllClosed(listOfNotNull(mc?.trunk))
 
         // 明细里只要有一扇明确是「开」，整体就不能算全关
-        val anyOpen = doors?.any { it == false } == true
+        // （机盖 / 后备箱同样算 —— 第六十六轮起把这条规则从「四门」推广到「全部开口」）
+        val anyOpen = doors?.any { it == false } == true ||
+            hood == false || trunk == false
         val allClosed = when {
             anyOpen -> false
             chained != null -> chained
@@ -244,6 +275,7 @@ object BodyState {
 
         val source = when {
             allClosedFromSignal != null -> SOURCE_CAR_SIGNAL
+            allClosedFromOem != null -> SOURCE_OEM
             adapt.allClosed != null -> SOURCE_ADAPTAPI
             chained != null -> SOURCE_PROPERTY
             mc?.readable == true -> SOURCE_MC

@@ -128,6 +128,11 @@ class AdaptapiGateway(private val context: Context) : VehicleGateway {
         }
         function = fn
         Logx.i(LogTags.VEHICLE, "ICarFunction 句柄就绪", "channel" to id, "class" to fn.javaClass.name)
+        // 第六十六轮：把句柄的类注册成「常量根类」。
+        // Adapt 的 `BCM_FUNC_*` / `DOOR_ROW_*` / `WINDOW_ROW_*` 常量就在**同一个 jar** 里，
+        // 从句柄的类出发按名字找，比猜候选类名准得多。
+        AdaptapiConstants.registerRoot(fn.javaClass)
+        instance.javaClass.let { AdaptapiConstants.registerRoot(it) }
         // 句柄到位后补注册值变化回调
         ensureWatcher()
         return fn
@@ -166,6 +171,8 @@ class AdaptapiGateway(private val context: Context) : VehicleGateway {
         watcherRegistered = false
         function = null
         car = null
+        // 通道重建了，固件支持结论要重新问
+        AdaptapiBody.clearSupportCache()
         AdaptapiSensors.detach()
         AdaptapiTpms.disconnect()
         TripDataReader.detach()
@@ -564,6 +571,26 @@ class AdaptapiGateway(private val context: Context) : VehicleGateway {
             is Boolean -> if (v) 1 else 0
             else -> null
         }
+    }
+
+    /**
+     * 固件是否支持这个功能号 / 区域。
+     *
+     * 按 `(func, zone)` → `(func)` 两档找 `isFunctionSupported`：
+     * - 两参版本能区分**区域**级不支持（这正是门位 zone 读出 255 的原因）；
+     * - 只有一参版本就退到功能号级判断。
+     *
+     * 找不到这个方法 → 返回 null（判不了，按「支持」继续读）。
+     */
+    override fun isFunctionSupported(func: Int, zone: Int): Boolean? {
+        val f = ensureFunction() ?: return null
+        findMethod(f, "isFunctionSupported", INT, INT)?.let { m ->
+            runCatching { m.invoke(f, func, zone) as? Boolean }.getOrNull()?.let { return it }
+        }
+        findMethod(f, "isFunctionSupported", INT)?.let { m ->
+            runCatching { m.invoke(f, func) as? Boolean }.getOrNull()?.let { return it }
+        }
+        return null
     }
 
     private fun readFunc(f: Any, func: Int, zone: Int): Int? {

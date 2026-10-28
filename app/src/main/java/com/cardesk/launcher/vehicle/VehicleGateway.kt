@@ -55,6 +55,22 @@ interface VehicleGateway {
      */
     fun readRawFunctionValue(func: Int, zone: Int): Int? = null
 
+    /**
+     * 固件**是否支持**这个功能号 / 区域。
+     *
+     * ## 为什么要有这一条（第六十六轮）
+     *
+     * 真机上四个门位全部返回 `raw=255`（= `-1`），jar 里的提示串是
+     * `is not supported for getFunctionValue BCM_FUNC_WINDOW_POS, returns -1`。
+     * 也就是说「读到了」不等于「这一档存在」。
+     *
+     * 有这个探针就能**先问一句再读**，把「不支持」与「读不到值」分开：
+     * - `false` → 这一档这台车没有，直接跳过（省一次调用，日志也清楚）；
+     * - `true` → 支持，正常读；
+     * - `null` → **固件没有这个方法**，判不了 → 按「支持」继续读（老口径）。
+     */
+    fun isFunctionSupported(func: Int, zone: Int): Boolean? = null
+
     // -------------------------------------------------- 车辆概览信号
 
     /**

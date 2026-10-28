@@ -1,5 +1,6 @@
 package com.cardesk.launcher.vehicle
 
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -16,9 +17,17 @@ import org.junit.Test
  */
 class AdaptapiBodyTest {
 
+    @After
+    fun tearDown() {
+        // 单测里塞的「按名解析」覆盖值不能漏到别的用例去
+        AdaptapiConstants.resetForTest()
+    }
+
     /** 假的属性通道：按 (func, zone) 返回预设值。 */
     private class FakeGateway(
         private val values: Map<Pair<Int, Int>, Int>,
+        /** 固件支持探针的预设（null = 固件没有这个方法，判不了）。 */
+        private val supported: Map<Pair<Int, Int>, Boolean>? = null,
     ) : VehicleGateway {
         override val id: String = "fake"
         override val displayName: String = "假通道"
@@ -38,6 +47,9 @@ class AdaptapiBodyTest {
             readZones.add(zone)
             return values[func to zone]
         }
+
+        override fun isFunctionSupported(func: Int, zone: Int): Boolean? =
+            supported?.get(func to zone)
     }
 
     private fun gw(vararg pairs: Pair<Int, Int>): FakeGateway =
@@ -155,5 +167,132 @@ class AdaptapiBodyTest {
         assertTrue(g.readZones.contains(AdaptapiBody.ZONE_NONE))
         assertTrue(g.readZones.contains(AdaptapiBody.ZONE_AGGREGATE))
         assertFalse(g.readZones.isEmpty())
+    }
+
+    // ------------------------------------------------------------ 按名解析的 zone（第六十六轮）
+
+    @Test
+    fun `按名解析出的 zone 优先于老约定`() {
+        // 真机根因：老约定 {1,4,16,64} 在这台车上全部返回 255（不支持），
+        // 而 jar 里的门区是另一套编号 —— 所以按名解析出来的 zone 要**先试**。
+        AdaptapiConstants.testOverride = mapOf(
+            "DOOR_ROW_1_LEFT" to 9,
+            "DOOR_ROW_1_RIGHT" to 10,
+            "DOOR_ROW_2_LEFT" to 11,
+            "DOOR_ROW_2_RIGHT" to 12,
+        )
+        val g = FakeGateway(
+            mapOf(
+                (AdaptapiBody.BCM_DOOR_POS to 9) to 0,
+                (AdaptapiBody.BCM_DOOR_POS to 10) to 1,
+                (AdaptapiBody.BCM_DOOR_POS to 11) to 0,
+                (AdaptapiBody.BCM_DOOR_POS to 12) to 0,
+            )
+        )
+        val state = AdaptapiBody.readDoors(g)
+        assertEquals(listOf(true, false, true, true), state.eachClosed)
+        assertEquals(false, state.allClosed)
+    }
+
+    @Test
+    fun `按名解析出的 zone 读不到时退回老约定`() {
+        AdaptapiConstants.testOverride = mapOf("DOOR_ROW_1_LEFT" to 9)
+        val g = gw(1 to 0)
+        val state = AdaptapiBody.readDoors(g)
+        // 老约定 zone 1 仍能读到 → 不因为新 zone 读不到就整扇作废
+        assertEquals(true, state.eachClosed?.get(0))
+    }
+
+    @Test
+    fun `固件说不支持就不读那个 zone`() {
+        AdaptapiConstants.testOverride = mapOf("DOOR_ROW_1_LEFT" to 9)
+        val g = FakeGateway(
+            values = mapOf((AdaptapiBody.BCM_DOOR_POS to 1) to 0),
+            supported = mapOf((AdaptapiBody.BCM_DOOR_POS to 9) to false),
+        )
+        AdaptapiBody.readDoors(g)
+        // 明确不支持的 zone 不该去读
+        assertFalse(g.readZones.contains(9))
+        // 老约定仍然读
+        assertTrue(g.readZones.contains(1))
+    }
+
+    @Test
+    fun `255 判为不支持 不当成门开着`() {
+        val g = gw(1 to 255, 4 to 0, 16 to 0, 64 to 0)
+        val state = AdaptapiBody.readDoors(g)
+        // 左前门读不出来，其余三扇照常
+        assertEquals(listOf(null, true, true, true), state.eachClosed)
+        assertEquals(true, state.allClosed)
+    }
+
+    // ------------------------------------------------------------ 车窗（第六十六轮）
+
+    @Test
+    fun `车窗按名解析的功能号与区域`() {
+        val func = 777_000
+        AdaptapiConstants.testOverride = mapOf(
+            AdaptapiConstants.FUNC_WINDOW to func,
+            "WINDOW_ROW_1_LEFT" to 21,
+            "WINDOW_ROW_1_RIGHT" to 22,
+            "WINDOW_ROW_2_LEFT" to 23,
+            "WINDOW_ROW_2_RIGHT" to 24,
+        )
+        val g = FakeGateway(
+            mapOf(
+                (func to 21) to 1,
+                (func to 22) to 0,
+                (func to 23) to 1,
+                (func to 24) to 0,
+            )
+        )
+        val flags = AdaptapiBody.readWindowsEach(g)
+        assertEquals(listOf(true, false, true, false), flags)
+    }
+
+    @Test
+    fun `车窗功能号解析不到就不读`() {
+        // 「不猜数值」：功能号按名解析不到，这一档就当没有
+        AdaptapiConstants.testOverride = mapOf(
+            "WINDOW_ROW_1_LEFT" to 21,
+        )
+        val g = gw()
+        assertNull(AdaptapiBody.readWindowsEach(g))
+        assertTrue(g.readZones.isEmpty())
+    }
+
+    @Test
+    fun `车窗区域号解析不到就不读`() {
+        AdaptapiConstants.testOverride = mapOf(
+            AdaptapiConstants.FUNC_WINDOW to 777_000,
+        )
+        val g = gw()
+        assertNull(AdaptapiBody.readWindowsEach(g))
+    }
+
+    @Test
+    fun `车窗读不到的那一扇留 null 其余照常`() {
+        val func = 777_000
+        AdaptapiConstants.testOverride = mapOf(
+            AdaptapiConstants.FUNC_WINDOW to func,
+            "WINDOW_ROW_1_LEFT" to 21,
+            "WINDOW_ROW_1_RIGHT" to 22,
+            "WINDOW_ROW_2_LEFT" to 23,
+            "WINDOW_ROW_2_RIGHT" to 24,
+        )
+        val g = FakeGateway(mapOf((func to 21) to 1))
+        val flags = AdaptapiBody.readWindowsEach(g)
+        assertEquals(listOf(true, null, null, null), flags)
+    }
+
+    @Test
+    fun `车窗不支持值不算开`() {
+        val func = 777_000
+        AdaptapiConstants.testOverride = mapOf(
+            AdaptapiConstants.FUNC_WINDOW to func,
+            "WINDOW_ROW_1_LEFT" to 21,
+        )
+        val g = FakeGateway(mapOf((func to 21) to 255))
+        assertNull(AdaptapiBody.readWindowsEach(g))
     }
 }
