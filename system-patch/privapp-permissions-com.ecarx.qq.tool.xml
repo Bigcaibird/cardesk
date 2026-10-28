@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<permissions>
+    <privapp-permissions package="com.ecarx.qq.tool">
+        <!--
+          第五十五轮：无线 ADB 链路。`CHANGE_COMPONENT_ENABLED_STATE` 用来显式启用
+          原生「开发者选项」页的组件（不少车机 ROM 默认把这个入口藏了），
+          `MANAGE_USB` 用来读 / 切 USB 功能位，也是 `ctl.restart=adbd`
+          走不通时的备用重启手段。对应代码 `core/AdbDebug.kt` + `core/AdbBridge.kt`。
+        -->
+        <permission name="android.permission.CHANGE_COMPONENT_ENABLED_STATE"/>
+        <permission name="android.permission.DELETE_PACKAGES"/>
+        <permission name="android.permission.DEVICE_POWER"/>
+        <permission name="android.permission.EXPAND_STATUS_BAR"/>
+        <permission name="android.permission.INJECT_EVENTS"/>
+        <permission name="android.permission.INSTALL_PACKAGES"/>
+        <permission name="android.permission.INTERNAL_SYSTEM_WINDOW"/>
+        <permission name="android.permission.MANAGE_USB"/>
+        <permission name="android.permission.MOUNT_UNMOUNT_FILESYSTEMS"/>
+        <permission name="android.permission.READ_LOGS"/>
+        <permission name="android.permission.REBOOT"/>
+        <!--
+          定位 AppOps：天气要用经纬度。`SET_APPOP` 让 system app 能直接把自己的
+          定位 AppOps 打开 —— `pm grant` 只写 permission grant，不写 AppOps，
+          结果就是「权限显示已授予但一个位置都拿不到」。
+          对应代码 `core/Permissions.kt` 的 `tryGrantAppOps`。
+        -->
+        <permission name="android.permission.SET_APPOP"/>
+        <permission name="android.permission.STATUS_BAR"/>
+        <permission name="android.permission.WRITE_SECURE_SETTINGS"/>
+        <permission name="android.permission.WRITE_SETTINGS"/>
+    </privapp-permissions>
+</permissions>

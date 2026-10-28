@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CarDesk 车控桌面</string>
+    <string name="boot_done">CarDesk 已随系统启动</string>
+</resources>

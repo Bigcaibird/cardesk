@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!--
+      媒体会话枚举权限（也声明了它）。
+      AOSP MediaSessionService.enforceMediaPermissions() 的判定是：
+        持有 MEDIA_CONTENT_CONTROL 权限 **或** 传入的组件是已启用的通知监听器。
+      平台签名的 system 版能拿到这个 signature|privileged 权限，
+      于是会话枚举不再依赖「通知使用权」白名单 —— 车机上更稳。
+      debug 版拿不到（不是平台签名），会退回走通知监听器那条路。
+    -->
+    <uses-permission android:name="android.permission.MEDIA_CONTENT_CONTROL" />
+    <!--也声明了它（联网前的连通性判断）；漏声明会让诊断快照里显示「未授予」-->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!--
+      第五十二轮：HUD 功能整体下线（原 `HudLink` / `HudScanDialog` 已删除），
+      蓝牙权限（BLUETOOTH / BLUETOOTH_ADMIN / BLUETOOTH_SCAN / BLUETOOTH_CONNECT）
+      原本只服务于 HUD 设备扫描，现在没有任何调用方，一并撤掉 ——
+      车机是 Android 9，BLUETOOTH_SCAN 属于运行时权限，留着只是白要授权。
+    -->
+    <!-- 天气子系统（WeatherDesk）：需要定位权限才能取到设备位置做天气查询-->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- LAN 传输：传输期保活（WakeLock + WifiLock）需要这三个权限-->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <!-- 诊断日志导出到 Download/CarDesk/：Android 9 及以下需要写外部存储权限；
+         Android 10+ 走 MediaStore，不需要该权限-->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
+    <application
+        android:allowBackup="false"
+        android:hardwareAccelerated="true"
+        android:largeHeap="true"
+        android:icon="@drawable/ic_cardesk"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme" android:usesCleartextTraffic="true">
+
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|uiMode|density"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:resizeableActivity="false"
+            android:screenOrientation="landscape"
+            android:theme="@style/AppTheme">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".core.media.MediaNotificationListener"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <receiver
+            android:name=".core.SystemOps$InstallResultReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.cardesk.launcher.action.INSTALL_COMMIT" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".core.TaskReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

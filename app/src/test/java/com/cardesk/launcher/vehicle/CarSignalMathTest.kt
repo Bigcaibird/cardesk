@@ -1,0 +1,106 @@
+package com.cardesk.launcher.vehicle
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Test
+
+/**
+ * [CarSignalMath] 单测（纯逻辑，不依赖 Android）。
+ *
+ * 口径
+ * - 续航
+ * - 油量
+ * - 环温
+ */
+class CarSignalMathTest {
+
+    @Test
+    fun `续航：小于等于 3000 直接当公里数`() {
+        assertEquals(386, CarSignalMath.rangeKm(386f))
+        assertEquals(1, CarSignalMath.rangeKm(1f))
+        // 要求结果严格小于 3000
+        assertNull(CarSignalMath.rangeKm(3000f))
+    }
+
+    @Test
+    fun `续航：大于 3000 先除以 1000`() {
+        assertEquals(386, CarSignalMath.rangeKm(386000f))
+        assertEquals(451, CarSignalMath.rangeKm(450500f))
+    }
+
+    @Test
+    fun `续航：非法值一律读不出来`() {
+        assertNull(CarSignalMath.rangeKm(0f))
+        assertNull(CarSignalMath.rangeKm(-5f))
+        assertNull(CarSignalMath.rangeKm(Float.NaN))
+        assertNull(CarSignalMath.rangeKm(Float.MIN_VALUE))
+        // 结果必须落在 1..2999
+        assertNull(CarSignalMath.rangeKm(3000000f))
+    }
+
+    @Test
+    fun `油量：容量已知时按容量换算百分比`() {
+        // 油箱 45L（45000ml），剩 22.5L（22500ml）→ 50%
+        assertEquals(50, CarSignalMath.fuelPercent(22500f, 45000f))
+        assertEquals(100, CarSignalMath.fuelPercent(45000f, 45000f))
+        assertEquals(0, CarSignalMath.fuelPercent(0f, 45000f))
+    }
+
+    @Test
+    fun `油量：容量未知时原始值当百分比`() {
+        assertEquals(62, CarSignalMath.fuelPercent(62f, 0f))
+        // 超出 0..100 → 读不出来
+        assertNull(CarSignalMath.fuelPercent(120f, 0f))
+        assertNull(CarSignalMath.fuelPercent(-1f, 0f))
+    }
+
+    @Test
+    fun `油量：容量很小时先除以 1000 再当百分比`() {
+        // 容量 0.05，原始值 30 → 30/1000 = 0.03 → 0%
+        assertEquals(0, CarSignalMath.fuelPercent(30f, 0.05f))
+    }
+
+    @Test
+    fun `油量：容量小时原始值也直接当百分比`() {
+        // 容量 <= 200 且 raw <= 2*capacity 时，raw 就是百分比
+        assertEquals(23, CarSignalMath.fuelPercent(22.5f, 45f))
+    }
+
+    @Test
+    fun `油量：结果夹在 0 到 100`() {
+        assertEquals(100, CarSignalMath.fuelPercent(90000f, 45000f))
+        assertEquals(0, CarSignalMath.fuelPercent(-13500f, 45000f))
+    }
+
+    // ---------------------------------------------------------------
+    // 第六十四轮：车端 `ISensor` 的占位值口径
+    // ---------------------------------------------------------------
+
+    @Test
+    fun `油量：车端占位值 0 不当成 0 百分比`() {
+        // 实测：这台车机开机 / 车机服务重连时先推 0.0，真实值约 5 分钟后才推来。
+        // 把占位值发布成「0%」会让桌面显示一个假的 0%。
+        assertNull(CarSignalMath.fuelPercentFromSensor(0f, 55263f))
+        assertNull(CarSignalMath.fuelPercentFromSensor(0f, 0f))
+        // 负值（传感器不可用时车端返回 -1）同样当「没有数据」
+        assertNull(CarSignalMath.fuelPercentFromSensor(-1f, 55263f))
+    }
+
+    @Test
+    fun `油量：真实原始值照常换算成百分比`() {
+        // 真机实测：容量 55263（0.001L → 55.26L），原始值 21000 → 38%
+        assertEquals(38, CarSignalMath.fuelPercentFromSensor(21000f, 55263f))
+        assertEquals(36, CarSignalMath.fuelPercentFromSensor(20000f, 55263f))
+        assertEquals(35, CarSignalMath.fuelPercentFromSensor(19400f, 55263f))
+    }
+
+    @Test
+    fun `环温：只在 -40 到 80 之间有效`() {
+        assertEquals(19, CarSignalMath.ambientTempC(19.4f))
+        assertEquals(-40, CarSignalMath.ambientTempC(-40f))
+        assertEquals(80, CarSignalMath.ambientTempC(80f))
+        assertNull(CarSignalMath.ambientTempC(81f))
+        assertNull(CarSignalMath.ambientTempC(-41f))
+        assertNull(CarSignalMath.ambientTempC(Float.NaN))
+    }
+}

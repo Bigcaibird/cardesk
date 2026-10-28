@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  system flavor：sharedUserId=android.uid.system + 平台签名。
+  使用前提（一致）：
+  1) APK 用平台证书签名（本项目用 AOSP platform 测试密钥，指纹与 PLATFORM.RSA 相同）；
+  2) 安装到 /system/priv-app/<dir>/ 并重启（或由系统签名预装）；
+  3) 系统信任该证书时才会授 uid 1000 与签名级权限。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sharedUserId="android.uid.system">
+
+    <uses-permission android:name="android.permission.INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.DELETE_PACKAGES" />
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+
+    <!--
+      第五十五轮：无线 ADB 链路需要的两条权限（「领克 05 调试工具」用的也是这两条）。
+
+      - `CHANGE_COMPONENT_ENABLED_STATE`：把原生「开发者选项」页的组件显式启用。
+        很多车机 ROM 默认把这个入口藏掉，不显式启用的话，
+        `adb_enabled=1` 写了也找不到地方勾「USB 调试」。
+      - `MANAGE_USB`：读 / 切 USB 功能位（切到 ADB 位）。
+        也是 `ctl.restart=adbd` 走不通时的备用重启手段。
+
+      两条都是 signature|privileged：装到 /system/priv-app + 平台签名才拿得到，
+      并且要写进 privapp-permissions 白名单（见 system-patch/）。
+    -->
+    <uses-permission android:name="android.permission.CHANGE_COMPONENT_ENABLED_STATE" />
+    <uses-permission android:name="android.permission.MANAGE_USB" />
+    <uses-permission android:name="android.permission.REBOOT" />
+    <uses-permission android:name="android.permission.INJECT_EVENTS" />
+    <uses-permission android:name="android.permission.READ_LOGS" />
+    <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
+    <uses-permission android:name="android.permission.STATUS_BAR" />
+    <uses-permission android:name="android.permission.INTERNAL_SYSTEM_WINDOW" />
+    <uses-permission android:name="android.permission.DEVICE_POWER" />
+    <uses-permission android:name="android.permission.MOUNT_UNMOUNT_FILESYSTEMS" />
+
+    <!--
+      定位：天气要用经纬度
+      `getWeatherByLocation(lon, lat)`。
+
+      `ACCESS_FINE_LOCATION` / `ACCESS_COARSE_LOCATION` 在主 manifest 里已经声明，
+      这里额外要 `SET_APPOP` —— 它是 signature|privileged 权限，
+      有了它，system app 就能**直接把自己的定位 AppOps 打开**
+      （`Permissions.tryGrantAppOps`），不必依赖车机有没有权限弹窗 UI。
+
+      为什么需要：Android 的位置权限有**两层** ——
+      permission grant（`checkSelfPermission`）和 AppOps mode（`LocationManagerService`
+      真正拦人的那一层。用 `adb shell pm grant` 批下来的权限**只写第一层**，
+      第二层在很多车机 ROM 上仍是 `MODE_IGNORED`，
+      表现就是「权限显示已授予，但一个位置都拿不到」。
+    -->
+    <uses-permission android:name="android.permission.SET_APPOP" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!--
+      与**完全同名**的通知监听服务（com.ecarx.qq.tool.service.MusicBridgeService）。
+      车机出厂时预置的「通知使用权」白名单条目指向的就是这个组件名，
+      按「包名 + 类名」精确匹配；替换版若不注册同名服务，那条白名单就是死条目，
+      通知使用权拿不到，媒体会话永远扫不到。
+      详见该类的 KDoc。
+    -->
+    <application>
+        <service
+            android:name="com.ecarx.qq.tool.service.MusicBridgeService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>
