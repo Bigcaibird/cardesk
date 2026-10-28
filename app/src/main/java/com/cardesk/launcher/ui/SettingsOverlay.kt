@@ -35,6 +35,7 @@ import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.ui.widget.CardStylePreviewView
 import com.cardesk.launcher.ui.widget.OverlayBackdrop
+import com.cardesk.launcher.ui.widget.QrCodeView
 import com.cardesk.launcher.ui.widget.WallpaperThumbView
 import com.cardesk.launcher.vehicle.DriveMode
 
@@ -2180,6 +2181,16 @@ class SettingsOverlay(
     private fun pageLan() {
         val status = Ui.text(context, "", 17f, pal.textDim).apply { setLineSpacing(6f, 1f) }
         body.addView(status, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 8 })
+
+        // —— 二维码（第六十七轮）：手机扫一下就能打开，不用手动敲地址 ——
+        //
+        // 原来只给一行 `http://192.168.x.x:18765/?t=<token>` 文本，
+        // 用户得在电脑上把它敲进去 —— IP + 端口 + token，敲错一个字符就白搭。
+        val qr = QrCodeView(context).apply { preferredSize = QR_SIZE_PX }
+        body.addView(qr, LinearLayout.LayoutParams(QR_SIZE_PX, QR_SIZE_PX).also { it.topMargin = 18 })
+        val qrHint = Ui.text(context, "", 15f, pal.textDim)
+        body.addView(qrHint, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
+
         val toggle = actionButton("启动局域网传输", primary = true) {}
         val listBox = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         fun fmtSize(bytes: Long): String = when {
@@ -2206,11 +2217,18 @@ class SettingsOverlay(
         }
         fun paint() {
             if (LanTransferServer.running) {
-                status.text = "运行中 · ${LanTransferServer.url(context)}\n目录：" + LanTransferServer.rootDir(context).absolutePath
+                val url = LanTransferServer.url(context)
+                status.text = "运行中 · $url\n目录：" + LanTransferServer.rootDir(context).absolutePath
                 toggle.text = "停止服务"
+                // —— 二维码跟着地址走（token / 端口变了都要变）
+                qr.text = url
+                qrHint.text = "手机扫这个码，直接打开上传 / 下载页面"
             } else {
                 status.text = "未启动。端口顺序探测 18765..18775、URL 必须带 token；启动后把地址贴到电脑浏览器即可上传/下载。"
                 toggle.text = "启动局域网传输"
+                // 没启动时没有地址 → 不画码（留白比画一个扫不通的码强）
+                qr.text = ""
+                qrHint.text = "启动服务后这里会出现二维码"
             }
         }
         toggle.setOnClickListener {
@@ -2305,6 +2323,9 @@ class SettingsOverlay(
     companion object {
         /** 面板宽（设计 px）—— 设计板 `s05-settings`。 */
         const val PANEL_W = 1440
+
+        /** 局域网传输页的二维码边长（设计 px）。 */
+        const val QR_SIZE_PX = 300
 
         /** 面板高（设计 px）—— 设计板 `s05-settings`。 */
         const val PANEL_H = 920

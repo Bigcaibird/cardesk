@@ -138,6 +138,17 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
     /** 当前承载的内容（ActivityView 或降级卡片）。 */
     private var content: View? = null
 
+    /**
+     * 画面探针（**只有嵌入式承载才有**；降级卡片是静态的，不需要）。
+     *
+     * 用来判「画中画是不是黑了」→ 黑了就自动重新拉起承载应用
+     * （见 [checkBlackScreen]）。
+     */
+    private var frameProbe: PipFrameProbe? = null
+
+    /** 上次黑屏自愈的时刻（冷却用，避免连着重启承载应用）。 */
+    private var lastBlackHealAt = 0L
+
     private var packageName: String = ""
 
     /** 承载应用的启动 Intent（看门狗重新拉起时复用）。 */
@@ -241,6 +252,8 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
             // 画面图层压在窗口之下 → 上方那三个点才不会被盖住
             //
             RoundClip.applySurfaceZOrder(view)
+            // 画面探针：黑屏自愈用（降级卡片不需要）
+            frameProbe = PipFrameProbe(view)
             post { syncVirtualDisplay() }
             startWatchdog()
             // 排障场景：「画中画不显示」——嵌入成功 / 降级必须能一眼看出来。
@@ -318,6 +331,7 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
     private fun clearContent() {
         val v = content
         content = null
+        frameProbe = null
         if (v != null) {
             ActivityEmbed.release(v)
             (v.parent as? ViewGroup)?.removeView(v)
@@ -397,6 +411,8 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
         // 承载面不可见（导航页不在前台）时不查 —— 这时 surface 都没了，
         // 进程可能在后台被系统回收，等回到这一页 surface 重建会自己拉起。
         if (!isShown) return
+        // —— 黑屏自愈（第六十七轮）：进程活着但画面没了的情形
+        checkBlackScreen()
         when (isProcessAlive(pkg)) {
             null -> {
                 // 判据不可靠（看不到别的进程）→ 不动作
@@ -415,6 +431,55 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
                 relaunch()
             }
         }
+    }
+
+    /**
+     * 黑屏自愈（第六十七轮）。
+     *
+     * ## 现象
+     *
+     * 画中画**黑屏**，用户要「全屏一次再还原画中画」才看得到。
+     * 全屏 → 还原那条路上我们会给承载应用**重新下发一次启动**
+     * （[relaunchAfterResize]），所以它能恢复。
+     *
+     * 也就是说：**承载应用的进程还在，但它的 task 已经不在 VirtualDisplay 上了**
+     * （Activity 被系统回收 / 应用自己退出了）→ ActivityView 里只剩一块黑。
+     * 现有的进程看门狗查出来「进程活着」→ 什么都不做 → 一直黑。
+     *
+     * ## 做法
+     *
+     * 画面探针（[PipFrameProbe]）连续采到全黑、而且**之前见过非黑画面**时，
+     * 就做与「全屏还原」同样的动作：重新下发一次启动。
+     *
+     * 探针侧的三道防误判闸在 [PipFrameProbe] 里，这里再加一道冷却。
+     */
+    private fun checkBlackScreen() {
+        val probe = frameProbe ?: return
+        probe.request()
+        val since = if (lastBlackHealAt == 0L) Long.MAX_VALUE
+        else System.currentTimeMillis() - lastBlackHealAt
+        if (!PipFrameProbe.shouldHeal(
+                sawContent = probe.sawContent,
+                consecutiveBlack = probe.consecutiveBlack,
+                streakLimit = BLACK_STREAK_LIMIT,
+                cooldownMs = BLACK_HEAL_COOLDOWN_MS,
+                sinceLastHealMs = since,
+            )
+        ) {
+            return
+        }
+        lastBlackHealAt = System.currentTimeMillis()
+        Logx.w(
+            LogTags.NAV_UI,
+            "画中画黑屏自愈：重新拉起承载应用",
+            "pkg" to packageName,
+            "role" to role,
+            "streak" to probe.consecutiveBlack,
+        )
+        // 一次黑屏只自愈一次：清掉计数，也忘掉「见过非黑画面」
+        //（免得反复重启承载应用 —— 那比一直黑更烦人）
+        probe.markHealed()
+        relaunch()
     }
 
     /**
@@ -605,6 +670,12 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
 
         /** 连续几次没找到进程才动手（是 miss 1 软恢复、miss 2 重建；这里更保守）。 */
         const val WATCHDOG_MISS_LIMIT = 3
+
+        /** 连续几帧全黑才判定「黑屏」（见 [PipFrameProbe]）。 */
+        const val BLACK_STREAK_LIMIT = PipFrameProbe.BLACK_STREAK_LIMIT
+
+        /** 黑屏自愈的冷却（见 [PipFrameProbe]）。 */
+        const val BLACK_HEAL_COOLDOWN_MS = PipFrameProbe.BLACK_HEAL_COOLDOWN_MS
 
         /**
          * 尺寸变化后重新拉起承载应用的延迟（毫秒）。

@@ -424,6 +424,28 @@ object ActivityEmbed {
         private val handler = Handler(Looper.getMainLooper())
         private var started = false
         private var cancelled = false
+
+        /**
+         * 「等太久了，停止轮询」（第六十七轮）。
+         *
+         * ## 为什么不能直接用 [cancelled]
+         *
+         * 原来超时的处理是 `cancelled = true` —— 而 `cancelled` 的语义是
+         * 「**承载面被拆了**」。于是：
+         *
+         * 1. 用户选好画中画应用后一直**没去导航页**（那时 surface 不会创建）；
+         * 2. 超过 5 分钟（`READY_SLOW_TOTAL_MS`）→ `cancelled = true`，放弃启动；
+         * 3. 用户进导航页 → surface 建好了 → 但 `cancelled` 已经为真，
+         *    [onSurfaceCreated] 直接 return、轮询也不再跑 → **承载应用从来没被启动**；
+         * 4. 画面就是一块黑。
+         *
+         * 而用户的绕法是「**全屏一次再还原**」—— 还原时我们会给承载应用
+         * 重新下发一次启动（`PipSurface.relaunchAfterResize`），所以就又能看了。
+         *
+         * 现在超时时只停**轮询**（[stopped]），不废掉承载面：
+         * surface 一建好就重新开始等。
+         */
+        private var stopped = false
         private var slow = false
         private var warned = false
         private var beginAt = 0L
@@ -448,15 +470,34 @@ object ActivityEmbed {
          * 也就不会再次触发 `onActivityViewReady` → 承载应用不会被拉起来 → 黑屏。
          * 这里在重建时把承载应用**重新下发一次启动**
          * （用的是那套 NEW_TASK 旗标，已有 task 会被拉到前台而不是重开）。
+         *
+         * ## 第六十七轮补的一条
+         *
+         * **还没启动过**的时候也要启动 ——
+         * 以前这里只处理「已经启动过 → 重建」，
+         * 于是「首次就绪但等待已超时」这一整条路是死的（画中画一块黑，
+         * 只有全屏一次再还原才看得到）。
          */
         fun onSurfaceCreated() {
             surfaceCreatedCount++
-            if (surfaceCreatedCount <= 1) {
-                // 第一次：正常路径（就绪探测或回调）负责启动，这里不重复
-                Logx.d(LogTags.NAV_UI, "承载面首次就绪", "pkg" to pkg)
+            if (cancelled) return
+            if (!started) {
+                // 还没启动过 → surface 建好了 = VirtualDisplay 建出来了 → 立刻试一次
+                if (stopped) {
+                    stopped = false
+                    slow = false
+                    warned = false
+                    beginAt = System.currentTimeMillis()
+                    Logx.i(
+                        LogTags.NAV_UI,
+                        "承载面就绪，重新开始等待（之前超时放弃过）",
+                        "pkg" to pkg,
+                    )
+                }
+                Logx.d(LogTags.NAV_UI, "承载面首次就绪", "pkg" to pkg, "times" to surfaceCreatedCount)
+                handler.post { attempt("surface") }
                 return
             }
-            if (cancelled) return
             Logx.i(
                 LogTags.NAV_UI,
                 "承载面重建，重新拉起承载应用",
@@ -489,7 +530,7 @@ object ActivityEmbed {
         }
 
         private fun attempt(reason: String) {
-            if (started || cancelled) return
+            if (started || cancelled || stopped) return
             if (view.isAttachedToWindow && displayReady(view)) {
                 started = true
                 handler.removeCallbacks(poll)
@@ -508,17 +549,21 @@ object ActivityEmbed {
         }
 
         private fun reschedule(reason: String) {
-            if (started || cancelled) return
+            if (started || cancelled || stopped) return
             val elapsed = System.currentTimeMillis() - beginAt
             if (elapsed > READY_SLOW_TOTAL_MS) {
+                // 只停**轮询**，不废掉承载面 —— surface 建好时会自动重新开始等。
+                // （以前这里置 `cancelled = true`，于是「进导航页 → surface 建好 → 启动」
+                //  这一整条路是死的 → 画中画一块黑，只能全屏一次再还原才看得到。）
                 Logx.w(
                     LogTags.NAV_UI,
-                    "承载面始终不就绪，已放弃启动承载应用",
+                    "承载面等待超时，停止轮询（surface 建好后会重新尝试）",
                     "pkg" to pkg,
                     "by" to reason,
                     "waited" to elapsed,
                 )
-                cancelled = true
+                stopped = true
+                handler.removeCallbacks(poll)
                 return
             }
             if (!slow && elapsed > READY_FAST_MS) {
@@ -539,6 +584,20 @@ object ActivityEmbed {
             handler.removeCallbacks(poll)
             handler.postDelayed(poll, if (slow) READY_SLOW_MS else READY_POLL_MS)
         }
+    }
+
+    /**
+     * 取承载面的 **Surface**（画面探针采样用）。
+     *
+     * AOSP 的 `ActivityView` 内部是 `mSurfaceView`（`SurfaceView`），
+     * 画面就画在它的 Surface 上 —— `PixelCopy` 采的就是它。
+     *
+     * @return null = 取不到（不是 ActivityView / Surface 还没建好 / 已被拆）
+     */
+    fun surfaceOf(view: View): android.view.Surface? {
+        val surfaceView = findField(view, "mSurfaceView")
+            ?.let { readField(it, view) } as? android.view.SurfaceView ?: return null
+        return runCatching { surfaceView.holder.surface }.getOrNull()
     }
 
     /**

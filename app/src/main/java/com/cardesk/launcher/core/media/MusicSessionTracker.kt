@@ -160,6 +160,31 @@ class MusicSessionTracker private constructor() {
      */
     private var dmtResumeRequested = false
 
+    // ---------------------------------------------------- 暂停态快照（第六十七轮）
+
+    /**
+     * 暂停时保留的元数据（**会话之外**的一份备份）。
+     *
+     * ## 为什么要在会话之外再存一份
+     *
+     * `Record` 是按会话 token 存的。车机音乐应用暂停时经常**把会话一起销毁**
+     * （我们给车机多媒体的暂停下发的是 `stop()`），于是：
+     *
+     * - `Record` 被移除 → 它里面的 `pausedMetadata` 一起没了；
+     * - 候选清单空了 → 界面清空 → **歌名、歌词全没了**；
+     * - 再按播放也没有会话可恢复 → 只能「打开音乐 App」，用户看着像「播放按钮没用」。
+     *
+     * 所以这里在会话之外再存一份：会话没了，歌名 / 歌词还能继续显示着，
+     * 播放按钮也知道该往哪个包恢复。
+     */
+    private var pausedSnapshot: MediaMetadata? = null
+
+    /** 暂停快照对应的包名（恢复播放时往这个包发指令）。 */
+    private var pausedSnapshotPkg: String = ""
+
+    /** 暂停快照的时刻（选候选时当「最近更新」用）。 */
+    private var pausedSnapshotAt = 0L
+
     /**
      * 「唤醒上次音乐包」是否已经做过（`MusicSessionTracker.defaultWakeDone`）。
      *
@@ -206,10 +231,31 @@ class MusicSessionTracker private constructor() {
             return metadata
         }
 
+        /**
+         * 元数据变化。
+         *
+         * ## 第六十七轮改了什么
+         *
+         * 原来「元数据被撤掉」时会把暂停时留的那份也一起清掉
+         * （除非正好处于可保留的暂停态）。
+         * 于是「恢复播放时 App 先报状态、后报元数据」的那一瞬，
+         * 歌名 / 歌词会空掉。
+         *
+         * 现在改成：
+         * - **有真值** → 覆盖暂停时留的那份，暂停意图解除；
+         * - **被撤成 null** → **留着**（只要不是换歌）；
+         * - **换歌了** → 那份作废。
+         *
+         * 什么时候「暂停时留的那份」会被用上，由 [canRetainPause] 把关
+         * （真正停下来了就该清屏）。
+         */
         fun updateMetadata(m: MediaMetadata?) {
             if (hasMetadata(m)) {
                 pausedMetadata = m
-            } else if (!canRetainPause() || identityChanged(pausedMetadata, m)) {
+                // 有真值了 → 不再需要「暂停态保留」，暂停意图可以解除
+                userPauseRequested = false
+            } else if (identityChanged(pausedMetadata, m)) {
+                // 换歌了 → 暂停时留的那份作废
                 pausedMetadata = null
                 userPauseRequested = false
             }
@@ -222,6 +268,7 @@ class MusicSessionTracker private constructor() {
                 state = s?.state,
                 userPauseRequested = userPauseRequested,
                 hasMetadata = hasMetadata(metadata),
+                hasPausedMetadata = pausedMetadata != null,
             )
             if (!r.keepPausedMetadata) pausedMetadata = null
             userPauseRequested = r.userPauseRequested
@@ -686,6 +733,27 @@ class MusicSessionTracker private constructor() {
         // 已选中会话用 **token** 比对（用）。
         val best = SessionChooser.choose(candidates, lockedPkg, now, selectedTokenKey, lastMusicPkg)
         if (best == null) {
+            // —— 暂停态保留（第六十七轮）：会话没了，但歌名 / 歌词要留着
+            //
+            // 真机现象：车机音乐应用暂停时会把会话一起销毁 → 候选清单空了 →
+            // 这里原来直接 `onTrackChanged(null)` → 界面清空 → 歌名、歌词全没，
+            // 再按播放也没得恢复。
+            //
+            // 现在有「用户按过暂停」的快照时**不清屏**：把歌名 / 歌词继续显示着，
+            // 播放按钮也知道往哪个包恢复。
+            val snap = pausedSnapshot
+            if (snap != null && current != null) {
+                Logx.i(
+                    LogTags.MEDIA,
+                    "会话没了，保留暂停态的歌名与歌词",
+                    "reason" to reason,
+                    "pkg" to pausedSnapshotPkg,
+                    "title" to current?.title,
+                )
+                // 播放态按「暂停」处理（本来就停着）
+                applyPlayingUi(false)
+                return
+            }
             // 排障场景：没有选中任何会话 → 界面会显示「暂无播放」，这里要能看到候选清单
             Logx.w(
                 LogTags.MEDIA,
@@ -880,9 +948,6 @@ class MusicSessionTracker private constructor() {
     private fun isActiveState(state: PlaybackState?): Boolean =
         PauseRetention.isActive(state?.state)
 
-    private fun isPauseMetadataPackage(pkg: String?): Boolean =
-        PauseRetention.isPauseMetadataPackage(pkg)
-
     /**
      * 换歌判定：暂停态保留的元数据与新元数据是不是同一首。
      *
@@ -1047,6 +1112,11 @@ class MusicSessionTracker private constructor() {
             lastObservedMediaPosAt = SystemClock.uptimeMillis()
         }
         current = next
+        // —— 真的放起来了 → 暂停态快照作废（它只是「暂停时的备份」）
+        if (playing && hasMetadata(meta)) {
+            pausedSnapshot = null
+            pausedSnapshotPkg = ""
+        }
         listeners.forEach { it.onTrackChanged(next) }
         listeners.forEach { it.onPlaybackChanged(playing, position) }
     }
@@ -1240,12 +1310,25 @@ class MusicSessionTracker private constructor() {
      *
      * 必须在**下发暂停之前**调用：暂停态元数据要在这刻先存下来，
      * 否则会话把元数据撤掉之后就再也找不回来了（真机现象：暂停后歌名消失）。
+     *
+     * ## 第六十七轮：不按包拦了
+     *
+     * 原来这里有一道包白名单（只有车机多媒体才记），
+     * 于是拿 QQ音乐车机版 / 网易云 / 酷狗 / 酷我 / 汽水 播歌时，
+     * **暂停一下就掉元数据** → 歌名、歌词一起没。
+     *
+     * 现在任何包都记 —— 「用户自己按了暂停」本身就是最强的信号。
      */
     fun prepareUserPause() {
         val rec = currentRecord() ?: return
-        if (!isPauseMetadataPackage(rec.pkg)) return
         rec.userPauseRequested = true
-        if (hasMetadata(rec.metadata)) rec.pausedMetadata = rec.metadata
+        if (hasMetadata(rec.metadata)) {
+            rec.pausedMetadata = rec.metadata
+            // —— 会话之外的备份：会话被销毁也留着（见字段注释）
+            pausedSnapshot = rec.metadata
+            pausedSnapshotPkg = rec.pkg
+            pausedSnapshotAt = SystemClock.elapsedRealtime()
+        }
         Logx.i(
             LogTags.MEDIA,
             "记录用户暂停意图（保留暂停态元数据）",
@@ -1333,6 +1416,30 @@ class MusicSessionTracker private constructor() {
      */
     private fun playWithoutSession() {
         val pkg = rememberedMusicPkg()
+        // —— 暂停态恢复（第六十七轮）
+        //
+        // 会话没了（车机 App 暂停时把会话一起销毁）但**歌还在**：
+        // 先试着恢复，而不是直接「打开音乐 App」。
+        // 「打开 App」的现象是「按了播放没反应」——只是把 App 拉到前台，歌不接着放。
+        val resumePkg = pausedSnapshotPkg.ifEmpty { pkg }
+        if (pausedSnapshot != null) {
+            Logx.i(
+                LogTags.MEDIA,
+                "播放指令（无会话）：从暂停态恢复",
+                "pkg" to resumePkg,
+                "title" to metaSnapshot(pausedSnapshot).title,
+            )
+            applyOptimisticTransport(true)
+            dmtResumeRequested = true
+            // —— 重新扫一遍会话，把目标包重新绑上
+            rescanNow()
+            tryResumeDmtPlayback(resumePkg)
+            main.postDelayed({ tryResumeDmtPlayback(resumePkg) }, DMT_RESUME_RETRY_MS)
+            main.postDelayed({ tryResumeDmtPlayback(resumePkg) }, DMT_RESUME_RETRY_MS * 2)
+            // —— 兜底：上面这些都没能把会话拉回来 → 把音乐 App 拉起来（总比毫无反应强）
+            main.postDelayed({ fallbackLaunchMusicApp(resumePkg) }, RESUME_LAUNCH_FALLBACK_MS)
+            return
+        }
         if (!customPlayFlag && !isAiqutingPkg(pkg)) {
             Logx.i(LogTags.MEDIA, "播放指令（无会话）：打开默认音乐应用", "pkg" to pkg)
             openDefaultMusicApp()
@@ -1381,10 +1488,14 @@ class MusicSessionTracker private constructor() {
      * 包候选顺序：`com.tencent.qqmusiccar` → `com.tencent.wecarflow`
      * `cn.kuwo.kwmusiccar` → `cn.kuwo.kwmusiccarclone` → `com.netease.cloudmusic.iot`，
      * 取第一个**装了且有启动入口**的。
+     *
+     * @param hint 优先使用的包（暂停态恢复时就是刚才那个包）
      */
-    private fun openDefaultMusicApp() {
+    private fun openDefaultMusicApp(hint: String = "") {
         val ctx = appContext ?: return
-        var pkg = controller?.packageName?.takeIf { it.isNotEmpty() } ?: rememberedMusicPkg()
+        var pkg = controller?.packageName?.takeIf { it.isNotEmpty() }
+            ?: hint.takeIf { it.isNotEmpty() }
+            ?: rememberedMusicPkg()
         if (pkg.isEmpty()) {
             pkg = MediaSources.DEFAULT_MUSIC_PACKAGES.firstOrNull { candidate ->
                 runCatching { ctx.packageManager.getLaunchIntentForPackage(candidate) != null }
@@ -1405,6 +1516,20 @@ class MusicSessionTracker private constructor() {
             Logx.w(LogTags.MEDIA, "默认音乐应用启动失败", it, "pkg" to pkg)
         }
         Logx.i(LogTags.MEDIA, "已打开默认音乐应用", "pkg" to pkg)
+    }
+
+    /**
+     * 暂停态恢复的兜底：恢复没成功就把音乐 App 拉到前台。
+     *
+     * 判据：
+     * - 会话已经回来了 → 不用管；
+     * - 不是暂停态恢复 → 不用管。
+     */
+    private fun fallbackLaunchMusicApp(pkg: String) {
+        if (controller != null) return
+        if (pausedSnapshot == null) return
+        Logx.i(LogTags.MEDIA, "暂停态恢复没成功，拉起音乐应用", "pkg" to pkg)
+        openDefaultMusicApp(pkg)
     }
 
     /**
@@ -1669,6 +1794,11 @@ class MusicSessionTracker private constructor() {
          * 车机多媒体恢复播放的兜底重试间隔（400L / 1000L 两个兜底）。
          */
         const val DMT_RESUME_RETRY_MS = 400L
+
+    /**
+     * 暂停态恢复的兜底延迟（毫秒）：这么长时间还没把会话拉回来，就把音乐 App 拉起来。
+     */
+    const val RESUME_LAUNCH_FALLBACK_MS = 2_000L
 
         /**
          * 唤醒上次音乐包之后的刷新间隔（`MusicSessionTracker` 的 400L / 1200L 两次刷新）。
