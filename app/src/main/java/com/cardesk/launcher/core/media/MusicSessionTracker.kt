@@ -1413,6 +1413,15 @@ class MusicSessionTracker private constructor() {
      * 之前我们只发了一个**全局** `KEYCODE_MEDIA_PLAY_PAUSE`：
      * 车机音乐应用（爱趣听）收不到按键 → 会话被 stop 掉之后就再也播不回来
      * （真机现象：暂停后点播放没反应）。
+     *
+     * ## 第六十八轮：所有分支都补上「定向播放事件」
+     *
+     * 两条路都先给**上一次使用的播放器**发一个定向 `MEDIA_BUTTON(PLAY)`：
+     * - 暂停态恢复 → 由 [tryResumeDmtPlayback] 在「没有绑定会话」时发；
+     * - 普通无会话 → 在打开 App 之前先发（[sendTargetedPlayEvent]）。
+     *
+     * 全局键只有「当前正在出声的 App」会接，App 把会话销毁之后全局键就是空放；
+     * 定向广播才是「明确叫醒那一个 App」。
      */
     private fun playWithoutSession() {
         val pkg = rememberedMusicPkg()
@@ -1442,6 +1451,9 @@ class MusicSessionTracker private constructor() {
         }
         if (!customPlayFlag && !isAiqutingPkg(pkg)) {
             Logx.i(LogTags.MEDIA, "播放指令（无会话）：打开默认音乐应用", "pkg" to pkg)
+            // —— 第六十八轮：先给「上一次使用的播放器」发一个**定向**播放事件。
+            // 有些 App 收到 MEDIA_BUTTON(PLAY) 就会接着放，比把它拉到前台更贴近「按播放」的意思。
+            sendTargetedPlayEvent(pkg, "无会话：上次播放器")
             openDefaultMusicApp()
             return
         }
@@ -1465,21 +1477,47 @@ class MusicSessionTracker private constructor() {
      * `dispatchMediaKey(126)` → 若目标是爱趣听类，再补一路**定向** MEDIA_BUTTON(126)。
      *
      * 目标包优先用当前绑定的会话，否则用「上次记住的音乐包」。
+     *
+     * ## 第六十八轮：没找到活动会话 → 定向发给「上一次使用的播放器」
+     *
+     * 原来「定向 MEDIA_BUTTON」只发给爱趣听类（`isAiqutingPkg`），
+     * 于是 QQ音乐车机版这类 App 在「暂停 → 会话被销毁 → 按播放」时收不到任何事件 → **按播放没反应**。
+     *
+     * 现在：**没有绑定会话**时一律给目标包（= 上一次使用的播放器）补一路定向播放事件；
+     * **有绑定会话**时保持原语义（只对爱趣听类补），避免给正在正常播放的 App 塞多余广播。
      */
     private fun tryResumeDmtPlayback(fallbackPkg: String) {
         if (!dmtResumeRequested) return
-        val target = controller?.packageName?.takeIf { it.isNotEmpty() }
-            ?: fallbackPkg.takeIf { it.isNotEmpty() }
-            ?: rememberedMusicPkg()
+        val bound = controller?.packageName?.takeIf { it.isNotEmpty() }
+        val target = MediaResume.targetPackage(bound, fallbackPkg, rememberedMusicPkg())
         controller?.let { c ->
             runCatching { c.transportControls.play() }
                 .onFailure { Logx.w(LogTags.MEDIA, "DMT 恢复播放失败", it, "pkg" to target) }
         }
         dispatchMediaKey(KeyEvent.KEYCODE_MEDIA_PLAY, "DMT 恢复播放")
-        if (isAiqutingPkg(target)) {
-            sendOrderedMediaButton(target, KeyEvent.KEYCODE_MEDIA_PLAY)
+        if (MediaResume.shouldSendTargetedPlay(bound, target, isAiqutingPkg(target))) {
+            sendTargetedPlayEvent(target, if (bound == null) "无会话：上次播放器" else "爱趣听类")
         }
-        Logx.i(LogTags.MEDIA, "DMT 恢复播放已下发", "pkg" to target)
+        Logx.i(
+            LogTags.MEDIA, "DMT 恢复播放已下发",
+            "pkg" to target, "bound" to (bound != null),
+        )
+    }
+
+    /**
+     * 给目标包发一路**定向**播放事件（`MEDIA_BUTTON` + `setPackage`）。
+     *
+     * 广播只送到目标 App 的 `MediaButtonReceiver`，别的 App 收不到 ——
+     * 这就是「没找到活动会话时，明确叫醒上一次使用的播放器」那条路。
+     *
+     * 目标包为空就**不发**（空包名广播没有意义，还白耗一次广播）。
+     *
+     * @param reason 为什么发（落进日志，排障时一眼看出走的是哪条路）
+     */
+    private fun sendTargetedPlayEvent(pkg: String, reason: String) {
+        if (pkg.isEmpty()) return
+        Logx.i(LogTags.MEDIA, "定向播放事件", "pkg" to pkg, "reason" to reason)
+        sendOrderedMediaButton(pkg, KeyEvent.KEYCODE_MEDIA_PLAY)
     }
 
     /**

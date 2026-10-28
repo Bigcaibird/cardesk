@@ -24,7 +24,7 @@ import java.io.FileOutputStream
  *  1. 设置项之间别那么紧凑（行高 92→104、行间距 37→52）；
  *  2. 去掉标题下那条绝对定位的分割线（它落进第一行，跟行分割线叠成「两根横线」）。
  *
- * 产物：`preview/x01..x04-settings-*.png`（夜间四页）。
+ * 产物：`preview/x01..x05-settings-*.png`（夜间五页）。
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w1920dp-h1080dp-land")
@@ -34,7 +34,7 @@ class SettingsLayoutRenderTest {
     private val dir = File("../preview").apply { mkdirs() }
 
     @Test
-    fun 渲染设置页四页() {
+    fun 渲染设置页五页() {
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
         shadowOf(Looper.getMainLooper()).idle()
         val decor = activity.window.decorView
@@ -50,6 +50,16 @@ class SettingsLayoutRenderTest {
         shot(decor, overlay, "dock", "x02-settings-dock.png")
         shot(decor, overlay, "daynight", "x03-settings-daynight.png")
         shot(decor, overlay, "diagnostics", "x04-settings-diagnostics.png")
+        // 第六十八轮：「开通免激活」页改成了「开源与声明」页
+        shot(decor, overlay, "about", "x05-settings-about.png")
+        // —— 滚到底：看免责声明与车辆信息
+        val scroll = findField<android.widget.ScrollView>(overlay, "bodyScroll")
+        scroll?.scrollTo(0, 100000)
+        shadowOf(Looper.getMainLooper()).idle()
+        val bmp = Bitmap.createBitmap(1920, 1080, Bitmap.Config.ARGB_8888)
+        decor.draw(Canvas(bmp))
+        FileOutputStream(File(dir, "x06-settings-about-bottom.png"))
+            .use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
     private fun shot(decor: View, overlay: SettingsOverlay, key: String, name: String) {

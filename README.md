@@ -83,6 +83,12 @@ echo "sdk.dir=/path/to/android-sdk" > local.properties
 > 没有时退化为 debug 签名 —— 也就是 clone 下来就能编译，只是装进 `/system/priv-app/`
 > 需要你自己的平台密钥。
 
+## 许可
+
+本仓库**暂未附带 LICENSE 文件**：在作者补充许可条款之前，请勿将本项目视为已授予
+再分发或商用授权；二次开发或分发前请先与作者确认。
+（App 内「设置 → 开源与声明」页展示的是同一口径。）
+
 ## 不随仓库发布的内容
 
 - `platform-key/`：平台签名私钥（`.gitignore` 排除）；

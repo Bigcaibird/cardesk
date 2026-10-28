@@ -360,7 +360,7 @@ class SettingsOverlay(
         navScroll.addView(navList, ViewGroup.LayoutParams(-1, -2))
         left.addView(navScroll, abs(0, TREE_TOP, leftWidth, TREE_VIEW_H))
 
-        // VIN + 开通免激活同一行（底部行）
+        // VIN + 开源与声明同一行（底部行）
         val bottomRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -374,10 +374,10 @@ class SettingsOverlay(
             maxLines = 2
         }
         bottomRow.addView(vin, LinearLayout.LayoutParams(0, -1, 1f))
-        val activate = Ui.text(context, "开通免激活", 16f, pal.accent, bold = true).apply {
+        val activate = Ui.text(context, "开源与声明", 16f, pal.accent, bold = true).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(12, 0, 0, 0)
-            setOnClickListener { select("activate") }
+            setOnClickListener { select("about") }
         }
         bottomRow.addView(activate, LinearLayout.LayoutParams(-2, -1))
 
@@ -500,9 +500,9 @@ class SettingsOverlay(
         }
         // 「启动后」只属于「启动切换」页
         bootCaption.visibility = if (key == "boot") View.VISIBLE else View.GONE
-        // 「开通免激活」不在导航组里，标题固定
-        val label = if (key == "activate") {
-            "开通免激活"
+        // 「开源与声明」不在导航组里，标题固定
+        val label = if (key == "about") {
+            "开源与声明"
         } else {
             mergedGroups.flatMap { it.items }.firstOrNull { it.key == key }?.label ?: ""
         }
@@ -536,7 +536,7 @@ class SettingsOverlay(
             "diagnostics" -> pageDiagnostics()
             "restart" -> pageRestart()
             "logs" -> pageLogs()
-            "activate" -> pageActivate()
+            "about" -> pageAbout()
         }
     }
 
@@ -585,16 +585,18 @@ class SettingsOverlay(
     /**
      * 一行「标签 + 右侧取值」。
      *
+     * @param valueColor 指定取值颜色；不传时按 [ok] 走（绿 / 弱文字）。
+     *
      * @return 取值那个 TextView（第五十五轮：ADB 页要在操作后**原地刷新**取值，
      *         所以这里把视图交出去，而不是只往 body 里塞。
      */
-    private fun kvRow(label: String, value: String, ok: Boolean): TextView {
+    private fun kvRow(label: String, value: String, ok: Boolean, valueColor: Int? = null): TextView {
         val holder = FrameLayout(context)
         holder.addView(
             Ui.text(context, label, 22f, pal.textDim).apply { gravity = Gravity.CENTER_VERTICAL },
             FrameLayout.LayoutParams(-1, -1).also { it.leftMargin = 18 },
         )
-        val readout = Ui.text(context, value, 22f, if (ok) pal.ok else pal.textDim).apply {
+        val readout = Ui.text(context, value, 22f, valueColor ?: if (ok) pal.ok else pal.textDim).apply {
             gravity = Gravity.CENTER_VERTICAL or Gravity.END
         }
         holder.addView(
@@ -2310,14 +2312,82 @@ class SettingsOverlay(
         }
     }
 
-    /** 开通免激活。 */
-    private fun pageActivate() {
-        section("激活信息")
-        kvRow("车辆 VIN", "（空）", false)
+    /**
+     * 「开源与声明」页。
+     *
+     * 第六十八轮：这一页原来只有「激活信息 / 车辆 VIN / 本版本不设激活码」，
+     * 现在按用户要求改成**开源信息 + 免责声明**。
+     *
+     * ## 许可口径
+     *
+     * 仓库里**目前没有 LICENSE 文件**（第六十五轮决定：公开仓库暂不加 LICENSE，
+     * 留给作者后续法务处理）。所以这里**不能**写「MIT / GPL」之类具体许可证 ——
+     * 凭空声明一个许可证是在替作者做法律决定，而且一旦和仓库实际内容对不上就成了虚假声明。
+     * 因此页面上如实写「源码公开，暂未附带 LICENSE 文件」，并提示二次开发 / 分发前先与作者确认。
+     */
+    private fun pageAbout() {
+        section("开源信息")
+        kvRow("项目名称", "CarDesk · 车控桌面", true)
+        kvRow("源码仓库", REPO_URL_TEXT, true)
+        kvRow("当前版本", appVersionLabel(), true)
+        kvRow("语言 / 依赖", "Kotlin · 纯 framework API · 无第三方运行时依赖", true)
+        kvRow("开源许可", "源码公开，暂未附带 LICENSE 文件", false, pal.warn)
         note(
-            "本版本不设激活码，所有功能直接可用。\n\n" +
-                "激活信息仅用于查询车辆 VIN。"
+            "本应用源代码完整公开在上述仓库，可自行审阅、编译与二次开发；" +
+                "安装包通过 GitHub Release 分发，不随源码仓库提交。\n\n" +
+                "在作者补充许可条款之前，请勿将本项目视为已授予再分发或商用授权；" +
+                "二次开发或分发前请先与作者确认。",
         )
+        actionButton("打开项目主页", primary = true) { openRepoPage() }
+
+        section("免责声明")
+        paragraphs(DISCLAIMER_ITEMS)
+
+        section("车辆信息")
+        kvRow("车辆 VIN", "（空）", false)
+        note("本版本不设激活码，所有功能直接可用；车辆信息仅用于在界面上显示当前车辆。")
+    }
+
+    /** 一组段落：每条单独一段，行距比 [note] 松一点，长文本读起来不挤。 */
+    private fun paragraphs(items: List<String>) {
+        for ((i, item) in items.withIndex()) {
+            body.addView(
+                Ui.text(context, item, 20f, pal.textDim).apply { setLineSpacing(8f, 1f) },
+                LinearLayout.LayoutParams(-1, -2).also { it.topMargin = if (i == 0) 6 else 16 },
+            )
+        }
+    }
+
+    /** 当前版本号（`1.0.1037（4133）`）。读不到就写「?」，不编。 */
+    private fun appVersionLabel(): String = runCatching {
+        val pm = context.packageManager
+        @Suppress("DEPRECATION")
+        val pi = pm.getPackageInfo(context.packageName, 0)
+        val name = pi.versionName ?: "?"
+        val code = if (android.os.Build.VERSION.SDK_INT >= 28) pi.longVersionCode else pi.versionCode.toLong()
+        "$name（$code）"
+    }.getOrDefault("?")
+
+    /**
+     * 打开项目主页。
+     *
+     * 车机上不一定有浏览器（很多车机系统不装）→ 打不开就**复制到剪贴板**，
+     * 别让用户点了没反应。
+     */
+    private fun openRepoPage() {
+        val opened = runCatching {
+            val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(REPO_URL))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+        }.isSuccess
+        if (!opened) {
+            runCatching {
+                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                cm?.setPrimaryClip(android.content.ClipData.newPlainText("CarDesk 源码仓库", REPO_URL))
+            }
+            Toast.makeText(context, "没有可用浏览器，仓库地址已复制", Toast.LENGTH_LONG).show()
+        }
+        Logx.event(LogTags.SETTING, "打开项目主页", "url" to REPO_URL, "opened" to opened)
     }
 
     companion object {
@@ -2326,6 +2396,39 @@ class SettingsOverlay(
 
         /** 局域网传输页的二维码边长（设计 px）。 */
         const val QR_SIZE_PX = 300
+
+        // -------------------------------------------------- 开源与声明（第六十八轮）
+
+        /** 项目仓库地址（「开源与声明」页 + 「打开项目主页」用同一个）。 */
+        const val REPO_URL = "https://github.com/Bigcaibird/cardesk"
+
+        /** 页面上显示的仓库地址（去掉协议前缀，好读）。 */
+        const val REPO_URL_TEXT = "github.com/Bigcaibird/cardesk"
+
+        /**
+         * 免责声明正文（一条一段）。
+         *
+         * 措辞口径：
+         * - 与车厂无隶属 / 授权关系（第三方个人项目必写）；
+         * - 会读取车辆状态并下发控制指令，风险自负；
+         * - 按「现状」提供，不作担保；
+         * - 遵守车辆使用规范与当地法规；
+         * - 日志与局域网传输的知情说明。
+         *
+         * 放在 [companion object] 里是为了**改文案只改一处**。
+         */
+        val DISCLAIMER_ITEMS: List<String> = listOf(
+            "1. 本项目为个人开发的第三方开源项目，与任何汽车厂商、供应商及其关联公司不存在隶属、" +
+                "赞助、授权或合作关系；产品名称、商标与车型信息仅用于说明兼容性，相关权利归各自权利人所有。",
+            "2. 本应用会通过系统接口读取车辆状态（空调、车门、车窗、续航、油量、胎压等），" +
+                "并可能向车辆下发控制指令。安装、启用或使用本应用所引发的任何直接或间接后果，" +
+                "包括但不限于车辆状态显示异常、第三方应用行为异常、系统不稳定或数据丢失等，均由使用者自行承担。",
+            "3. 本应用按「现状」提供，不作任何明示或默示的担保，包括但不限于适销性、特定用途适用性、" +
+                "不侵权及不受干扰的担保；在法律允许的最大范围内，作者不对使用本应用造成的任何损失承担责任。",
+            "4. 使用前请自行确认车辆使用规范、当地法律法规与安全要求；因违反规定或不当使用造成的后果由使用者自行承担。",
+            "5. 本应用的诊断日志只写入车机本地，不会自动上传；但「局域网传输」开启后会在同一局域网内提供这些文件，" +
+                "请自行决定是否开启。发现本应用与车辆系统或其他应用存在冲突时，请停止使用并通过仓库反馈。",
+        )
 
         /** 面板高（设计 px）—— 设计板 `s05-settings`。 */
         const val PANEL_H = 920
