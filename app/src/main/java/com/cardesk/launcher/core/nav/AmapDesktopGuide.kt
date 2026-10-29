@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
+import android.os.SystemClock
 import android.os.UserHandle
 import com.cardesk.launcher.core.AmapAreaInfo
 import com.cardesk.launcher.core.AmapCitySource
@@ -61,6 +62,13 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
         /** 收到（可能不带引导数据的）车道线数据。 */
         fun onLanes(raw: String)
 
+        /**
+         * 收到一条红绿灯数据（**最近路口**）。
+         *
+         * null = 这次没有有效信号（协议不匹配 / 字段不全 / 巡航数组多方向无法取舍）。
+         */
+        fun onTrafficLight(signal: AmapTrafficLight.Signal?)
+
         /** 导航结束 / 超时，卡片要收起。 */
         fun onStopped()
 
@@ -83,6 +91,27 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
 
     /** 最近一次的车道线原文（引导数据里没带车道线时用它兜底）。 */
     private var lastLanes: String? = null
+
+    /**
+     * 最近一条红绿灯信号（**最近路口**）。
+     *
+     * 官方协议（`KEY_TYPE=60073`）与修改版巡航协议（`NAVITOOL_CRUISE_TRAFFIC_LIGHTS`）
+     * 各存一份 —— 巡航那份的枚举**已验证**，优先用它。
+     */
+    private var lightStandard: AmapTrafficLight.Signal? = null
+    private var lightCruise: AmapTrafficLight.Signal? = null
+
+    /** 两条信号各自的到达时刻（单调时钟，毫秒）。 */
+    private var lightStandardAt = 0L
+    private var lightCruiseAt = 0L
+
+    /**
+     * 最近一次引导数据的转向图标。
+     *
+     * 巡航协议一次会带上**同一个路口的多个方向**，
+     * 我们用它挑出「我们正要走的那条方向」—— 挑不出就不画（不猜）。
+     */
+    private var lastGuideIcon = 0
 
     /**
      * 上一次记过 INFO 的「导航状态」值。
@@ -125,6 +154,9 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
     fun start() {
         if (registered) return
         val filter = IntentFilter(ACTION_SEND)
+        // 修改版（YH）的巡航红绿灯是另一个 action，加进同一个过滤器，
+        // 复用同一个接收器（不用再注册一个）。
+        filter.addAction(AmapTrafficLight.ACTION_CRUISE)
         val ok = runCatching {
             if (Build.VERSION.SDK_INT >= 33) {
                 // 用字面量 2 = RECEIVER_EXPORTED（高德是别的应用，必须 EXPORTED）
@@ -150,17 +182,31 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
         registered = false
         navigating = false
         lastLanes = null
+        lightStandard = null
+        lightCruise = null
+        lightStandardAt = 0L
+        lightCruiseAt = 0L
+        lastGuideIcon = 0
         Logx.i(LogTags.NAV_UI, "停止导航引导数据源")
     }
 
     // ------------------------------------------------------------------ 广播处理
 
     private fun handle(intent: Intent?) {
-        if (intent == null || ACTION_SEND != intent.action) return
+        if (intent == null) return
+        // 修改版（YH）的巡航红绿灯是**另一个 action**，
+        // 与引导数据分开处理（它带的是 JSON，不是 extras）。
+        if (AmapTrafficLight.ACTION_CRUISE == intent.action) {
+            handleCruiseTrafficLight(intent)
+            return
+        }
+        if (ACTION_SEND != intent.action) return
         when (val type = intent.getIntExtra(EXTRA_KEY_TYPE, -1)) {
             KEY_STATE -> handleState(intent.getIntExtra(EXTRA_STATE, -1))
             KEY_DRIVE_WAY, KEY_DRIVE_WAY_YH_A, KEY_DRIVE_WAY_YH_B -> handleLanes(intent.getStringExtra(EXTRA_DRIVE_WAY))
             KEY_GUIDE, KEY_GUIDE_EXT, KEY_GUIDE_YH -> handleGuide(intent, type)
+            // 红绿灯（官方标准协议）：同一个 action，靠 `KEY_TYPE` 区分。
+            KEY_TRAFFIC_LIGHT -> handleStandardTrafficLight(intent)
             // 区域信息：高德把自己的当前城市广播出来（`10077`）。
             //
             // 高德车机版自己就用这条做城市兜底
@@ -286,6 +332,8 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
         }
         navigating = true
         lastGuideAt = System.currentTimeMillis()
+        // 记下转向图标 —— 巡航协议一次带多个方向时，用它挑出我们该看的那条。
+        if (guide.icon > 0) lastGuideIcon = guide.icon
         main.removeCallbacks(staleCheck)
         main.postDelayed(staleCheck, STALE_MS)
         if (guide.lanes.isNotEmpty()) lastLanes = guide.lanes
@@ -309,12 +357,125 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
         listener.onGuide(guide)
     }
 
+    /**
+     * 官方标准协议的红绿灯帧（`KEY_TYPE = 60073`）。
+     *
+     * 只取**数值型** extra —— 字符串 / 布尔一律当没有
+     * （协议里这些字段本来就是数值，混进字符串说明不是这一类广播）。
+     */
+    private fun handleStandardTrafficLight(intent: Intent) {
+        val extras = intent.extras ?: return
+        val map = HashMap<String, Any?>(AmapTrafficLight.STANDARD_EXTRAS.size)
+        for (key in AmapTrafficLight.STANDARD_EXTRAS) {
+            val v = extras.get(key)
+            if (v is Number) map[key] = v
+        }
+        val signal = AmapTrafficLight.standard(map)
+        if (signal == null) {
+            Logx.d(LogTags.NAV_UI, "红绿灯帧解析失败（官方协议）")
+            return
+        }
+        lightStandard = signal
+        lightStandardAt = SystemClock.elapsedRealtime()
+        Logx.i(
+            LogTags.NAV_UI,
+            "收到红绿灯数据（官方协议）",
+            "lamp" to signal.lamp,
+            "countdown" to signal.countdownSeconds,
+            "rawStatus" to signal.rawStatus,
+            "rawDir" to signal.rawDirection,
+        )
+        listener.onTrafficLight(signal)
+    }
+
+    /**
+     * 修改版（YH）巡航协议的红绿灯帧。
+     *
+     * JSON 在 extra `data` 里；一次可能带**同一个路口的多个方向**，
+     * 靠当前转向方向挑出我们该看的那条（挑不出就不画，见 [AmapTrafficLight.cruise]）。
+     */
+    private fun handleCruiseTrafficLight(intent: Intent) {
+        val json = intent.getStringExtra(AmapTrafficLight.EXTRA_CRUISE_DATA)
+        if (json.isNullOrEmpty()) {
+            Logx.d(LogTags.NAV_UI, "红绿灯巡航广播没有 data")
+            return
+        }
+        val signal = AmapTrafficLight.cruise(json, preferredDirection())
+        if (signal == null) {
+            Logx.d(LogTags.NAV_UI, "红绿灯巡航帧解析失败", "len" to json.length)
+            return
+        }
+        lightCruise = signal
+        lightCruiseAt = SystemClock.elapsedRealtime()
+        Logx.i(
+            LogTags.NAV_UI,
+            "收到红绿灯数据（巡航协议）",
+            "lamp" to signal.lamp,
+            "countdown" to signal.countdownSeconds,
+            "rawStatus" to signal.rawStatus,
+            "rawDir" to signal.rawDirection,
+        )
+        listener.onTrafficLight(signal)
+    }
+
+    /**
+     * 当前导航转向 → 巡航协议的方向码。
+     *
+     * 巡航方向 `1` 左 / `2` 直 / `3` 右（YH 包里已验证），
+     * 与我们自己的转向图标分类一一对应（掉头没有对应方向 → null）。
+     */
+    private fun preferredDirection(): Int? = when (NavGuideText.guideIcon(lastGuideIcon)) {
+        NavGuideText.GuideIcon.LEFT -> AmapTrafficLight.DIR_LEFT
+        NavGuideText.GuideIcon.STRAIGHT -> AmapTrafficLight.DIR_STRAIGHT
+        NavGuideText.GuideIcon.RIGHT -> AmapTrafficLight.DIR_RIGHT
+        NavGuideText.GuideIcon.UTURN -> null
+    }
+
+    /**
+     * 当前有效的红绿灯信号（**最近路口**）；null = 没有可用信号。
+     *
+     * ## 有效期
+     *
+     * 高德实际多久推一帧还没实测（路口才有信号，间隔不固定），
+     * 所以取一个保守的 [TRAFFIC_LIGHT_TTL_MS]：超过这个时长没收到新帧就当失效。
+     *
+     * ## 读秒怎么走
+     *
+     * 读秒按**本机单调时钟**往下减（不依赖两端墙钟一致）。
+     * 减到 0 之后**不再显示数字**，但**不自动换灯态** ——
+     * 「红灯读秒走完」不等于「变绿灯」，那是猜。
+     */
+    fun trafficLight(): AmapTrafficLight.Signal? {
+        val now = SystemClock.elapsedRealtime()
+        // 巡航那份的枚举已验证，优先。
+        val cruise = lightCruise
+        if (cruise != null && now - lightCruiseAt < TRAFFIC_LIGHT_TTL_MS) {
+            return withRemaining(cruise, now - lightCruiseAt)
+        }
+        val standard = lightStandard
+        if (standard != null && now - lightStandardAt < TRAFFIC_LIGHT_TTL_MS) {
+            return withRemaining(standard, now - lightStandardAt)
+        }
+        return null
+    }
+
+    /** 按已过去的毫秒数把读秒往下减；走到 0 就把读秒抹掉（不猜灯态变化）。 */
+    private fun withRemaining(signal: AmapTrafficLight.Signal, ageMs: Long): AmapTrafficLight.Signal {
+        val countdown = signal.countdownSeconds ?: return signal
+        val left = countdown - (ageMs / 1000L).toInt()
+        return signal.copy(countdownSeconds = if (left > 0) left else null)
+    }
+
     /** 收起卡片。 */
     private fun stopGuide() {
         main.removeCallbacks(staleCheck)
         if (!navigating) return
         navigating = false
         lastLanes = null
+        lightStandard = null
+        lightCruise = null
+        lightStandardAt = 0L
+        lightCruiseAt = 0L
         // 下一段导航的状态要重新记 INFO（状态值可能和上次一样）
         lastLoggedState = null
         Logx.i(LogTags.NAV_UI, "收起导航引导卡片")
@@ -499,6 +660,21 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
 
         /** 车道线 YH B（`AmapDesktopGuide.KEY_DRIVE_WAY_YH_B`）。 */
         const val KEY_DRIVE_WAY_YH_B = 13022
+
+        /**
+         * 红绿灯（官方标准协议，`AmapDesktopGuide.KEY_TRAFFIC_LIGHT`）。
+         *
+         * 与引导数据同一个 action，靠 `KEY_TYPE` 区分。
+         */
+        const val KEY_TRAFFIC_LIGHT = AmapTrafficLight.KEY_TYPE_TRAFFIC_LIGHT
+
+        /**
+         * 红绿灯信号的有效期（毫秒）。
+         *
+         * 高德实际多久推一帧还没实测（只有路口才有信号，间隔不固定），
+         * 这里取一个保守值：超过 5 秒没收到新帧就当信号失效（不再显示）。
+         */
+        const val TRAFFIC_LIGHT_TTL_MS = 5000L
 
         /** 索要引导数据（`AmapDesktopGuide.KEY_REQUEST_HUD`）。 */
         const val KEY_REQUEST_HUD = 10031

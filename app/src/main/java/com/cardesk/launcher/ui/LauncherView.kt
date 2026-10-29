@@ -349,6 +349,16 @@ class LauncherView(context: Context) : FrameLayout(context) {
                     if (navGuideRaw != null) applyNavGuide()
                 }
 
+                override fun onTrafficLight(signal: com.cardesk.launcher.core.nav.AmapTrafficLight.Signal?) {
+                    // 红绿灯是「最近路口」的瞬时信号：
+                    // 有就画，没有就不画（不占位）。
+                    // 收到新帧后立刻重画一次 —— 读秒要马上从车机给的值开始。
+                    //
+                    // 真正的信号状态放在 `AmapDesktopGuide` 里（那里判有效期、减读秒），
+                    // 这里不另存一份，免得两处状态打架。
+                    if (navGuideRaw != null) applyNavGuide()
+                }
+
                 override fun onStopped() {
                     navGuideRaw = null
                     navLanesRaw = null
@@ -377,6 +387,9 @@ class LauncherView(context: Context) : FrameLayout(context) {
     private fun applyNavGuide() {
         val guide = navGuideRaw ?: return
         val lanes = guide.lanes.ifEmpty { navLanesRaw.orEmpty() }
+        // 红绿灯读秒按本机单调时钟往下走，所以**每次重画都要重新取一次**。
+        // `AmapDesktopGuide.trafficLight()` 内部会按已过去的秒数把读秒减掉。
+        val light = navGuideSource?.trafficLight()
         scenePage.setGuide(
             com.cardesk.launcher.core.nav.NavGuideModel.build(
                 icon = guide.icon,
@@ -386,6 +399,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
                 remainSeconds = guide.remainSeconds,
                 remainMeters = guide.remainMeters,
                 lanesRaw = lanes,
+                trafficLight = light,
             ),
         )
     }
@@ -2055,6 +2069,9 @@ private fun showCam() {
         scenePage.fuelPercent = info.fuelPercent
         statusBar.fuelPercent = info.fuelPercent ?: ShellStatusBar.FUEL_UNKNOWN_VALUE
         scenePage.bind(info, state, prefs.wallpaper)
+        // 引导卡每秒重算一次 —— 红绿灯读秒要按秒往下走，
+        // 信号超时（超过 TTL 没收到新帧）也要在这一轮里消失。
+        if (navGuideRaw != null) applyNavGuide()
         // 车模编号跟着设置走（第三十三轮：**接到第一页胎压卡的自绘图模**上）。
         scenePage.carModel = prefs.carModel
         navPage.carModel = prefs.carModel

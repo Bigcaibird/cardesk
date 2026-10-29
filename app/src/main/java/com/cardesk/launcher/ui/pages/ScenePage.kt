@@ -26,6 +26,7 @@ import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.core.media.CoverAccent
 import com.cardesk.launcher.core.media.MediaSources
 import com.cardesk.launcher.core.media.MusicCardVisuals
+import com.cardesk.launcher.core.nav.AmapTrafficLight
 import com.cardesk.launcher.core.nav.DesktopGuide
 import com.cardesk.launcher.core.nav.LaneShape
 import com.cardesk.launcher.core.nav.LaneShapes
@@ -579,6 +580,18 @@ class ScenePage(context: Context) : View(context) {
         text.textSize = 24f
         text.color = Skin.TEXT_SOFT
         canvas.drawText(guide.segmentUnit, tx + distW + 6f, rowTop + 62f, text)
+        val unitW = text.measureText(guide.segmentUnit)
+
+        // —— 行1 右上角：红绿灯 chip（**最近路口**）——
+        // 与分段距离同一水平带，右对齐到卡片内容右缘。
+        // 左边界取「距离 + 单位」的右缘：放不下就整个不画（不挤掉距离）。
+        drawTrafficLight(
+            canvas = canvas,
+            guide = guide,
+            right = x + w - pad,
+            rowTop = rowTop,
+            leftLimit = tx + distW + 6f + unitW + 12f,
+        )
 
         // —— 行1 右下：道路（24px，marginTop 6）——
         text.textSize = 24f
@@ -625,6 +638,108 @@ class ScenePage(context: Context) : View(context) {
         }
 
         hits["nav"] = r
+    }
+
+    /**
+     * 红绿灯 chip（**最近路口**）。
+     *
+     * 位置：引导卡的**右上角**，与「分段距离」同一水平带，右对齐到卡片内容右缘。
+     *
+     * ```
+     *  ● 红灯  12 秒
+     * ```
+     *
+     * ## 为什么放在右上角而不是新开一行
+     *
+     * 路口才有信号，信号一来一走很频繁。
+     * 新开一行会让引导卡在有/无信号之间**反复长高变矮**（整张卡跟着跳），
+     * 而右上角是**画在空位上**的 —— 有信号才画，没信号什么都不画，
+     * 卡片高度**恒定**（与「没有歌词不占位」同一口径）。
+     *
+     * ## 画不出来就不画
+     *
+     * 右上角放不下时（分段距离数字太长）直接**不画**这一块，
+     * 宁可少一个信息，也不去挤掉已经在显示的距离。
+     */
+    private fun drawTrafficLight(
+        canvas: Canvas,
+        guide: DesktopGuide,
+        right: Float,
+        rowTop: Float,
+        leftLimit: Float,
+    ) {
+        val signal = guide.trafficLight ?: return
+        val lampColor = when (signal.lamp) {
+            AmapTrafficLight.Lamp.RED -> Skin.DANGER
+            AmapTrafficLight.Lamp.GREEN -> Skin.OK
+            AmapTrafficLight.Lamp.AMBER -> Skin.WARN
+            AmapTrafficLight.Lamp.UNKNOWN -> Skin.TEXT_DIM
+        }
+        val label = NavGuideText.trafficLampText(signal.lamp)
+        val seconds = signal.countdownSeconds
+        val number = NavGuideText.trafficCountdownText(seconds)
+
+        // —— 量尺寸（先量后画，避免画到一半发现放不下）——
+        val dotD = 14f
+        val gap1 = 10f
+        val gap2 = 14f
+        text.typeface = Typeface.DEFAULT
+        text.textSize = 20f
+        val labelW = text.measureText(label)
+        text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        text.textSize = 34f
+        val numW = text.measureText(number)
+        text.typeface = Typeface.DEFAULT
+        text.textSize = 16f
+        val unitW = if (seconds != null && seconds > 0) text.measureText("秒") else 0f
+
+        val chipW = dotD + gap1 + labelW + gap2 + numW + (if (unitW > 0f) 4f + unitW else 0f)
+        val chipLeft = right - chipW
+        // 放不下就不画（不挤掉已有的距离信息）
+        if (chipLeft < leftLimit) return
+        val chipH = 46f
+        val chipTop = rowTop + 8f
+        val centerY = chipTop + chipH / 2f
+
+        // —— 底：与卡片同族的扁平面 + 1px 描边 ——
+        canvas.drawRoundRect(
+            RectF(chipLeft, chipTop, right, chipTop + chipH), 23f, 23f,
+            Paint(fill).apply { color = Skin.CHIP_FILL },
+        )
+        canvas.drawRoundRect(
+            RectF(chipLeft, chipTop, right, chipTop + chipH), 23f, 23f,
+            Paint(stroke).apply {
+                color = Skin.CHIP_STROKE
+                strokeWidth = 1.4f
+            },
+        )
+
+        // —— 灯点 ——
+        val dotCx = chipLeft + 14f
+        canvas.drawCircle(dotCx, centerY, dotD / 2f, Paint(fill).apply { color = lampColor })
+
+        // —— 灯态文字（与灯点同色，不靠颜色单独表意）——
+        var cx = dotCx + dotD / 2f + gap1
+        text.textAlign = Paint.Align.LEFT
+        text.typeface = Typeface.DEFAULT
+        text.textSize = 20f
+        text.color = lampColor
+        canvas.drawText(label, cx, centerY + 7f, text)
+        cx += labelW + gap2
+
+        // —— 读秒（大号）+ 单位 ——
+        text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        text.textSize = 34f
+        text.color = lampColor
+        canvas.drawText(number, cx, centerY + 12f, text)
+        if (unitW > 0f) {
+            text.typeface = Typeface.DEFAULT
+            text.textSize = 16f
+            text.color = Skin.TEXT_DIM
+            canvas.drawText("秒", cx + numW + 4f, centerY + 10f, text)
+        }
+        // 交还画笔：读秒用的是粗体，不能漏给后面的绘制（道路名等）。
+        text.typeface = Typeface.DEFAULT
     }
 
     /**

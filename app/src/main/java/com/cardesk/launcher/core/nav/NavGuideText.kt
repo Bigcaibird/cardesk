@@ -145,4 +145,25 @@ object NavGuideText {
      */
     fun isValidGuide(icon: Int, segmentMeters: Int, currentRoad: String?, nextRoad: String?): Boolean =
         icon > 0 && segmentMeters >= 0 && !(currentRoad.isNullOrEmpty() && nextRoad.isNullOrEmpty())
+
+    /**
+     * 灯态文案。
+     *
+     * `UNKNOWN` 显示成「灯态未知」而不是空白 ——
+     * 空白会让人以为「没信号」，而实际是「信号在，但灯态枚举没验证过」。
+     * 文字和颜色一起给，不靠颜色单独表意。
+     */
+    fun trafficLampText(lamp: AmapTrafficLight.Lamp): String = when (lamp) {
+        AmapTrafficLight.Lamp.RED -> "红灯"
+        AmapTrafficLight.Lamp.GREEN -> "绿灯"
+        AmapTrafficLight.Lamp.AMBER -> "黄灯"
+        AmapTrafficLight.Lamp.UNKNOWN -> "灯态未知"
+    }
+
+    /** 读秒文案；null = 这一帧没有读秒（或已经走完）。 */
+    fun trafficCountdownText(seconds: Int?): String = if (seconds != null && seconds > 0) {
+        seconds.toString()
+    } else {
+        "—"
+    }
 }

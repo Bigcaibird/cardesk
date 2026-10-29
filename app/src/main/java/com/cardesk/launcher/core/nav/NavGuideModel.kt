@@ -25,6 +25,13 @@ data class DesktopGuide(
     val icon: NavGuideText.GuideIcon,
     /** 车道线（解析好的，可能为空）。 */
     val lanes: List<LaneTile>,
+    /**
+     * 最近路口的红绿灯（**可为空**）。
+     *
+     * null = 当前没有有效信号（没收到广播 / 超时 / 协议不匹配）——
+     * 这种情况下引导卡**不画**红绿灯那一块（不占位）。
+     */
+    val trafficLight: AmapTrafficLight.Signal? = null,
 )
 
 /**
@@ -37,6 +44,7 @@ object NavGuideModel {
      *
      * @param lanesRaw 车道线原文（`EXTRA_DRIVE_WAY`）；为空时按回落到最近一次的车道线。
      * @param now 当前时间戳（ETA = now + remainSeconds）。
+     * @param trafficLight 最近路口的红绿灯；null = 没有有效信号（不画）。
      */
     fun build(
         icon: Int,
@@ -47,6 +55,7 @@ object NavGuideModel {
         remainMeters: Int,
         lanesRaw: String?,
         now: Long = System.currentTimeMillis(),
+        trafficLight: AmapTrafficLight.Signal? = null,
     ): DesktopGuide = DesktopGuide(
         segmentText = NavGuideText.formatSegmentDistance(segmentMeters),
         segmentUnit = NavGuideText.segmentUnit(segmentMeters),
@@ -56,5 +65,6 @@ object NavGuideModel {
         etaTime = NavGuideText.formatEtaTime(now + max(0, remainSeconds) * 1000L),
         icon = NavGuideText.guideIcon(icon),
         lanes = DriveWay.parse(lanesRaw).orEmpty(),
+        trafficLight = trafficLight,
     )
 }
