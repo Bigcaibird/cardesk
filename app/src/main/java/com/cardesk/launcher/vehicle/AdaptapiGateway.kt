@@ -574,6 +574,27 @@ class AdaptapiGateway(private val context: Context) : VehicleGateway {
     }
 
     /**
+     * 读一个功能属性的**自定义（浮点）值**（第七十一轮）。
+     *
+     * 逐扇车窗的开度只在 `getCustomizeFunctionValue(func, zone)`（浮点）里实现，
+     * 整型通道对同一个功能号直接返回 `-1`。
+     *
+     * 固件返回的是 `float`（开度百分比），这里取整成 `Int`；
+     * `-1`（异常 / 无数据）原样带出去，由调用方判定「读不到」。
+     */
+    override fun readCustomizeFunctionValue(func: Int, zone: Int): Int? {
+        val f = ensureFunction() ?: return null
+        val m = findMethod(f, "getCustomizeFunctionValue", INT, INT) ?: return null
+        val v = runCatching { m.invoke(f, func, zone) }.getOrNull() ?: return null
+        return when (v) {
+            is Float -> v.toInt()
+            is Double -> v.toInt()
+            is Int -> v
+            else -> null
+        }
+    }
+
+    /**
      * 固件是否支持这个功能号 / 区域。
      *
      * 按 `(func, zone)` → `(func)` 两档找 `isFunctionSupported`：
@@ -581,16 +602,49 @@ class AdaptapiGateway(private val context: Context) : VehicleGateway {
      * - 只有一参版本就退到功能号级判断。
      *
      * 找不到这个方法 → 返回 null（判不了，按「支持」继续读）。
+     *
+     * ## 第七十一轮：返回值不是 boolean
+     *
+     * 车机端 `ICarFunction.isFunctionSupported(int, int)` 返回的是
+     * **`FunctionStatus` 枚举**，不是 `boolean`：
+     *
+     * ```
+     * active        支持且当前可用
+     * notactive     支持但当前不可用（判不了）
+     * notavailable  这台车不支持这一档
+     * error         出错（判不了）
+     * ```
+     *
+     * 之前这里直接 `as? Boolean` 强转，**永远拿到 null** ——
+     * 也就是说「固件支持探针」从来没生效过（它一直走的是「判不了」那条路）。
+     * 现在按枚举名解析：`active` → true，`notavailable` → false，其余 → null。
      */
     override fun isFunctionSupported(func: Int, zone: Int): Boolean? {
         val f = ensureFunction() ?: return null
         findMethod(f, "isFunctionSupported", INT, INT)?.let { m ->
-            runCatching { m.invoke(f, func, zone) as? Boolean }.getOrNull()?.let { return it }
+            runCatching { m.invoke(f, func, zone) }.getOrNull()?.let { return functionStatusToBool(it) }
         }
         findMethod(f, "isFunctionSupported", INT)?.let { m ->
-            runCatching { m.invoke(f, func) as? Boolean }.getOrNull()?.let { return it }
+            runCatching { m.invoke(f, func) }.getOrNull()?.let { return functionStatusToBool(it) }
         }
         return null
+    }
+
+    /**
+     * `FunctionStatus` → 三态结论。
+     *
+     * @return true = 支持；false = 这台车不支持；null = 判不了
+     */
+    private fun functionStatusToBool(status: Any?): Boolean? {
+        if (status == null) return null
+        if (status is Boolean) return status
+        // 枚举：按**名字**判定，不依赖 ordinal（ordinal 顺序不是契约）。
+        val name = runCatching {
+            (status as? Enum<*>)?.name ?: status.javaClass.methods
+                .firstOrNull { it.name == "name" && it.parameterCount == 0 }
+                ?.invoke(status) as? String
+        }.getOrNull() ?: return null
+        return CarSignalMath.functionSupported(name)
     }
 
     private fun readFunc(f: Any, func: Int, zone: Int): Int? {

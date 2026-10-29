@@ -6,40 +6,37 @@ import com.cardesk.launcher.core.log.Logx
 /**
  * AdaptAPI（`com.ecarx.xui.adaptapi.*`）的**常量按名字解析**。
  *
- * ## 为什么需要这一层（第六十六轮）
+ * ## 第七十一轮：为什么必须按名字找（原因换了个说法）
  *
- * 真机（领克 dcy11 / Android 9）诊断包里，车门四档全部返回 `raw=255`：
+ * 真机（领克 dcy11 / Android 9）诊断包里，「按名解析不到」是这样的：
  *
  * ```
- * 车门状态探针值无法解释 label=主驾 zone=1 raw=255
- * 车门状态探针值无法解释 label=副驾 zone=4 raw=255
- * 车门状态探针值无法解释 label=左后 zone=16 raw=255
- * 车门状态探针值无法解释 label=右后 zone=64 raw=255
+ * Adapt 门区常量：按名解析不到（退回 {1,4,16,64}）
+ * 车门功能号按名解析不到 name=BCM_FUNC_WINDOW
  * ```
  *
- * `255` 就是 `-1`（AdaptAPI 的 jar 里带着这句话：
- * `is not supported for getFunctionValue BCM_FUNC_WINDOW_POS, returns -1`）。
+ * 拿到车机端 `ecarx.adapterapi.jar` 反汇编之后，原因确定了 ——
+ * **不是「这台车的编号是另一套」**，而是**我们找错了类**：
  *
- * 也就是说：**`BCM_FUNC_DOOR_POS` 本身能用，但我们传的 zone 不对**。
- * 我们用的 `{1, 4, 16, 64}` 是参考桌面（君君）那台车的 zone 约定，
- * 而这台车机上的门区常量是**另外一套编号**——
- * Adapt jar 里的符号名是 `DOOR_ROW_1_LEFT` / `DOOR_ROW_1_RIGHT` /
- * `DOOR_ROW_2_LEFT` / `DOOR_ROW_2_RIGHT` / `DOOR_HOOD` / `DOOR_REAR`，
- * 窗区是 `WINDOW_ROW_1_LEFT` / `WINDOW_ROW_1_RIGHT` /
- * `WINDOW_ROW_2_LEFT` / `WINDOW_ROW_2_RIGHT`。
+ * | 常量 | 真正宿主 |
+ * | --- | --- |
+ * | `BCM_FUNC_*` | `com.ecarx.xui.adaptapi.car.vehicle.IBcm` |
+ * | `DOOR_ROW_*` / `DOOR_HOOD` / `DOOR_REAR` | `com.ecarx.xui.adaptapi.vehicle.VehicleDoor` |
+ * | `WINDOW_ROW_*` / `WINDOW_ROOF_*` | `com.ecarx.xui.adaptapi.vehicle.VehicleWindow` |
+ *
+ * 门区 / 窗区住在 **`vehicle` 包**（和 `car` 平级），
+ * 之前我们的候选名单只有 `car` 包下的猜测类名，所以一个都找不到。
+ *
+ * 顺带纠正一个旧结论：门区的值与君君那台车**一致**
+ * （`DOOR_ROW_1_LEFT=1` / `ROW_1_RIGHT=4` / `ROW_2_LEFT=16` / `ROW_2_RIGHT=64`），
+ * 窗区则是 `16 / 32 / 256 / 512`。
  *
  * ## 做法：不猜数值，**按名字找**
  *
- * 这些常量就住在我们**已经拿在手里的** `ICarFunction` 句柄的类（或它的接口 /
- * 嵌套类）上。所以这里做的是：
- *
- * 1. 从 `ICarFunction` 句柄的类出发，展开「类 + 它实现的接口 + 它们的嵌套类」；
- * 2. 在这些类里找**同名**的静态 int 字段（接口常量、`static final` 都算）；
- * 3. 顺带把 `BCM_FUNC_*` 的功能号也按名字解析出来
- *    （`BCM_FUNC_WINDOW` 的数值我们**本来就不清楚**，只能靠名字拿）。
- *
- * 找不到就返回 null —— **宁可读不到，也不猜一个数值**。
- * 猜错的后果是「读到别的功能的值」，那比读不到更糟。
+ * 1. 优先从运行时注册进来的**根类**出发（`ICarFunction` 句柄的类及其接口/嵌套类）；
+ * 2. 再从 jar 实测确认的候选类里找**同名**的静态 int 字段；
+ * 3. 找不到就返回 null —— **宁可读不到，也不猜一个数值**。
+ *    猜错的后果是「读到别的功能的值」，那比读不到更糟。
  *
  * ## 缓存
  *
@@ -76,11 +73,52 @@ object AdaptapiConstants {
     /** 车门位置功能号（与 `AdaptapiBody.BCM_DOOR_POS` 同名，解析失败时用它兜底）。 */
     const val FUNC_DOOR_POS = "BCM_FUNC_DOOR_POS"
 
+    /** 车门开合功能号（固件只支持 `DOOR_REAR` 一个区域 —— 后备箱）。 */
+    const val FUNC_DOOR = "BCM_FUNC_DOOR"
+
     /** 车窗开合功能号（**布尔**开合，不是百分比）。 */
     const val FUNC_WINDOW = "BCM_FUNC_WINDOW"
 
-    /** 车窗位置功能号（百分比，弱证据，只作探测用）。 */
+    /** 车窗位置功能号（**逐扇开度**，走浮点通道 `getCustomizeFunctionValue`）。 */
     const val FUNC_WINDOW_POS = "BCM_FUNC_WINDOW_POS"
+
+    // ------------------------------------------------------------ 氛围灯功能号
+    //
+    // 第七十一轮：拿到车机端 `ecarx.adapterapi.jar` 后确认了氛围灯的真实通道，
+    // 数值全部**按名字**解析（jar 里的确定值见 `analysis/findings/11-ecarx-adapterapi-api.md`）。
+
+    /** 氛围灯主色来源（`THEME` / `DRIVER_MODE` / `SET_COLOR`）。 */
+    const val FUNC_AMBIENT_MAIN_COLOR = "SETTING_FUNC_AMBIENCE_LIGHT_MAINCOLOR"
+
+    /** 氛围灯**互动效果**（音乐律动）开关。 */
+    const val FUNC_AMBIENT_INTERACTIVE_EFFECT = "SETTING_FUNC_AMBIENCE_LIGHT_INTERACTIVE_EFFECT"
+
+    /** 氛围灯颜色（RGB 打包成 `0xRRGGBB`）。 */
+    const val FUNC_AMBIENT_COLOR_SET = "SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET"
+
+    /** 氛围灯亮度（行驶档）。 */
+    const val FUNC_AMBIENT_BRIGHTNESS_DRIVING = "SETTING_FUNC_AMBIENCE_LIGHT_BRIGHTNESS_DRIVING"
+
+    /** 氛围灯主区域开关。 */
+    const val FUNC_AMBIENT_MAIN_ZONES = "SETTING_FUNC_AMBIENCE_LIGHT_MAINZONES"
+
+    /** 氛围灯顶部区域开关。 */
+    const val FUNC_AMBIENT_TOP_ZONES = "SETTING_FUNC_AMBIENCE_LIGHT_TOPZONES"
+
+    /** 氛围灯底部区域开关。 */
+    const val FUNC_AMBIENT_BOT_ZONES = "SETTING_FUNC_AMBIENCE_LIGHT_BOTZONES"
+
+    /** 氛围灯主色 = 自定义色（我们把频谱算出来的颜色写进去）。 */
+    const val AMBIENT_MAIN_COLOR_SET_COLOR = "AMBIENCE_LIGHT_MAINCOLOR_SETCOLOR"
+
+    /** 氛围灯主色 = 音乐律动。 */
+    const val AMBIENT_MAIN_COLOR_MUSIC = "AMBIENCE_LIGHT_MAINCOLOR_MUSIC"
+
+    /** 氛围灯亮度 = 高。 */
+    const val AMBIENT_BRIGHTNESS_HIGH = "BRIGHTNESS_DRIVING_HIGH"
+
+    /** 氛围灯亮度 = 低。 */
+    const val AMBIENT_BRIGHTNESS_LOW = "BRIGHTNESS_DRIVING_LOW"
 
     // ------------------------------------------------------------ 候选类
 
@@ -90,8 +128,31 @@ object AdaptapiConstants {
      * 这些常量按 jar 的组织习惯，通常在 `car` 包下的某个「常量/枚举/接口」里。
      * 真机解析时优先走 [registerRoot] 注册的**运行时类**（那是最准的），
      * 这里只是兜底。
+     *
+     * ## 第七十一轮：按 jar 实测补全
+     *
+     * 拿到车机端 `ecarx.adapterapi.jar`（一个只含 `classes.dex` 的 jar）反汇编后，
+     * 常量的**真实归属**是确定的，不再是猜的：
+     *
+     * | 常量 | 宿主类 | 说明 |
+     * | --- | --- | --- |
+     * | `BCM_FUNC_*` | `com.ecarx.xui.adaptapi.car.vehicle.IBcm` | 纯常量接口 |
+     * | `AMBIENCE_LIGHT_*` / `BRIGHTNESS_*` | `com.ecarx.xui.adaptapi.car.vehicle.IVehicle` | 纯常量接口 |
+     * | `SETTING_FUNC_AMBIENCE_LIGHT_*` / `MUSIC_SHOW_MODE_*` | `com.ecarx.xui.adaptapi.car.vehicle.IAmbienceLight` | 纯常量接口 |
+     * | `DOOR_ROW_*` / `DOOR_HOOD` / `DOOR_REAR` | `com.ecarx.xui.adaptapi.vehicle.VehicleDoor` | 门区号 |
+     * | `WINDOW_ROW_*` / `WINDOW_ROOF_*` | `com.ecarx.xui.adaptapi.vehicle.VehicleWindow` | 窗区号 |
+     *
+     * 之前找不到它们，是因为候选名单里只有 `car` 包下的猜测类名 ——
+     * 而门区/窗区其实住在 `vehicle` 包（和 `car` 是**平级**的另一个包）。
      */
     private val CANDIDATE_CLASSES = arrayOf(
+        // —— jar 实测确认的常量宿主 ——
+        "com.ecarx.xui.adaptapi.car.vehicle.IBcm",
+        "com.ecarx.xui.adaptapi.car.vehicle.IVehicle",
+        "com.ecarx.xui.adaptapi.car.vehicle.IAmbienceLight",
+        "com.ecarx.xui.adaptapi.vehicle.VehicleDoor",
+        "com.ecarx.xui.adaptapi.vehicle.VehicleWindow",
+        // —— 早期按惯例猜的候选（保留作兜底）——
         "com.ecarx.xui.adaptapi.car.Car",
         "com.ecarx.xui.adaptapi.car.ICarFunction",
         "com.ecarx.xui.adaptapi.car.CarFunction",

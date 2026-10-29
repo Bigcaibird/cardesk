@@ -99,6 +99,64 @@ object CarSignalMath {
     }
 
     /**
+     * 逐扇车窗**开度** → 是否打开（**true = 开**）。
+     *
+     * ## 这条是第七十一轮才有的
+     *
+     * 车机端（`ecarx.adapterapi.jar`）里逐扇车窗只有一个信号：
+     * `PaSpeechWinCtrlFrntLe` / `FrntRi` / `ReLe` / `ReRi`，
+     * 它的 `data` 字段是**开度**（厂商给的合法区间是 `0..127`），
+     * `status` 字段是 `NORMAL` / `ABNORMAL`。
+     *
+     * 厂商自己的取值函数（`getMappedFunctionValue`）的口径是：
+     * - `data` 不在 `0..127` → 返回 `-1`（读不出来）；
+     * - `status == ABNORMAL` → 返回 `-1`（读不出来）；
+     * - 否则 → 返回 `data` 原值。
+     *
+     * 所以这里照搬同一套口径：
+     *
+     * - `< 0` → 读不出来（null）—— **异常 / 无数据**，不是「关着」；
+     * - `0` → 关（false）；
+     * - `> 0` → 开（true）。
+     *
+     * ## 为什么不用 [interpretWindowOpen]
+     *
+     * 那条是给**布尔**车窗信号（`BCM_FUNC_WINDOW`）用的；
+     * 这条是给**开度**信号用的。两者值域不同，混用会把「开度 50」当成读不出来。
+     */
+    fun interpretWindowPosition(raw: Int): Boolean? = when {
+        raw < 0 -> null
+        raw == 0 -> false
+        else -> true
+    }
+
+    /**
+     * 后备箱 / 引擎盖的开合原始值 → 是否关闭（**true = 关**）。
+     *
+     * ## 口径（第七十一轮，按 jar 实测定）
+     *
+     * 厂商的 `getMappedFunctionValue(PaSpeechTrCtrl)` 把信号枚举翻译成 BCM 门值：
+     *
+     * | 信号枚举 | 翻译出的值 | 含义 |
+     * | --- | --- | --- |
+     * | `OPEN` | `1` | 开 |
+     * | `CLOSE` | `0` | 关 |
+     * | `IDLE` | `553844993` | 静止不动 —— **不确定** |
+     * | `STOP` | `553844993` | 停在中间 —— **不确定** |
+     *
+     * 所以这里只认 `0` / `1`，其余一律**读不出来**：
+     * `IDLE` / `STOP` 说成「关」或「开」都是编的。
+     *
+     * @param raw 原始值
+     * @return true = 关；false = 开；null = 读不出来 / 不确定
+     */
+    fun interpretLatchClosed(raw: Int): Boolean? = when (raw) {
+        0 -> true
+        1 -> false
+        else -> null
+    }
+
+    /**
      * 油量原始值 → 百分比。
      *
      *
@@ -159,5 +217,31 @@ object CarSignalMath {
         if (raw.isNaN() || raw == Float.MIN_VALUE) return null
         val t = Math.round(raw)
         return if (t in -40..80) t else null
+    }
+
+    /**
+     * 车机端 `FunctionStatus` 的**名字** → 「支不支持」三态结论。
+     *
+     * ## 为什么按名字而不是 ordinal
+     *
+     * 车机端 `com.ecarx.xui.adaptapi.FunctionStatus` 是个枚举：
+     *
+     * ```
+     * active         支持且当前可用
+     * notactive      支持但当前不可用（判不了）
+     * notavailable   这台车不支持这一档
+     * error          出错（判不了）
+     * ```
+     *
+     * 枚举的 **ordinal 是实现细节**（增删一个常量就会整体错位），
+     * 所以这里只认**名字**。
+     *
+     * @param name `FunctionStatus` 的枚举名；null / 认不出来 → 判不了
+     * @return true = 支持；false = 这台车不支持；null = 判不了
+     */
+    fun functionSupported(name: String?): Boolean? = when (name?.lowercase()) {
+        "active" -> true
+        "notavailable" -> false
+        else -> null
     }
 }

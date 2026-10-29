@@ -56,6 +56,28 @@ interface VehicleGateway {
     fun readRawFunctionValue(func: Int, zone: Int): Int? = null
 
     /**
+     * 读一个功能属性的**自定义（浮点）值**。
+     *
+     * ## 为什么要有这一条（第七十一轮）
+     *
+     * 车机端 `ICarFunction` 有两条取值通道：
+     *
+     * - `getFunctionValue(func, zone)` → `int` —— **整型**通道；
+     * - `getCustomizeFunctionValue(func, zone)` → `float` —— **自定义**通道。
+     *
+     * 逐扇车窗的开度**只在浮点通道里实现**：
+     * 整型通道对 `BCM_FUNC_WINDOW_POS` 直接返回 `-1`
+     * （jar 里的原话：`is not supported for getFunctionValue BCM_FUNC_WINDOW_POS, returns -1`），
+     * 而浮点通道按 `zone` 分派到四个逐窗信号
+     * （`PaSpeechWinCtrlFrntLe` / `FrntRi` / `ReLe` / `ReRi`）。
+     *
+     * 整型通道读不到的东西，浮点通道能读到 —— 这就是必须分两条路的原因。
+     *
+     * @return null = 通道不可用 / 方法不存在 / 调用失败
+     */
+    fun readCustomizeFunctionValue(func: Int, zone: Int): Int? = null
+
+    /**
      * 固件**是否支持**这个功能号 / 区域。
      *
      * ## 为什么要有这一条（第六十六轮）

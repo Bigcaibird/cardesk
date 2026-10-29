@@ -28,11 +28,14 @@ class AdaptapiBodyTest {
         private val values: Map<Pair<Int, Int>, Int>,
         /** 固件支持探针的预设（null = 固件没有这个方法，判不了）。 */
         private val supported: Map<Pair<Int, Int>, Boolean>? = null,
+        /** 浮点通道（`getCustomizeFunctionValue`）的预设；null = 浮点通道不可用。 */
+        private val customizeValues: Map<Pair<Int, Int>, Int>? = null,
     ) : VehicleGateway {
         override val id: String = "fake"
         override val displayName: String = "假通道"
         override var on360State: ((Boolean) -> Unit)? = null
         val readZones = mutableListOf<Int>()
+        val readCustomizeZones = mutableListOf<Int>()
 
         override fun connect(onResult: (Boolean) -> Unit) = onResult(true)
         override fun disconnect() = Unit
@@ -46,6 +49,11 @@ class AdaptapiBodyTest {
         override fun readRawFunctionValue(func: Int, zone: Int): Int? {
             readZones.add(zone)
             return values[func to zone]
+        }
+
+        override fun readCustomizeFunctionValue(func: Int, zone: Int): Int? {
+            readCustomizeZones.add(zone)
+            return customizeValues?.get(func to zone)
         }
 
         override fun isFunctionSupported(func: Int, zone: Int): Boolean? =
@@ -226,73 +234,153 @@ class AdaptapiBodyTest {
         assertEquals(true, state.allClosed)
     }
 
-    // ------------------------------------------------------------ 车窗（第六十六轮）
+    // ------------------------------------------------------------ 车窗（第七十一轮改口径）
 
     @Test
-    fun `车窗按名解析的功能号与区域`() {
+    fun `车窗走浮点通道 逐扇读开度`() {
+        // 第七十一轮：逐扇开度只在 `getCustomizeFunctionValue` 里实现，
+        // 整型通道对同一个功能号返回 -1。
         val func = 777_000
         AdaptapiConstants.testOverride = mapOf(
-            AdaptapiConstants.FUNC_WINDOW to func,
+            AdaptapiConstants.FUNC_WINDOW_POS to func,
             "WINDOW_ROW_1_LEFT" to 21,
             "WINDOW_ROW_1_RIGHT" to 22,
             "WINDOW_ROW_2_LEFT" to 23,
             "WINDOW_ROW_2_RIGHT" to 24,
         )
         val g = FakeGateway(
-            mapOf(
-                (func to 21) to 1,
-                (func to 22) to 0,
-                (func to 23) to 1,
-                (func to 24) to 0,
-            )
+            values = emptyMap(),
+            customizeValues = mapOf(
+                (func to 21) to 60,   // 开度 60 → 开
+                (func to 22) to 0,    // 开度 0  → 关
+                (func to 23) to 1,    // 开度 1  → 开
+                (func to 24) to 0,    // 开度 0  → 关
+            ),
         )
         val flags = AdaptapiBody.readWindowsEach(g)
         assertEquals(listOf(true, false, true, false), flags)
+        // 只走浮点通道，不碰整型通道
+        assertTrue(g.readZones.isEmpty())
+        assertEquals(listOf(21, 22, 23, 24), g.readCustomizeZones)
     }
 
     @Test
-    fun `车窗功能号解析不到就不读`() {
-        // 「不猜数值」：功能号按名解析不到，这一档就当没有
+    fun `车窗功能号解析不到就用 jar 实测值兜底`() {
+        // 「不猜数值」：兜底值是车机端 jar 里的**确定值**（`BCM_FUNC_WINDOW_POS`），
+        // 不是猜的 —— 猜一个数去读别的功能比读不到更糟。
         AdaptapiConstants.testOverride = mapOf(
             "WINDOW_ROW_1_LEFT" to 21,
         )
-        val g = gw()
-        assertNull(AdaptapiBody.readWindowsEach(g))
-        assertTrue(g.readZones.isEmpty())
+        val g = FakeGateway(
+            values = emptyMap(),
+            customizeValues = mapOf(
+                (AdaptapiBody.BCM_WINDOW_POS to 21) to 30,
+            ),
+        )
+        val flags = AdaptapiBody.readWindowsEach(g)
+        assertEquals(listOf(true, null, null, null), flags)
     }
 
     @Test
-    fun `车窗区域号解析不到就不读`() {
+    fun `车窗区域号解析不到就用 jar 实测值兜底`() {
+        // 兜底区号 = `VehicleWindow` 的确定值 16/32/256/512
         AdaptapiConstants.testOverride = mapOf(
-            AdaptapiConstants.FUNC_WINDOW to 777_000,
+            AdaptapiConstants.FUNC_WINDOW_POS to 777_000,
         )
-        val g = gw()
-        assertNull(AdaptapiBody.readWindowsEach(g))
+        val g = FakeGateway(
+            values = emptyMap(),
+            customizeValues = mapOf(
+                (777_000 to 16) to 10,
+                (777_000 to 32) to 0,
+            ),
+        )
+        val flags = AdaptapiBody.readWindowsEach(g)
+        assertEquals(listOf(true, false, null, null), flags)
+        assertEquals(listOf(16, 32, 256, 512), g.readCustomizeZones)
     }
 
     @Test
     fun `车窗读不到的那一扇留 null 其余照常`() {
         val func = 777_000
         AdaptapiConstants.testOverride = mapOf(
-            AdaptapiConstants.FUNC_WINDOW to func,
+            AdaptapiConstants.FUNC_WINDOW_POS to func,
             "WINDOW_ROW_1_LEFT" to 21,
             "WINDOW_ROW_1_RIGHT" to 22,
             "WINDOW_ROW_2_LEFT" to 23,
             "WINDOW_ROW_2_RIGHT" to 24,
         )
-        val g = FakeGateway(mapOf((func to 21) to 1))
+        val g = FakeGateway(
+            values = emptyMap(),
+            customizeValues = mapOf((func to 21) to 40),
+        )
         val flags = AdaptapiBody.readWindowsEach(g)
         assertEquals(listOf(true, null, null, null), flags)
     }
 
     @Test
-    fun `车窗不支持值不算开`() {
+    fun `车窗异常值 -1 算读不到 不算开`() {
+        // 厂商把「异常（ABNORMAL）」也翻译成 -1 —— 那是「读不到」，不是「关着」。
         val func = 777_000
         AdaptapiConstants.testOverride = mapOf(
-            AdaptapiConstants.FUNC_WINDOW to func,
+            AdaptapiConstants.FUNC_WINDOW_POS to func,
             "WINDOW_ROW_1_LEFT" to 21,
         )
-        val g = FakeGateway(mapOf((func to 21) to 255))
+        val g = FakeGateway(
+            values = emptyMap(),
+            customizeValues = mapOf((func to 21) to -1),
+        )
         assertNull(AdaptapiBody.readWindowsEach(g))
+    }
+
+    // ------------------------------------------------------------ 车门探针（第七十一轮）
+
+    @Test
+    fun `固件说整档都不支持时一次都不探`() {
+        // 这台车机（领克 dcy11）的固件没实现 `BCM_FUNC_DOOR_POS`，
+        // 支持探针会判成「不支持」—— 这时不该再去探（诊断包里那 3536 条日志的来源）。
+        val g = FakeGateway(
+            values = mapOf(
+                (AdaptapiBody.BCM_DOOR_POS to 1) to 0,
+                (AdaptapiBody.BCM_DOOR_POS to 4) to 0,
+                (AdaptapiBody.BCM_DOOR_POS to 16) to 0,
+                (AdaptapiBody.BCM_DOOR_POS to 64) to 0,
+            ),
+            supported = mapOf(
+                (AdaptapiBody.BCM_DOOR_POS to 1) to false,
+                (AdaptapiBody.BCM_DOOR_POS to 4) to false,
+                (AdaptapiBody.BCM_DOOR_POS to 16) to false,
+                (AdaptapiBody.BCM_DOOR_POS to 64) to false,
+            ),
+        )
+        val state = AdaptapiBody.readDoors(g)
+        assertNull(state.eachClosed)
+        assertNull(state.allClosed)
+        // 四个门位一个都没探
+        assertFalse(g.readZones.contains(1))
+        assertFalse(g.readZones.contains(4))
+        assertFalse(g.readZones.contains(16))
+        assertFalse(g.readZones.contains(64))
+    }
+
+    // ------------------------------------------------------------ 口径
+
+    @Test
+    fun `interpretWindowPosition 开度口径`() {
+        // 0 = 关；> 0 = 开；< 0 = 读不到（厂商把「异常」也翻译成 -1）
+        assertEquals(false, CarSignalMath.interpretWindowPosition(0))
+        assertEquals(true, CarSignalMath.interpretWindowPosition(1))
+        assertEquals(true, CarSignalMath.interpretWindowPosition(100))
+        assertEquals(true, CarSignalMath.interpretWindowPosition(127))
+        assertNull(CarSignalMath.interpretWindowPosition(-1))
+    }
+
+    @Test
+    fun `interpretLatchClosed 只认 0 关 1 开`() {
+        // 厂商把后备箱的 IDLE / STOP 也映射到 553844993 —— 那是「不确定」，不是「关」
+        assertEquals(true, CarSignalMath.interpretLatchClosed(0))
+        assertEquals(false, CarSignalMath.interpretLatchClosed(1))
+        assertNull(CarSignalMath.interpretLatchClosed(553844993))
+        assertNull(CarSignalMath.interpretLatchClosed(-1))
+        assertNull(CarSignalMath.interpretLatchClosed(2))
     }
 }

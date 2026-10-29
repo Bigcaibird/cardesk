@@ -4,47 +4,36 @@ import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 
 /**
- * 车身状态（车门开闭）——走 AdaptAPI 的 **ICarFunction** 通道。
+ * 车身状态（车门开闭 / 后备箱）——走 AdaptAPI 的 **ICarFunction** 通道。
  *
- * ## 这一档在第六十六轮之前为什么**整条失效**
+ * ## 第七十一轮：按车机端 jar 的实测定案
  *
- * 真机（领克 dcy11 / Android 9）诊断包里，四个门位全部返回 `raw=255`：
+ * 拿到车机端 `ecarx.adapterapi.jar`（只含 `classes.dex`）反汇编后，
+ * 「车门车窗为什么读不到」这件事有了**确定答案**，不再靠猜：
  *
- * ```
- * 车门状态探针值无法解释 label=主驾 zone=1 raw=255
- * 车门状态探针值无法解释 label=副驾 zone=4 raw=255
- * 车门状态探针值无法解释 label=左后 zone=16 raw=255
- * 车门状态探针值无法解释 label=右后 zone=64 raw=255
- * ```
+ * | 通道 | 功能号 | 固件实现情况 | 结论 |
+ * | --- | --- | --- | --- |
+ * | 整型 `getFunctionValue` | `BCM_FUNC_DOOR_POS` | **分派表里没有** → 落默认分支返回 `255` | 四个侧门读不到 |
+ * | 整型 `getFunctionValue` | `BCM_FUNC_WINDOW_POS` | 明确返回 `-1` | 整型读不到 |
+ * | **浮点** `getCustomizeFunctionValue` | `BCM_FUNC_WINDOW_POS` | **按 zone 分派到四个逐窗信号** | **逐扇车窗可读** |
+ * | 整型 `getFunctionValue` | `BCM_FUNC_DOOR` | 只支持 `DOOR_REAR` | 后备箱可读，引擎盖读不到 |
  *
- * `255` 就是 `-1`，jar 里带着这句话：
- * `is not supported for getFunctionValue BCM_FUNC_WINDOW_POS, returns -1`。
+ * 之前「车门车窗都读不到」的三个原因分别对应上表：
  *
- * **根因是 zone 用错了**：我们用的是君君那台车的 `{1, 4, 16, 64}`，
- * 而这台车机 jar 里的门区符号名是
- * `DOOR_ROW_1_LEFT` / `DOOR_ROW_1_RIGHT` / `DOOR_ROW_2_LEFT` / `DOOR_ROW_2_RIGHT`
- * （另有 `DOOR_HOOD` / `DOOR_REAR`），**编号是另一套**。
+ * 1. `BCM_FUNC_DOOR_POS` 本来就没实现 —— 探多少次都是 `255`；
+ * 2. `BCM_FUNC_WINDOW_POS` 在**整型**通道没实现 —— 必须走浮点通道；
+ * 3. `BCM_FUNC_WINDOW` / `WINDOW_ROW_*` 这两个常量**按名解析不到** ——
+ *    因为它们住在 `com.ecarx.xui.adaptapi.car.vehicle.IBcm` 与
+ *    `com.ecarx.xui.adaptapi.vehicle.VehicleWindow`，
+ *    而我们的候选名单里只有 `car` 包下的猜测类名（漏了平级的 `vehicle` 包）。
  *
- * ## 现在的做法：**按名字找 zone，不猜数值**
+ * ## 现在的做法
  *
- * 常量就在我们**已经拿在手里的** `ICarFunction` 句柄的同一个 jar 里，
- * 所以由 [AdaptapiConstants] 从句柄的类出发按名字解析：
- *
- * 1. 解析出来的 zone **优先**；
- * 2. 解析不到（或读不出值）时**退回**老的 `{1, 4, 16, 64}`；
- * 3. 固件若提供 `isFunctionSupported` 探针，**先问一句再读**，
- *    把「这一档这台车没有」与「读到了但值解释不出来」分开。
- *
- * 功能号 `BCM_FUNC_DOOR_POS = 553779968` 是 jar 里的确定值，
- * 仍会按名解析一次做交叉校验（解析出不同的值以解析结果为准）。
- *
- * ## 降级链
- *
- * 1. —— ECarXCar 的 SignalManager
- *    （`getDoorDrvrSts/getDoorPassSts/...`），这台车上**那个类不存在** → 跳过；
- * 2. —— `IDoorAndWindow.isDoorOpened`（车机原生 BCM 布尔）→ 见 [OemDoorWindowSignals]；
- * 3. **`adaptPosAllClosed(BCM_DOOR_POS, zone)`** —— AdaptAPI 的属性通道 ← 我们走这条；
- * 4. `aggregatePosClosed(373295872)` —— `car_service` 的 property 通道（另一套 AIDL）。
+ * - **逐扇车窗**：浮点通道 + `VehicleWindow` 的窗区号（按名解析，兜底 `16/32/256/512`）；
+ * - **四个侧门**：先问固件支持探针，说「不支持」就**不探**（省掉每秒 4 次无效调用），
+ *   说「支持」就照读；判不了就退回老口径；
+ * - **后备箱 / 引擎盖**：走 `BCM_FUNC_DOOR` + `DOOR_REAR` / `DOOR_HOOD` 区域，
+ *   口径只认 `0`（关）/ `1`（开），厂商的 `IDLE` / `STOP`（映射到 `553844993`）**读不出来**。
  *
  * ## 与一处刻意差异
  *
@@ -62,11 +51,36 @@ object AdaptapiBody {
     const val BCM_DOOR_POS = 553779968
 
     /**
+     * 车门开合功能号（jar 里的 `BCM_FUNC_DOOR`）。
+     *
+     * 固件的整型通道**只**为它实现了 `DOOR_REAR`（后备箱）一个区域，
+     * 其它区域一律返回 `-1`。
+     */
+    const val BCM_DOOR = 553779456
+
+    /**
+     * 车窗位置功能号（jar 里的 `BCM_FUNC_WINDOW_POS`）。
+     *
+     * 整型通道对它返回 `-1`；**逐扇开度只在浮点通道**
+     * `getCustomizeFunctionValue(func, zone)` 里实现。
+     */
+    const val BCM_WINDOW_POS = 553845504
+
+    /**
      * 四个门位对应的 zone（**君君那台车**的约定）。
      *
      * 现在只作为**兜底**：按名解析出来的 zone 优先（见 [AdaptapiConstants]）。
      */
     val DOOR_ZONES = intArrayOf(1, 4, 16, 64)
+
+    /**
+     * 四扇车窗对应的 zone 兜底值。
+     *
+     * 这四个数是车机端 jar 里 `VehicleWindow` 的确定值
+     * （`WINDOW_ROW_1_LEFT=16` / `ROW_1_RIGHT=32` / `ROW_2_LEFT=256` / `ROW_2_RIGHT=512`），
+     * 与厂商自己分派逐窗信号时用的 zone 完全一致。
+     */
+    val WINDOW_ZONES = intArrayOf(16, 32, 256, 512)
 
     /** 门位名（按 [DOOR_ZONES] 顺序），只用于日志与车辆页展示。 */
     val DOOR_NAMES = arrayOf("主驾", "副驾", "左后", "右后")
@@ -97,12 +111,39 @@ object AdaptapiBody {
     fun windowFunc(): Int? = AdaptapiConstants.funcId(AdaptapiConstants.FUNC_WINDOW)
 
     /**
+     * 车窗位置功能号（jar 里的 `BCM_FUNC_WINDOW_POS`）。
+     *
+     * 逐扇开度只在**浮点通道**实现，所以这个功能号必须配合
+     * [VehicleGateway.readCustomizeFunctionValue] 用。
+     */
+    fun windowPosFunc(): Int =
+        AdaptapiConstants.funcId(AdaptapiConstants.FUNC_WINDOW_POS, BCM_WINDOW_POS) ?: BCM_WINDOW_POS
+
+    /**
+     * 车门开合功能号（jar 里的 `BCM_FUNC_DOOR`）。
+     *
+     * 固件只实现了 `DOOR_REAR`（后备箱）一个区域 —— 引擎盖 / 侧门都读不到。
+     */
+    fun doorOpenFunc(): Int =
+        AdaptapiConstants.funcId(AdaptapiConstants.FUNC_DOOR, BCM_DOOR) ?: BCM_DOOR
+
+    /**
      * 某个门位要试的 zone 列表（**按优先级**）。
      *
      * - 按名解析出来的 zone 在前；
      * - 老约定 `{1, 4, 16, 64}` 在后（兜底）；
      * - 固件支持探针说「不支持」的直接剔除；
      * - 探针判不了（固件没这个方法）就照常都试。
+     *
+     * ## 第七十一轮：探针真的开始说话了
+     *
+     * 车机端 `isFunctionSupported` 返回的是 `FunctionStatus` 枚举，
+     * 之前这里 `as? Boolean` 强转**永远拿到 null**，所以探针等于没有 ——
+     * 四个门位每秒照探不误，每次都拿回 `255`。
+     *
+     * 现在 [AdaptapiGateway.isFunctionSupported] 按枚举名解析，
+     * 这台车机上四个门位会判成「不支持」，
+     * 于是这里返回**空列表** —— 一次都不探。
      */
     internal fun doorZoneProbes(gw: VehicleGateway, func: Int, position: Int): List<Int> {
         val legacy = DOOR_ZONES[position]
@@ -183,11 +224,34 @@ object AdaptapiBody {
     /**
      * 读一次车门状态（一次通道调用里把整体值与四个门位都读出来）。
      *
+     * ## 第七十一轮：先问固件「支不支持」，再决定要不要探
+     *
+     * 车机端 jar（`ecarx.adapterapi.jar`）里 `CarFunctionValueImpl.getFunctionValue`
+     * 的功能号分派表里**根本没有 `BCM_FUNC_DOOR_POS`** ——
+     * 落进默认分支时厂商返回 `255`（= `-1`）并打一句
+     * `getFunctionValue(...) This function is not implemented.`。
+     *
+     * 也就是说这台车机上**四个侧门 + 引擎盖没有信号**，
+     * 每秒去探四次只会得到四个 `255`（诊断包里这两轮就是 3536 条
+     * 「车门功能号/区域不被固件支持」）。
+     *
+     * 所以现在改成：
+     * 1. 先问固件支持探针（`isFunctionSupported`）**这一档 / 这个区域**支不支持；
+     * 2. 探针说「不支持」→ **不探**，这一扇直接判「读不到」；
+     * 3. 探针说「支持」→ 照常读；
+     * 4. 探针判不了（固件没有这个方法）→ 退回老口径（读了再说）。
+     *
+     * 引擎盖 / 后备箱走的是**另一个功能号** `BCM_FUNC_DOOR`，
+     * 固件只为它实现了 `DOOR_REAR`（后备箱）一个区域。
+     *
      * @return 完全读不到时 `eachClosed` 与 `allClosed` 都是 null
      */
     fun readDoors(gw: VehicleGateway): DoorState {
         val func = doorFunc()
         // —— 逐门位（每一扇独立：读不到的那一扇留 null，不作废整组）——
+        // 剪枝在 [doorZoneProbes] 里做：固件支持探针说「不支持」的区域不会被读。
+        // 探针修好之后（第七十一轮），这台车机上四个门位全部判为「不支持」，
+        // 于是这里**一次都不会去探** —— 诊断包里那 3536 条无效日志就是这么来的。
         val perZone = MutableList<Boolean?>(DOOR_ZONES.size) { null }
         var anyZone = false
         var allZoneClosed = true
@@ -199,25 +263,31 @@ object AdaptapiBody {
             if (!closed) allZoneClosed = false
         }
 
-        // —— 引擎盖 / 后备箱（`DOOR_HOOD` / `DOOR_REAR` 两个区域）——
-        val hood = readAuxZone(gw, func, AdaptapiConstants.hoodZone(), "引擎盖")
-        val trunk = readAuxZone(gw, func, AdaptapiConstants.trunkZone(), "后备箱")
+        // —— 引擎盖 / 后备箱：走 `BCM_FUNC_DOOR`（固件只实现了 DOOR_REAR）——
+        val latchFunc = doorOpenFunc()
+        val hood = readAuxZone(gw, latchFunc, AdaptapiConstants.hoodZone(), "引擎盖")
+        val trunk = readAuxZone(gw, latchFunc, AdaptapiConstants.trunkZone(), "后备箱")
 
         // —— 整体值（探测顺序：无 zone → zone 0 → 逐门位聚合）——
-        val rawNone = gw.readRawFunctionValue(func, ZONE_NONE)
-        if (rawNone != null) {
-            val closed = CarSignalMath.interpretClosed(rawNone)
-            if (closed != null) {
-                logDoorProbe("整体(无zone)", ZONE_NONE, rawNone, closed)
-                return DoorState(perZone, closed, hood = hood, trunk = trunk)
+        // 探针明确说「不支持」的区域就不去读（省掉每秒两次无效调用）。
+        if (supported(gw, func, ZONE_NONE) != false) {
+            val rawNone = gw.readRawFunctionValue(func, ZONE_NONE)
+            if (rawNone != null) {
+                val closed = CarSignalMath.interpretClosed(rawNone)
+                if (closed != null) {
+                    logDoorProbe("整体(无zone)", ZONE_NONE, rawNone, closed)
+                    return DoorState(perZone, closed, hood = hood, trunk = trunk)
+                }
             }
         }
-        val rawAgg = gw.readRawFunctionValue(func, ZONE_AGGREGATE)
-        if (rawAgg != null) {
-            val closed = CarSignalMath.interpretClosed(rawAgg)
-            if (closed != null) {
-                logDoorProbe("整体(zone0)", ZONE_AGGREGATE, rawAgg, closed)
-                return DoorState(perZone, closed, hood = hood, trunk = trunk)
+        if (supported(gw, func, ZONE_AGGREGATE) != false) {
+            val rawAgg = gw.readRawFunctionValue(func, ZONE_AGGREGATE)
+            if (rawAgg != null) {
+                val closed = CarSignalMath.interpretClosed(rawAgg)
+                if (closed != null) {
+                    logDoorProbe("整体(zone0)", ZONE_AGGREGATE, rawAgg, closed)
+                    return DoorState(perZone, closed, hood = hood, trunk = trunk)
+                }
             }
         }
         if (!anyZone) {
@@ -245,6 +315,10 @@ object AdaptapiBody {
      *
      * 区域号按名解析（`DOOR_HOOD` / `DOOR_REAR`），解析不到就返回 null ——
      * 不拿别的区域号顶替。
+     *
+     * 口径用 [CarSignalMath.interpretLatchClosed]：`0` = 关、`1` = 开，
+     * 其余（厂商把 `IDLE` / `STOP` 也映射到 `553844993`）一律**读不出来** ——
+     * 「静止不动」说成「关着」是编的。
      */
     private fun readAuxZone(gw: VehicleGateway, func: Int, zone: Int?, label: String): Boolean? {
         if (zone == null) return null
@@ -253,7 +327,7 @@ object AdaptapiBody {
             Logx.d(LogTags.SIGNAL, "车身区域不被固件支持", "label" to label, "zone" to zone, "raw" to raw)
             return null
         }
-        val closed = CarSignalMath.interpretClosed(raw) ?: return null
+        val closed = CarSignalMath.interpretLatchClosed(raw) ?: return null
         Logx.d(LogTags.SIGNAL, "车身区域", "label" to label, "zone" to zone, "raw" to raw, "closed" to closed)
         return closed
     }
@@ -317,49 +391,73 @@ object AdaptapiBody {
     /**
      * 四扇车窗的开闭（**true = 开**），顺序 FL/FR/RL/RR；读不到返回 null。
      *
-     * 走 AdaptAPI 的 **`BCM_FUNC_WINDOW`**（布尔开合，不是百分比）：
-     * - 功能号按名解析（`BCM_FUNC_WINDOW`）—— 数值我们不知道，**不猜**；
-     * - 区域号按名解析（`WINDOW_ROW_1_LEFT` / `_RIGHT` / `WINDOW_ROW_2_LEFT` / `_RIGHT`）；
-     * - 两者任一解析不到就返回 null（这一档就当没有）。
+     * ## 第七十一轮：改走**浮点通道**，逐扇才有值
      *
-     * 口径见 [CarSignalMath.interpretWindowOpen]：
-     * 只认 `0`（关）/ `1`（开）/ BCM 的「开」枚举，**不臆造开合百分比**。
+     * 车机端 jar 里逐扇车窗只有一个信号：
+     * `PaSpeechWinCtrlFrntLe` / `FrntRi` / `ReLe` / `ReRi`，
+     * 厂商在 `CarFunctionCustomizedValueImpl.getFunctionValue(func, zone)` 里
+     * **按 zone 分派**到这四个信号：
+     *
+     * ```
+     * zone 16  (WINDOW_ROW_1_LEFT ) → PaSpeechWinCtrlFrntLe
+     * zone 32  (WINDOW_ROW_1_RIGHT) → PaSpeechWinCtrlFrntRi
+     * zone 256 (WINDOW_ROW_2_LEFT ) → PaSpeechWinCtrlReLe
+     * zone 512 (WINDOW_ROW_2_RIGHT) → PaSpeechWinCtrlReRi
+     * ```
+     *
+     * 而这条分派挂在 **`BCM_FUNC_WINDOW_POS`** 上，且只在**浮点通道**
+     * `getCustomizeFunctionValue(func, zone)` 里实现 ——
+     * 整型通道对它直接返回 `-1`
+     * （jar 里的原话：`is not supported for getFunctionValue BCM_FUNC_WINDOW_POS, returns -1`）。
+     *
+     * 所以之前「车窗功能号按名解析不到」+「整型通道」这两处一起导致车窗永远是「读不到」。
+     *
+     * 口径见 [CarSignalMath.interpretWindowPosition]：
+     * `0` = 关、`> 0` = 开、`< 0` = 读不出来（厂商把「异常」也翻译成 `-1`）。
      */
     fun readWindowsEach(gw: VehicleGateway): List<Boolean?>? {
-        val func = windowFunc() ?: run {
-            Logx.d(LogTags.SIGNAL, "车窗功能号按名解析不到", "name" to AdaptapiConstants.FUNC_WINDOW)
-            return null
-        }
+        val func = windowPosFunc()
         val zones = AdaptapiConstants.windowZones()
-        if (zones == null) {
-            Logx.d(LogTags.SIGNAL, "车窗区域号按名解析不到")
-            return null
-        }
-        val out = MutableList<Boolean?>(DOOR_ZONES.size) { null }
+        val zoneOf = { i: Int -> zones?.getOrNull(i) ?: WINDOW_ZONES[i] }
+        val out = MutableList<Boolean?>(WINDOW_ZONES.size) { null }
         var any = false
-        for (i in DOOR_ZONES.indices) {
-            val zone = zones.getOrNull(i) ?: continue
-            val raw = gw.readRawFunctionValue(func, zone) ?: continue
-            if (CarSignalMath.isUnsupportedRaw(raw)) {
+        for (i in WINDOW_ZONES.indices) {
+            val zone = zoneOf(i)
+            val raw = gw.readCustomizeFunctionValue(func, zone)
+            if (raw == null) {
                 Logx.d(
                     LogTags.SIGNAL,
-                    "车窗功能号/区域不被固件支持",
+                    "车窗读不到（浮点通道无返回）",
+                    "zone" to zone,
+                    "func" to func,
+                )
+                continue
+            }
+            val open = CarSignalMath.interpretWindowPosition(raw)
+            if (open == null) {
+                Logx.d(
+                    LogTags.SIGNAL,
+                    "车窗开度值解释不出来",
                     "zone" to zone,
                     "raw" to raw,
                 )
                 continue
             }
-            val open = CarSignalMath.interpretWindowOpen(raw) ?: continue
             out[i] = open
             any = true
         }
         if (!any) {
-            Logx.d(LogTags.SIGNAL, "车窗状态读不到（BCM_FUNC_WINDOW）", "func" to func)
+            Logx.d(
+                LogTags.SIGNAL,
+                "车窗状态读不到（BCM_FUNC_WINDOW_POS 浮点通道）",
+                "func" to func,
+                "zones" to WINDOW_ZONES.joinToString(","),
+            )
             return null
         }
         Logx.d(
             LogTags.SIGNAL,
-            "车窗状态（BCM_FUNC_WINDOW）",
+            "车窗状态（BCM_FUNC_WINDOW_POS）",
             "open" to out.joinToString(",") { c -> c?.let { if (it) "开" else "关" } ?: "?" },
         )
         return out

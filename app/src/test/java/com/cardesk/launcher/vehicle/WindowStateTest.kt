@@ -17,7 +17,8 @@ class WindowStateTest {
     @Test
     fun `三档来源名字与文档口径一致`() {
         assertEquals("IDoorAndWindow", WindowState.SOURCE_OEM)
-        assertEquals("BCM_FUNC_WINDOW", WindowState.SOURCE_ADAPTAPI)
+        // 第七十一轮：逐扇开度只在浮点通道的 `BCM_FUNC_WINDOW_POS` 里实现
+        assertEquals("BCM_FUNC_WINDOW_POS", WindowState.SOURCE_ADAPTAPI)
         assertEquals("WINDOW_POS", WindowState.SOURCE_PROPERTY)
     }
 

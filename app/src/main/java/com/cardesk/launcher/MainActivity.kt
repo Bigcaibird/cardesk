@@ -62,11 +62,13 @@ class MainActivity : Activity() {
         runCatching { com.cardesk.launcher.core.media.MusicController.get().start(applicationContext) }
             .onFailure { Logx.w(LogTags.MEDIA, "媒体会话启动失败", it) }
         // 氛围灯（第七十轮）：绑上下文；上次是开着的就把频谱采集拉起来。
-        // 灯珠下发通道还没接（`core/ambient/AmbientLightApi.kt`），
-        // 所以这一步只会开始采频谱，不会真的点灯。
+        // 第七十一轮接上了真实通道：车机端 AdaptAPI 的
+        // `SETTING_FUNC_AMBIENCE_LIGHT_*` 一组设置类功能号
+        // （颜色 / 亮度 / 互动效果=音乐律动）。
         runCatching {
             val ambient = com.cardesk.launcher.core.ambient.AmbientLightController
             ambient.attach(applicationContext)
+            ambient.setApi(com.cardesk.launcher.core.ambient.AdaptapiAmbientLightApi())
             if (ambient.isEnabled(applicationContext)) ambient.start(applicationContext)
         }.onFailure { Logx.w(LogTags.AMBIENT, "氛围灯启动失败", it) }
         // MainActivity.checkNotificationPermission():1297-1305 —— 没通知使用权就跳系统设置页。

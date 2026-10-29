@@ -14,17 +14,18 @@ import com.cardesk.launcher.core.log.Logx
  *      ↓ 频段能量
  * AmbientPalette（纯函数：频段 → 颜色 + 亮度）
  *      ↓ AmbientColor
- * AmbientLightApi（**接口留空**，现阶段是空实现）
+ * AmbientLightApi（车机端 AdaptAPI 实装，见 AdaptapiAmbientLightApi）
  * ```
  *
  * ## 现在做到哪儿了
  *
  * - 频谱采集：✅ 真的在采（`Visualizer` 挂在播放会话上）；
  * - 颜色映射：✅ 真的在算（三种模式、灵敏度、亮度上下限）；
- * - 灯珠下发：⏸ **接口留空** —— 车机氛围灯的真实通道还没定，
- *   等拿到之后写一个 [AmbientLightApi] 实现、[setApi] 挂上来就行。
+ * - 灯珠下发：✅ **接上了**（第七十一轮）—— 车机端 AdaptAPI 的
+ *   `SETTING_FUNC_AMBIENCE_LIGHT_*` 一组功能号：
+ *   颜色（`0xRRGGBB`）、亮度（高/低/关）、互动效果（= 音乐律动）。
  *
- * 设置页里能看到实时频谱条与算出来的颜色，所以这一层是可验收的。
+ * 设置页里能看到实时频谱条与算出来的颜色。
  */
 object AmbientLightController {
 
@@ -163,7 +164,9 @@ object AmbientLightController {
         lastColor = computed
         // 原始频谱先给出去（设置页画频谱条）
         listeners.forEach { it.onAmbientSpectrum(bands, level) }
-        // 通道是空实现时这行只是记日志（空实现自己也记一笔）
+        // 亮度与颜色分开下发（车机氛围灯是「一组灯珠 + 一个统一亮度」）。
+        // 通道自己会节流：亮度按三档折算后比较，颜色按间隔 + 变化幅度比较。
+        api.setBrightness(computed.brightness)
         api.apply(computed)
         listeners.forEach { it.onAmbientColor(computed) }
     }

@@ -46,7 +46,7 @@ object WindowState {
     const val SOURCE_OEM = "IDoorAndWindow"
 
     /** 源2 的名字（诊断用）。 */
-    const val SOURCE_ADAPTAPI = "BCM_FUNC_WINDOW"
+    const val SOURCE_ADAPTAPI = "BCM_FUNC_WINDOW_POS"
 
     /** 源3 的名字（诊断用）。 */
     const val SOURCE_PROPERTY = "WINDOW_POS"

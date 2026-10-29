@@ -4,22 +4,20 @@ import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 
 /**
- * 氛围灯控制通道（**接口先留空** —— 第七十轮）。
+ * 氛围灯控制通道。
  *
- * ## 为什么是留空的
+ * ## 实现状态（第七十一轮）
  *
- * 车机氛围灯的实际通道还没定：
- * ECARX 的 `AdaptAPI` 里没有现成的氛围灯函数（查过：`BCM_FUNC_LIGHT_*` 是车灯，
- * 不是氛围灯），CarProperty / AOSP 里也没有标准接口 ——
- * 剩下的多半是这车厂自己的私有通道。
+ * 之前是**接口先留空**：上层（频谱解析 → 颜色映射 → 设置项）都做完了，
+ * 但车机氛围灯的真实通道还没定，所以下发那一步挂着空实现。
  *
- * 所以这一轮先把**上层做完**：
- * - 频谱解析（[com.cardesk.launcher.core.audio.SpectrumAnalyzer] + `SpectrumBands`）✅
- * - 频谱 → 颜色 / 亮度的映射（[AmbientPalette]）✅
- * - 设置项（颜色模式 / 灵敏度 / 亮度上下限）✅
+ * 第七十一轮拿到车机端 `ecarx.adapterapi.jar` 之后通道确定了：
+ * **AdaptAPI 的 `SETTING_FUNC_AMBIENCE_LIGHT_*` 一组设置类功能号**，
+ * 写法和空调属性一样（`setFunctionValue(func, zone, value)`）。
+ * 实装见 [AdaptapiAmbientLightApi]。
  *
- * 等拿到真实 API，只要另写一个 [AmbientLightApi] 的实现接进
- * [AmbientLightController.setApi] 就行，上层一行都不用改。
+ * [NullAmbientLightApi] 仍然留着：车控通道探不到（退模拟车）时用它兜底，
+ * 频谱与颜色照常算，只是**不往车上发**。
  *
  * ## 形状为什么这么定
  *

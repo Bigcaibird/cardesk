@@ -155,4 +155,39 @@ class CarSignalMathTest {
         assertNull(CarSignalMath.interpretWindowOpen(255))
         assertNull(CarSignalMath.interpretWindowOpen(-1))
     }
+
+    // ------------------------------------------------------------ 第七十一轮
+
+    @Test
+    fun `逐扇车窗开度口径`() {
+        // 0 = 关；> 0 = 开；< 0 = 读不到（厂商把「异常」也翻译成 -1）
+        assertEquals(false, CarSignalMath.interpretWindowPosition(0))
+        assertEquals(true, CarSignalMath.interpretWindowPosition(1))
+        assertEquals(true, CarSignalMath.interpretWindowPosition(100))
+        assertEquals(true, CarSignalMath.interpretWindowPosition(127))
+        assertNull(CarSignalMath.interpretWindowPosition(-1))
+    }
+
+    @Test
+    fun `后备箱只认 0 关 1 开`() {
+        assertEquals(true, CarSignalMath.interpretLatchClosed(0))
+        assertEquals(false, CarSignalMath.interpretLatchClosed(1))
+        // 厂商把 IDLE / STOP 也映射到 553844993 —— 不确定，不是「关」
+        assertNull(CarSignalMath.interpretLatchClosed(553844993))
+        assertNull(CarSignalMath.interpretLatchClosed(-1))
+    }
+
+    @Test
+    fun `固件支持状态按名字判 不看 ordinal`() {
+        assertEquals(true, CarSignalMath.functionSupported("active"))
+        assertEquals(false, CarSignalMath.functionSupported("notavailable"))
+        // 判不了的两种
+        assertNull(CarSignalMath.functionSupported("notactive"))
+        assertNull(CarSignalMath.functionSupported("error"))
+        // 认不出来 / null → 判不了
+        assertNull(CarSignalMath.functionSupported(null))
+        assertNull(CarSignalMath.functionSupported("whatever"))
+        // 大小写不敏感
+        assertEquals(true, CarSignalMath.functionSupported("ACTIVE"))
+    }
 }
