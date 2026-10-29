@@ -9,7 +9,13 @@ import com.cardesk.launcher.core.log.Logx
 data class VehicleInfo(
     val ambientTemp: Float = 26.5f,
     val rangeKm: Int = 386,
-    /** 总里程（公里）；读不到时为 -1。第三十六轮起读 `PERF_ODOMETER` / `ODOMETER` 属性。 */
+    /**
+     * 总里程（公里）；读不到时为 -1。
+     *
+     * 第三十六轮起读 `PERF_ODOMETER` / `ODOMETER` 属性；
+     * **第七十五轮起第一顺位是 AdaptAPI `ISensor` 的 `ODOMETER`（1050368，单位确定是 km）**，
+     * 属性通道退成兜底 —— 那条路在这台车机上从来没读到过值。
+     */
     val odometerKm: Int = -1,
     val speedKmh: Int = 0,
     val gear: String = "P",
@@ -50,11 +56,17 @@ data class VehicleInfo(
     /** 平均油耗（L/100km）；读不到时为 null。 */
     val avgFuelConsumption: Double? = null,
     /**
-     * 本次行程油耗（L/100km）；读不到时为 null。
+     * 本次行程油耗（**L，总升数**）；读不到时为 null。
      *
      * 第三十七轮新增：之前它和平均油耗混在一条兜底里
      * （`avgFuelConsumption ?: tripFuelConsumption`），
      * 导致「显示的平均油耗」和「自检的平均油耗」是两个口径。
+     *
+     * **第七十五轮补上单位差**：厂商口径 `getTripFuelConsumption() = avgFuel × odo / 100`
+     * → 单位是**升**；而平均油耗是 **L/100km**。两者差 100 倍，
+     * 所以这个字段**不能**直接当平均油耗的兜底 ——
+     * 现在平均油耗的兜底改用 [TripStats.avgFuelConsumptionFromTrip]
+     * （由行程油耗反解出的、单位一致的 L/100km）。
      */
     val tripFuelConsumption: Double? = null,
     /** 本次行程里程（公里）；读不到时为 null。 */
@@ -144,9 +156,21 @@ fun currentVehicleInfo(): VehicleInfo {
             val windows = WindowState.resolve(gw, ctx)
             // 行程与油耗：AdaptAPI 的 ITripData
             val trip = TripDataReader.stats()
+            // 第七十五轮：总里程改为**两条路都读，传感器优先**。
+            //
+            // 原来只有属性通道（`CarBodySignals.readOdometerKm` → `PERF_ODOMETER` / `ODOMETER`），
+            // 而那条路在这台车机上从来没读到过值 —— 桌面行程卡的「总里程」一直是 `--`。
+            //
+            // 现在第一顺位走 AdaptAPI 的 `ISensor`：`SENSOR_TYPE_ODOMETER = 1050368`，
+            // 厂商 SDK 里取值 / 支持判定 / 监听注册 / 变化回调**四样都有**，
+            // 单位确定是公里（值域 0..2,000,000），不用再猜米/公里。
+            // 属性通道退成兜底 —— 万一将来它在别的车型上能用。
+            val odoSensor = AdaptapiSensors.odometerKm().takeIf { it > 0 }
+            val odoProperty = CarBodySignals.readOdometerKm()
+            val odometer = odoSensor ?: odoProperty ?: -1
             VehicleInfo(
                 rangeKm = range,
-                odometerKm = CarBodySignals.readOdometerKm() ?: -1,
+                odometerKm = odometer,
                 ambientTemp = gw.ambientTempC() ?: Float.NaN,
                 driveModeLabel = driveMode,
                 tires = tires ?: floatArrayOf(Float.NaN, Float.NaN, Float.NaN, Float.NaN),
@@ -158,9 +182,12 @@ fun currentVehicleInfo(): VehicleInfo {
                 trunkClosed = body.trunk,
                 windowsOpen = windows.open,
                 windowsAllClosed = windows.allClosed,
-                // 平均油耗优先用**真正的平均值**（onAvgEnergyInfoUpdate 回调），
-                // 拿不到才退回本行程油耗（原值透传）。
-                avgFuelConsumption = trip.avgFuelConsumption ?: trip.tripFuelConsumption,
+                // 平均油耗优先用**真正的平均值**（onAvgEnergyInfoUpdate 回调）。
+                // 拿不到才退回**单位一致**的行程油耗反解值
+                // （`tripFuel × 100 / tripKm`，仍是 L/100km）——
+                // 第七十五轮修正：之前直接退 `tripFuelConsumption`（单位是 L），
+                // 会把「本行程烧了 12.3 升」显示成「12.3 L/100km」，差 100 倍。
+                avgFuelConsumption = trip.avgFuelConsumption ?: trip.avgFuelConsumptionFromTrip,
                 tripFuelConsumption = trip.tripFuelConsumption,
                 tripKm = trip.tripKm,
                 tripDurationMs = trip.tripDurationMs,

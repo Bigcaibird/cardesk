@@ -10,11 +10,11 @@ import java.lang.reflect.Proxy
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * AdaptAPI 的 **ISensor** 通道：剩余续航 / 油量 / 环温。
+ * AdaptAPI 的 **ISensor** 通道：总里程 / 剩余续航 / 油量。
  *
  * ## 取值通道
  *
- * 这三项都**不是**从属性通道读的，而是走 `ISensor`：
+ * 这几项都**不是**从属性通道读的，而是走 `ISensor`：
  *
  * - 句柄：`iCar.getSensorManager()`
  * - 监听注册：`sensor.registerListener(listener, SENSOR_XXX)`
@@ -22,6 +22,7 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * | 传感器 id | 常量 | 含义 | SDK 里实现了吗 |
  * | --- | --- | --- | --- |
+ * | 1050368 | `SENSOR_ODOMETER_KM` | **总里程（km）** | ✅ 取值/支持判定/监听注册/变化回调，四样都有 |
  * | 1050624 | `SENSOR_ENDURANCE_KM` | 续航（km） | ✅ `SensorImpl.getSensorLatestValue` 有这个 case |
  * | 1050112 | `SENSOR_FUEL_LEVEL` | 油量（原始值） | ✅ 同上 |
  * | 4211456 | `SENSOR_POTENTIAL_ENDURANCE` | 潜在续航 | ❌ 只有常量定义，取值恒 `-1.0f` |
@@ -31,6 +32,30 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * 油箱容量另走 `iCar.getCarInfoManager().getCarInfoFloat(INFO_FUEL_CAPACITY = 2097408)`
  * 百分比换算口径见。
+ *
+ * ## 第七十五轮：总里程改走 `ISensor`（原来一直读不到）
+ *
+ * 总里程原来**只有一条路** —— `car_service` 属性通道
+ * （`PERF_ODOMETER` / `ODOMETER`，见 `CarBodySignals.readOdometerKm`）。
+ * 那条路在这台车机上从来没读到过值，桌面行程卡的「总里程」一直是 `--`。
+ *
+ * 而厂商 SDK 里 `ISensor` **有**一个实现完整的总里程传感器：
+ *
+ * - 常量：`ISensor.SENSOR_TYPE_ODOMETER = 1050368`（`ISensor.java:47`）；
+ * - 取值：`SensorImpl.getSensorLatestValue` 的 `case 1050368`
+ *   → `getPaDiDstTrVld()` → `SensorPaUtil.getValue`（`SensorImpl.java:238-240`）；
+ * - 支持判定：`SensorImpl.isSensorSupported` 的 `case 1050368`
+ *   → `getAvailability`（`SensorImpl.java:67-69`）；
+ * - 监听注册：1050368 在 `SensorListener.mListenableSensors` 里
+ *   → `registerListener` 会走 `paDiDstTrVldChangedCallback`（`SensorListener.java:253`、`:295-297`）；
+ * - 变化回调：`SensorListener.java:102` 会把新值推给监听者。
+ *
+ * 也就是说：**这条通道在 SDK 里是完整可用的**，和已经读得到的续航（1050624）、
+ * 油量（1050112）是同一族、同一套机制。
+ *
+ * 单位**确定是公里**：`SensorPaUtil.getValue(PaDiDstTrVld)` 的值域判定是
+ * `> 2000000 || < 0` 即越界 —— 200 万公里是合理车龄上限，200 万米只有 2000 公里。
+ * 换算口径见 [CarSignalMath.odometerKmFromSensor]。
  *
  * ## 我们之前的问题
  *
@@ -48,6 +73,9 @@ import java.util.concurrent.atomic.AtomicInteger
  *   容量未知或很小（<= 200）时，`raw` 在 `0..100` 就当百分比直接用，
  *   否则先把 `raw` 除以 1000 再当百分比；最后统一夹到 `0..100`；
  *   **另外：`raw <= 0` 一律当「没有数据」**（见第六十四轮）；
+ * - 总里程：单位确定是 km，`raw <= 0` 当「没有数据」
+ *   （厂商在「信号为 null」和「值越界」时都返回 `0.0f`，
+ *   和真正的 0 公里没法区分 —— 宁可显示 `--`）；
  * - 环温：**没有这一条了** —— `ISensor` 上的环温传感器在 SDK 里没实现
  *   （见 [SENSOR_TEMP_AMBIENT]），不能拿它当环温来源。
  *
@@ -81,6 +109,22 @@ object AdaptapiSensors {
 
     /** 油量（`ISensor.SENSOR_TYPE_FUEL_LEVEL`）；SDK 里有实现。 */
     const val SENSOR_FUEL_LEVEL = 1050112
+
+    /**
+     * 总里程（`ISensor.SENSOR_TYPE_ODOMETER`）；SDK 里有完整实现。
+     *
+     * 厂商源码里的四处证据（`work/adapterapi-jar/sources`）：
+     * - `ISensor.java:47` —— `SENSOR_TYPE_ODOMETER = 1050368`；
+     * - `SensorImpl.java:238-240` —— `getSensorLatestValue` 的 `case 1050368`
+     *   → `getPaDiDstTrVld()` → `SensorPaUtil.getValue`；
+     * - `SensorImpl.java:67-69` —— `isSensorSupported` 的 `case 1050368`
+     *   → `getAvailability`；
+     * - `SensorListener.java:253` / `:295-297` / `:102` ——
+     *   在可监听列表里、注册时挂 `paDiDstTrVldChangedCallback`、变化时回调新值。
+     *
+     * **单位是公里**（`SensorPaUtil.getValue` 的值域判定 `> 2000000 || < 0`）。
+     */
+    const val SENSOR_ODOMETER_KM = 1050368
 
     /** 续航（`ISensor.SENSOR_TYPE_ENDURANCE_MILEAGE`）；SDK 里有实现。 */
     const val SENSOR_ENDURANCE_KM = 1050624
@@ -182,6 +226,19 @@ object AdaptapiSensors {
         SENSOR_ENDURANCE_KM,
     )
 
+    /**
+     * **注册监听的传感器 id 列表**（监听注册与探针都按这个列表来）。
+     *
+     * 只放 SDK 里**确实实现了取值**的传感器：
+     * - 油量（1050112）—— 有实现；
+     * - 总里程（1050368）—— 有实现（第七十五轮接上）；
+     * - 续航（1050624）—— 有实现。
+     *
+     * 环温（1051392）和三个虚拟续航**不在这里** ——
+     * SDK 里只有常量、没有取值实现，注册只会多一条失败日志。
+     */
+    val LISTENED_SENSORS: IntArray = intArrayOf(SENSOR_FUEL_LEVEL, SENSOR_ODOMETER_KM) + RANGE_SENSORS
+
     /** 反射用：`int` 的原始类型。 */
     private val INT_CLASS: Class<*> = Int::class.javaPrimitiveType ?: Int::class.java
 
@@ -197,6 +254,13 @@ object AdaptapiSensors {
 
     /** 剩余续航（km）；-1 = 不可读。 */
     private val rangeKm = AtomicInteger(-1)
+
+    /**
+     * 总里程（km）；-1 = 不可读。
+     *
+     * 单位确定是公里（见 [SENSOR_ODOMETER_KM]），不需要再做米/公里猜测换算。
+     */
+    private val odometerKm = AtomicInteger(-1)
 
     /** 油量百分比；-1 = 不可读。 */
     private val fuelPct = AtomicInteger(-1)
@@ -292,6 +356,7 @@ object AdaptapiSensors {
         listener = null
         registeredIds.clear()
         rangeKm.set(-1)
+        odometerKm.set(-1)
         fuelPct.set(-1)
         ambientC.set(Int.MIN_VALUE)
         lastFuelRaw = Float.NaN
@@ -340,11 +405,14 @@ object AdaptapiSensors {
             null
         }
         listener = proxy
-        // 油量 + 续航。
+        // 油量 + 总里程 + 续航。
         // 环温（1051392）**不在这个列表里**：SDK 里 `getSensorLatestValue` 没有它的 case
         // （恒 -1.0f）、`registerListener` 也不让它注册，注册它只会多一条
         // 「注册失败」的日志，却拿不到任何环温 —— 理由见 [SENSOR_TEMP_AMBIENT]。
-        for (id in intArrayOf(SENSOR_FUEL_LEVEL) + RANGE_SENSORS) {
+        //
+        // 总里程（1050368）在 SDK 里是**完整实现**的（取值 / 支持判定 / 注册 / 变化回调），
+        // 所以它和续航一样能注册成功 —— 理由见 [SENSOR_ODOMETER_KM]。
+        for (id in LISTENED_SENSORS) {
             val ok = runCatching {
                 register.invoke(s, proxy, id) as? Boolean ?: true
             }.getOrElse {
@@ -425,6 +493,12 @@ object AdaptapiSensors {
         // 只探一次必然读到占位值；推送漏掉一次就再也拿不到了。
         // 这里每次探针都顺带把油量重读一遍（读不到就跳过，不影响续航）。
         probeFuel(reason)
+        // 第七十五轮：总里程同样按这个节奏复查。
+        //
+        // 理由和油量一样 —— `ISensor` 是「车端有变化才推」，
+        // 开机那一刻很可能还没有里程值（读到的是厂商的 0.0 占位）。
+        // 只探一次就永远停在「读不到」。
+        probeOdometer(reason)
         if (got || rangeKm.get() > 0) {
             // 已经有续航了 → 停掉快速重试，转成慢速复查
             main.removeCallbacks(rangeRetry)
@@ -493,6 +567,7 @@ object AdaptapiSensors {
             // 环温没有分支：SDK 里那个传感器没实现（恒 -1.0f），
             // 留着分支只会把「没实现」当成「环温变了」发出去 —— 见 [SENSOR_TEMP_AMBIENT]。
             SENSOR_ENDURANCE_KM -> publishRangeKm("sensor.$id", raw)
+            SENSOR_ODOMETER_KM -> publishOdometerKm("sensor.$id", raw)
         }
     }
 
@@ -528,6 +603,38 @@ object AdaptapiSensors {
             )
         }
         dispatch(SENSOR_FUEL_LEVEL, raw)
+    }
+
+    /**
+     * 总里程探针（跟着续航探针的节奏跑）。
+     *
+     * 读到的值照样走 [dispatch] —— 厂商的 0.0 占位值会被忽略，
+     * 真实值（单位 km）会被发布成总里程。
+     */
+    private fun probeOdometer(reason: String) {
+        val s = sensor ?: return
+        val raw = readLatest(s, SENSOR_ODOMETER_KM)
+        if (raw == null) {
+            Logx.d(LogTags.SIGNAL, "总里程探针读不到最新值", "id" to SENSOR_ODOMETER_KM, "reason" to reason)
+            return
+        }
+        if (reason == "slow") {
+            Logx.d(
+                LogTags.SIGNAL,
+                "总里程慢速探针",
+                "raw" to raw,
+                "support" to supportLabel(s, SENSOR_ODOMETER_KM),
+            )
+        } else {
+            Logx.i(
+                LogTags.SIGNAL,
+                "总里程探针",
+                "raw" to raw,
+                "support" to supportLabel(s, SENSOR_ODOMETER_KM),
+                "reason" to reason,
+            )
+        }
+        dispatch(SENSOR_ODOMETER_KM, raw)
     }
 
     /**
@@ -569,6 +676,23 @@ object AdaptapiSensors {
         main.removeCallbacks(rangeRetry)
         main.removeCallbacks(rangeSlowRetry)
         main.postDelayed(rangeSlowRetry, RANGE_SLOW_RETRY_MS)
+    }
+
+    /**
+     * 总里程发布。
+     *
+     * 换算口径见 [CarSignalMath.odometerKmFromSensor]：
+     * 单位确定是公里；`raw <= 0` 判为「没有数据」（厂商在信号为 null
+     * 和值越界时都返回 `0.0f`，和真正的 0 公里没法区分）。
+     */
+    private fun publishOdometerKm(source: String, raw: Float) {
+        val km = CarSignalMath.odometerKmFromSensor(raw) ?: run {
+            Logx.d(LogTags.SIGNAL, "总里程占位值（忽略）", "raw" to raw, "source" to source)
+            return
+        }
+        val old = odometerKm.getAndSet(km)
+        if (old == km) return
+        Logx.i(LogTags.SIGNAL, "总里程变化", "from" to old, "to" to km, "source" to source, "raw" to raw)
     }
 
     /**
@@ -678,6 +802,14 @@ object AdaptapiSensors {
     /** 剩余续航（km）；-1 = 不可读。 */
     fun rangeKm(): Int = rangeKm.get()
 
+    /**
+     * 总里程（km）；-1 = 不可读。
+     *
+     * 单位**确定是公里**（`ISensor` 的 `ODOMETER` 传感器值域 `0..2,000,000`），
+     * 调用方不要再做米/公里换算。
+     */
+    fun odometerKm(): Int = odometerKm.get()
+
     /** 油量百分比；-1 = 不可读。 */
     fun fuelPercent(): Int = fuelPct.get()
 
@@ -706,6 +838,7 @@ object AdaptapiSensors {
     /** 传感器 id → 名字（日志用）。 */
     private fun sensorName(id: Int): String = when (id) {
         SENSOR_FUEL_LEVEL -> "油量"
+        SENSOR_ODOMETER_KM -> "总里程km"
         SENSOR_ENDURANCE_KM -> "续航km"
         SENSOR_POTENTIAL_ENDURANCE -> "潜在续航"
         SENSOR_DISCHARGE_ENDURANCE -> "放电续航"

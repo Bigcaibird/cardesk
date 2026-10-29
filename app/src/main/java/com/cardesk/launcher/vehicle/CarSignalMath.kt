@@ -246,6 +246,66 @@ object CarSignalMath {
     }
 
     /**
+     * 车端 `ISensor` 推来的**总里程**原始值 → 公里数（单位**确定就是 km**）。
+     *
+     * ## 为什么这条不能走 [core.VehicleStats.odometerKm] 那套换算
+     *
+     * 属性通道（`PERF_ODOMETER` / `ODOMETER`）的米/公里口径不明，
+     * 所以老代码用「大于 10 万就当米、除以 1000」来猜。
+     *
+     * 而 `ISensor` 这条路的单位是**厂商写死在值域里的**：
+     * `SensorPaUtil.getValue(PaDiDstTrVld)` 判 `data > 2000000 || data < 0` 即越界，
+     * 即取值域 `0..2,000,000` —— 200 万**公里**是合理车龄上限，
+     * 200 万**米**只有 2000 公里、不可能。所以单位就是 km。
+     *
+     * 走老那套猜测的话，一辆跑了 15 万公里的车会被当成
+     * 「150000 米」再除以 1000 → 显示成 **150 km**，错得离谱。
+     *
+     * ## 为什么 `0` 判为无效
+     *
+     * `SensorPaUtil.getValue` 在「信号为 null」和「值越界」两种情况下
+     * **都返回 `0.0f`** —— 它和真正的「0 公里」没法区分。
+     * 宁可显示 `--`，也不显示一个假的 0 公里。
+     *
+     * @return null 表示这个原始值不是有效总里程
+     */
+    fun odometerKmFromSensor(raw: Float): Int? {
+        if (raw.isNaN() || raw == Float.MIN_VALUE) return null
+        if (raw <= 0f) return null
+        // 厂商值域上限 2,000,000；超出说明车端给的不是公里数。
+        if (raw > 2_000_000f) return null
+        return Math.round(raw)
+    }
+
+    /**
+     * 由**本行程油耗**反解出平均油耗（L/100km）。
+     *
+     * ## 为什么要反解，而不是直接拿行程油耗顶
+     *
+     * 厂商口径（`DrivingInfoManager`）：
+     * - `getAvgFuelConsumption()` → **L/100km**；
+     * - `getTripFuelConsumption()` → **L**（本行程总共烧了多少升），
+     *   换算是 `avgFuel × odo / 100`。
+     *
+     * 这两个**差 100 倍**。之前平均油耗拿不到时直接顶行程油耗，
+     * 128 km 跑掉 12.3 L 的车会显示成「12.3 L/100km」，
+     * 而正确值是 `12.3 × 100 / 128 = 9.6 L/100km`。
+     *
+     * 按厂商公式反解即可：`avgFuel = tripFuel × 100 / tripKm`。
+     *
+     * @param tripFuelL 本行程油耗（**升**）
+     * @param tripKm 本行程里程（**公里**）
+     * @return null 表示反解不出来（任一缺失，或行程里程为 0）
+     */
+    fun avgFuelConsumptionFromTrip(tripFuelL: Double?, tripKm: Double?): Double? {
+        if (tripFuelL == null || tripKm == null) return null
+        if (tripFuelL.isNaN() || tripFuelL.isInfinite()) return null
+        if (tripKm.isNaN() || tripKm.isInfinite()) return null
+        if (tripFuelL < 0.0 || tripKm <= 0.0) return null
+        return tripFuelL * 100.0 / tripKm
+    }
+
+    /**
      * 环温原始值 → 摄氏度。
      *
      * 四舍五入后必须落在 `-40..80`，否则丢弃。

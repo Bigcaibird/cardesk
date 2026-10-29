@@ -27,7 +27,10 @@ import java.util.concurrent.atomic.AtomicReference
  * 单位换算照抄
  * `tripDistance = getTripDistance() / 1000.0f`（米 → 公里）、
  * `tripDuration = (int)(getTripDuration() / 1000)`（毫秒 → 秒）。
- * **油耗两个值原值透传**（没有做任何倍率换算）。
+ * **油耗两个值原值透传**（没有做任何倍率换算）——
+ * 但要注意这两个值的**单位不同**：
+ * `getAvgFuelConsumption()` 是 **L/100km**，`getTripFuelConsumption()` 是 **L**（总升数）。
+ * 第七十五轮据此把「平均油耗的兜底」改成按厂商公式反解，见 [stats]。
  *
  * ## 前提
  *
@@ -74,8 +77,20 @@ object TripDataReader {
         val avgFuelConsumption: Double? = null,
         /** 平均电耗（kWh/100km）。 */
         val avgEleConsumption: Double? = null,
-        /** 当前行程油耗（L/100km）。 */
+        /**
+         * 当前行程油耗（**L**，总升数）。
+         *
+         * 厂商口径 `getTripFuelConsumption() = avgFuel × odo / 100` → 单位是升。
+         * **不是 L/100km** —— 和 [avgFuelConsumption] 差 100 倍，不能混用。
+         */
         val tripFuelConsumption: Double? = null,
+        /**
+         * 由行程油耗**反解**出来的平均油耗（L/100km）；见 [stats]。
+         *
+         * 和 [avgFuelConsumption] 是同一个单位，可以直接当兜底用；
+         * 而 [tripFuelConsumption] 是「L」，单位不同，不能直接顶。
+         */
+        val avgFuelConsumptionFromTrip: Double? = null,
     )
 
     private val tripDistanceM = AtomicReference<Double?>(null)
@@ -293,14 +308,38 @@ object TripDataReader {
             null
         }
 
-    /** 取当前快照。 */
-    fun stats(): TripStats = TripStats(
-        tripKm = tripDistanceM.get()?.let { it / 1000.0 },
-        tripDurationMs = tripDurationMs.get(),
-        avgFuelConsumption = avgFuel.get(),
-        avgEleConsumption = avgEle.get(),
-        tripFuelConsumption = tripFuel.get(),
-    )
+    /**
+     * 取当前快照。
+     *
+     * ## 平均油耗的兜底要**换算**（第七十五轮）
+     *
+     * 厂商口径（`DrivingInfoManager`）：
+     * - `getAvgFuelConsumption()` → **L/100km**（每百公里油耗）；
+     * - `getTripFuelConsumption()` → **L**（本行程总共烧了多少升），
+     *   换算是 `avgFuel × odo / 100`。
+     *
+     * 这两个**不是一个单位**，差 100 倍。
+     * 之前 `avgFuelConsumption` 拿不到时直接顶上 `tripFuelConsumption`，
+     * 于是 128 km 跑掉 12.3 L 的车会显示成「12.3 L/100km」，
+     * 而正确的平均油耗是 `12.3 × 100 / 128 = 9.6 L/100km`。
+     *
+     * 现在兜底改成**按厂商公式反解**：`avgFuel = tripFuel × 100 / tripKm`。
+     * 行程里程拿不到（km 为 0）时宁可不显示，也不用错单位的值顶。
+     */
+    fun stats(): TripStats {
+        val tripKm = tripDistanceM.get()?.let { it / 1000.0 }
+        val tripFuel = tripFuel.get()
+        // 平均油耗拿不到时的兜底：**单位一致**的行程油耗反解值（L → L/100km）
+        val avgFromTrip = CarSignalMath.avgFuelConsumptionFromTrip(tripFuel, tripKm)
+        return TripStats(
+            tripKm = tripKm,
+            tripDurationMs = tripDurationMs.get(),
+            avgFuelConsumption = avgFuel.get(),
+            avgEleConsumption = avgEle.get(),
+            tripFuelConsumption = tripFuel,
+            avgFuelConsumptionFromTrip = avgFromTrip,
+        )
+    }
 
     /** 是否可用。 */
     fun isAvailable(): Boolean = tripData != null

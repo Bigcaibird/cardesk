@@ -54,4 +54,23 @@ class AdaptapiSensorsListTest {
         // 环温传感器在 SDK 里没实现 → 不再当环温来源展示
         assertEquals(Int.MIN_VALUE, AdaptapiSensors.ambientTempC())
     }
+
+    @Test
+    fun `总里程传感器进了监听列表`() {
+        // 第七十五轮：总里程改走 ISensor 的 ODOMETER（1050368）。
+        // SDK 里取值 / 支持判定 / 注册 / 变化回调四样都有，所以它能注册成功。
+        assertTrue(AdaptapiSensors.LISTENED_SENSORS.contains(AdaptapiSensors.SENSOR_ODOMETER_KM))
+    }
+
+    @Test
+    fun `监听列表里只有 SDK 真正实现了取值的传感器`() {
+        val ids = AdaptapiSensors.LISTENED_SENSORS.toList()
+        assertTrue(ids.contains(AdaptapiSensors.SENSOR_FUEL_LEVEL))
+        assertTrue(ids.contains(AdaptapiSensors.SENSOR_ENDURANCE_KM))
+        // 没实现的不能混进来
+        assertFalse(ids.contains(AdaptapiSensors.SENSOR_TEMP_AMBIENT))
+        assertFalse(ids.contains(AdaptapiSensors.SENSOR_POTENTIAL_ENDURANCE))
+        assertFalse(ids.contains(AdaptapiSensors.SENSOR_DISCHARGE_ENDURANCE))
+        assertFalse(ids.contains(AdaptapiSensors.SENSOR_CHARGE_ENDURANCE))
+    }
 }

@@ -515,6 +515,10 @@ object VehicleController {
         lines += "总里程 PERF_ODOMETER：${if (odo != null) "$odo km" else "读不到"}"
 
         // —— AdaptAPI 通道 ——
+        // 第七十五轮：总里程多了一条**真正可用**的路（ISensor ODOMETER = 1050368）。
+        // 两条都列出来，才能一眼看出是哪一条能读、哪一条读不到。
+        val odoSensor = runCatching { AdaptapiSensors.odometerKm() }.getOrDefault(-1)
+        lines += "总里程 ISensor：${if (odoSensor > 0) "$odoSensor km" else "读不到"}"
         lines += "续航 ISensor：${runCatching { AdaptapiSensors.rangeKm() }.getOrDefault(-1).let { if (it > 0) "$it km" else "读不到" }}"
         // 第六十四轮：油量这一行把**原始值 + 油箱容量**一起报出来 ——
         // 「油量没拿到」到底是传感器没推、还是容量没读到，只有这两个数能分清。
@@ -534,8 +538,14 @@ object VehicleController {
         // 之前只报「平均油耗」一个口径，而桌面卡片显示的是
         // `avgFuelConsumption ?: tripFuelConsumption` 的兜底值 —— 两者对不上，
         // 诊断快照里就会出现「平均油耗：读不到」但日志里明明有值的矛盾。
+        //
+        // 第七十五轮：**单位也标对了**。
+        // `getAvgFuelConsumption()` 是 L/100km；`getTripFuelConsumption()` 是 **L**（总升数）。
+        // 之前这行把行程油耗也打成「L/100km」，属于单位标错。
         lines += "平均油耗：${trip.avgFuelConsumption?.let { String.format(java.util.Locale.US, "%.2f L/100km", it) } ?: "读不到"}"
-        lines += "本行程油耗：${trip.tripFuelConsumption?.let { String.format(java.util.Locale.US, "%.2f L/100km", it) } ?: "读不到"}"
+        lines += "本行程油耗：${trip.tripFuelConsumption?.let { String.format(java.util.Locale.US, "%.2f L", it) } ?: "读不到"}"
+        // 兜底用的平均油耗（由行程油耗反解，单位同样是 L/100km）
+        lines += "平均油耗（行程反解）：${trip.avgFuelConsumptionFromTrip?.let { String.format(java.util.Locale.US, "%.2f L/100km", it) } ?: "读不到"}"
         lines += "行程里程/时长：${trip.tripKm?.let { String.format(java.util.Locale.US, "%.1f km", it) } ?: "--"} / ${trip.tripDurationMs?.let { "${it / 60000.0} 分钟" } ?: "--"}"
 
         val text = lines.joinToString("\n")

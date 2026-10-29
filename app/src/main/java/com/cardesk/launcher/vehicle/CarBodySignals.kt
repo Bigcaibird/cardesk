@@ -240,6 +240,15 @@ object CarBodySignals {
      * 总里程（公里）；读不到返回 null。
      *
      * 先读 ECARX 厂商扩展属性 `PERF_ODOMETER`，读不到再退到 AOSP 标准 `ODOMETER`。
+     *
+     * ## 第七十五轮：这条退成兜底
+     *
+     * 这条属性通道在这台车机上**从来没读到过值** —— 桌面行程卡的「总里程」一直是 `--`。
+     * 现在第一顺位是 AdaptAPI `ISensor` 的 `ODOMETER`（1050368，单位确定是 km），
+     * 见 `AdaptapiSensors.odometerKm()`；这条留着当兜底 —— 万一将来在别的车型上能用。
+     *
+     * 另外这条的属性单位**米/公里不明**，所以走的是 `VehicleStats.odometerKm`
+     * 那套「大于 10 万就当米」的猜测换算；`ISensor` 那条不需要猜。
      */
     fun readOdometerKm(): Int? {
         val now = System.currentTimeMillis()

@@ -1044,7 +1044,9 @@ class ScenePage(context: Context) : View(context) {
      * `
      *
      * 数据来源：
-     * - 总里程 → `PERF_ODOMETER` / `ODOMETER` 属性（`CarBodySignals.readOdometerKm`）
+     * - 总里程 → **AdaptAPI `ISensor` 的 `SENSOR_TYPE_ODOMETER`（1050368，单位 km）**，
+     *   属性通道 `PERF_ODOMETER` / `ODOMETER` 退成兜底
+     *   （第七十五轮：属性通道在这台车机上从来没读到过值）；
      * - 平均油耗 → `ITripData.IAvgEnergyInfo.getAvgFuelConsumption()`
      * - 行程里程/时长 → `ITripData.IDrivingInfo.getTripDistance()` /
      *
