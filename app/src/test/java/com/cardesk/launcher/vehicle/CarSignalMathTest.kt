@@ -190,4 +190,37 @@ class CarSignalMathTest {
         // 大小写不敏感
         assertEquals(true, CarSignalMath.functionSupported("ACTIVE"))
     }
+
+    @Test
+    fun `属性号取车机真注册的那个`() {
+        val candidates = intArrayOf(0x16400B00, 0x16401000)
+        // 车机注册的是 ECARX 那套 → 用它
+        assertEquals(
+            0x16401000,
+            CarSignalMath.resolvePropertyId(candidates, setOf(0x16401000, 560993300)),
+        )
+        // 车机注册的是 AOSP 那套 → 用它
+        assertEquals(
+            0x16400B00,
+            CarSignalMath.resolvePropertyId(candidates, setOf(0x16400B00)),
+        )
+        // 两个都注册 → 候选顺序里靠前的优先
+        assertEquals(
+            0x16400B00,
+            CarSignalMath.resolvePropertyId(candidates, setOf(0x16400B00, 0x16401000)),
+        )
+    }
+
+    @Test
+    fun `属性号一个都没命中就用第一个候选`() {
+        val candidates = intArrayOf(0x16400B00, 0x16401000)
+        assertEquals(0x16400B00, CarSignalMath.resolvePropertyId(candidates, setOf(1, 2, 3)))
+        // 清单读不到（空集合）也是同一个口径
+        assertEquals(0x16400B00, CarSignalMath.resolvePropertyId(candidates, emptySet()))
+    }
+
+    @Test
+    fun `候选为空返回 0`() {
+        assertEquals(0, CarSignalMath.resolvePropertyId(intArrayOf(), setOf(1)))
+    }
 }

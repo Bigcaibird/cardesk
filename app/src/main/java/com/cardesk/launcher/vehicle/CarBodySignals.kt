@@ -116,8 +116,11 @@ object CarBodySignals {
     fun readWindowsEach(): List<Boolean?>? {
         val now = System.currentTimeMillis()
         windowCache?.let { if (now - windowCacheAt < CACHE_MS) return it }
+        // 属性号：这台车机上 AOSP 标准号与 ECARX 自己那份不一样，
+        // 拿属性清单核对一下，用真正注册的那个（见 [CarProperties.resolvePropertyId]）。
+        val propId = CarProperties.resolvePropertyId(VehicleIds.WINDOW_POS_CANDIDATES)
         val roles = VehicleStats.areaRoles(
-            areasOf(VehicleIds.WINDOW_POS, VehicleIds.WINDOW_AREAS),
+            areasOf(propId, VehicleIds.WINDOW_AREAS),
             VehicleStats.WINDOW_AREA_MASKS,
         )
         val values = DoubleArray(4) { Double.NaN }
@@ -125,14 +128,14 @@ object CarBodySignals {
         for (i in 0 until 4) {
             val area = roles[i]
             if (area < 0) continue
-            val v = CarProperties.readNumber(VehicleIds.WINDOW_POS, area)
+            val v = CarProperties.readNumber(propId, area)
             if (v != null) {
                 values[i] = v
                 any = true
             }
         }
         if (!any) {
-            Logx.d(LogTags.SIGNAL, "车窗位置读不到", "prop" to "WINDOW_POS")
+            Logx.d(LogTags.SIGNAL, "车窗位置读不到", "prop" to "0x%08X".format(propId))
             return null
         }
         val flags = VehicleStats.windowOpenFlagsEach(values) ?: return null
@@ -167,8 +170,9 @@ object CarBodySignals {
     fun readDoorsViaProperty(): List<Boolean?>? {
         val now = System.currentTimeMillis()
         doorCache?.let { if (now - doorCacheAt < CACHE_MS) return it }
+        val propId = CarProperties.resolvePropertyId(VehicleIds.DOOR_POS_CANDIDATES)
         val roles = VehicleStats.areaRoles(
-            areasOf(VehicleIds.DOOR_POS, VehicleIds.DOOR_AREAS),
+            areasOf(propId, VehicleIds.DOOR_AREAS),
             VehicleStats.DOOR_AREA_MASKS,
         )
         val out = MutableList<Boolean?>(4) { null }
@@ -176,13 +180,13 @@ object CarBodySignals {
         for (i in 0 until 4) {
             val area = roles[i]
             if (area < 0) continue
-            val v = CarProperties.readNumber(VehicleIds.DOOR_POS, area)
+            val v = CarProperties.readNumber(propId, area)
             val closed = VehicleStats.interpretDoorClosed(v) ?: continue
             out[i] = closed
             any = true
         }
         if (!any) {
-            Logx.d(LogTags.SIGNAL, "车门位置读不到", "prop" to "DOOR_POS")
+            Logx.d(LogTags.SIGNAL, "车门位置读不到", "prop" to "0x%08X".format(propId))
             return null
         }
         doorCache = out
@@ -206,18 +210,19 @@ object CarBodySignals {
     fun readHoodTrunkViaProperty(): Pair<Boolean?, Boolean?>? {
         val now = System.currentTimeMillis()
         hoodTrunkCache?.let { if (now - hoodTrunkCacheAt < CACHE_MS) return it }
+        val propId = CarProperties.resolvePropertyId(VehicleIds.DOOR_POS_CANDIDATES)
         val roles = VehicleStats.areaRoles(
-            areasOf(VehicleIds.DOOR_POS, VehicleIds.DOOR_AREAS),
+            areasOf(propId, VehicleIds.DOOR_AREAS),
             VehicleStats.DOOR_AREA_MASKS,
         )
         val hoodArea = roles.getOrNull(4)?.takeIf { it >= 0 }
         val trunkArea = roles.getOrNull(5)?.takeIf { it >= 0 }
         if (hoodArea == null && trunkArea == null) {
-            Logx.d(LogTags.SIGNAL, "引擎盖/后备箱区域不可用", "areas" to areasOf(VehicleIds.DOOR_POS, VehicleIds.DOOR_AREAS).joinToString(","))
+            Logx.d(LogTags.SIGNAL, "引擎盖/后备箱区域不可用", "areas" to areasOf(propId, VehicleIds.DOOR_AREAS).joinToString(","))
             return null
         }
-        val hood = hoodArea?.let { VehicleStats.interpretDoorClosed(CarProperties.readNumber(VehicleIds.DOOR_POS, it)) }
-        val trunk = trunkArea?.let { VehicleStats.interpretDoorClosed(CarProperties.readNumber(VehicleIds.DOOR_POS, it)) }
+        val hood = hoodArea?.let { VehicleStats.interpretDoorClosed(CarProperties.readNumber(propId, it)) }
+        val trunk = trunkArea?.let { VehicleStats.interpretDoorClosed(CarProperties.readNumber(propId, it)) }
         if (hood == null && trunk == null) {
             Logx.d(LogTags.SIGNAL, "引擎盖/后备箱读不到")
             return null

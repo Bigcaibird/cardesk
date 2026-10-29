@@ -28,22 +28,28 @@ ECARX `AdaptAPI` 与 AOSP `Car` 属性通道；读不到真车数据时自动降
 下面这一项**还没有真正生效**。代码写了、界面也画了，但达不到可用状态 ——
 用的时候请按「还没做」来理解。
 
-### 1. 车门状态：四个侧门与引擎盖读不到真车数据（车机固件没这个信号）
+### 1. 车门状态：侧门与尾门改走车机属性通道（**待真机验证**），引擎盖仍读不到
 
 - **车窗**已经能读到真值：逐扇开度走 `AdaptAPI` 的
   `getCustomizeFunctionValue(BCM_FUNC_WINDOW_POS, 窗区)`，
   窗区号按名字解析（`WINDOW_ROW_1_LEFT` 等），读不到的那一扇显示 `--`，
   不会当成「关着」；
-- **四个侧门 + 引擎盖**在本车（领克 dcy11 / Android 9）上读不到。
-  原因不是我们没接，而是**车机固件本身没有这两个信号** ——
-  厂商 `getFunctionValue` 的功能号分派表里根本没有 `BCM_FUNC_DOOR_POS`，
-  调它只会拿到 `255`（= `-1`，厂商自己的提示是
-  `getFunctionValue(...) This function is not implemented.`）；
-- 同样的原因，OEM 的 `IDoorAndWindow`（`getDoorAndWindowState`）通道在这台车机上
-  根本不存在这个类，AOSP 的 `DOOR_POS` / `WINDOW_POS` 属性本车也没注册；
-- **后备箱**能读：走 `BCM_FUNC_DOOR` + `DOOR_REAR` 区域，
-  厂商把「静止 / 停在中间」也映射成同一个值，这种情况一律显示「读不到」；
-- 所以**不要**把界面上的侧门图标当成真实车况。
+- **四个侧门 + 尾门**在车机端有独立的属性（`GeelyVehicleProperty` 里的
+  `PA_CP_DoorDrvrSts` / `DoorDrvrReSts` / `DoorPassSts` / `DoorPassReSts` / `TrSts`），
+  在车机的 `car_service` 清单里**标为只读、确实存在**。
+  第七十二轮之前读不到，是因为**属性通道压根没建起来** ——
+  我们调的 `Car.createCar(Context)` 这个重载在车机端那份 `android.car` 里
+  **压根不存在**（它只有带 `ServiceConnection` 的重载），
+  诊断包里那句「Car.createCar 返回 null」就是这么来的。
+  签名改对之后这条通道才有机会起来；
+- 但**这一档还没在真机上验证过**：属性值是 `0`（关）/ `1`（开）还是反过来，
+  要等装到车上开一次门看日志里的原始值才能定；
+- **引擎盖**仍然读不到：车机端那份 jar 里**没有** `PA_CP_Hood*` 之类的属性，
+  `BCM_FUNC_DOOR` 也只为 `DOOR_REAR`（后备箱）实现了一个区域；
+- 老的 `IDoorAndWindow`（`getDoorAndWindowState`）通道在这台车机上
+  根本不存在这个类；
+- 所以在验证之前，**不要**把界面上的侧门图标当成真实车况 ——
+  读不到时显示 `--`，不会当成「关着」。
 
 ## 目录结构
 

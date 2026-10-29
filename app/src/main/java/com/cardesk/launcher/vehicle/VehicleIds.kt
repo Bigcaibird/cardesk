@@ -38,11 +38,35 @@ object VehicleIds {
     const val WINDOW_POS = 0x13400BC0
 
     /**
+     * 车窗位置的**候选**属性 id。
+     *
+     * ## 为什么有候选
+     *
+     * 两个来源给的值不一样：
+     *
+     * | 来源 | `WINDOW_POS` |
+     * | --- | --- |
+     * | AOSP `android.car.VehiclePropertyIds`（也是我们这张表原本的值） | `0x13400BC0` |
+     * | 车机端 jar 里 ECARX 自己那份 `android.car.VehiclePropertyIds` | `0x13401000` |
+     *
+     * `0x13401000` 不是 AOSP 的标准值 —— 说明 ECARX 在自己那份
+     * `VehiclePropertyIds` 里**改了号**（车门同理：`0x16401000` vs `0x16400B00`）。
+     *
+     * 到底哪个是这台车机真正注册的，只能问车机自己：
+     * [CarProperties.resolvePropertyId] 会拿属性清单（`getPropertyList()`）
+     * 去核对，命中哪个用哪个。
+     */
+    val WINDOW_POS_CANDIDATES = intArrayOf(WINDOW_POS, 0x13401000)
+
+    /**
      * 车门位置（**AOSP 标准** `VehiclePropertyIds.DOOR_POS`）。
      *
      * 值：`0` = 关、`1` = 开、`2` = 关闭中、`3` = 开启中。
      */
     const val DOOR_POS = 0x16400B00
+
+    /** 车门位置的**候选**属性 id（见 [WINDOW_POS_CANDIDATES] 的说明）。 */
+    val DOOR_POS_CANDIDATES = intArrayOf(DOOR_POS, 0x16401000)
 
     /** 车窗锁（`WINDOW_LOCK`）。 */
     const val WINDOW_LOCK = 0x13400BC1

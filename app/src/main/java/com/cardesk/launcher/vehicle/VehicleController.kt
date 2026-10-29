@@ -450,11 +450,24 @@ object VehicleController {
         lines += "车门 DOOR_POS：${describeDoors(doors)}"
 
         // 第四十五轮新增的第四档：MC / Geely 事件属性。
-        // 这组属性是 CEVT 平台的，ECARX 上大概率没有 —— 读不到就是「没有」，不影响其它档。
+        // 第七十二轮：这组属性在车机的 car_service 清单里确实存在（只读），
+        // 之前读不到是属性通道没建起来（createCar 重载调错），现在通了。
         val mc = McDoorSignals.read()
-        lines += "车门 MC 事件属性：${if (mc == null) "读不到（该平台没有这组属性）" else {
+        lines += "车门 MC 事件属性：${if (mc == null) "读不到（属性通道上没读到这组属性）" else {
             describeDoors(mc.doors) + " 后备箱=" + (mc.trunk?.let { if (it) "关" else "开" } ?: "?")
         }}"
+
+        // 第七十二轮：属性清单 —— 唯一能回答「这台车到底支持哪些属性」的权威来源。
+        val propCfgs = CarProperties.propertyConfigs()
+        lines += "car_service 属性清单：" + (
+            if (propCfgs == null) "读不到" else {
+                val doors = propCfgs.filter { it.propertyId in PaCpDoorProps.ALL }
+                "共 ${propCfgs.size} 个 | 车门属性 " +
+                    (if (doors.isEmpty()) "未注册" else doors.joinToString(",") {
+                        "0x%08X(areas=%s,type=%s)".format(it.propertyId, it.areaIds.joinToString("&"), it.typeName)
+                    })
+            }
+            )
 
         // —— 第六十六轮新增：车机原生的 IDoorAndWindow（车门 + 车窗的唯一布尔来源）——
         val oemOk = ctx != null && OemDoorWindowSignals.attach(ctx)

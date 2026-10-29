@@ -1,6 +1,8 @@
 package com.cardesk.launcher.vehicle
 
+import android.content.ComponentName
 import android.content.Context
+import android.content.ServiceConnection
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -54,6 +56,31 @@ import java.lang.reflect.Method
  * B 路失败（隐藏 API 被拦 / 车机没有 `car_service`）时自动退回 A 路；
  * A 路在后台线程连接，接好后 `readNumber` 立刻生效。
  *
+ * ## 第七十二轮：A 路为什么一直「Car.createCar 返回 null」
+ *
+ * 车机端 `ecarx.adapterapi.jar`（车机系统分区的 DEX）里带了一份
+ * **ECARX 自己的 `android.car`**。把它反汇编后可以看到，它只有这两个工厂方法：
+ *
+ * ```java
+ * static Car createCar(Context, ServiceConnection);
+ * static Car createCar(Context, ServiceConnection, Handler);
+ * ```
+ *
+ * 而我们这里试的签名是 `createCar(Context)` / `createCar(Context, Handler)` ——
+ * **这两个重载在这个平台上压根不存在**，于是两次 `NoSuchMethodException` 被
+ * `runCatching` 吞掉，`createCar()` 返回 null，日志就写成
+ * 「Car.createCar 返回 null」。
+ *
+ * 换句话说：**不是车机没有 car service，是我们调错了重载**。
+ * 厂商自己的 `se.cevt.vehiclesignals.VendorExtensionController` 就是这么连的：
+ *
+ * ```java
+ * Car car = Car.createCar(context, mCarServiceConnection);
+ * car.connect();   // → onServiceConnected → CarPropertyManager
+ * ```
+ *
+ * 签名补对之后，整条属性通道（车门 `PA_CP_*`、总里程、MC 事件属性…）才有机会起来。
+ *
  * ## 生命周期
  *
  * `android.car.Car` 的连接在进程内**只做一次**（`createCar` 重复调用会抛
@@ -72,6 +99,9 @@ object CarProperties {
     private const val CAR_SERVICE = "car_service"
     private const val MANAGER_PROPERTY = "property"
 
+    /** `CarPropertyValue.STATUS_AVAILABLE` —— 属性值当前可用。 */
+    private const val STATUS_AVAILABLE = 0
+
     /** 通道建连失败后的冷却时间（毫秒）—— 每秒调一次，必须限流。 */
     private const val RETRY_INTERVAL_MS = 30_000L
 
@@ -82,6 +112,30 @@ object CarProperties {
     private const val CONNECT_POLL_INTERVAL_MS = 150L
 
     private val main = Handler(Looper.getMainLooper())
+
+    /**
+     * `Car.createCar(Context, ServiceConnection)` 需要的连接回调。
+     *
+     * ECARX 那份 `android.car` **只提供带 `ServiceConnection` 的重载**，
+     * 所以这个对象不是「可选参数」—— 没有它就建连不上（见 [createCar]）。
+     *
+     * 这里只记日志：真正取值走 `car.getCarManager("property")`，
+     * 不从回调参数里直接拿 binder（那只是 `ICar` 的 binder，还要再转一层）。
+     */
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            Logx.i(
+                LogTags.SIGNAL,
+                "car_service 已连上",
+                "component" to name?.flattenToString(),
+                "binder" to (service?.javaClass?.simpleName ?: "null"),
+            )
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            Logx.w(LogTags.SIGNAL, "car_service 断开", "component" to name?.flattenToString())
+        }
+    }
 
     private var car: Any? = null
 
@@ -121,6 +175,9 @@ object CarProperties {
     private var mGetProperty1B: Method? = null
     private var mGetValue: Method? = null
     private var mGetAreaIds: Method? = null
+
+    /** `CarPropertyValue.getStatus()`（0 = 可用 / 1 = 不可用 / 2 = 出错）。 */
+    private var mGetStatus: Method? = null
 
     /** 读 `byte[]` 属性的重载（`getProperty(int[], Class)`），只有 A 路有。 */
     private var mGetBytesA: Method? = null
@@ -292,6 +349,8 @@ object CarProperties {
         mGetProperty2B = null
         mGetValue = null
         mGetAreaIds = null
+        mGetStatus = null
+        propConfigCache = null
     }
 
     /** 通道是否可用。 */
@@ -318,6 +377,21 @@ object CarProperties {
     fun readNumber(propId: Int, areaId: Int): Double? {
         readViaA(propId, areaId)?.let { return it }
         return readViaB(propId, areaId)
+    }
+
+    /**
+     * 读一个属性在某个区域的**整数值**。
+     *
+     * 车门状态那组属性（`PA_CP_Door*Sts`）是 0 / 1 的枚举值，
+     * 用浮点通道读会多一层取整误差，所以单独给一个整型入口。
+     *
+     * @return 读不到返回 null
+     */
+    fun readInt(propId: Int, areaId: Int): Int? {
+        val v = readNumber(propId, areaId) ?: return null
+        if (v.isNaN() || v.isInfinite()) return null
+        if (v < Int.MIN_VALUE.toDouble() || v > Int.MAX_VALUE.toDouble()) return null
+        return v.toInt()
     }
 
     /** 路 A：`CarPropertyManager.getProperty(int, int)`。 */
@@ -375,6 +449,13 @@ object CarProperties {
      *  拿到区域数组，再对每个区域取一次值。
      * AOSP 的等价物是 `CarPropertyManager.getProperty(int propertyId)` → `CarPropertyValue.getAreaIds()`。
      *
+     * ## 第七十二轮：多一条「属性清单」的路
+     *
+     * ECARX 那份 `CarPropertyManager` 的 `CarPropertyValue` **只有 `getAreaId()`**
+     * （单个区域），没有 AOSP 的 `getAreaIds()`；而 `getProperty(int)` 单参重载也没有。
+     * 所以这里在「拿不到 `getAreaIds()`」时，退到 [propertyConfigs] 的属性清单里查 ——
+     * 那是 `getPropertyList()` 给的，每条配置都带 `getAreaIds()`。
+     *
      * @return 区域号数组；读不到返回 null
      */
     fun availableAreas(propId: Int): IntArray? {
@@ -383,14 +464,135 @@ object CarProperties {
             mGetProperty1A ?: run { resolveMethodsA(m); mGetProperty1A }
         } else {
             mGetProperty1B ?: run { resolveMethodsB(m); mGetProperty1B }
-        } ?: return null
-        return runCatching {
-            val value = get1.invoke(m, propId) ?: return null
-            val getAreaIds = mGetAreaIds ?: return null
-            val arr = getAreaIds.invoke(value) as? IntArray ?: return null
-            if (arr.isEmpty()) null else arr.copyOf()
-        }.getOrNull()
+        }
+        if (get1 != null) {
+            val arr = runCatching {
+                val value = get1.invoke(m, propId) ?: return null
+                val getAreaIds = mGetAreaIds ?: return null
+                (getAreaIds.invoke(value) as? IntArray)?.copyOf()
+            }.getOrNull()
+            if (arr != null && arr.isNotEmpty()) return arr
+        }
+        // 退路：属性清单（ECARX 的 CarPropertyManager 走这条）
+        val cfg = propertyConfigs()?.firstOrNull { it.propertyId == propId } ?: return null
+        return cfg.areaIds.takeIf { it.isNotEmpty() }
     }
+
+    // ------------------------------------------------------------ 属性清单
+
+    /**
+     * 一个属性的配置摘要。
+     *
+     * @param propertyId 属性 id
+     * @param access 访问权限（0 = 只读 / 1 = 可写 …，具体值由车机定义）
+     * @param areaIds 该属性注册的区域号
+     * @param typeName 属性类型名（`Integer` / `Float` / `String` …）
+     */
+    data class PropConfig(
+        val propertyId: Int,
+        val access: Int,
+        val areaIds: IntArray,
+        val typeName: String,
+    ) {
+        override fun equals(other: Any?): Boolean =
+            other is PropConfig && other.propertyId == propertyId
+
+        override fun hashCode(): Int = propertyId
+    }
+
+    /** 属性清单缓存（车机的属性表是静态的，查一次就够）。 */
+    private var propConfigCache: List<PropConfig>? = null
+
+    /**
+     * 车机 `car_service` 支持的**属性清单**。
+     *
+     * ## 为什么要这个
+     *
+     * 这是**唯一能拿到「这台车到底支持哪些属性」的权威来源** ——
+     * 比任何硬编码的属性号表都可靠。
+     *
+     * 有了它就能：
+     *
+     * 1. 确认某个属性在这台车上**存不存在**（不存在就别去读，省掉每秒几次无效 binder 调用）；
+     * 2. 拿到它的**区域号**（ECARX 的 `CarPropertyValue` 没有 `getAreaIds()`）；
+     * 3. 下一次诊断包里直接带出清单，排障不用再猜属性号。
+     *
+     * @return 读不到返回 null；空清单说明车机没报任何属性
+     */
+    fun propertyConfigs(): List<PropConfig>? {
+        propConfigCache?.let { return it }
+        val m = managerA ?: managerB ?: return null
+        val list = runCatching {
+            val getter = m.javaClass.methods.firstOrNull {
+                it.name == "getPropertyList" && it.parameterCount == 0
+            } ?: return null
+            val raw = getter.invoke(m) as? List<*> ?: return null
+            raw.mapNotNull { item -> item?.let { toPropConfig(it) } }
+        }.getOrNull() ?: return null
+        propConfigCache = list
+        Logx.i(
+            LogTags.SIGNAL,
+            "car_service 属性清单",
+            "count" to list.size,
+            "doorProps" to list.filter { it.propertyId in DOOR_PROPERTY_IDS }
+                .joinToString(",") { "0x%08X/areas=%s".format(it.propertyId, it.areaIds.joinToString("&")) },
+        )
+        return list
+    }
+
+    /** 车门那组厂商属性的 id（`GeelyVehicleProperty.PA_CP_*`）。 */
+    private val DOOR_PROPERTY_IDS = PaCpDoorProps.ALL
+
+    /** 把一个 `CarPropertyConfig` 读成摘要（读不出来的字段留默认值，不抛）。 */
+    private fun toPropConfig(raw: Any): PropConfig? {
+        val id = callInt(raw, "getPropertyId") ?: return null
+        val access = callInt(raw, "getAccess") ?: 0
+        val areas = runCatching {
+            val m = raw.javaClass.methods.firstOrNull {
+                it.name == "getAreaIds" && it.parameterCount == 0
+            }
+            (m?.invoke(raw) as? IntArray)?.copyOf() ?: IntArray(0)
+        }.getOrNull() ?: IntArray(0)
+        val typeName = runCatching {
+            val m = raw.javaClass.methods.firstOrNull {
+                it.name == "getPropertyType" && it.parameterCount == 0
+            }
+            (m?.invoke(raw) as? Class<*>)?.simpleName ?: "?"
+        }.getOrNull() ?: "?"
+        return PropConfig(id, access, areas, typeName)
+    }
+
+    /**
+     * 在候选属性 id 里挑一个**这台车机真的注册了**的。
+     *
+     * ## 为什么需要这个
+     *
+     * 同一个属性（AOSP `DOOR_POS` / `WINDOW_POS`）有两个号：
+     * AOSP 标准号，和 ECARX 在自己那份 `android.car.VehiclePropertyIds`
+     * 里改过的号。哪个是这台车机上真正注册的，硬编码猜不出来 ——
+     * 但车机自己知道：`getPropertyList()` 会把注册的属性全列出来。
+     *
+     * @param candidates 候选 id，按优先级排
+     * @return 清单里命中的第一个候选；清单读不到时返回第一个候选
+     */
+    fun resolvePropertyId(candidates: IntArray): Int {
+        val configs = propertyConfigs()
+        val registered = if (configs.isNullOrEmpty()) {
+            emptySet()
+        } else {
+            val set = HashSet<Int>(configs.size)
+            for (c in configs) set.add(c.propertyId)
+            set
+        }
+        return CarSignalMath.resolvePropertyId(candidates, registered)
+    }
+
+    private fun callInt(target: Any, method: String): Int? = runCatching {
+        val m = target.javaClass.methods.firstOrNull {
+            it.name == method && it.parameterCount == 0
+        } ?: return null
+        m.invoke(target) as? Int
+    }.getOrNull()
 
     // ------------------------------------------------------------ 反射细节
 
@@ -414,13 +616,40 @@ object CarProperties {
         mGetAreaIds = valueClass?.methods?.firstOrNull {
             it.name == "getAreaIds" && it.parameterCount == 0
         }
+        mGetStatus = valueClass?.methods?.firstOrNull {
+            it.name == "getStatus" && it.parameterCount == 0
+        }
     }
 
-    /** 取 `CarPropertyValue.getValue()`，并把各种数值类型统一成 Double。 */
+    /**
+     * 取 `CarPropertyValue.getValue()`，并把各种数值类型统一成 Double。
+     *
+     * ## 第七十二轮：先看状态，再取值
+     *
+     * `CarPropertyValue` 带一个状态字段：
+     *
+     * | 值 | 含义 |
+     * | --- | --- |
+     * | `0` | `STATUS_AVAILABLE` —— 值可用 |
+     * | `1` | `STATUS_UNAVAILABLE` —— 属性存在但**当前没有值** |
+     * | `2` | `STATUS_ERROR` —— 出错 |
+     *
+     * 不看状态的话，「属性存在但此刻没数据」会被当成「值 = 0」。
+     * 对车门来说，**0 就是「门关着」** —— 那等于凭空造出一个「门全关」的假状态。
+     * 所以这里先把状态判掉，`AVAILABLE` 之外一律当「读不到」。
+     */
     private fun extractValue(value: Any): Double? {
+        if (!isValueUsable(value)) return null
         val getValue = mGetValue ?: return (value as? Number)?.toDouble()
         val raw = runCatching { getValue.invoke(value) }.getOrNull() ?: return null
         return (raw as? Number)?.toDouble()
+    }
+
+    /** 属性值当前是不是「可用」。状态字段读不出来时按「可用」处理（不猜）。 */
+    private fun isValueUsable(value: Any): Boolean {
+        val getStatus = mGetStatus ?: return true
+        val status = runCatching { getStatus.invoke(value) as? Int }.getOrNull() ?: return true
+        return status == STATUS_AVAILABLE
     }
 
     /**
@@ -461,12 +690,28 @@ object CarProperties {
     /**
      * 建连 `android.car.Car`。
      *
-     * 候选顺序按 AOSP `Car.createCar` 的公开重载来（不同 Android 版本重载不一样）。
+     * ## 第七十二轮：候选顺序改了
+     *
+     * 这台车机上跑的 `android.car` 是 ECARX 自己的一份（随 `ecarx.adapterapi.jar`
+     * 一起在系统分区），它**只有带 `ServiceConnection` 的重载**：
+     *
+     * ```java
+     * createCar(Context, ServiceConnection)
+     * createCar(Context, ServiceConnection, Handler)
+     * ```
+     *
+     * 之前只试了 `createCar(Context)` 与 `createCar(Context, Handler)` ——
+     * 两个都不存在，所以每次都是 null（诊断包里「Car.createCar 返回 null」）。
+     * 现在把**带 `ServiceConnection` 的两个重载排在最前面**，
+     * 厂商自己的 `VendorExtensionController` 也是这么连的。
      */
     private fun createCar(carClass: Class<*>, context: Context): Any? {
         val ctx = Context::class.java
         val handler = Handler::class.java
+        val conn = ServiceConnection::class.java
         val attempts: List<() -> Any?> = listOf(
+            { carClass.getMethod("createCar", ctx, conn, handler).invoke(null, context, serviceConnection, main) },
+            { carClass.getMethod("createCar", ctx, conn).invoke(null, context, serviceConnection) },
             { carClass.getMethod("createCar", ctx, handler).invoke(null, context, main) },
             { carClass.getMethod("createCar", ctx).invoke(null, context) },
         )

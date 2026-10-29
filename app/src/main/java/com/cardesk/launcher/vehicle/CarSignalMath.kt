@@ -244,4 +244,29 @@ object CarSignalMath {
         "notavailable" -> false
         else -> null
     }
+
+    /**
+     * 在候选属性 id 里挑一个「车机真的注册了」的。
+     *
+     * ## 为什么需要这个
+     *
+     * 同一个属性（AOSP `DOOR_POS` / `WINDOW_POS`）有两个号：
+     * AOSP 标准号，和 ECARX 在自己那份 `android.car.VehiclePropertyIds` 里改过的号
+     * （车门 `0x16400B00` vs `0x16401000`；车窗 `0x13400BC0` vs `0x13401000`）。
+     *
+     * 哪个是这台车机上真正注册的，硬编码猜不出来 ——
+     * 但车机自己知道：`CarPropertyManager.getPropertyList()` 会把注册的属性全列出来。
+     *
+     * ## 口径
+     *
+     * - 候选按优先级排，**第一个在注册清单里的**胜出；
+     * - 一个都没命中 → 用第一个候选（也许清单不完整，先照常用）；
+     * - 清单读不到（空集合）→ 用第一个候选；
+     * - 候选为空 → 返回 `0`（读不到）。
+     */
+    fun resolvePropertyId(candidates: IntArray, registered: Set<Int>): Int {
+        if (candidates.isEmpty()) return 0
+        if (registered.isEmpty()) return candidates.first()
+        return candidates.firstOrNull { registered.contains(it) } ?: candidates.first()
+    }
 }
