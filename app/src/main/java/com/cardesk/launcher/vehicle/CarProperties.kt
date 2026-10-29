@@ -182,6 +182,26 @@ object CarProperties {
     /** 读 `byte[]` 属性的重载（`getProperty(int[], Class)`），只有 A 路有。 */
     private var mGetBytesA: Method? = null
 
+    /**
+     * 读**指定类型**属性的重载（`getProperty(Class, int, int)`），只有 A 路有。
+     *
+     * ## 第七十四轮：这才是这台车机上唯一能读 BYTES 属性的路
+     *
+     * 厂商 jar 里的 `CarPropertyManager` 只有两个 `getProperty`：
+     *
+     * ```
+     * <E> CarPropertyValue<E> getProperty(Class<E> clazz, int propId, int area)
+     *      CarPropertyValue    getProperty(int propId, int area)
+     * ```
+     *
+     * **没有** `getProperty(int[], Class)` —— 那是 AOSP 公开 SDK 的形状，
+     * ECARX 自己这份没有。所以原先那条「按字节读」的路在这台车机上**恒返回 null**。
+     *
+     * 属性类型由 `CarPropertyConfig.getPropertyType()` 给出（车机自己说了算），
+     * 所以正确做法是：**先问类型，再按类型读**。
+     */
+    private var mGetTypedA: Method? = null
+
     // ------------------------------------------------------------ 连接
 
     /**
@@ -350,6 +370,8 @@ object CarProperties {
         mGetValue = null
         mGetAreaIds = null
         mGetStatus = null
+        mGetBytesA = null
+        mGetTypedA = null
         propConfigCache = null
     }
 
@@ -535,7 +557,12 @@ object CarProperties {
             "car_service 属性清单",
             "count" to list.size,
             "doorProps" to list.filter { it.propertyId in DOOR_PROPERTY_IDS }
-                .joinToString(",") { "0x%08X/areas=%s".format(it.propertyId, it.areaIds.joinToString("&")) },
+                .joinToString(",") {
+                    // 第七十四轮：把 typeName 一并带出来。
+                    // 车门那组属性是「BYTES 还是数值」此前只能靠属性 id 的类型位推断；
+                    // 车机自己登记的 getPropertyType() 才是权威 —— 一次实车日志就能定论。
+                    "0x%08X/type=%s/areas=%s".format(it.propertyId, it.typeName, it.areaIds.joinToString("&"))
+                },
         )
         return list
     }
@@ -599,6 +626,7 @@ object CarProperties {
     private fun resolveMethodsA(m: Any) {
         mGetProperty2A = findMethod(m, "getProperty", 2)
         mGetProperty1A = findMethod(m, "getProperty", 1)
+        mGetTypedA = findTypedPropertyMethod(m)
         resolveValueMethods()
     }
 
@@ -655,15 +683,24 @@ object CarProperties {
     /**
      * 读一个 **类型为 `byte[]`** 的属性。
      *
-     * ## 为什么单独开一条
+     * ## 第七十四轮：这条路在这台车机上**走不通**，别再指望它
      *
-     * 厂商事件属性（MC / Geely 那一套）不是数值属性，而是**一段 protobuf 字节**：
-     * `CarPropertyManager.getProperty(int[] propertyIds, Class<T> clazz)`
-     * `List<T>`，取 `clazz = byte[].class` 时拿到的就是原始字节。
+     * 这里匹配的是 `getProperty(int[], Class)` —— **AOSP 公开 SDK** 的形状。
+     * ECARX 自己那份 `CarPropertyManager`（随 `ecarx.adapterapi.jar` 在系统分区）
+     * 只有两个 `getProperty`：
      *
-     * 这个重载**只有 A 路**（公开 API 的 `android.car.Car` → `CarPropertyManager`）有；
-     * B 路的 `IPropertyManager` 只有 `getProperty(int, int)`，读不了字节属性。
-     * 所以这里只走 A 路，读不到就返回 null。
+     * ```
+     * <E> CarPropertyValue<E> getProperty(Class<E> clazz, int propId, int area)
+     *      CarPropertyValue    getProperty(int propId, int area)
+     * ```
+     *
+     * **没有 `int[] + Class` 那个重载**，所以 [mGetBytesA] 恒为 null，
+     * 本方法在这台车机上**恒返回 null**（死路）。
+     *
+     * 保留它是因为：同一份代码在真正的 **CEVT 平台**（`android.car` 是 AOSP 原版）
+     * 上仍然有效，而属性通道的形状是车机给的、不由我们决定。
+     *
+     * 在这台车机上要读字节属性，请走 [readBytesViaClass]。
      */
     fun readBytes(propId: Int): ByteArray? {
         val m = managerA ?: return null
@@ -680,6 +717,84 @@ object CarProperties {
             list.firstOrNull() as? ByteArray
         }.getOrNull()
     }
+
+    /**
+     * 读一个属性（**按指定类型**），走 `getProperty(Class, propId, area)`。
+     *
+     * ## 为什么要带类型
+     *
+     * 同一个属性 id，取值类型是**属性 id 自带的位域**决定的，不是调用方随便挑的：
+     * `propId = (group << 24) | (type << 16) | id`，`type` 位取自 `VehiclePropertyType`
+     * （`STRING`/`BOOLEAN`/`INT32`/`FLOAT`/`BYTES`…）。
+     *
+     * 车门那组 `PA_CP_Door*Sts`（`0x21701414`~`0x21701418`）的类型位是
+     * `0x70 << 16` = **`VehiclePropertyType.BYTES`** —— 也就是说它们**读出来是 `byte[]`**，
+     * 用数值重载读会类型不符。
+     *
+     * 但这仍是**按位域推断**。车机自己知道真实类型：
+     * `CarPropertyConfig.getPropertyType()` 给出期望的 Java 类型，
+     * 见 [propertyTypeOf]。**先问类型再读**才是稳的做法。
+     *
+     * @return 读不到 / 类型不符返回 null
+     */
+    private fun readTypedA(propId: Int, areaId: Int, clazz: Class<*>): Any? {
+        val m = managerA ?: return null
+        val getter = mGetTypedA ?: run {
+            resolveMethodsA(m)
+            mGetTypedA
+        } ?: return null
+        return runCatching {
+            val value = getter.invoke(m, clazz, propId, areaId) ?: return null
+            if (!isValueUsable(value)) return null
+            val getValue = mGetValue ?: return value
+            runCatching { getValue.invoke(value) }.getOrNull() ?: value
+        }.getOrNull()
+    }
+
+    /**
+     * 按类型读一个 `byte[]` 属性（`getProperty(ByteArray.class, propId, area)`）。
+     *
+     * 这才是这台车机上读字节属性的**唯一**通路。
+     *
+     * @param areaId 区域号；整车级属性传 `0`
+     */
+    fun readBytesViaClass(propId: Int, areaId: Int): ByteArray? =
+        readTypedA(propId, areaId, ByteArray::class.java) as? ByteArray
+
+    /**
+     * 按类型读一个整数属性（`getProperty(Integer.class, propId, area)`）。
+     *
+     * 数值属性也可以用 [readInt]（走 `getProperty(int, int)`）；这条是
+     * 「先问车机要 `Integer`」的显式版本，类型不符时车机会直接拒，
+     * 不会像数值重载那样**把 byte[] 悄悄解成别的**。
+     */
+    fun readIntViaClass(propId: Int, areaId: Int): Int? {
+        val v = readTypedA(propId, areaId, java.lang.Integer::class.java)
+        return when (v) {
+            is Number -> v.toInt()
+            else -> null
+        }
+    }
+
+    /**
+     * 这个属性在这台车机上的**类型名**（`Integer` / `Float` / `byte[]` / `String` …）。
+     *
+     * 来源是 `CarPropertyConfig.getPropertyType()`，也就是车机自己登记的类型。
+     * 清单读不到时返回 `null`（**不是**「读不到」而是「没问出类型」）。
+     */
+    fun propertyTypeOf(propId: Int): String? {
+        val cfg = propertyConfigs()?.firstOrNull { it.propertyId == propId } ?: return null
+        return cfg.typeName.takeIf { it.isNotEmpty() && it != "?" }
+    }
+
+    /** 找 `getProperty(Class, int, int)` 这个重载。 */
+    private fun findTypedPropertyMethod(m: Any): Method? =
+        m.javaClass.methods.firstOrNull {
+            it.name == "getProperty" && it.parameterCount == 3 &&
+                it.parameterTypes[0] == Class::class.java &&
+                it.parameterTypes[1] == Integer.TYPE &&
+                it.parameterTypes[2] == Integer.TYPE
+        }
 
     private fun findMethod(m: Any, name: String, paramCount: Int): Method? =
         m.javaClass.methods.firstOrNull {

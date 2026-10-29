@@ -34,6 +34,55 @@ class HvacLogicTest {
 
     private fun lastWrite() = writes.last()
 
+    // ------------------------------------------------------------ 第七十四轮
+
+    @Test
+    fun `副驾座椅通风被拒绝 左舵车没有这条通路`() {
+        // 厂商的座椅通风是单座信号 PaSvcSts，按左右舵决定哪个 zone 有效
+        // （zone == 4 && isSteeringwheelRight() || zone == 1 && !isSteeringwheelRight()，
+        // CarFunctionValueImpl.java:2037-2044）。dcy11 是左舵车 → 副驾通风写下去必失败。
+        val h = logic()
+        h.cycleSeat(HvacIds.ZONE_PASSENGER, heat = false)
+        assertTrue(writes.isEmpty())
+    }
+
+    @Test
+    fun `前除霜 watcher 回灌认 MAX 那个号`() {
+        // 厂商对 DEFROST_FRONT 的读恒返回 255（未实现），真正可用的是 DEFROST_FRONT_MAX；
+        // 而 watcher 推上来的正是 MAX 的号 —— 之前这里只认 DEFROST_FRONT，回灌被丢弃。
+        val h = logic()
+        assertTrue(h.applyZone(HvacIds.DEFROST_FRONT_MAX, HvacIds.ZONE_GLOBAL, 1))
+        assertTrue(h.state.defrostFront)
+    }
+
+    @Test
+    fun `吹风模式写失败后回读对齐到车端真值`() {
+        // 厂商的吹风写是三个布尔（defrost/floor/vent）的与运算，任一路失败就返回 false，
+        // 但已经写进去的那一路不会回滚 → 必须回读一次把 UI 拉回车机真值。
+        val h = HvacLogic(
+            clock = { now },
+            write = { func, zone, value ->
+                writes.add(Triple(func, zone, value))
+                false
+            },
+            readSync = { func, _ -> if (func == HvacIds.BLOWING) HvacCodec.blowingRaw(2) else null },
+        )
+        h.setBlowing(5)
+        assertEquals(HvacCodec.blowingRaw(5), writes[0].third) // 确实写过了（乐观更新）
+        assertEquals(2, h.state.blowing)          // 但回读后 UI 跟回车端（脸+脚）
+    }
+
+    @Test
+    fun `副驾座椅加热仍然可以写 左舵车也支持加热`() {
+        // 座椅加热**不受**左右舵限制（zone1 → PaShcLeSts / zone4 → PaShcRiSts，无方向判断），
+        // 所以副驾加热是通的 —— 不能跟通风一起误伤。
+        val h = logic()
+        h.cycleSeat(HvacIds.ZONE_PASSENGER, heat = true)
+        assertTrue(writes.isNotEmpty())
+        assertEquals(HvacIds.SEAT_HEAT, writes[0].first)
+        assertEquals(HvacIds.ZONE_PASSENGER, writes[0].second)
+    }
+
     @Test
     fun powerOn_raisesFanToAtLeastOneAndWritesFanSpeed() {
         // —— 开机且风量 < 1 时
@@ -110,7 +159,7 @@ class HvacLogicTest {
         assertEquals(23.5f, HvacCodec.clampTemp(23.7f), 0.001f)
         assertEquals(24f, HvacCodec.clampTemp(23.8f), 0.001f)
         assertEquals(16f, HvacCodec.clampTemp(10f), 0.001f)
-        assertEquals(32f, HvacCodec.clampTemp(40f), 0.001f)
+        assertEquals(31f, HvacCodec.clampTemp(40f), 0.001f)
     }
 
     @Test

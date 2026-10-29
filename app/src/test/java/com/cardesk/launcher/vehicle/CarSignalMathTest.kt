@@ -125,6 +125,60 @@ class CarSignalMathTest {
         assertFalse(CarSignalMath.isUnsupportedRaw(553779968))
     }
 
+    // ------------------------------------------------------------ 厂商错误码（第七十四轮）
+
+    @Test
+    fun `253 与 254 也是厂商错误码 不是真值`() {
+        // 厂商的通用取值码：253 = COMMON_VALUE_ERROR、254 = COMMON_VALUE_NONE、255 = COMMON_VALUE_UNKNOWN。
+        // 最要命的是 HVAC_FUNC_TEMP 的整型读恒返回 253 ——
+        // 253/2 = 126.5 会被 clamp 成 32℃，也就是「读不到」伪装成「车机说 32 度」。
+        assertTrue(CarSignalMath.isUnsupportedRaw(253))
+        assertTrue(CarSignalMath.isUnsupportedRaw(254))
+    }
+
+    @Test
+    fun `interpretClosed 把 2 判为读不到而不是门关着`() {
+        // 2 = COMMON_VALUE_DEFAULT（默认值），不是开度百分比。
+        assertNull(CarSignalMath.interpretClosed(2))
+        // 3..5 仍按「0..100 开度」口径判为关闭
+        assertEquals(true, CarSignalMath.interpretClosed(3))
+        assertEquals(true, CarSignalMath.interpretClosed(5))
+    }
+
+    @Test
+    fun `车窗开度 固件说不支持时 0 也算读不到`() {
+        // 厂商的浮点读失败返回 0.0f（不是 -1），而 0.0f 恰好又是「窗关着」。
+        // 固件明确说「不支持这个区域」时，0 必须按「读不到」处理。
+        assertNull(CarSignalMath.interpretWindowPosition(0, supported = false))
+        assertNull(CarSignalMath.interpretWindowPosition(50, supported = false))
+        // 判不了（null）时保持原口径
+        assertEquals(false, CarSignalMath.interpretWindowPosition(0, supported = null))
+        assertEquals(true, CarSignalMath.interpretWindowPosition(50, supported = null))
+        // 支持时 0 = 关
+        assertEquals(false, CarSignalMath.interpretWindowPosition(0, supported = true))
+    }
+
+    @Test
+    fun `属性读法按车机登记的类型分派`() {
+        // 车门那组厂商属性的类型位是 0x70<<16 = BYTES → 走字节读
+        assertEquals(
+            CarSignalMath.PropReadKind.BYTES,
+            CarSignalMath.propReadKind("byte[]"),
+        )
+        assertEquals(
+            CarSignalMath.PropReadKind.BYTES,
+            CarSignalMath.propReadKind("byte"),
+        )
+        // 数值型
+        assertEquals(CarSignalMath.PropReadKind.NUMERIC, CarSignalMath.propReadKind("Integer"))
+        assertEquals(CarSignalMath.PropReadKind.NUMERIC, CarSignalMath.propReadKind("Float"))
+        assertEquals(CarSignalMath.PropReadKind.NUMERIC, CarSignalMath.propReadKind("Short"))
+        // 问不出类型 → 两种都试（字节优先）
+        assertEquals(CarSignalMath.PropReadKind.UNKNOWN, CarSignalMath.propReadKind(null))
+        assertEquals(CarSignalMath.PropReadKind.UNKNOWN, CarSignalMath.propReadKind("?"))
+        assertEquals(CarSignalMath.PropReadKind.UNKNOWN, CarSignalMath.propReadKind("String"))
+    }
+
     // ------------------------------------------------------------ 车窗归一化（第六十六轮）
 
     @Test

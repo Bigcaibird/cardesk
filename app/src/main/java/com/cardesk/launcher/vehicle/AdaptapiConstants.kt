@@ -120,6 +120,62 @@ object AdaptapiConstants {
     /** 氛围灯亮度 = 低。 */
     const val AMBIENT_BRIGHTNESS_LOW = "BRIGHTNESS_DRIVING_LOW"
 
+    /**
+     * 氛围灯亮度（**静止档**）。
+     *
+     * 厂商把亮度分成**两套互不相干**的档位：
+     * - 行车：`SETTING_FUNC_AMBIENCE_LIGHT_BRIGHTNESS_DRIVING`（`0x200A0700`）
+     *   + `BRIGHTNESS_DRIVING_LOW` / `BRIGHTNESS_DRIVING_HIGH`；
+     * - 静止：`SETTING_FUNC_AMBIENCE_LIGHT_BRIGHTNESS_STATIONARY`（`0x200A0600`）
+     *   + `BRIGHTNESS_STATIONARY_LOW` / `BRIGHTNESS_STATIONARY_HIGH`。
+     *
+     * 两套的常量**值不同**（静止 LOW=`537527809`，行车 LOW=`537528065`），
+     * 写错功能号就等于把「行车亮度」写成了「静止亮度」。
+     */
+    const val FUNC_AMBIENT_BRIGHTNESS_STATIONARY = "SETTING_FUNC_AMBIENCE_LIGHT_BRIGHTNESS_STATIONARY"
+
+    /**
+     * 氛围灯**体验模式**（完整灯效 / 自定义）。
+     *
+     * 厂商取值只有两档（`IVehicle`）：
+     * `AMBIENCE_LIGHT_EXPERIENCE_FULL` → `CbAmlExperienceSettingValue.PUSHED`、
+     * `AMBIENCE_LIGHT_EXPERIENCE_CUSTOM` → `CbAmlExperienceSettingValue.NOTPUSHED`。
+     *
+     * 它和 `SETTING_FUNC_AMBIENCE_LIGHT_MAINCOLOR`（主色来源）是**两回事**：
+     * 一个选「灯效玩法」，一个选「颜色从哪来」。
+     */
+    const val FUNC_AMBIENT_EXPERIENCE = "SETTING_FUNC_AMBIENCE_LIGHT_EXPERIENCE"
+
+    /** 氛围灯亮度（静止档）= 低。 */
+    const val AMBIENT_BRIGHTNESS_STATIONARY_LOW = "BRIGHTNESS_STATIONARY_LOW"
+
+    /** 氛围灯亮度（静止档）= 高。 */
+    const val AMBIENT_BRIGHTNESS_STATIONARY_HIGH = "BRIGHTNESS_STATIONARY_HIGH"
+
+    /** 氛围灯体验模式 = 自定义（厂商映射到 `CbAmlExperienceSettingValue.NOTPUSHED`）。 */
+    const val AMBIENT_EXPERIENCE_CUSTOM = "AMBIENCE_LIGHT_EXPERIENCE_CUSTOM"
+
+    /** 氛围灯体验模式 = 完整（厂商映射到 `CbAmlExperienceSettingValue.PUSHED`）。 */
+    const val AMBIENT_EXPERIENCE_FULL = "AMBIENCE_LIGHT_EXPERIENCE_FULL"
+
+    /**
+     * 氛围灯三个分区的功能号名字（顺序 **主 / 上 / 下**）。
+     *
+     * 厂商把分区做成了**三个独立功能号**：
+     * `SETTING_FUNC_AMBIENCE_LIGHT_MAINZONES`（`0x200A0500`）、
+     * `SETTING_FUNC_AMBIENCE_LIGHT_TOPZONES`（`0x200A0400`）、
+     * `SETTING_FUNC_AMBIENCE_LIGHT_BOTZONES`（`0x200A0300`），
+     * 写值都只有 `0` / `1`（`getMappedCbAml*ZonesSettingValue` 只认这两个）。
+     *
+     * 根因：只写主区的话**上/下分区不会亮** —— 三个功能号各写各的，
+     * 写一个不会带上另外两个。
+     */
+    val AMBIENT_ZONE_FUNC_NAMES = arrayOf(
+        FUNC_AMBIENT_MAIN_ZONES,
+        FUNC_AMBIENT_TOP_ZONES,
+        FUNC_AMBIENT_BOT_ZONES,
+    )
+
     // ------------------------------------------------------------ 候选类
 
     /**
@@ -279,6 +335,16 @@ object AdaptapiConstants {
         val list = WINDOW_ZONE_NAMES.map { resolve(it) }
         return if (list.all { it == null }) null else list
     }
+
+    /**
+     * 氛围灯三个分区的功能号（按名解析，顺序 **主 / 上 / 下**）。
+     *
+     * 每一项独立：解析不到的留 null，其余照常 ——
+     * 少一个分区就少写那个分区，**不拿别的分区的号顶替**。
+     *
+     * @return 三个分区各自的功能号（顺序同 [AMBIENT_ZONE_FUNC_NAMES]）
+     */
+    fun ambientZoneFuncs(): List<Int?> = AMBIENT_ZONE_FUNC_NAMES.map { resolve(it) }
 
     /**
      * 引擎盖区域号（jar 里的 `DOOR_HOOD`）；解析不到返回 null。

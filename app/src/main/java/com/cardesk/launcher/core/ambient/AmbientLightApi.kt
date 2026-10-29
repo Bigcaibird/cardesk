@@ -44,6 +44,23 @@ interface AmbientLightApi {
 
     /** 设置亮度（0..100）。 */
     fun setBrightness(brightness: Int): Boolean
+
+    /**
+     * 设置**静止时**亮度（0..100）。
+     *
+     * ## 第七十四轮：行车亮度与静止亮度是**两个功能号**
+     *
+     * 厂商把氛围灯亮度拆成两档：
+     * `SETTING_FUNC_AMBIENCE_LIGHT_BRIGHTNESS_DRIVING`（行车）与
+     * `SETTING_FUNC_AMBIENCE_LIGHT_BRIGHTNESS_STATIONARY`（静止），
+     * 底层信号分别是 `PaAmlBriDrivSetting` / `PaAmlBriStatSetting`。
+     *
+     * 停好车、等人上车时该亮的那档，是**静止**这一档。
+     *
+     * 默认实现返回 false —— 没实装的通道（[NullAmbientLightApi]）当作「不支持」，
+     * 调用方据此保持原状即可，不必每个实现都写一遍。
+     */
+    fun setStationaryBrightness(brightness: Int): Boolean = false
 }
 
 /**

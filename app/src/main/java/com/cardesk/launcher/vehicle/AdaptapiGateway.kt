@@ -292,9 +292,21 @@ class AdaptapiGateway(private val context: Context) : VehicleGateway {
     }
 
     /**
-     * 写温度：优先 float 通道 `setCustomizeFunctionValue(func, zone, celsius)`，
-     * 失败退化为 `setFunctionValue(FUNC_TEMP, zone, round(celsius*2))`
+     * 写温度：走 float 通道 `setCustomizeFunctionValue(func, zone, celsius)`。
      *
+     * ## 第七十四轮：删掉整型回退
+     *
+     * 之前浮点写失败会退到 `setFunctionValue(FUNC_TEMP, zone, round(celsius*2))`。
+     * 但厂商的**整型写对 `HVAC_FUNC_TEMP` 是 unsupported** ——
+     * `CarFunctionValueImpl.java:1137` 原文：
+     * `"Set function by integer is not supported for IHvac.HVAC_FUNC_TEMP, please use setCustomizeFunctionValue"`
+     * 然后直接 `return false`。
+     *
+     * 也就是说这条回退**注定失败**：白跑一次 binder 事务，
+     * 还会把「写入失败」这个结论报给上层（用户看到「点了没反应」）。
+     *
+     * 另外浮点写**必须带 zone**（1 = 主驾 / 4 = 副驾）：
+     * 两参重载会把 zone 设成 0，厂商那边判「not a valid zone」直接 false。
      */
     override fun setTemp(zone: Int, celsius: Float): Boolean {
         val f = ensureFunction() ?: run {
@@ -322,15 +334,17 @@ class AdaptapiGateway(private val context: Context) : VehicleGateway {
             )
             return true
         }
-        // 退化路径：内部整型通道（setHvac 内部已记一条写入日志）
-        Logx.d(
+        // 不再退回整型通道：厂商那边整型写恒 false（见上面的源码依据）。
+        lastError = "温度 float 通道写入被拒（zone=$zone）"
+        Logx.w(
             LogTags.VEHICLE,
-            "温度 float 通道不可用，退回整型通道",
+            "写入温度失败",
             "zone" to zone,
             "celsius" to celsius,
-            "raw" to HvacCodec.tempRaw(celsius),
+            "channel" to "float",
+            "reason" to lastError,
         )
-        return setHvac(HvacIds.TEMP, zone, HvacCodec.tempRaw(celsius))
+        return false
     }
 
     /**
@@ -647,14 +661,24 @@ class AdaptapiGateway(private val context: Context) : VehicleGateway {
         return CarSignalMath.functionSupported(name)
     }
 
+    /**
+     * 读一个功能号（整型通道）。
+     *
+     * ## 第七十四轮：把厂商的三个错误码一起挡掉
+     *
+     * 之前只挡 `-1` 和 `Int.MIN_VALUE`，于是 `253` / `254` 会流进业务逻辑 ——
+     * 最要命的是 `HVAC_FUNC_TEMP` 的整型读**恒返回 253**
+     * （厂商源码 `CarFunctionValueImpl.java:399`）。
+     * 现在统一走 [CarSignalMath.isUnsupportedRaw]：`253`/`254`/`255`/`-1` 一律当「读不到」。
+     */
     private fun readFunc(f: Any, func: Int, zone: Int): Int? {
         findMethod(f, "getFunctionValue", INT, INT)?.let { m ->
             val v = runCatching { m.invoke(f, func, zone) as? Int }.getOrNull()
-            if (v != null && v != INVALID && v != Int.MIN_VALUE) return v
+            if (v != null && !CarSignalMath.isUnsupportedRaw(v)) return v
         }
         findMethod(f, "getFunctionValue", INT)?.let { m ->
             val v = runCatching { m.invoke(f, func) as? Int }.getOrNull()
-            if (v != null && v != INVALID && v != Int.MIN_VALUE) return v
+            if (v != null && !CarSignalMath.isUnsupportedRaw(v)) return v
         }
         return null
     }
@@ -666,7 +690,7 @@ class AdaptapiGateway(private val context: Context) : VehicleGateway {
     private fun readDefrost(f: Any, func: Int): Int? {
         findMethod(f, "getFunctionValue", INT)?.let { m ->
             val v = runCatching { m.invoke(f, func) as? Int }.getOrNull()
-            if (v != null && v != INVALID && v != Int.MIN_VALUE) return v
+            if (v != null && !CarSignalMath.isUnsupportedRaw(v)) return v
         }
         readFunc(f, func, HvacIds.ZONE_DRIVER)?.let { return it }
         readFunc(f, func, 0)?.let { return it }
@@ -680,7 +704,7 @@ class AdaptapiGateway(private val context: Context) : VehicleGateway {
     private fun readCirculation(f: Any): Int? {
         findMethod(f, "getFunctionValue", INT)?.let { m ->
             val v = runCatching { m.invoke(f, HvacIds.CIRCULATION) as? Int }.getOrNull()
-            if (v != null && v != INVALID && v != Int.MIN_VALUE) return v
+            if (v != null && !CarSignalMath.isUnsupportedRaw(v)) return v
         }
         readFunc(f, HvacIds.CIRCULATION, HvacIds.ZONE_DRIVER)?.let { return it }
         readFunc(f, HvacIds.CIRCULATION, 0)?.let { return it }
@@ -688,22 +712,31 @@ class AdaptapiGateway(private val context: Context) : VehicleGateway {
     }
 
     /**
-     * 读温度：优先 `getCustomizeFunctionValue(func, zone)`（返回 Float），
-     * 失败退 `getFunctionValue(func, zone) / 2`
+     * 读温度：走 `getCustomizeFunctionValue(func, zone)`（返回 Float）。
      *
+     * ## 第七十四轮：删掉整型回退
      *
-     * 再失败退 **zone 0**（：主驾读 zone 1 → zone 0
-     * 副驾读 zone 4 → zone 0。
+     * 之前浮点通道失败会退到 `getFunctionValue(func, zone) / 2`。
+     * 但厂商的**整型**读对 `HVAC_FUNC_TEMP` 是**恒返回 253**
+     * （`CarFunctionValueImpl.java:399`：`case 268828928: … return 253;`）——
+     * 于是 `253 / 2 = 126.5`，被 clamp 成 **32℃**：
+     * **「读不到」被伪装成「车机说 32 度」**。
+     *
+     * 厂商自己在 `getFunctionValue` 的注释里也写了
+     * `Set function by integer is not supported for IHvac.HVAC_FUNC_TEMP, please use setCustomizeFunctionValue`。
+     *
+     * 现在浮点通道失败就是**读不到**（null），上层保留上一次的镜像值，
+     * 宁可显示旧值，也不显示一个假的温度。
+     *
+     * @param zone 主驾 1 / 副驾 4
      */
     private fun readCustomizeTemp(f: Any, zone: Int): Float? {
         findMethod(f, "getCustomizeFunctionValue", INT, INT)?.let { m ->
             val v = runCatching { m.invoke(f, HvacIds.TEMP, zone) as? Float }.getOrNull()
-            if (v != null && v >= HvacIds.TEMP_MIN && v <= HvacIds.TEMP_MAX + 1f) return v
+            // 接受窗就是厂商的 [TEMP_MIN, TEMP_MAX]，不再放宽到 +1。
+            if (v != null && v >= HvacIds.TEMP_MIN && v <= HvacIds.TEMP_MAX) return v
         }
-        val raw = readFunc(f, HvacIds.TEMP, zone)
-            ?: readFunc(f, HvacIds.TEMP, 0)
-            ?: return null
-        return if (raw > 0) raw / 2f else null
+        return null
     }
 
     /** 最近的反射失败原因，便于设置页/日志展示。 */

@@ -36,6 +36,14 @@ import java.lang.reflect.Proxy
  * 之前胎压是**写死 NaN** 的（`VehicleInfo.currentVehicleInfo` 里
  * `tires = floatArrayOf(NaN, NaN, NaN, NaN)`，根本没接任何数据源
  * 真机胎压卡永远是 `NaN`。这次把真正用的 TPMS 通道补上。
+ *
+ * ## 无效值
+ *
+ * 车端用 `Float.MIN_VALUE`（1.4E-45）表示「这个轮子的压力读不到」：
+ * 单位取不到、availability 不是 `ACTIVE`、或者压力超上限 `637.5 kPa`
+ * —— 三种情况都归一成这一个值（`TireStateManager.java:42,46`）。
+ * 之前我们**原样返回**，桌面就会把 `1.4E-45` 当成一个真实的压力显示出来。
+ * 现在统一在 [validPressure] 里过滤掉。
  */
 object AdaptapiTpms {
 
@@ -58,6 +66,53 @@ object AdaptapiTpms {
      * kPa ↔ bar 的换算系数是 0.01、kPa ↔ PSI 是 0.145，**底层存的就是 kPa**。
      */
     private var pressures: FloatArray? = null
+
+    // ------------------------------------------------------------ 无效值约定
+
+    /**
+     * 厂商的**胎压物理上限**（`TireStateManager.UPPER_LIMIT = 637.5f`，
+     * `TireStateManager.java:46`）。
+     *
+     * `637.5 kPa ≈ 92.5 psi`；车端 `update*TirePressure` 里
+     * `newValue >= UPPER_LIMIT` 一律归一成「无效压力」。
+     */
+    const val PRESSURE_UPPER_LIMIT = 637.5f
+
+    /**
+     * 「这个压力就是没读到」的阈值（`TireStateManager.THRESHOLD = 1.0E-4f`，
+     * `TireStateManager.java:45`）。
+     *
+     * 厂商的「无效压力」是 `INVALID_PRESSURE = Float.MIN_VALUE`（1.4E-45，
+     * `TireStateManager.java:42`），它落在 `1e-4f` 以下，
+     * 所以用 `p <= 1e-4f` 一条就能把 `Float.MIN_VALUE` 一起盖住。
+     */
+    const val PRESSURE_EPSILON = 1e-4f
+
+    /**
+     * 过滤厂商的「无效压力」标记。
+     *
+     * 车端的约定（`TireStateManager`）：
+     * - 单位取不到（`PaDTpmsUnitSetting` 为空 / 单位不认识）或
+     *   availability 不是 `ACTIVE` → 返回 `Float.MIN_VALUE`（1.4E-45）；
+     * - 压力 `>= 637.5f` → 同样归一成 `Float.MIN_VALUE`。
+     *
+     * 另外 `TireState` 的初值就是 `mPressure = Float.MIN_VALUE`
+     * （`TireState.java:20`）—— 也就是说**从没更新过的轮子也是这个值**。
+     *
+     * 所以这些值**不是压力**，直接当成「读不到」。
+     *
+     * @return null = 读不到（厂商的无效值）
+     */
+    fun validPressure(raw: Float?): Float? {
+        if (raw == null) return null
+        // NaN 同样不是压力（比较运算对 NaN 恒 false，只能单独判）
+        if (raw.isNaN()) return null
+        // 无效标记 Float.MIN_VALUE(1.4E-45) 与「车端还没给值」的 0 都在这下面
+        if (raw <= PRESSURE_EPSILON) return null
+        // 超出物理上限 → 厂商也把它归一成无效值
+        if (raw >= PRESSURE_UPPER_LIMIT) return null
+        return raw
+    }
 
     /** 上次一次的模式（用于日志）。 */
     private var lastError: String? = null
@@ -173,7 +228,13 @@ object AdaptapiTpms {
         var any = false
         for ((pos, index) in POS_TO_INDEX) {
             val state = runCatching { getState.invoke(t, pos) }.getOrNull() ?: continue
-            val pressure = readPressure(state) ?: continue
+            val raw = readRawPressure(state) ?: continue
+            val pressure = validPressure(raw)
+            if (pressure == null) {
+                // 厂商的「无效压力」标记（Float.MIN_VALUE / 超上限）—— 不是压力，记一笔。
+                Logx.w(LogTags.SIGNAL, "胎压是厂商的无效值（忽略）", "pos" to pos, "raw" to raw)
+                continue
+            }
             out[index] = pressure
             any = true
         }
@@ -184,11 +245,24 @@ object AdaptapiTpms {
         publish(out)
     }
 
-    private fun readPressure(state: Any): Float? = runCatching {
+    /**
+     * 读一个轮子的**原始**胎压（反射 `getPressure()`）。
+     *
+     * 返回的是车端的原值，**没过滤** —— 过滤见 [validPressure]。
+     */
+    private fun readRawPressure(state: Any): Float? = runCatching {
         state.javaClass.methods.firstOrNull {
             it.name == "getPressure" && it.parameterCount == 0
         }?.invoke(state) as? Float
     }.getOrNull()
+
+    /**
+     * 读一个轮子的胎压；**读不到返回 null**。
+     *
+     * 车端返回的「无效值」（`Float.MIN_VALUE` / 超上限）在这里就被滤掉，
+     * 不能让它进 [pressures] —— 桌面会把 1.4E-45 当成一个真实的压力显示。
+     */
+    private fun readPressure(state: Any): Float? = validPressure(readRawPressure(state))
 
     /** 注册胎压变化监听。 */
     private fun registerMonitor(t: Any) {

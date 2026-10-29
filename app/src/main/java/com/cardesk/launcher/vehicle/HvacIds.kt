@@ -83,8 +83,14 @@ object HvacIds {
     val DEFROST_ZONES = intArrayOf(2, 1, 0)
 
     // 温度范围
+    //
+    // 第七十四轮：上限从 32 改成 **31**。
+    // 厂商源码 `CarFunctionCustomizedValueImpl.java:33` 写的是
+    // `private static final float TEMP_MAX = 31.0f;`（MIN=16.0f / STEP=0.5f）。
+    // 之前写 32 是拍的 —— UI 因此允许设到 32℃，**超出厂商上限**，
+    // 表现就是「滑块顶到头但车里不跟着变」。
     const val TEMP_MIN = 16f
-    const val TEMP_MAX = 32f
+    const val TEMP_MAX = 31f
     const val TEMP_STEP = 0.5f
 
     const val FAN_MIN = 0

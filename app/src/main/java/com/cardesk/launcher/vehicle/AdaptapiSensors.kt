@@ -20,14 +20,14 @@ import java.util.concurrent.atomic.AtomicInteger
  * - 监听注册：`sensor.registerListener(listener, SENSOR_XXX)`
  * - 取最新值：`sensor.getSensorLatestValue(id)`
  *
- * | 传感器 id | 常量 | 含义 |
- * | --- | --- | --- |
- * | 1050624 | `SENSOR_ENDURANCE_KM` | 续航（km） |
- * | 4211456 | `SENSOR_POTENTIAL_ENDURANCE` | 潜在续航 |
- * | 4211200 | `SENSOR_DISCHARGE_ENDURANCE` | 放电续航 |
- * | 4210944 | `SENSOR_CHARGE_ENDURANCE` | 充电续航 |
- * | 1050112 | `SENSOR_FUEL_LEVEL` | 油量（原始值） |
- * | 1051392 | `SENSOR_TEMP_AMBIENT` | 环温（℃） |
+ * | 传感器 id | 常量 | 含义 | SDK 里实现了吗 |
+ * | --- | --- | --- | --- |
+ * | 1050624 | `SENSOR_ENDURANCE_KM` | 续航（km） | ✅ `SensorImpl.getSensorLatestValue` 有这个 case |
+ * | 1050112 | `SENSOR_FUEL_LEVEL` | 油量（原始值） | ✅ 同上 |
+ * | 4211456 | `SENSOR_POTENTIAL_ENDURANCE` | 潜在续航 | ❌ 只有常量定义，取值恒 `-1.0f` |
+ * | 4211200 | `SENSOR_DISCHARGE_ENDURANCE` | 放电续航 | ❌ 同上 |
+ * | 4210944 | `SENSOR_CHARGE_ENDURANCE` | 充电续航 | ❌ 同上 |
+ * | 1051392 | `SENSOR_TEMP_AMBIENT` | 环温（℃） | ❌ 同上（连监听都注册不上） |
  *
  * 油箱容量另走 `iCar.getCarInfoManager().getCarInfoFloat(INFO_FUEL_CAPACITY = 2097408)`
  * 百分比换算口径见。
@@ -48,7 +48,16 @@ import java.util.concurrent.atomic.AtomicInteger
  *   容量未知或很小（<= 200）时，`raw` 在 `0..100` 就当百分比直接用，
  *   否则先把 `raw` 除以 1000 再当百分比；最后统一夹到 `0..100`；
  *   **另外：`raw <= 0` 一律当「没有数据」**（见第六十四轮）；
- * - 环温：四舍五入后必须落在 `-40..80`，否则丢弃。
+ * - 环温：**没有这一条了** —— `ISensor` 上的环温传感器在 SDK 里没实现
+ *   （见 [SENSOR_TEMP_AMBIENT]），不能拿它当环温来源。
+ *
+ * ## 传感器列表的收缩
+ *
+ * `ISensor` 的取值接口 `SensorImpl.getSensorLatestValue` 只实现了 8 个传感器，
+ * 其余 id 恒返回 `-1.0f`。之前我们的列表里挂了几个**只定义了常量、没实现取值**的
+ * 传感器（潜在/放电/充电续航）和一个没实现的环温传感器，
+ * 探针每轮白读一次、日志里多一条 INFO —— 现在都从列表里去掉了。
+ * 油量与续航这两条真正在用的探针逻辑**没有动**。
  *
  * ## 第六十四轮：油量「永远拿不到」的修复
  *
@@ -70,16 +79,57 @@ object AdaptapiSensors {
 
     // ------------------------------------------------------------常量
 
+    /** 油量（`ISensor.SENSOR_TYPE_FUEL_LEVEL`）；SDK 里有实现。 */
     const val SENSOR_FUEL_LEVEL = 1050112
 
+    /** 续航（`ISensor.SENSOR_TYPE_ENDURANCE_MILEAGE`）；SDK 里有实现。 */
     const val SENSOR_ENDURANCE_KM = 1050624
 
+    /**
+     * 潜在续航（`IVirtualSensor.TYPE_POTENTIAL_ENDURANCE_MILEAGE`）。
+     *
+     * **SDK 里只有常量定义，没有实现取值**：
+     * `SensorImpl.getSensorLatestValue` 的 8 个 case 里没有它 →
+     * 落到 `default: return -1.0f`（`SensorImpl.java:250-251`）；
+     * `SensorListener.mListenableSensors` 里也没有它 →
+     * `registerListener` 直接 `return false`（`SensorListener.java:271-274`）。
+     *
+     * 之前它挂在续航探针的传感器列表里，探针每轮都白读一次 `-1.0f`。
+     */
     const val SENSOR_POTENTIAL_ENDURANCE = 4211456
 
+    /**
+     * 放电续航（`IVirtualSensor.TYPE_DISCHARGING_ENDURANCE_MILEAGE`）。
+     *
+     * **SDK 里没有实现取值**，理由同 [SENSOR_POTENTIAL_ENDURANCE]。
+     */
     const val SENSOR_DISCHARGE_ENDURANCE = 4211200
 
+    /**
+     * 充电续航（`IVirtualSensor.TYPE_CHARGING_ENDURANCE_MILEAGE`）。
+     *
+     * **SDK 里没有实现取值**，理由同 [SENSOR_POTENTIAL_ENDURANCE]。
+     */
     const val SENSOR_CHARGE_ENDURANCE = 4210944
 
+    /**
+     * 环温（`ISensor.SENSOR_TYPE_TEMPERATURE_AMBIENT`）。
+     *
+     * **这个传感器在 SDK 里根本没实现，读不到**：
+     * - `SensorImpl.getSensorLatestValue` 的 8 个 case 里没有 1051392
+     *   → 落到 `default: return -1.0f`（`SensorImpl.java:250-251`）；
+     * - `SensorListener.mListenableSensors` 里也没有它
+     *   → `registerListener` 直接 `return false`（`SensorListener.java:271-274`）。
+     *
+     * 注意 **`-1.0f` 不能当成无效值过滤掉**：-1℃ 是合法的环温，
+     * 靠数值判断分不出「没实现」和「真的是 -1℃」——
+     * 所以只能把它从传感器列表里去掉，不能留在探针里当环温来源。
+     *
+     * 真正的环温要走**属性通道**
+     * `ENV_OUTSIDE_TEMPERATURE = 291505923`（`VehicleIds.ENV_OUTSIDE_TEMPERATURE`）——
+     * 那是**另一条取数路径**，本次不接（只修缺陷，不加新通道）；
+     * 这里把正确路径记下来，等以后要显示环温时再接。
+     */
     const val SENSOR_TEMP_AMBIENT = 1051392
 
     const val INFO_FUEL_CAPACITY = 2097408
@@ -112,12 +162,24 @@ object AdaptapiSensors {
     /** 「油箱容量读不到」这条 WARN 的最小间隔（毫秒）。 */
     const val FUEL_CAPACITY_WARN_MS = 60_000L
 
-    /** （按优先级顺序）。 */
+    /**
+     * 续航探针要探的传感器 id（按优先级顺序）。
+     *
+     * **只列 SDK 真正实现了取值的那些**：
+     * `SensorImpl.getSensorLatestValue` 只有 8 个 case
+     * （1048832 车速 / 1049344 PM2.5 / 1049856 AQI / 1050112 油量 /
+     * 1050368 总里程 / 1050624 续航 / 4206592 保养里程 / 4210688 SOC%），
+     * 其它 id 一律落 `default: return -1.0f`（`SensorImpl.java:224-252`）。
+     *
+     * 之前这里还挂着 4211456（潜在续航）/ 4211200（放电续航）/ 4210944（充电续航）——
+     * 那三个在 SDK 里**只有常量定义、没有取值实现**，
+     * 探针每轮都白读一次 `-1.0f`（还会打一条 INFO 日志），纯属浪费。
+     *
+     * 油量不在这个列表里：它走 [probeFuel]，跟着同一个探针节奏跑，
+     * 但读的是自己的 id（1050112，SDK 里是有实现的）。
+     */
     val RANGE_SENSORS = intArrayOf(
         SENSOR_ENDURANCE_KM,
-        SENSOR_POTENTIAL_ENDURANCE,
-        SENSOR_DISCHARGE_ENDURANCE,
-        SENSOR_CHARGE_ENDURANCE,
     )
 
     /** 反射用：`int` 的原始类型。 */
@@ -139,7 +201,15 @@ object AdaptapiSensors {
     /** 油量百分比；-1 = 不可读。 */
     private val fuelPct = AtomicInteger(-1)
 
-    /** 环温（℃）；[Int.MIN_VALUE] = 不可读。 */
+    /**
+     * 环温（℃）；[Int.MIN_VALUE] = 不可读。
+     *
+     * **当前恒为「不可读」**：`ISensor` 那条通道上的环温传感器（1051392）
+     * 在 SDK 里没有实现（`getSensorLatestValue` 恒 -1.0f、`registerListener` 直接 false），
+     * 所以这里**不会**再有环温值进来 —— 理由见 [SENSOR_TEMP_AMBIENT]。
+     *
+     * 字段先留着：以后接上属性通道 `ENV_OUTSIDE_TEMPERATURE` 时直接复用。
+     */
     private val ambientC = AtomicInteger(Int.MIN_VALUE)
 
     /** 上次一次取到的续航原始值（换算用）。 */
@@ -270,8 +340,11 @@ object AdaptapiSensors {
             null
         }
         listener = proxy
-        // 油量 + 4 个续航 + 环温
-        for (id in intArrayOf(SENSOR_FUEL_LEVEL) + RANGE_SENSORS + intArrayOf(SENSOR_TEMP_AMBIENT)) {
+        // 油量 + 续航。
+        // 环温（1051392）**不在这个列表里**：SDK 里 `getSensorLatestValue` 没有它的 case
+        // （恒 -1.0f）、`registerListener` 也不让它注册，注册它只会多一条
+        // 「注册失败」的日志，却拿不到任何环温 —— 理由见 [SENSOR_TEMP_AMBIENT]。
+        for (id in intArrayOf(SENSOR_FUEL_LEVEL) + RANGE_SENSORS) {
             val ok = runCatching {
                 register.invoke(s, proxy, id) as? Boolean ?: true
             }.getOrElse {
@@ -416,16 +489,10 @@ object AdaptapiSensors {
                 lastFuelRaw = raw
                 publishFuel(raw)
             }
-            SENSOR_ENDURANCE_KM, SENSOR_POTENTIAL_ENDURANCE,
-            SENSOR_DISCHARGE_ENDURANCE, SENSOR_CHARGE_ENDURANCE,
-            -> publishRangeKm("sensor.$id", raw)
-            SENSOR_TEMP_AMBIENT -> {
-                val t = CarSignalMath.ambientTempC(raw) ?: return
-                val old = ambientC.getAndSet(t)
-                if (old != t) {
-                    Logx.i(LogTags.SIGNAL, "环温变化", "from" to old, "to" to t)
-                }
-            }
+            // 只有续航这一路是真的实现了取值（`SENSOR_ENDURANCE_KM` = 1050624）。
+            // 环温没有分支：SDK 里那个传感器没实现（恒 -1.0f），
+            // 留着分支只会把「没实现」当成「环温变了」发出去 —— 见 [SENSOR_TEMP_AMBIENT]。
+            SENSOR_ENDURANCE_KM -> publishRangeKm("sensor.$id", raw)
         }
     }
 
@@ -620,7 +687,14 @@ object AdaptapiSensors {
     /** 最近一次读到的油箱容量；0 = 没读到。 */
     fun fuelCapacityValue(): Float = fuelCapacity()
 
-    /** 环温（℃）；[Int.MIN_VALUE] = 不可读。 */
+    /**
+     * 环温（℃）；[Int.MIN_VALUE] = 不可读。
+     *
+     * **恒为 [Int.MIN_VALUE]（不可读）** —— `ISensor` 上的环温传感器在 SDK 里
+     * 没有实现，不能把它当环温来源；正确的路径是属性通道
+     * `ENV_OUTSIDE_TEMPERATURE = 291505923`（`VehicleIds.ENV_OUTSIDE_TEMPERATURE`），
+     * 本次不接。
+     */
     fun ambientTempC(): Int = ambientC.get()
 
     /** 是否已经挂上 ISensor。 */

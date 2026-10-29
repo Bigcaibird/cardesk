@@ -74,8 +74,10 @@ class AdaptapiBodyTest {
         assertEquals(false, CarSignalMath.interpretClosed(553844994))
         assertEquals(false, CarSignalMath.interpretClosed(553844993))
         assertEquals(false, CarSignalMath.interpretClosed(553779457))
-        // (1, 100] → <= 5 关，其余开
-        assertEquals(true, CarSignalMath.interpretClosed(2))
+        // (3, 100] → <= 5 关，其余开
+        // 第七十四轮：2 是厂商的 COMMON_VALUE_DEFAULT（默认值），不是开度 → 读不出来
+        assertNull(CarSignalMath.interpretClosed(2))
+        assertEquals(true, CarSignalMath.interpretClosed(3))
         assertEquals(true, CarSignalMath.interpretClosed(5))
         assertEquals(false, CarSignalMath.interpretClosed(6))
         assertEquals(false, CarSignalMath.interpretClosed(100))

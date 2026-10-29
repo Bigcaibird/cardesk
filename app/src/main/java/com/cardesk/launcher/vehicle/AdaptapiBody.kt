@@ -33,7 +33,22 @@ import com.cardesk.launcher.core.log.Logx
  * - **四个侧门**：先问固件支持探针，说「不支持」就**不探**（省掉每秒 4 次无效调用），
  *   说「支持」就照读；判不了就退回老口径；
  * - **后备箱 / 引擎盖**：走 `BCM_FUNC_DOOR` + `DOOR_REAR` / `DOOR_HOOD` 区域，
- *   口径只认 `0`（关）/ `1`（开），厂商的 `IDLE` / `STOP`（映射到 `553844993`）**读不出来**。
+ *   口径只认 `0`（关）/ `1`（开），厂商的 `IDLE` / `STOP`（映射到 `553844993`）**读不出来**；
+ * - **尾门写入**：走 `BCM_FUNC_DOOR` + `DOOR_REAR` 区域 + `0` / `1`
+ *   （厂商 `setCbSpeechTargetTrCtrl`，写侧映射只认这两个值），见 [writeTrunk]。
+ *
+ * ## 尾门能开能关，只是以前**只读不写**
+ *
+ * 厂商 jar 里 `BCM_FUNC_DOOR` 是**读、写都实现了**的一条功能号
+ * （`case IBcm.BCM_FUNC_DOOR` 在 `getFunctionValue` 与 `setFunctionValue` 里各有一处），
+ * 我们之前只用了读的那一半 —— 全项目没有任何写入尾门的调用。
+ *
+ * 写的时候有两处必须当心：
+ *
+ * - **区域号按名解析** `VehicleDoor.DOOR_REAR`：厂商 set 分支写死了
+ *   `zone == 536870912`，别的区域直接 `returns false`；解析不到就**不写**。
+ * - **值只有 `0` / `1`**：`getMappedCbSpeechTargetTrCtrlValue` 把其它值一律判为
+ *   「不支持」，其中 `553779457` 是 `STOP`（**暂停**），不是「开」。
  *
  * ## 与一处刻意差异
  *
@@ -57,6 +72,18 @@ object AdaptapiBody {
      * 其它区域一律返回 `-1`。
      */
     const val BCM_DOOR = 553779456
+
+    /**
+     * 尾门写入值：**开**。
+     *
+     * 厂商 `CarFunctionValueUtil.getMappedCbSpeechTargetTrCtrlValue`：
+     * `0` → `CbSpeechTargetTrCtrlValue.CLOSE`、`1` → `OPEN`，
+     * **其余值一律 `null`**（写不进去）。
+     */
+    const val TRUNK_OPEN = 1
+
+    /** 尾门写入值：**关**（厂商映射到 `CbSpeechTargetTrCtrlValue.CLOSE`）。 */
+    const val TRUNK_CLOSE = 0
 
     /**
      * 车窗位置功能号（jar 里的 `BCM_FUNC_WINDOW_POS`）。
@@ -386,6 +413,78 @@ object AdaptapiBody {
         )
     }
 
+    // ------------------------------------------------------------ 尾门写入
+
+    /**
+     * 写尾门（开 / 关）。
+     *
+     * ## 厂商侧对照
+     *
+     * | 东西 | 值 | 出处 |
+     * | --- | --- | --- |
+     * | 功能号 | `BCM_FUNC_DOOR`（`0x21020100`） | `com.ecarx.xui.adaptapi.car.vehicle.IBcm` |
+     * | 区域 | `VehicleDoor.DOOR_REAR` | `com.ecarx.xui.adaptapi.vehicle.VehicleDoor` |
+     * | 读信号 | `getPaSpeechTrCtrl` | `CarFunctionValueImpl` 的 `case IBcm.BCM_FUNC_DOOR` |
+     * | 写信号 | `setCbSpeechTargetTrCtrl` | 同上（`setFunctionValue` 分支） |
+     *
+     * 厂商 jar 里这**一条**功能号是读、写**都实现了**的
+     * （`case IBcm.BCM_FUNC_DOOR` 在 `getFunctionValue` 与 `setFunctionValue`
+     * 两个 switch 里各有一处），
+     * 且 set 分支**写死了** `zone == 536870912`
+     * —— 与 `VehicleDoor.DOOR_REAR` 的值一致，
+     * 所以「区域号 = `DOOR_REAR`」这条推断在源码里是**闭合**的
+     * （其它门区写了会被固件直接拒绝：`returns false`）。
+     *
+     * ## 值：只有 `0` / `1`
+     *
+     * `getMappedCbSpeechTargetTrCtrlValue`：`0` → `CLOSE`、`1` → `OPEN`，
+     * **其余一律 `null`**（写不进去）。
+     *
+     * ## `553779457` 是「暂停」，**不是「开」**
+     *
+     * 同一个映射函数把 `553779457`（`IBcm.DOOR_PAUSE`）单独映射成 `STOP`。
+     * 把它当「开」写下去，厂商会当成「**停下**」。
+     * 另外读侧把 `IDLE` / `STOP` 翻译成的是 `553844993`（`IBcm.WINDOW_PAUSE`），
+     * 与写侧的 `553779457` **不是同一个数**（厂商两处用了不同常量）——
+     * 所以**不要**把读到的值原样回写。
+     *
+     * ## 这个功能号是「动作状态」，不是「开闭布尔」
+     *
+     * `setCbSpeechTargetTrCtrl` 的语义是「**让尾门去做这个动作**」，
+     * 不是「尾门现在处于这个状态」。
+     * 写成功只说明**指令下发成功**，**不代表尾门已经开到目标位置** ——
+     * 到位与否要看之后读回来的 `PaSpeechTrCtrl`。
+     *
+     * @param open true = 开，false = 关
+     * @return false = 区域号按名解析不到（**不写**）或写入失败
+     */
+    fun writeTrunk(gw: VehicleGateway, open: Boolean): Boolean {
+        // 区域号**按名解析** `VehicleDoor.DOOR_REAR`；
+        // 解析不到就**不写** —— 不猜 536870912。
+        val zone = AdaptapiConstants.trunkZone()
+        if (zone == null) {
+            Logx.w(LogTags.SIGNAL, "尾门区域号按名解析不到 不写", "name" to "DOOR_REAR")
+            return false
+        }
+        val func = doorOpenFunc()
+        val value = if (open) TRUNK_OPEN else TRUNK_CLOSE
+        val ok = gw.setHvac(func, zone, value)
+        if (ok) {
+            Logx.i(
+                LogTags.SIGNAL,
+                "尾门动作已下发",
+                "open" to open,
+                "func" to func,
+                "zone" to zone,
+                "value" to value,
+                "note" to "指令已下发，不代表已到位",
+            )
+        } else {
+            Logx.w(LogTags.SIGNAL, "尾门动作下发失败", "open" to open, "func" to func, "zone" to zone, "value" to value)
+        }
+        return ok
+    }
+
     // ------------------------------------------------------------ 车窗
 
     /**
@@ -413,7 +512,17 @@ object AdaptapiBody {
      * 所以之前「车窗功能号按名解析不到」+「整型通道」这两处一起导致车窗永远是「读不到」。
      *
      * 口径见 [CarSignalMath.interpretWindowPosition]：
-     * `0` = 关、`> 0` = 开、`< 0` = 读不出来（厂商把「异常」也翻译成 `-1`）。
+     * `0` = 关、`> 0` = 开、`< 0` = 读不出来。
+     *
+     * ## 第七十四轮：`0` 有歧义，要靠固件支持与否来分
+     *
+     * 厂商的**浮点**读失败时返回 **`0.0f` 而不是 `-1`**
+     * （`status == ABNORMAL` / `data` 越界 / 信号为 null → 一律翻译成 `0.0f`）。
+     * 而 `0.0f` 恰好又是「窗关着」的开度 ——
+     * 不加区分的话，**读不到会伪装成「窗全关」**。
+     *
+     * 所以这里把 `isFunctionSupported(func, zone)` 的结论一起传下去：
+     * 固件明确说「不支持这个区域」时，`0` 也按「读不到」处理。
      */
     fun readWindowsEach(gw: VehicleGateway): List<Boolean?>? {
         val func = windowPosFunc()
@@ -433,13 +542,15 @@ object AdaptapiBody {
                 )
                 continue
             }
-            val open = CarSignalMath.interpretWindowPosition(raw)
+            val supported = supported(gw, func, zone)
+            val open = CarSignalMath.interpretWindowPosition(raw, supported)
             if (open == null) {
                 Logx.d(
                     LogTags.SIGNAL,
                     "车窗开度值解释不出来",
                     "zone" to zone,
                     "raw" to raw,
+                    "supported" to supported,
                 )
                 continue
             }

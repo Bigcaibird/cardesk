@@ -586,8 +586,14 @@ object VehicleController {
             emptyMap()
         }
         var changed = logic.applySnapshot(snapshot)
-        // 双区项按区域单独读回，避免副驾温度/座椅被主驾值覆盖
-        for (func in listOf(HvacIds.TEMP, HvacIds.SEAT_HEAT, HvacIds.SEAT_VENT)) {
+        // 双区项按区域单独读回，避免副驾温度/座椅被主驾值覆盖。
+        // 第七十四轮：**座椅通风不在这个列表里** ——
+        // 厂商的座椅通风是单座信号 `PaSvcSts`，按左右舵决定哪个 zone 有效
+        // （`zone == 4 && isSteeringwheelRight() || zone == 1 && !isSteeringwheelRight()`，
+        // `CarFunctionValueImpl.java:2037-2044`）。dcy11 是左舵车，
+        // 副驾（zone 4）读回来恒 0 —— 回读它只会把「副驾通风没有值」
+        // 渲染成「副驾通风已关」。
+        for (func in listOf(HvacIds.TEMP, HvacIds.SEAT_HEAT)) {
             val value = try {
                 gateway.readValue(func, HvacIds.ZONE_PASSENGER)
             } catch (t: Throwable) {

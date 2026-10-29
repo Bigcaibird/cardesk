@@ -111,7 +111,13 @@ class HvacLogic(
                 fanLevel = HvacCodec.fanLevel(value),
                 fanAuto = value == HvacIds.FAN_SPEED_AUTO,
             )
-            HvacIds.DEFROST_FRONT -> state.copy(defrostFront = value != 0)
+            // 第七十四轮：`DEFROST_FRONT_MAX` 也要认。
+            // 厂商对 `DEFROST_FRONT`(0x10040100) 的读**恒返回 255**（该功能号未实现），
+            // 真正可用的是 `DEFROST_FRONT_MAX`(0x10040200)；
+            // 而 watcher 推上来的 func 号正是 MAX ——
+            // 之前这里只认 `DEFROST_FRONT`，结果车端前除霜变化**永远回灌不到 UI**，
+            // 只能靠每秒轮询兜底，用户看到的就是「按键生效了但桌面不跟着变」。
+            HvacIds.DEFROST_FRONT, HvacIds.DEFROST_FRONT_MAX -> state.copy(defrostFront = value != 0)
             HvacIds.DEFROST_REAR -> state.copy(defrostRear = value != 0)
             HvacIds.BLOWING -> state.copy(blowing = HvacCodec.normalizeBlowing(value))
             HvacIds.TEMP_DUAL -> if (value != 0) {
@@ -134,7 +140,13 @@ class HvacLogic(
             }
             HvacIds.SEAT_VENT -> {
                 val level = HvacCodec.seatLevel(HvacIds.SEAT_VENT, value)
-                if (zone == HvacIds.ZONE_DRIVER) state.copy(seatVentDriver = level) else state.copy(seatVentPassenger = level)
+                // 第七十四轮：副驾通风**不回灌**。
+                // 厂商的座椅通风是**单座信号** `PaSvcSts`，而且按左右舵决定哪个 zone 有效：
+                // `zone == 4 && isSteeringwheelRight() || zone == 1 && !isSteeringwheelRight()`
+                // （`CarFunctionValueImpl.java:2037-2044`）——
+                // dcy11 是**左舵**车，副驾（zone 4）读回来恒 0、写也必失败。
+                // 照搬会把「副驾通风没有值」渲染成「副驾通风已关」。
+                if (zone == HvacIds.ZONE_DRIVER) state.copy(seatVentDriver = level) else state
             }
             else -> state
         }
@@ -322,7 +334,10 @@ class HvacLogic(
     }
 
     fun toggleDefrostFront() {
-        syncFromVehicle(HvacIds.DEFROST_FRONT)
+        // 第七十四轮：同步读用 `DEFROST_FRONT_MAX`，不是 `DEFROST_FRONT`。
+        // 厂商对 `DEFROST_FRONT` 的读恒返回 255（未实现），读了也是白读 ——
+        // 取反就会基于一份可能过期的本地镜像算，方向可能反。
+        syncFromVehicle(HvacIds.DEFROST_FRONT_MAX)
         val on = !state.defrostFront
         Logx.event(LogTags.HVAC, "前除霜", "to" to if (on) "开" else "关")
         state = if (on) {
@@ -352,7 +367,33 @@ class HvacLogic(
         }
         Logx.event(LogTags.HVAC, "吹风模式", "from" to state.blowing, "to" to i)
         state = state.copy(blowing = i)
-        send(HvacIds.BLOWING, HvacIds.ZONE_GLOBAL, HvacCodec.blowingRaw(i), op = "吹风模式")
+        val ok = send(HvacIds.BLOWING, HvacIds.ZONE_GLOBAL, HvacCodec.blowingRaw(i), op = "吹风模式")
+        // 第七十四轮：写失败后回读对齐。
+        // 厂商对 `HVAC_FUNC_BLOWING_MODE` 的写是**三个布尔**（defrost / floor / vent）的聚合写，
+        // `CarFunctionValueImpl.java:1213`：
+        // `if (setCbModeDefrst) if (setCbModeFlr) if (setCbModeVent) return true; return false;`
+        // —— **任一路失败就返回 false，但已经写进去的那一路不会回滚**。
+        // 于是「车里已经变了、UI 报写入失败」是真实存在的状态；
+        // 不回读的话，两边会一直不一致（下次再点就是基于错的本地值取反）。
+        if (!ok) resyncBlowing()
+    }
+
+    /**
+     * 吹风模式写失败后，回读车端真值把镜像拉回去。
+     *
+     * 厂商这一条写的是三个布尔的**与运算**，所以「失败」只说明**至少一路没成**，
+     * 到底成了哪几路只能回读才知道。
+     */
+    private fun resyncBlowing() {
+        val read = readSync ?: return
+        val v = runCatching { read(HvacIds.BLOWING, HvacIds.ZONE_GLOBAL) }.getOrNull() ?: return
+        applyRemote(HvacIds.BLOWING, HvacIds.ZONE_GLOBAL, v)
+        Logx.i(
+            LogTags.HVAC,
+            "吹风模式写失败后已回读对齐",
+            "value" to v,
+            "mode" to state.blowing,
+        )
     }
 
     /**
@@ -375,6 +416,21 @@ class HvacLogic(
 
     /** 座椅档位 0→1→2→3→0 循环；加热与通风互斥。 */
     fun cycleSeat(zone: Int, heat: Boolean) {
+        // 第七十四轮：副驾通风在左舵车上**没有通路**，直接拒绝，别假装成功。
+        // 厂商的座椅通风是单座信号 `PaSvcSts`，且按左右舵决定哪个 zone 有效：
+        // `zone == 4 && isSteeringwheelRight() || zone == 1 && !isSteeringwheelRight()`
+        // （`CarFunctionValueImpl.java:2037-2044`）。
+        // dcy11 是左舵车 → 只有主驾（zone 1）通风可写可读，
+        // 副驾（zone 4）写下去必然 false、读回来恒 0。
+        if (!heat && zone != HvacIds.ZONE_DRIVER) {
+            Logx.w(
+                LogTags.HVAC,
+                "副驾座椅通风不可用",
+                "zone" to zone,
+                "reason" to "厂商按左右舵只暴露主驾座通风信号；dcy11 是左舵车",
+            )
+            return
+        }
         val current = if (heat) state.seatHeatOf(zone) else state.seatVentOf(zone)
         val next = if (current >= 3) 0 else current + 1
         Logx.event(
@@ -431,8 +487,10 @@ class HvacLogic(
      *
      * [op] 是这次写入对应的操作名（电源 / A-C / AUTO / 风量 / 循环 / 吹风 / 除霜 / 温度 / 座椅…），
      * 真机上「点了没反应」时，要能一眼看出是**哪个操作的哪一次写**没进去。
+     *
+     * @return 这次写是否成功（第七十四轮起返回，供「部分生效」的场景回读对齐）
      */
-    private fun send(func: Int, zone: Int, raw: Int, op: String, hold: Boolean = false) {
+    private fun send(func: Int, zone: Int, raw: Int, op: String, hold: Boolean = false): Boolean {
         writeAttempts++
         val ok = write(func, zone, raw)
         lastWriteOk = ok
@@ -463,6 +521,7 @@ class HvacLogic(
                 "ok" to false,
             )
         }
+        return ok
     }
 
     /** 写温度（优先走 float 通道 [writeTempCelsius]）。 */

@@ -35,8 +35,16 @@ object CarSignalMath {
      * - `0` → 关闭；
      * - `1` → 打开；
      * - `553844994 / 553844993 / 553779457` → 打开（车端这三个值表示「开」）；
-     * - `(1, 100]` → `<= 5` 关闭，否则打开（车端用 0..100 表示开度）；
+     * - `(3, 100]` → `<= 5` 关闭，否则打开（车端用 0..100 表示开度）；
      * - 其它 → 读不出来（null）。
+     *
+     * ## 第七十四轮：`2` 不再算「关闭」
+     *
+     * `2` 是厂商的 `COMMON_VALUE_DEFAULT`（**默认值**），不是开度百分比。
+     * 之前 `2..5 → 关闭` 这条分支把它判成了「门关着」。
+     *
+     * 而 `BCM_FUNC_DOOR_POS` 在这台车机上**根本没实现**（恒返回 255），
+     * 这条分支基本没机会用上，留着只是纯风险 —— 现在按「读不出来」处理。
      *
      * @return null 表示这个原始值不是有效的开闭状态
      */
@@ -45,7 +53,7 @@ object CarSignalMath {
         if (raw == 0) return true
         if (raw == 1) return false
         if (raw == 553844994 || raw == 553844993 || raw == 553779457) return false
-        if (raw <= 1 || raw > 100) return null
+        if (raw == 2 || raw > 100) return null
         return raw <= 5
     }
 
@@ -64,9 +72,25 @@ object CarSignalMath {
      * - 「值解释不出来」→ 读到了但语义不明，要换映射表。
      *
      * 两种情况在桌面上的表现一样（显示 `--`），但在排障时必须分开。
+     *
+     * ## 第七十四轮：把 253 / 254 也算进来
+     *
+     * 厂商的通用取值码（`ICarFunction`）有三个「不是真值」的：
+     *
+     * | 值 | 常量 | 含义 |
+     * | --- | --- | --- |
+     * | `253` | `COMMON_VALUE_ERROR` | 读取出错 |
+     * | `254` | `COMMON_VALUE_NONE` | 无此能力 / 未定义 |
+     * | `255` | `COMMON_VALUE_UNKNOWN` | 未知 / 未实现的功能号 |
+     *
+     * 之前只挡了 `255`，于是 `253` 会一路流进业务逻辑 ——
+     * 最要命的是 **`HVAC_FUNC_TEMP` 的整型读恒返回 253**
+     * （厂商源码 `CarFunctionValueImpl.java:399`）：
+     * `253 / 2 = 126.5` → 被 clamp 成 **32℃**，
+     * 也就是**「读不到」被伪装成「车机说 32 度」**。
      */
     fun isUnsupportedRaw(raw: Int): Boolean =
-        raw == 255 || raw == -1 || raw == Int.MIN_VALUE
+        raw == 255 || raw == 254 || raw == 253 || raw == -1 || raw == Int.MIN_VALUE
 
     /**
      * 车窗开闭原始值 → 是否打开（**true = 开**）。
@@ -123,9 +147,24 @@ object CarSignalMath {
      *
      * 那条是给**布尔**车窗信号（`BCM_FUNC_WINDOW`）用的；
      * 这条是给**开度**信号用的。两者值域不同，混用会把「开度 50」当成读不出来。
+     *
+     * ## 第七十四轮：`0` 可能是「关」，也可能是「读失败」
+     *
+     * 厂商的**浮点**读失败时返回 **`0.0f`，不是 `-1`**
+     * （`status == ABNORMAL` / `data` 越界 / 信号为 null → 一律翻译成 `0.0f`，
+     * 见文档 11 号「车窗」段）。
+     * 而 `0.0f` 恰好又是「窗关着」的开度 ——
+     * 于是**读不到会伪装成「窗全关」**。
+     *
+     * 单看数值分不开这两件事，只能靠「这个 zone 到底支不支持」来区分：
+     * 调用方把 `isFunctionSupported(func, zone)` 的结论传进来，
+     * 明确「不支持」时，`0` 也按「读不到」处理。
+     *
+     * @param supported 该区域是否被固件支持（true / false / 判不了=null）
      */
-    fun interpretWindowPosition(raw: Int): Boolean? = when {
+    fun interpretWindowPosition(raw: Int, supported: Boolean? = null): Boolean? = when {
         raw < 0 -> null
+        supported == false -> null
         raw == 0 -> false
         else -> true
     }
@@ -244,6 +283,50 @@ object CarSignalMath {
         "notavailable" -> false
         else -> null
     }
+
+    /**
+     * 一个属性的**读法**（按车机登记的类型决定）。
+     *
+     * ## 第七十四轮：车门属性「按类型读」的决策抽成纯函数
+     *
+     * 车门那组厂商属性（`PA_CP_Door*Sts` / `PA_CP_TrSts`）的类型
+     * 写在**属性 id 的位域**里（`type << 16`），按 `0x70 << 16` 推断是
+     * `VehiclePropertyType.BYTES` —— 也就是 `byte[]`。
+     * 但那只是推断，**车机自己登记的类型才是权威**
+     * （`CarPropertyConfig.getPropertyType()`）。
+     *
+     * 所以读之前先按类型名分派：
+     * - `byte[]` → 走字节读（`getProperty(ByteArray.class, id, area)`）+ 解 varint；
+     * - 数值型 → 走 `Integer` / 数值读；
+     * - 问不出来 → 两种都试，**字节优先**。
+     */
+    enum class PropReadKind {
+        /** 字节属性（`byte[]`）。 */
+        BYTES,
+
+        /** 数值属性（`Integer` / `Float` / `Short` …）。 */
+        NUMERIC,
+
+        /** 类型没问出来：两种都试。 */
+        UNKNOWN,
+    }
+
+    /**
+     * 按车机登记的类型名 → 读法。
+     *
+     * @param typeName `CarPropertyConfig.getPropertyType().simpleName`；null / `?` → [PropReadKind.UNKNOWN]
+     */
+    fun propReadKind(typeName: String?): PropReadKind = when {
+        typeName == null || typeName.isEmpty() || typeName == "?" -> PropReadKind.UNKNOWN
+        typeName.startsWith("byte", ignoreCase = true) -> PropReadKind.BYTES
+        typeName in NUMERIC_TYPE_NAMES -> PropReadKind.NUMERIC
+        else -> PropReadKind.UNKNOWN
+    }
+
+    /** 数值型属性的类型名（`getPropertyType()` 返回的是 Java 类型的 simpleName）。 */
+    private val NUMERIC_TYPE_NAMES = setOf(
+        "Integer", "int", "Short", "short", "Long", "long", "Float", "float", "Double", "double",
+    )
 
     /**
      * 在候选属性 id 里挑一个「车机真的注册了」的。

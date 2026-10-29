@@ -60,8 +60,31 @@ import com.cardesk.launcher.core.log.Logx
  * `Car.createCar` 的重载调错了（见 [CarProperties]）。
  *
  * 解析不依赖 CEVT 的类（那个类我们进程里根本没有），
- * 只按 protobuf 的**公开线格式**扫出唯一一个 varint 字段（见 [ProtoLite]）；
- * ECARX 上这五个是**数值属性**，走普通数值读法。
+ * 只按 protobuf 的**公开线格式**扫出唯一一个 varint 字段（见 [ProtoLite]）。
+ *
+ * ## 第七十四轮：按**车机自报的类型**读，不再靠猜
+ *
+ * 上一轮这里写的是「ECARX 上这五个是数值属性」——
+ * **那个推断是错的**，推理链断在「缺重载 ⇒ 换类型」：
+ *
+ * 1. ECARX 那份 `CarPropertyManager` 没有 `getProperty(int[], Class)`（AOSP 的形状）；
+ * 2. 于是第七十二轮判「这些属性在 ECARX 上必然是数值属性」；
+ * 3. 但**缺一个重载只能说明厂商不这么读**，推不出属性类型 ——
+ *    类型是写在**属性 id 位域**里的（`type << 16`），跟 SDK 怎么读无关。
+ *
+ * 事实是：这两个推断导致**两条路同时是死路** ——
+ * 字节路匹配不到重载（恒 null），数值路对 `byte[]` 恒 null。
+ * 于是「四门+尾门读不到」一直找不到真凶。
+ *
+ * 现在改成**让车机自己说**：
+ *
+ * 1. `CarPropertyConfig.getPropertyType()` → 属性类型名（`byte[]` / `Integer` / …）；
+ * 2. 按类型走 `getProperty(Class, propId, area)`；
+ * 3. 问不出类型时，两种都试（字节优先）。
+ *
+ * 属性 id 的类型位指向 `VehiclePropertyType.BYTES`（`0x70 << 16`），
+ * 也就是说**大概率是字节**；但这是按位域推断，
+ * 真正说了算的是车机登记的类型 —— 诊断日志里会带出来（见 [CarProperties.propertyConfigs]）。
  */
 object McDoorSignals {
 
@@ -198,45 +221,60 @@ object McDoorSignals {
     /**
      * 读一个属性的原始数值。
      *
-     * ## 第七十二轮：加了「数值」这条读法
+     * ## 第七十四轮：先问类型，再按类型读
      *
-     * 原来只有一条路：`getProperty(int[], Class<byte[]>)` 取 protobuf 字节再解 varint。
-     * 那是 **CEVT 平台**的属性形态（MC 事件属性是字节）。
+     * 三段式：
      *
-     * 但这台车机上跑的 `android.car` 是 ECARX 自己的一份，
-     * 它的 `CarPropertyManager` **没有** `getProperty(int[], Class)` 这个重载，
-     * 只有 `getProperty(int, int)` / `getProperty(Class, int, int)`，
-     * 也就是说这五个属性在 ECARX 上是**数值属性**（0 / 1 的门状态），
-     * 得按普通数值属性去读。
+     * 1. **类型问出来了** → 按类型走：
+     *    - `byte[]` → `getProperty(ByteArray.class, id, area)`，再解 varint；
+     *    - 数值型 → `getProperty(Integer.class, id, area)`，退 `getProperty(int, area)`；
+     * 2. **类型没问出来**（属性清单读不到）→ 两种都试，**字节优先**
+     *    （属性 id 的类型位指向 BYTES，字节的可能性更大）；
+     * 3. 都不行 → 最后一搏 CEvt 平台形态（`getProperty(int[], Class)`，
+     *    这台车机上通常不存在，见 [CarProperties.readBytes]）。
      *
-     * 读法顺序：
-     *
-     * 1. 先试字节（CEVT 形态，保持原有行为）；
-     * 2. 再试数值：区域号先用属性清单里查到的（ECARX 的 `CarPropertyValue`
-     *    只有 `getAreaId()`，没有 AOSP 的 `getAreaIds()`，区域号得从清单拿），
-     *    查不到就用 `0`（全局属性）。
+     * 区域号：整车级属性传 `0`；属性清单里有区域就按区域逐个试。
      *
      * @return 读不到返回 null
      */
     private fun readValue(propId: Int): Long? {
-        CarProperties.readBytes(propId)?.let { bytes ->
-            ProtoLite.singleVarint(bytes)?.let { return it }
+        val areas = CarProperties.availableAreas(propId)
+        val zones = if (areas != null && areas.isNotEmpty()) areas.toList() else listOf(0)
+
+        // —— ① 车机登记了类型：按类型走 ——
+        // 分派口径抽在 [CarSignalMath.propReadKind]（纯函数，可单测）。
+        when (CarSignalMath.propReadKind(CarProperties.propertyTypeOf(propId))) {
+            CarSignalMath.PropReadKind.BYTES ->
+                for (z in zones) {
+                    decodeVarint(CarProperties.readBytesViaClass(propId, z))?.let { return it }
+                }
+            CarSignalMath.PropReadKind.NUMERIC ->
+                for (z in zones) {
+                    readNumericZone(propId, z)?.let { return it }
+                }
+            CarSignalMath.PropReadKind.UNKNOWN -> Unit
         }
-        return readNumeric(propId)
+
+        // —— ② 类型没问出来：两种都试，字节优先 ——
+        for (z in zones) {
+            decodeVarint(CarProperties.readBytesViaClass(propId, z))?.let { return it }
+        }
+        for (z in zones) {
+            readNumericZone(propId, z)?.let { return it }
+        }
+
+        // —— ③ CEvt 平台形态的最后一搏 ——
+        return decodeVarint(CarProperties.readBytes(propId))
     }
 
-    /** 数值读法：区域号从属性清单里来，没有就用 `0`（全局属性）。 */
-    private fun readNumeric(propId: Int): Long? {
-        val areas = CarProperties.availableAreas(propId)
-        if (areas != null && areas.isNotEmpty()) {
-            for (area in areas) {
-                val v = CarProperties.readInt(propId, area)
-                if (v != null) return v.toLong()
-            }
-            return null
-        }
-        return CarProperties.readInt(propId, 0)?.toLong()
-    }
+    /** 数值属性：先按类型要 `Integer`，再退通用数值读法。 */
+    private fun readNumericZone(propId: Int, zone: Int): Long? =
+        CarProperties.readIntViaClass(propId, zone)?.toLong()
+            ?: CarProperties.readInt(propId, zone)?.toLong()
+
+    /** protobuf 字节 → 唯一的 varint 字段值。 */
+    private fun decodeVarint(bytes: ByteArray?): Long? =
+        bytes?.let { ProtoLite.singleVarint(it) }
 
     /**
      * 把原始值解释成「关 / 开」。
