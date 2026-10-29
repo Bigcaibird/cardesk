@@ -423,7 +423,8 @@ class SpectrumAnalyzer private constructor() {
                 throw IllegalStateException("setCaptureSize 返回 $sizeOk")
             }
             captureSize = size
-            // 缓冲区按 captureSize/2 分配（见 SpectrumCapture.fftBufferSize 的说明）
+            // 缓冲区按 captureSize 分配（**不是一半** —— 少一半会被 ROM 越界写坏堆，
+            // 见 SpectrumCapture.fftBufferSize 的说明）
             fftBuffer = ByteArray(SpectrumCapture.fftBufferSize(size))
             sampleRate = resolveSampleRate(v)
             val enabled = v.setEnabled(true)
@@ -505,8 +506,13 @@ class SpectrumAnalyzer private constructor() {
         }
         // 返回值 > 0 且小于缓冲区长度 ⇒ 只用前这么多个字节；
         // 返回 0（= SUCCESS 口径）⇒ 整个缓冲区都是这一帧的。
+        //
+        // 第八十轮：**频率轴要显式用采集点数 N**，不能靠缓冲区长度推 ——
+        // 缓冲区现在就是 N 字节（见 [SpectrumCapture.fftBufferSize]），
+        // 若某一帧只填了前 k 字节，N 仍然是 captureSize。
+        val points = captureSize
         val frame = if (bytes > 0 && bytes < buf.size) buf.copyOf(bytes) else buf
-        val raw = SpectrumBands.fromFft(frame, SpectrumBands.DEFAULT_BAND_COUNT, sampleRate)
+        val raw = SpectrumBands.fromFft(frame, SpectrumBands.DEFAULT_BAND_COUNT, sampleRate, points)
         val calibrated = SpectrumBands.calibrate(raw)
         smoothed = SpectrumBands.smooth(smoothed, calibrated, SMOOTH_DECAY)
         bands = smoothed

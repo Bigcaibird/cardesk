@@ -30,11 +30,16 @@ class SpectrumBandsTest {
      *
      * 以前我们把实部写在 `fft[1 + 2k]` —— 那是**错一位**的布局，
      * 会把「上一对的虚部 + 当前对的实部」当成一对 ⇒ 每个频段取到的都是混频。
+     *
+     * ## 第八十轮：**N = 缓冲区字节数**
+     *
+     * 缓冲区现在就是 N 字节（AOSP 文档：1 DC + 1 Nyquist + (N/2−1) 组实虚对），
+     * 所以 `binHz = sampleRate / fftSize`，不是 `sampleRate / (fftSize × 2)`。
      */
-    private fun toneFft(freqHz: Double, sampleRate: Int = 48_000, fftSize: Int = 256): ByteArray {
-        val n = fftSize * 2
+    private fun toneFft(freqHz: Double, sampleRate: Int = 48_000, fftSize: Int = 512): ByteArray {
+        val n = fftSize
         val binHz = sampleRate.toDouble() / n
-        val bin = (freqHz / binHz).roundToInt().coerceIn(1, (fftSize - 2) / 2)
+        val bin = (freqHz / binHz).roundToInt().coerceIn(1, n / 2 - 1)
         val fft = ByteArray(fftSize)
         fft[2 * bin] = 127
         return fft
@@ -51,6 +56,27 @@ class SpectrumBandsTest {
     }
 
     @Test
+    fun `高频段的频点能取到_缓冲区给足后频点恢复到 N 除以 2`() {
+        // 第八十轮：以前缓冲区只有 captureSize/2 ⇒ 最多只有 128 个频点，
+        // 13kHz 附近（bin 140）根本够不到。现在缓冲区 = N = 512 ⇒ 256 个频点。
+        val fft = ByteArray(512)
+        fft[2 * 140] = 127          // 140 × 93.75Hz ≈ 13.1kHz
+        val bands = SpectrumBands.fromFft(fft, 24, 48_000)
+        assertTrue("13kHz 附近的能量应该落在最高频段（实际 ${bands[23]}）", bands[23] > 0.4f)
+    }
+
+    @Test
+    fun `DC 与 Nyquist 占字节 0 和 1_不算频点`() {
+        // 字节 0 = DC、字节 1 = Nyquist —— 它们不成对，
+        // 正确实现从 k=1 开始读（字节 2 起）⇒ 写在字节 1 上不产生任何频段能量。
+        val fft = ByteArray(512)
+        fft[0] = 127
+        fft[1] = 127
+        val bands = SpectrumBands.fromFft(fft, 24, 48_000)
+        assertTrue("DC/Nyquist 不该变成频段能量", bands.all { it == 0f })
+    }
+
+    @Test
     fun `低频与高频落在不同段`() {
         val low = SpectrumBands.fromFft(toneFft(80.0), 24, 48_000)
         val high = SpectrumBands.fromFft(toneFft(8000.0), 24, 48_000)
@@ -62,14 +88,14 @@ class SpectrumBandsTest {
 
     @Test
     fun `实部虚部按 AOSP 布局读取`() {
-        // 把能量写在「上一对的虚部」那个位置上（错位布局）——
-        // 正确实现**不应该**把它当成第 k 个频点的实部。
-        val fft = ByteArray(256)
-        fft[1 + 2 * 20] = 127
+        // 能量只写在**虚部**上（字节 2k+1）——
+        // 正确实现按「实部 + 虚部」成对取功率 ⇒ 这一对仍然要有能量；
+        // 写错位置（当成实部）则会取到别的频点去。
+        val fft = ByteArray(512)
+        fft[2 * 20 + 1] = 127
         val bands = SpectrumBands.fromFft(fft, 24, 48_000)
-        // 错位的那一位在正确实现里属于「第 19 个频点的虚部」，
-        // 只会有一点点能量漏到相邻段，绝不会整段到顶。
-        assertTrue("错位字节不该造成整段满能量", bands.max() < 0.5f)
+        val peak = bands.indices.maxByOrNull { bands[it] } ?: -1
+        assertTrue("虚部有能量时这一对也该有能量（峰值段 $peak）", bands[peak] > 0.4f)
     }
 
     @Test

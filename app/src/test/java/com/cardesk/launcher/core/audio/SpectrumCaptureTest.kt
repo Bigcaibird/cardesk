@@ -42,13 +42,15 @@ class SpectrumCaptureTest {
     }
 
     @Test
-    fun `FFT 缓冲区是采集点数的一半`() {
-        // AOSP 的 getFft() 只写 captureSize/2 个字节；
-        // 按采集点数分配的话后半截永远是 0，频率会差一倍。
-        assertEquals(256, SpectrumCapture.fftBufferSize(512))
-        assertEquals(64, SpectrumCapture.fftBufferSize(128))
+    fun `FFT 缓冲区按采集点数给_不能给一半`() {
+        // 第八十轮：给一半会被 ROM 越界写坏 Java 堆 → GC SIGSEGV（模拟器实测）。
+        // AOSP 文档口径：FFT 装的是 N 个字节（1 DC + 1 Nyquist + (N/2−1) 组实虚对）。
+        assertEquals(512, SpectrumCapture.fftBufferSize(512))
+        assertEquals(128, SpectrumCapture.fftBufferSize(128))
         // 太小也要给个能用的下限
         assertTrue(SpectrumCapture.fftBufferSize(4) >= 8)
+        // 绝不能比采集点数小 —— 小了就是给 ROM 留越界写的机会
+        assertTrue(SpectrumCapture.fftBufferSize(512) >= 512)
     }
 
     @Test

@@ -83,15 +83,24 @@ object SpectrumCapture {
     /**
      * 采集点数 → FFT 缓冲区字节数。
      *
-     * ## 为什么是采集点数的一半
+     * ## 第八十轮：**按采集点数给，不能给一半**
      *
-     * AOSP 的 `Visualizer.getFft(byte[])` 只往缓冲区里写 **captureSize / 2** 个字节
-     * （1 字节直流 + (N/2−1)/2 组实虚对）。
-     * 缓冲区按 `captureSize` 分配的话，后半截永远是 0，
-     * 而 [SpectrumBands.fromFft] 是按「缓冲区长度 × 2 = 采样点数」推频率的 ——
-     * 频率会整整差一倍，高频段还全是空的。
+     * AOSP 公开文档口径：`getFft()` 往缓冲区里写的是 **N 个字节**
+     * （1 字节 DC + 1 字节 Nyquist + (N/2−1) 组实虚对，每组 2 字节 = N）。
+     *
+     * 以前这里给的是 `captureSize / 2` —— **ROM 会往这个数组里写 N−1 个字节**，
+     * 越界那两百多个字节**直接踩坏 Java 堆**；
+     * 堆坏掉之后不一定立刻崩，ART 的 GC 扫到坏引用时才 native SIGSEGV
+     * （现场表现就是「开氛围灯页过一会儿闪退」——
+     * 第八十轮在 ecarx 平台模拟器上复现，tombstone 定位到
+     * `art::gc::collector::ConcurrentCopying::AddLiveBytesAndScanRef`）。
+     *
+     * 参照工程 `uni-launcher`（**同一款车机，已跑通**）用的是 `new byte[captureSize]`，
+     * 与文档口径一致 —— 本项目现在也对齐它。
+     *
+     * 频率轴不再靠「缓冲区长度 × 2」凑，而是显式用采集点数 N（见 [SpectrumBands.fromFft]）。
      */
-    fun fftBufferSize(captureSize: Int): Int = (captureSize / 2).coerceAtLeast(8)
+    fun fftBufferSize(captureSize: Int): Int = captureSize.coerceAtLeast(8)
 
     /**
      * 采样率归一（统一成 Hz）。

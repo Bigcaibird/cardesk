@@ -743,15 +743,23 @@ class ScenePage(context: Context) : View(context) {
         canvas.drawCircle(circleCx, circleCy, TRAFFIC_LAMP_D / 2f, Paint(fill).apply { color = lampColor })
 
         // —— 读秒：在圆的**下方**，居中 ——
+        //
+        // 第八十轮修了一个排版缺陷：数字原来按 `Align.CENTER` 画在圆心，
+        // 而「秒」按 `Align.LEFT` 画在 `numLeft + numW + 4`，
+        // 而 `numLeft` 又是按「整行左对齐」算的 —— 两个基准不一致，
+        // 结果「秒」压在第二个数字上（模拟器截图里能直接看到）。
+        //
+        // 现在**整行（数字 +「秒」）作为一个整体以圆心居中**：
+        // 数字左对齐画在 numLeft，「秒」紧跟其后。
         val baseline = circleCy + TRAFFIC_LAMP_D / 2f + TRAFFIC_GAP + TRAFFIC_SECONDS_TEXT_ASCENT
-        text.textAlign = Paint.Align.CENTER
+        val numLeft = circleCx - textRowW / 2f
+        text.textAlign = Paint.Align.LEFT
         text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         text.textSize = TRAFFIC_SECONDS_SIZE
         text.color = lampColor
-        canvas.drawText(number, circleCx, baseline, text)
+        canvas.drawText(number, numLeft, baseline, text)
         if (hasUnit) {
-            // 「秒」跟着数字走：数字居中、秒紧跟在右侧，整体仍以圆心为准
-            val numLeft = circleCx - textRowW / 2f
+            // 「秒」跟着数字走：数字左对齐起笔，秒紧跟在右侧，整体仍以圆心为准
             text.typeface = Typeface.DEFAULT
             text.textSize = TRAFFIC_UNIT_SIZE
             text.color = Skin.TEXT_DIM

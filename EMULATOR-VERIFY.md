@@ -5,6 +5,55 @@
 
 判定标准：截图 + logcat（FATAL/Exception 计数）+ `dumpsys`/`pm`/`settings` 实际状态，任一失败即记为 ❌。
 
+## 0. 流程要求（第八十轮起，**硬性**）
+
+用户要求：**「以后新功能开发都需要在虚拟机跑一遍结果，并提供截图」**。
+
+为什么是硬性的 —— 第八十轮就抓到了两个**设计板（Python 重绘）根本看不出来**的问题：
+
+1. **红绿灯读秒和「秒」字重叠** —— 设计板里是分开排的，App 里两个绘制基准不一致；
+2. **氛围灯一开就 native 闪退** —— 根因是 FFT 缓冲区少给一半，ROM 越界写坏 Java 堆，
+   崩在 ART 的 GC 线程上（tombstone：`ConcurrentCopying::AddLiveBytesAndScanRef`）。
+
+所以每个新功能都要走一遍：
+
+```bash
+# 装包（会顺手授 RECORD_AUDIO：pm grant + appops 两步）+ 启动
+python3 tools/emu_regress.py install dist/CarDesk-ecarx-cardesk-<code>.apk
+
+# 触发 + 截图 + 判定闪退
+python3 tools/emu_regress.py ambient 40          # 氛围灯页（开页 / 开开关 / 观察 / 判定）
+python3 tools/emu_regress.py traffic 0 12        # 造高德红绿灯广播并截图（0=红 1=绿）
+python3 tools/emu_regress.py check 30            # 单独判定「这段时间没崩」
+
+# 判定标准（任一失败即 ❌）
+#   · 进程 pid 没变（变了 = 崩过并被系统重启）
+#   · logcat 无 Fatal signal / FATAL EXCEPTION
+#   · /data/tombstones 没有新增
+#   · 截图能看出功能真的在渲染（不是黑屏 / 不是空白）
+```
+
+**出图要「看得清」才算数** —— 全屏 1920×1080 里一个 80×100 的 chip 肉眼很难判，
+所以红绿灯这类小元素另配了 `tools/traffic_shot.py`：广播 → 截图 →
+**自动定位灯圆色块 → 裁 3 倍放大图**，并顺带判定「这一帧到底是红是绿」：
+
+```bash
+python3 tools/traffic_shot.py red 12      # → r80-traffic-red.png + -zoom.png
+python3 tools/traffic_shot.py green 8     # → r80-traffic-green.png + -zoom.png
+```
+
+> 抓图脚本自己踩过的坑（**都出过假图**）：
+> ① 设置面板没关 → 截到的是设置页；
+> ② 上一轮的广播脚本没杀掉 → 红绿互盖，「绿灯」截出来是红的；
+> ③ `ps -A` 只显示进程名（脚本都叫 `sh`），清脚本必须用 `ps -ef` 按 PID 杀。
+> 详见 `emu-verify/REPORT-r80.md` 第 1.3 节。
+
+**推荐用 ecarx 平台镜像**（`emulator-5554`，android-10 / API 29）：预装 `com.ecarx.*` 与高德 YH，
+`com.ecarx.cardesk` 是**平台签名 + uid 1000**，车控链路（`AdaptapiGateway`）是**真链路**。
+
+**模拟器验不到、要真机的**（如实标注，不要写成 ✅）：车门 0/1 语义、
+频谱条是否随音乐跳动（模拟器没有能在后台持续播放的音源）、歌词与 QQ 音乐 App 的逐句一致性。
+
 ## A. 桌面主体
 
 | # | 项 | 操作 | 期望 | 结果 |
@@ -97,6 +146,25 @@
 | H17 | 异常内层原因 | logcat 过滤 `属性按类型读取失败` | `err=` 后面带 `cause[N]=java.lang.IllegalArgumentException: … but was: class …`（不是只有 `InvocationTargetException: -`） | |
 | H18 | 崩溃栈落盘 | 故意触发一次崩溃后导出诊断包 | 日志文件里有一条 `未捕获异常（进程即将退出）`，带 `thread=` 与完整 `stack=` | |
 | H19 | 设置项类型容错 | 把 `ambient_mode` 存成字符串后进氛围灯页 | 页面正常打开（不因 `ClassCastException` 白屏），诊断包「设置全量键值」段能看到 `[String]` | |
+
+## H3. 第八十轮新增（氛围灯闪退根因 + 红绿灯渲染）
+
+被测包：`dist/CarDesk-ecarx-cardesk-4144.apk`（修前）/ `-4145.apk`（修后）；
+设备：`emulator-5554`（ecarx 平台镜像）。完整报告见 `emu-verify/REPORT-r80.md`。
+
+| # | 项 | 操作 | 期望 | 结果 |
+|---|---|---|---|---|
+| H20 | 氛围灯页不黑屏 | 设置 → 氛围灯 → 打开开关 | 页面**不黑屏**（第七十九轮已修） | ✅ 4144/4145 均正常 |
+| H21 | 氛围灯不闪退 | 同上，**观察 45s + 180s** | 进程 pid 不变；logcat 无 `Fatal signal`；tombstone 不新增 | ❌ 4144：11 秒后 native SIGSEGV（GC 线程）；✅ 4145：45s+180s 无崩溃 |
+| H22 | 崩溃根因隔离 | 撤掉 `RECORD_AUDIO`（Visualizer 挂不上）再开 | 不崩 ⇒ 崩溃在 `Visualizer.getFft` 而非车控写入 | ✅ 25 秒无崩溃，2×2 隔离成立 |
+| H23 | FFT 缓冲区口径 | logcat `频谱已挂上输出混音` | `captureSize=512` **`fftBytes=512`**（不是 256） | ✅ 4144 是 256（越界写坏堆），4145 是 512 |
+| H24 | 频段数恢复 | 单测 + 诊断包 | 频点 `bins = N/2 = 256`（不是 128） | ✅ 与参照工程 `uni-launcher` 一致 |
+| H25 | 写入节流 | logcat 过滤 `氛围灯颜色功能号按名解析不到` | 间隔 ≈ 1 秒（不是 120ms） | ✅ 4144 ≈ 8 次/秒，4145 ≈ 1.1 秒一条 |
+| H26 | 红绿灯渲染 | 造高德广播 → 截图 | 大圆 + 圆下方读秒，**数字与「秒」不重叠** | ❌ 4144「秒」压在数字上；✅ 4145 整行以圆心居中（`r80-traffic-red-zoom.png` / `r80-traffic-green-zoom.png`） |
+| H27 | 抓图前回到场景页 | 设置面板打开时截导航卡 | 先 `input keyevent BACK` 关掉面板，否则截到的是设置页 | ⚠️ 本轮曾误截成设置页（红绿两张 md5 相同） |
+| H28 | 广播脚本互不打架 | `ps -ef \| grep broadcast` | 抓图前后**只有一个**广播脚本在跑 | ⚠️ 第七十九轮残留的红灯脚本活到 00:41，把绿灯盖成红 |
+| H29 | 清脚本用 `ps -ef` | `ps -A` 的 NAME 列 | 脚本进程名都叫 `sh`，必须用 `ps -ef` / `ps -A -o PID,ARGS` 才看得到参数 | ✅ 已固化进 `tools/traffic_shot.py`（按 PID kill） |
+| H30 | 灯态与图一致 | 脚本自动判定这一帧是红是绿 | 红灯帧红像素 > 0、绿灯帧红像素 = 0 | ✅ 红 1836 / 绿 0（`tools/traffic_shot.py` 会打印） |
 
 ## I. 稳定性
 

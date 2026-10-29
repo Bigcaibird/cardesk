@@ -150,12 +150,15 @@ class AdaptapiAmbientLightApi(
      * 这属于**未验证**项：真机上若自定义色仍不亮，要回头查这条。
      */
     override fun apply(color: AmbientColor): Boolean {
-        val gw = gateway("写颜色") ?: return false
-        val func = AdaptapiConstants.resolve(AdaptapiConstants.FUNC_AMBIENT_COLOR_SET) ?: run {
-            Logx.d(LogTags.AMBIENT, "氛围灯颜色功能号按名解析不到", "name" to AdaptapiConstants.FUNC_AMBIENT_COLOR_SET)
-            return false
-        }
-        // 节流：颜色没怎么变就别写
+        // 第八十轮：**节流必须放在最前面**。
+        //
+        // 以前是「先解析功能号 → 解析不到就直接 return」，
+        // 节流写在解析**之后** ⇒ 车机不认这个功能号时，
+        // 每一次都提前返回，`lastWriteAt` 永远不推进 → **节流形同虚设**：
+        // 频谱 10Hz ⇒ 每秒 10 次解析 + 10 次日志（模拟器上实测 ≈ 8 次/秒）。
+        // 写失败时虽然有 backoff，但它也被解析这道门挡在后面，同样够不着。
+        //
+        // 现在先把节流与 backoff 判掉，写不出去就直接返回，后面的解析一次都不做。
         val now = System.currentTimeMillis()
         val prev = lastColor
         if (prev != null && now - lastWriteAt < minIntervalMs) return true
@@ -171,6 +174,12 @@ class AdaptapiAmbientLightApi(
         val failedRecently = lastWriteFailed && now - lastWriteAt < FAIL_BACKOFF_MS
         if (failedRecently) return false
         lastWriteAt = now
+        val gw = gateway("写颜色") ?: return false
+        val func = AdaptapiConstants.resolve(AdaptapiConstants.FUNC_AMBIENT_COLOR_SET) ?: run {
+            Logx.d(LogTags.AMBIENT, "氛围灯颜色功能号按名解析不到", "name" to AdaptapiConstants.FUNC_AMBIENT_COLOR_SET)
+            lastWriteFailed = true
+            return false
+        }
         // 体验模式 = CUSTOM —— **必须在写自定义色之前**
         ensureExperienceCustom(gw)
         val rgb = (color.r.coerceIn(0, 255) shl 16) or

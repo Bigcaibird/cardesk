@@ -1,0 +1,1828 @@
+--------- beginning of main
+10-29 23:52:49.239   175   175 I netd    : trafficSwapActiveStatsMap() <14.81ms>
+10-29 23:52:49.245   175   175 I netd    : tetherGetStats() <4.92ms>
+10-29 23:52:49.338  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:52:49.338  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:52:49.339  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:52:49.339  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:52:49.464  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:49.464  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:49.464  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:52:49.464  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:52:49.742  8080  8080 D CarDesk/Media: 周期重扫 count=194 sessions=0
+10-29 23:52:49.742  8080  8080 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:52:49.742  8080  8080 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:52:49.742  8080  8080 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:52:49.742  8080  8080 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:52:49.744  1100  1100 D CarDesk/Media: 周期重扫 count=10680 sessions=0
+10-29 23:52:49.744  1100  1100 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:52:49.744  1100  1100 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:52:49.744  1100  1100 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:52:49.744  1100  1100 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:52:49.782  8080  8080 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:49.782  8080  8080 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:49.782  8080  8080 D CarDesk/Dock: Dock 可见性 hideHomeDock=false hideOemDock=false lowerDock=false page=0
+10-29 23:52:49.782  8080  8080 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=73
+10-29 23:52:50.024  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:52:50.024  8080  8080 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:52:50.024  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:52:50.024  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:52:50.345  8080  8080 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:52:50.346  8080  8080 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:52:50.346  1100  1100 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:52:50.346  8080  8080 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:50.346  1100  1100 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:52:50.346  8080  8080 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:50.346  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:50.346  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:50.346  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:52:50.346  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:52:50.346  8080  8080 D CarDesk/Dock: Dock 可见性 hideHomeDock=false hideOemDock=false lowerDock=false page=0
+10-29 23:52:50.346  8080  8080 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=73
+10-29 23:52:50.465  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:50.465  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:50.465  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:52:50.465  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:52:50.595  1100  1100 I CarDesk/NavUI: 高德导航状态 state=40
+10-29 23:52:50.595  8080  8080 I CarDesk/NavUI: 高德导航状态 state=40
+10-29 23:52:50.676  1969  1969 E mapautp.yh:pus: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+10-29 23:52:50.784  8080  8080 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:50.784  8080  8080 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:50.784  8080  8080 D CarDesk/Dock: Dock 可见性 hideHomeDock=false hideOemDock=false lowerDock=false page=0
+10-29 23:52:50.784  8080  8080 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=73
+10-29 23:52:51.032  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:52:51.033  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:52:51.033  8080  8080 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:52:51.033  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:52:51.076  1100  1100 I CarDesk/NavUI: 高德导航状态 state=8
+10-29 23:52:51.077  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:52:51.077  8080  8080 I CarDesk/NavUI: 高德导航状态 state=8
+10-29 23:52:51.077  8080  8080 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:52:51.087  1100  1100 I CarDesk/NavUI: 收到导航引导数据 keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:52:51.087  8080  8080 I CarDesk/NavUI: 收到导航引导数据 keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:52:51.096  8080  8080 I CarDesk/NavUI: 收到红绿灯数据（巡航协议） lamp=RED countdown=12 rawStatus=0 rawDir=2
+10-29 23:52:51.340  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:52:51.341  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:52:51.341  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:52:51.341  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:52:51.467  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:51.467  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:51.467  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:52:51.467  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:52:51.785  8080  8080 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:51.785  8080  8080 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:51.785  8080  8080 D CarDesk/Dock: Dock 可见性 hideHomeDock=false hideOemDock=false lowerDock=false page=0
+10-29 23:52:51.785  8080  8080 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=73
+10-29 23:52:51.900   368  8012 I WifiService: startScan uid=10119
+10-29 23:52:51.900   368   479 I WifiScanRequestProxy: Scan request from com.autonavi.amapautp.yh throttled
+10-29 23:52:51.901   368  8012 E WifiService: Failed to start scan
+10-29 23:52:52.039  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:52:52.040  8080  8080 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:52:52.040  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:52:52.040  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:52:52.058  1836  1836 E locationservic: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+10-29 23:52:52.246  1100  1100 D CarDesk/Media: 周期重扫 count=10681 sessions=0
+10-29 23:52:52.246  1100  1100 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:52:52.246  1100  1100 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:52:52.246  1100  1100 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:52:52.246  1100  1100 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:52:52.246  8080  8080 D CarDesk/Media: 周期重扫 count=195 sessions=0
+10-29 23:52:52.246  8080  8080 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:52:52.246  8080  8080 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:52:52.246  8080  8080 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:52:52.246  8080  8080 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:52:52.467  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:52.467  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:52.467  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:52:52.467  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:52:52.706  1836  1888 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:52:52.753  9881  9881 D AndroidRuntime: >>>>>> START com.android.internal.os.RuntimeInit uid 0 <<<<<<
+10-29 23:52:52.754  9881  9881 I AndroidRuntime: Using default boot image
+10-29 23:52:52.754  9881  9881 I AndroidRuntime: Leaving lock profiling enabled
+10-29 23:52:52.755  9881  9881 I app_process: Core platform API reporting enabled, enforcing=false
+10-29 23:52:52.786  8080  8080 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:52.786  8080  8080 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:52.786  8080  8080 D CarDesk/Dock: Dock 可见性 hideHomeDock=false hideOemDock=false lowerDock=false page=0
+10-29 23:52:52.786  8080  8080 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=73
+10-29 23:52:52.792  9881  9881 D ICU     : Time zone APEX file found: /apex/com.android.tzdata/etc/icu/icu_tzdata.dat
+10-29 23:52:52.795  9881  9881 I app_process: The ClassLoaderContext is a special shared library.
+10-29 23:52:52.801  9881  9881 W app_process: JNI RegisterNativeMethods: attempt to register 0 native methods for android.media.AudioAttributes
+10-29 23:52:52.804  9881  9881 D AndroidRuntime: Calling main entry com.android.commands.input.Input
+10-29 23:52:52.820  9881  9881 D AndroidRuntime: Shutting down VM
+10-29 23:52:52.820  8080  8080 I CarDesk/Ambient: 氛围灯开关 from=false to=true
+10-29 23:52:52.826   181  3182 W audio_hw_generic: Not supplying enough data to HAL, expected position 670998 , only wrote 670915
+10-29 23:52:52.826  8080  8080 I CarDesk/Ambient: 已注册播放配置监听 sampleRate=44100
+10-29 23:52:52.862   181  3182 W audio_hw_generic: Not supplying enough data to HAL, expected position 672515 , only wrote 672237
+10-29 23:52:52.863  1100  1100 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:52:52.863  8080  8080 I CarDesk/Setting: 设置已应用
+10-29 23:52:52.863  1100  1100 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:52:52.864  8080  8080 D CarDesk/Dock: Dock 可见性 hideHomeDock=false hideOemDock=false lowerDock=false page=0
+10-29 23:52:52.864  8080  8080 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=73
+10-29 23:52:52.864  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:52.864  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:52.871  8080  8080 I CarDesk/Sys: 生成原车 Dock/状态栏策略 hideDock=false hideStatus=false immersive=com.ecarx.cardesk dockApps=* statusApps=* policy=immersive.navigation=com.ecarx.cardesk
+10-29 23:52:52.872  8080  8080 I CarDesk/Sys: 应用原车 Dock/状态栏策略 policy=immersive.navigation=com.ecarx.cardesk hideDock=false hideStatus=false oemNavImmersive=true
+10-29 23:52:52.874  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:52:52.874  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:52:52.879  8080  9896 D CarDesk/Signal: AdaptAPI 常量按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_INTERACTIVE_EFFECT
+10-29 23:52:52.879  8080  9896 D CarDesk/Ambient: 氛围灯互动效果功能号按名解析不到
+10-29 23:52:52.879  8080  9896 D CarDesk/Ambient: 氛围灯开关下发失败，稍后重试 enabled=true 连续失败次数=1
+10-29 23:52:52.880  8080  9896 D CarDesk/Signal: AdaptAPI 常量按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_BRIGHTNESS_DRIVING
+10-29 23:52:52.880  8080  9896 D CarDesk/Ambient: 氛围灯亮度功能号按名解析不到
+--------- beginning of system
+10-29 23:52:52.880   368   368 V SettingsProvider: Notifying for 0: content://settings/global/policy_control
+10-29 23:52:52.881  8080  9896 D CarDesk/Signal: AdaptAPI 常量按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_BRIGHTNESS_STATIONARY
+10-29 23:52:52.881  8080  9896 D CarDesk/Ambient: 氛围灯静止亮度功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_BRIGHTNESS_STATIONARY
+10-29 23:52:52.881  8080  9896 D CarDesk/Ambient: 氛围灯互动效果功能号按名解析不到
+10-29 23:52:52.881  8080  9896 D CarDesk/Ambient: 氛围灯亮度功能号按名解析不到
+10-29 23:52:52.881  8080  9896 D CarDesk/Ambient: 氛围灯静止亮度功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_BRIGHTNESS_STATIONARY
+10-29 23:52:52.889  8080  8080 D CarDesk/Sys: shell settings put global key=policy_control value=immersive.navigation=com.ecarx.cardesk exit=0
+10-29 23:52:52.889  8080  8080 I CarDesk/Sys: 应用 policy_control 成功 policy=immersive.navigation=com.ecarx.cardesk directWrite=true
+10-29 23:52:52.890  8080  8080 W CarDesk/Sys: 设置 overscan 失败：反射 setOverscan 不可用 l=0 t=0 r=0 b=0
+10-29 23:52:52.890  8080  8080 D CarDesk/NavUI: 画中画比例读取 dual=false key=desk_primary_ratio_normal_v1 raw=0.71030045 value=0.71030045 default=0.71030045
+10-29 23:52:52.890  8080  8080 D CarDesk/NavUI: 画中画分屏比例变化 ratio=0.71030045 dual=false
+10-29 23:52:52.890  8080  8080 D CarDesk/NavUI: 副画包名变更 pkg=
+10-29 23:52:52.890  8080  8080 D CarDesk/NavUI: 刷新画中画 pkg= pkg2= dual=false
+10-29 23:52:52.890  8080  8080 D CarDesk/NavUI: 画中画清空（原本没有承载应用） role=主画
+10-29 23:52:52.890  8080  8080 D CarDesk/NavUI: 画中画清空（原本没有承载应用） role=副画
+10-29 23:52:52.890  8080  8080 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:52.890  8080  8080 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:52.890  8080  8080 D CarDesk/Dock: Dock 可见性 hideHomeDock=false hideOemDock=false lowerDock=false page=0
+10-29 23:52:52.890  8080  8080 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=73
+10-29 23:52:52.891  8080  8080 I CarDesk/Setting: [EVT] 进入设置页 page=ambient name=氛围灯
+10-29 23:52:52.900  8080  8080 I CarDesk/Setting: 设置已应用
+10-29 23:52:52.900  8080  8080 D CarDesk/Dock: Dock 可见性 hideHomeDock=false hideOemDock=false lowerDock=false page=0
+10-29 23:52:52.900  8080  8080 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=73
+10-29 23:52:52.900  8080  8080 I CarDesk/Sys: 生成原车 Dock/状态栏策略 hideDock=false hideStatus=false immersive=com.ecarx.cardesk dockApps=* statusApps=* policy=immersive.navigation=com.ecarx.cardesk
+10-29 23:52:52.900  8080  8080 I CarDesk/Sys: 应用原车 Dock/状态栏策略 policy=immersive.navigation=com.ecarx.cardesk hideDock=false hideStatus=false oemNavImmersive=true
+10-29 23:52:52.908  8080  8080 D CarDesk/Sys: shell settings put global key=policy_control value=immersive.navigation=com.ecarx.cardesk exit=0
+10-29 23:52:52.908  8080  8080 I CarDesk/Sys: 应用 policy_control 成功 policy=immersive.navigation=com.ecarx.cardesk directWrite=true
+10-29 23:52:52.908  8080  8080 W CarDesk/Sys: 设置 overscan 失败：反射 setOverscan 不可用 l=0 t=0 r=0 b=0
+10-29 23:52:52.909  8080  8080 D CarDesk/NavUI: 画中画比例读取 dual=false key=desk_primary_ratio_normal_v1 raw=0.71030045 value=0.71030045 default=0.71030045
+10-29 23:52:52.909  8080  8080 D CarDesk/NavUI: 画中画分屏比例变化 ratio=0.71030045 dual=false
+10-29 23:52:52.909  8080  8080 D CarDesk/NavUI: 副画包名变更 pkg=
+10-29 23:52:52.909  8080  8080 D CarDesk/NavUI: 刷新画中画 pkg= pkg2= dual=false
+10-29 23:52:52.909  8080  8080 D CarDesk/NavUI: 画中画清空（原本没有承载应用） role=主画
+10-29 23:52:52.909  8080  8080 D CarDesk/NavUI: 画中画清空（原本没有承载应用） role=副画
+10-29 23:52:52.909  8080  8080 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:52.909  8080  8080 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:52.909  8080  8080 D CarDesk/Dock: Dock 可见性 hideHomeDock=false hideOemDock=false lowerDock=false page=0
+10-29 23:52:52.909  8080  8080 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=73
+10-29 23:52:52.912  8080  8080 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:52:52.912  8080  8080 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:52:52.913  8080  8080 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:52.913  8080  8080 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:52.913  8080  8080 D CarDesk/Dock: Dock 可见性 hideHomeDock=false hideOemDock=false lowerDock=false page=0
+10-29 23:52:52.913  8080  8080 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=73
+10-29 23:52:52.940  8080  9895 I CarDesk/Ambient: 频谱采集状态 state=RUNNING reason=
+10-29 23:52:52.940  8080  9895 I CarDesk/Ambient: 频谱已挂上输出混音 captureSize=512 fftBytes=256 sampleRate=44100 source=输出混音
+10-29 23:52:52.999  8080  9896 D CarDesk/Signal: AdaptAPI 常量按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:52.999  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:53.053  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:52:53.056  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:52:53.056  8080  8080 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:52:53.057  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:52:53.080  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:53.124  1100  1100 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:52:53.124  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:52:53.125  8080  8080 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:52:53.125  8080  8080 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:52:53.135  1100  1100 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:52:53.135  8080  8080 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:52:53.148  8080  8080 I CarDesk/NavUI: 收到红绿灯数据（巡航协议） lamp=RED countdown=12 rawStatus=0 rawDir=2
+10-29 23:52:53.220  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:53.342  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:52:53.342  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:52:53.342  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:52:53.343  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:52:53.359  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:53.470  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:53.470  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:53.470  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:52:53.470  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:52:53.488  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:53.609  8080  9896 I chatty  : uid=1000(system) com.ecarx.cardesk identical 1 line
+10-29 23:52:53.728  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:53.788  8080  8080 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:53.789  8080  8080 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:53.789  8080  8080 D CarDesk/Dock: Dock 可见性 hideHomeDock=false hideOemDock=false lowerDock=false page=0
+10-29 23:52:53.789  8080  8080 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=73
+10-29 23:52:53.865  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:53.932   190   227 D gralloc_ranchu: gralloc_alloc: Creating ashmem region of size 8298496
+10-29 23:52:53.939   121   121 I hwservicemanager: getTransport: Cannot find entry android.hardware.graphics.mapper@3.0::IMapper/default in either framework or device manifest.
+10-29 23:52:53.939  9928  9928 W Gralloc3: mapper 3.x is not supported
+10-29 23:52:53.942  9928  9928 D HostConnection: createUnique: call
+10-29 23:52:53.942  9928  9928 D HostConnection: HostConnection::get() New Host Connection established 0x7459f9c5a0, tid 9928
+10-29 23:52:53.943  9928  9928 D HostConnection: HostComposition ext ANDROID_EMU_CHECKSUM_HELPER_v1 ANDROID_EMU_native_sync_v2 ANDROID_EMU_dma_v1 ANDROID_EMU_direct_mem ANDROID_EMU_host_composition_v1 ANDROID_EMU_host_composition_v2 ANDROID_EMU_vulkan ANDROID_EMU_deferred_vulkan_commands ANDROID_EMU_vulkan_null_optional_strings ANDROID_EMU_vulkan_create_resources_with_requirements ANDROID_EMU_YUV_Cache ANDROID_EMU_vulkan_ignored_handles ANDROID_EMU_vulkan_free_memory_sync ANDROID_EMU_vulkan_shader_float16_int8 ANDROID_EMU_vulkan_async_queue_submit ANDROID_EMU_sync_buffer_data ANDROID_EMU_vulkan_async_qsri ANDROID_EMU_hwc_color_transform ANDROID_EMU_hwc_display_power_mode GL_OES_EGL_image_external_essl3 GL_OES_vertex_array_object ANDROID_EMU_host_side_tracing ANDROID_EMU_gles_max_version_3_1 
+10-29 23:52:53.943  9928  9928 D eglCodecCommon: allocate: Ask for block of size 0x1000
+10-29 23:52:53.943  9928  9928 D eglCodecCommon: allocate: ioctl allocate returned offset 0x1fef10000 size 0x8000
+10-29 23:52:53.947  9928  9928 D eglCodecCommon: allocate: Ask for block of size 0x7ea000
+10-29 23:52:53.947  9928  9928 D eglCodecCommon: allocate: ioctl allocate returned offset 0x1fe728000 size 0x7f0000
+10-29 23:52:54.005  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:54.046  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:52:54.046  8080  8080 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:52:54.046  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:52:54.048  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:52:54.143  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:54.281  8080  9896 I chatty  : uid=1000(system) com.ecarx.cardesk identical 1 line
+10-29 23:52:54.423  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:54.471  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:54.472  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:54.472  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:52:54.472  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:52:54.563  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:54.703  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:54.749  1100  1100 D CarDesk/Media: 周期重扫 count=10682 sessions=0
+10-29 23:52:54.749  1100  1100 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:52:54.749  1100  1100 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:52:54.749  1100  1100 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:52:54.750  8080  8080 D CarDesk/Media: 周期重扫 count=196 sessions=0
+10-29 23:52:54.750  8080  8080 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:52:54.750  1100  1100 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:52:54.750  8080  8080 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:52:54.750  8080  8080 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:52:54.750  8080  8080 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:52:54.791  8080  8080 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:54.791  8080  8080 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:54.792  8080  8080 D CarDesk/Dock: Dock 可见性 hideHomeDock=false hideOemDock=false lowerDock=false page=0
+10-29 23:52:54.792  8080  8080 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=73
+10-29 23:52:54.842  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:54.902   368  1909 I WifiService: startScan uid=10119
+10-29 23:52:54.903   368   479 I WifiScanRequestProxy: Scan request from com.autonavi.amapautp.yh throttled
+10-29 23:52:54.903   368  1909 E WifiService: Failed to start scan
+10-29 23:52:54.981  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:55.053  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:52:55.053  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:52:55.053  8080  8080 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:52:55.054  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:52:55.120  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:55.200  1100  1100 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:52:55.200  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:52:55.200  8080  8080 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:52:55.200  8080  8080 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:52:55.206  1100  1100 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:52:55.207  8080  8080 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:52:55.214  8080  8080 I CarDesk/NavUI: 收到红绿灯数据（巡航协议） lamp=RED countdown=12 rawStatus=0 rawDir=2
+10-29 23:52:55.262  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:55.342  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:52:55.343  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:52:55.343  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:52:55.343  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:52:55.352  1100  1100 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:52:55.352  1100  1100 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:52:55.352  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:55.352  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:55.352  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:52:55.352  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:52:55.353  8080  8080 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:52:55.353  8080  8080 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:52:55.353  8080  8080 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:55.353  8080  8080 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:55.353  8080  8080 D CarDesk/Dock: Dock 可见性 hideHomeDock=false hideOemDock=false lowerDock=false page=0
+10-29 23:52:55.353  8080  8080 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=73
+10-29 23:52:55.399  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:55.473  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:55.473  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:55.473  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:52:55.473  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:52:55.531  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:55.668  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:55.685  1969  1969 E mapautp.yh:pus: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+10-29 23:52:55.794  8080  8080 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:55.794  8080  8080 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:55.794  8080  8080 D CarDesk/Dock: Dock 可见性 hideHomeDock=false hideOemDock=false lowerDock=false page=0
+10-29 23:52:55.794  8080  8080 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=73
+10-29 23:52:55.805  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:55.829  8080  9896 D CarDesk/Ambient: 氛围灯互动效果功能号按名解析不到
+10-29 23:52:55.829  8080  9896 D CarDesk/Ambient: 氛围灯亮度功能号按名解析不到
+10-29 23:52:55.829  8080  9896 D CarDesk/Ambient: 氛围灯静止亮度功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_BRIGHTNESS_STATIONARY
+10-29 23:52:55.944  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:55.980   181   181 W audio_hw_generic: Not supplying enough data to HAL, expected position 945507 , only wrote 809725
+10-29 23:52:56.053  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:52:56.053  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:52:56.053  8080  8080 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:52:56.053  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:52:56.083  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:56.110   190   227 D gralloc_ranchu: gralloc_alloc: Creating ashmem region of size 8298496
+10-29 23:52:56.127   121   121 I hwservicemanager: getTransport: Cannot find entry android.hardware.graphics.mapper@3.0::IMapper/default in either framework or device manifest.
+10-29 23:52:56.127  9945  9945 W Gralloc3: mapper 3.x is not supported
+10-29 23:52:56.130  9945  9945 D HostConnection: createUnique: call
+10-29 23:52:56.135  9945  9945 D HostConnection: HostConnection::get() New Host Connection established 0x7335f645a0, tid 9945
+10-29 23:52:56.136  9945  9945 D HostConnection: HostComposition ext ANDROID_EMU_CHECKSUM_HELPER_v1 ANDROID_EMU_native_sync_v2 ANDROID_EMU_dma_v1 ANDROID_EMU_direct_mem ANDROID_EMU_host_composition_v1 ANDROID_EMU_host_composition_v2 ANDROID_EMU_vulkan ANDROID_EMU_deferred_vulkan_commands ANDROID_EMU_vulkan_null_optional_strings ANDROID_EMU_vulkan_create_resources_with_requirements ANDROID_EMU_YUV_Cache ANDROID_EMU_vulkan_ignored_handles ANDROID_EMU_vulkan_free_memory_sync ANDROID_EMU_vulkan_shader_float16_int8 ANDROID_EMU_vulkan_async_queue_submit ANDROID_EMU_sync_buffer_data ANDROID_EMU_vulkan_async_qsri ANDROID_EMU_hwc_color_transform ANDROID_EMU_hwc_display_power_mode GL_OES_EGL_image_external_essl3 GL_OES_vertex_array_object ANDROID_EMU_host_side_tracing ANDROID_EMU_gles_max_version_3_1 
+10-29 23:52:56.136  9945  9945 D eglCodecCommon: allocate: Ask for block of size 0x1000
+10-29 23:52:56.136  9945  9945 D eglCodecCommon: allocate: ioctl allocate returned offset 0x1fef10000 size 0x8000
+10-29 23:52:56.140  9945  9945 D eglCodecCommon: allocate: Ask for block of size 0x7ea000
+10-29 23:52:56.140  9945  9945 D eglCodecCommon: allocate: ioctl allocate returned offset 0x1fe728000 size 0x7f0000
+10-29 23:52:56.221  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:56.367  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:56.476  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:56.476  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:56.476  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:52:56.476  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:52:56.515  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:56.654  8080  9896 I chatty  : uid=1000(system) com.ecarx.cardesk identical 1 line
+10-29 23:52:56.784  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:56.798  8080  8080 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:56.798  8080  8080 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:56.798  8080  8080 D CarDesk/Dock: Dock 可见性 hideHomeDock=false hideOemDock=false lowerDock=false page=0
+10-29 23:52:56.798  8080  8080 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=73
+10-29 23:52:56.925  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:57.067  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:57.067  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:52:57.069  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:52:57.081  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:52:57.083  8080  8080 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:52:57.104  1836  1836 E locationservic: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+10-29 23:52:57.203  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:57.235  1100  1100 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:52:57.235  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:52:57.236  8080  8080 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:52:57.236  8080  8080 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:52:57.243  1100  1100 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:52:57.243  8080  8080 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:52:57.250  1100  1100 D CarDesk/Media: 周期重扫 count=10683 sessions=0
+10-29 23:52:57.250  1100  1100 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:52:57.250  1100  1100 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:52:57.250  1100  1100 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:52:57.250  1100  1100 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:52:57.252  8080  8080 D CarDesk/Media: 周期重扫 count=197 sessions=0
+10-29 23:52:57.252  8080  8080 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:52:57.252  8080  8080 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:52:57.252  8080  8080 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:52:57.252  8080  8080 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:52:57.258  8080  8080 I CarDesk/NavUI: 收到红绿灯数据（巡航协议） lamp=RED countdown=12 rawStatus=0 rawDir=2
+10-29 23:52:57.342  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:57.344  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:52:57.345  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:52:57.345  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:52:57.345  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:52:57.477  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:57.477  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:57.477  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:52:57.477  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:52:57.479  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:57.600  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:57.708  1836  1888 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:52:57.737  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:57.799  8080  8080 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:57.799  8080  8080 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:57.799  8080  8080 D CarDesk/Dock: Dock 可见性 hideHomeDock=false hideOemDock=false lowerDock=false page=0
+10-29 23:52:57.799  8080  8080 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=73
+10-29 23:52:57.852  1100  1100 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:52:57.852  1100  1100 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:52:57.852  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:57.852  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:57.852  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:52:57.853  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:52:57.854  8080  8080 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:52:57.854  8080  8080 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:52:57.854  8080  8080 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:57.854  8080  8080 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:57.854  8080  8080 D CarDesk/Dock: Dock 可见性 hideHomeDock=false hideOemDock=false lowerDock=false page=0
+10-29 23:52:57.855  8080  8080 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=73
+10-29 23:52:57.878  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:57.905   368  8012 I WifiService: startScan uid=10119
+10-29 23:52:57.906   368   479 I WifiScanRequestProxy: Scan request from com.autonavi.amapautp.yh throttled
+10-29 23:52:57.906   368  8012 E WifiService: Failed to start scan
+10-29 23:52:58.018  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:58.069  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:52:58.069  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:52:58.069  8080  8080 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:52:58.070  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:52:58.157  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:58.297  8080  9896 I chatty  : uid=1000(system) com.ecarx.cardesk identical 1 line
+10-29 23:52:58.438  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:58.480  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:58.480  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:58.480  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:52:58.480  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:52:58.575  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:58.714  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:58.800  8080  8080 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:58.800  8080  8080 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:58.800  8080  8080 D CarDesk/Dock: Dock 可见性 hideHomeDock=false hideOemDock=false lowerDock=false page=0
+10-29 23:52:58.800  8080  8080 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=73
+10-29 23:52:58.829  8080  9896 D CarDesk/Ambient: 氛围灯互动效果功能号按名解析不到
+10-29 23:52:58.829  8080  9896 D CarDesk/Ambient: 氛围灯亮度功能号按名解析不到
+10-29 23:52:58.829  8080  9896 D CarDesk/Ambient: 氛围灯静止亮度功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_BRIGHTNESS_STATIONARY
+10-29 23:52:58.847  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:58.985  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:59.073  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:52:59.073  1100  1100 I CarDesk/NavUI: 丢弃无效的导航引导数据 keyType=12205 icon=-1 seg=-1
+10-29 23:52:59.073  8080  8080 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:52:59.074  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:52:59.123  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:59.265  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:59.272  1100  1100 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:52:59.272  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:52:59.280  8080  8080 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:52:59.280  8080  8080 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:52:59.309  1100  1100 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:52:59.309  8080  8080 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:52:59.318  8080  8080 I CarDesk/NavUI: 收到红绿灯数据（巡航协议） lamp=RED countdown=12 rawStatus=0 rawDir=2
+10-29 23:52:59.347  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:52:59.348  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:52:59.348  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:52:59.349  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:52:59.403  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:59.483  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:59.483  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:59.483  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:52:59.483  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:52:59.544  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:59.681  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:59.753  8080  8080 D CarDesk/Media: 周期重扫 count=198 sessions=0
+10-29 23:52:59.753  8080  8080 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:52:59.753  8080  8080 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:52:59.753  8080  8080 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:52:59.753  8080  8080 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:52:59.753  1100  1100 D CarDesk/Media: 周期重扫 count=10684 sessions=0
+10-29 23:52:59.753  1100  1100 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:52:59.753  1100  1100 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:52:59.753  1100  1100 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:52:59.753  1100  1100 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:52:59.802  8080  8080 D CarDesk/Dock: 状态栏时钟刷新 clock=23:52
+10-29 23:52:59.802  8080  8080 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:52:59.802  8080  8080 D CarDesk/Dock: Dock 可见性 hideHomeDock=false hideOemDock=false lowerDock=false page=0
+10-29 23:52:59.802  8080  8080 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=73
+10-29 23:52:59.815  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:52:59.948  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:00.002   601   601 D KeyguardClockSwitch: Updating clock: 1153
+10-29 23:53:00.080  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:00.080  8080  8080 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:00.080  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:00.080  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:00.089  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:00.230  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:00.289   190   227 D gralloc_ranchu: gralloc_alloc: Creating ashmem region of size 8298496
+10-29 23:53:00.294   121   121 I hwservicemanager: getTransport: Cannot find entry android.hardware.graphics.mapper@3.0::IMapper/default in either framework or device manifest.
+10-29 23:53:00.294  9976  9976 W Gralloc3: mapper 3.x is not supported
+10-29 23:53:00.298  9976  9976 D HostConnection: createUnique: call
+10-29 23:53:00.298  9976  9976 D HostConnection: HostConnection::get() New Host Connection established 0x7655f1f5a0, tid 9976
+10-29 23:53:00.299  9976  9976 D HostConnection: HostComposition ext ANDROID_EMU_CHECKSUM_HELPER_v1 ANDROID_EMU_native_sync_v2 ANDROID_EMU_dma_v1 ANDROID_EMU_direct_mem ANDROID_EMU_host_composition_v1 ANDROID_EMU_host_composition_v2 ANDROID_EMU_vulkan ANDROID_EMU_deferred_vulkan_commands ANDROID_EMU_vulkan_null_optional_strings ANDROID_EMU_vulkan_create_resources_with_requirements ANDROID_EMU_YUV_Cache ANDROID_EMU_vulkan_ignored_handles ANDROID_EMU_vulkan_free_memory_sync ANDROID_EMU_vulkan_shader_float16_int8 ANDROID_EMU_vulkan_async_queue_submit ANDROID_EMU_sync_buffer_data ANDROID_EMU_vulkan_async_qsri ANDROID_EMU_hwc_color_transform ANDROID_EMU_hwc_display_power_mode GL_OES_EGL_image_external_essl3 GL_OES_vertex_array_object ANDROID_EMU_host_side_tracing ANDROID_EMU_gles_max_version_3_1 
+10-29 23:53:00.299  9976  9976 D eglCodecCommon: allocate: Ask for block of size 0x1000
+10-29 23:53:00.299  9976  9976 D eglCodecCommon: allocate: ioctl allocate returned offset 0x1fef10000 size 0x8000
+10-29 23:53:00.304  9976  9976 D eglCodecCommon: allocate: Ask for block of size 0x7ea000
+10-29 23:53:00.304  9976  9976 D eglCodecCommon: allocate: ioctl allocate returned offset 0x1fe728000 size 0x7f0000
+10-29 23:53:00.353  8080  8080 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:53:00.354  8080  8080 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:53:00.354  1100  1100 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:53:00.354  8080  8080 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:00.354  8080  8080 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:00.354  1100  1100 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:53:00.354  8080  8080 D CarDesk/Dock: Dock 可见性 hideHomeDock=false hideOemDock=false lowerDock=false page=0
+10-29 23:53:00.354  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:00.354  8080  8080 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=73
+10-29 23:53:00.354  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:00.354  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:00.354  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:00.370  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:00.487  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:00.487  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:00.487  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:00.487  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:00.511  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:00.613  8080  8080 I CarDesk/NavUI: 高德导航状态 state=40
+10-29 23:53:00.614  1100  1100 I CarDesk/NavUI: 高德导航状态 state=40
+10-29 23:53:00.648  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:00.703  1969  1969 E mapautp.yh:pus: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+10-29 23:53:00.786  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:00.803  8080  8080 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:00.803  8080  8080 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:00.803  8080  8080 D CarDesk/Dock: Dock 可见性 hideHomeDock=false hideOemDock=false lowerDock=false page=0
+10-29 23:53:00.803  8080  8080 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=73
+10-29 23:53:00.910   368  1909 I WifiService: startScan uid=10119
+10-29 23:53:00.910   368   479 I WifiScanRequestProxy: Scan request from com.autonavi.amapautp.yh throttled
+10-29 23:53:00.911   368  1909 E WifiService: Failed to start scan
+10-29 23:53:00.926  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:01.063  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:01.085  8080  8080 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:01.085  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:01.085  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:01.085  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:01.203  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:01.327  1100  1100 I CarDesk/NavUI: 高德导航状态 state=8
+10-29 23:53:01.327  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:01.328  8080  8080 I CarDesk/NavUI: 高德导航状态 state=8
+10-29 23:53:01.328  8080  8080 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:01.334  1100  1100 I CarDesk/NavUI: 收到导航引导数据 keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:01.334  8080  8080 I CarDesk/NavUI: 收到导航引导数据 keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:01.351  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:01.352  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:01.352  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:01.353  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:01.353  8080  8080 I CarDesk/NavUI: 收到红绿灯数据（巡航协议） lamp=RED countdown=12 rawStatus=0 rawDir=2
+10-29 23:53:01.354  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:01.481  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:01.487  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:01.487  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:01.488  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:01.488  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:01.614  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:01.750  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:01.804  8080  8080 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:01.804  8080  8080 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:01.804  8080  8080 D CarDesk/Dock: Dock 可见性 hideHomeDock=false hideOemDock=false lowerDock=false page=0
+10-29 23:53:01.804  8080  8080 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=73
+10-29 23:53:01.830  8080  9896 D CarDesk/Ambient: 氛围灯互动效果功能号按名解析不到
+10-29 23:53:01.830  8080  9896 D CarDesk/Ambient: 氛围灯亮度功能号按名解析不到
+10-29 23:53:01.830  8080  9896 D CarDesk/Ambient: 氛围灯静止亮度功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_BRIGHTNESS_STATIONARY
+10-29 23:53:01.886  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:02.020  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:02.093  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:02.094  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:02.094  8080  8080 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:02.094  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:02.114  1836  1836 E locationservic: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+10-29 23:53:02.159  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:02.255  8080  8080 D CarDesk/Media: 周期重扫 count=199 sessions=0
+10-29 23:53:02.255  8080  8080 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:02.255  8080  8080 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:02.255  8080  8080 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:02.255  8080  8080 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:53:02.256  1100  1100 D CarDesk/Media: 周期重扫 count=10685 sessions=0
+10-29 23:53:02.256  1100  1100 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:02.256  1100  1100 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:02.256  1100  1100 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:02.256  1100  1100 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:53:02.299  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:02.439  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:02.487  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:02.487  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:02.488  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:02.488  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:02.578  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:02.710  1836  1888 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:02.716  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:02.808  8080  8080 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:02.808  8080  8080 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:02.808  8080  8080 D CarDesk/Dock: Dock 可见性 hideHomeDock=false hideOemDock=false lowerDock=false page=0
+10-29 23:53:02.808  8080  8080 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=73
+10-29 23:53:02.856  8080  8080 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:53:02.857  8080  8080 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:53:02.857  1100  1100 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:53:02.857  1100  1100 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:53:02.857  8080  8080 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:02.857  8080  8080 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:02.857  8080  8080 D CarDesk/Dock: Dock 可见性 hideHomeDock=false hideOemDock=false lowerDock=false page=0
+10-29 23:53:02.857  8080  8080 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=73
+10-29 23:53:02.857  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:02.857  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:02.857  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:02.857  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:02.864  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:02.998  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:03.101  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:03.102  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:03.102  8080  8080 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:03.102  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:03.138  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:03.278  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:03.353  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:03.353  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:03.353  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:03.354  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:03.398  1100  1100 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:53:03.398  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:03.398  8080  8080 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:53:03.398  8080  8080 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:03.404  1100  1100 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:03.404  8080  8080 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:03.421  8080  8080 I CarDesk/NavUI: 收到红绿灯数据（巡航协议） lamp=RED countdown=12 rawStatus=0 rawDir=2
+10-29 23:53:03.435  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:03.489  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:03.489  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:03.489  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:03.489  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:03.562  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:03.697  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:03.810  8080  8080 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:03.810  8080  8080 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:03.811  8080  8080 D CarDesk/Dock: Dock 可见性 hideHomeDock=false hideOemDock=false lowerDock=false page=0
+10-29 23:53:03.811  8080  8080 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=73
+--------- beginning of crash
+10-29 23:53:03.814  8080  8096 F libc    : Fatal signal 11 (SIGSEGV), code 1 (SEGV_MAPERR), fault addr 0x44 in tid 8096 (HeapTaskDaemon), pid 8080 (m.ecarx.cardesk)
+10-29 23:53:03.849 10006 10006 I crash_dump64: obtaining output fd from tombstoned, type: kDebuggerdTombstone
+10-29 23:53:03.851  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:03.852   258   258 I /system/bin/tombstoned: received crash request for pid 8096
+10-29 23:53:03.853 10006 10006 I crash_dump64: performing dump of process 8080 (target tid = 8096)
+10-29 23:53:03.855 10006 10006 F DEBUG   : *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***
+10-29 23:53:03.855 10006 10006 F DEBUG   : Build fingerprint: 'Android/sdk_phone64_arm64/emulator64_arm64:10/QSR1.211112.002/7910984:userdebug/test-keys'
+10-29 23:53:03.855 10006 10006 F DEBUG   : Revision: '0'
+10-29 23:53:03.855 10006 10006 F DEBUG   : ABI: 'arm64'
+10-29 23:53:03.855 10006 10006 F DEBUG   : Timestamp: 2026-10-29 23:53:03+0800
+10-29 23:53:03.855 10006 10006 F DEBUG   : pid: 8080, tid: 8096, name: HeapTaskDaemon  >>> com.ecarx.cardesk <<<
+10-29 23:53:03.855 10006 10006 F DEBUG   : uid: 1000
+10-29 23:53:03.855 10006 10006 F DEBUG   : signal 11 (SIGSEGV), code 1 (SEGV_MAPERR), fault addr 0x44
+10-29 23:53:03.855 10006 10006 F DEBUG   : Cause: null pointer dereference
+10-29 23:53:03.855 10006 10006 F DEBUG   :     x0  00000078e1239200  x1  0000000012c40140  x2  00000078513caa70  x3  000000000000000c
+10-29 23:53:03.855 10006 10006 F DEBUG   :     x4  0000000000000000  x5  0000007850379a80  x6  0000007850270800  x7  000000784b8a4c00
+10-29 23:53:03.855 10006 10006 F DEBUG   :     x8  0000000000000000  x9  0000000000000001  x10 000000005ac00000  x11 0000000040000000
+10-29 23:53:03.855 10006 10006 F DEBUG   :     x12 0000000000000001  x13 0000007850207a50  x14 00000078513ca938  x15 00001f1b8aaaea60
+10-29 23:53:03.855 10006 10006 F DEBUG   :     x16 00000078dd98a8f0  x17 00000078dd97c8c0  x18 00000077fc15e000  x19 0000000012c40140
+10-29 23:53:03.855 10006 10006 F DEBUG   :     x20 00000078e1239200  x21 0000000000000000  x22 00000078e11e6400  x23 0000000000000000
+10-29 23:53:03.855 10006 10006 F DEBUG   :     x24 00000078e1227a80  x25 00000078513cc020  x26 0000000000000001  x27 00000078513cc020
+10-29 23:53:03.855 10006 10006 F DEBUG   :     x28 000000785c5e4000  x29 00000078513caae0
+10-29 23:53:03.855 10006 10006 F DEBUG   :     sp  00000078513caa40  lr  000000785c23005c  pc  000000785c22ec34
+10-29 23:53:03.915   368  1909 I WifiService: startScan uid=10119
+10-29 23:53:03.915   368   479 I WifiScanRequestProxy: Scan request from com.autonavi.amapautp.yh throttled
+10-29 23:53:03.915   368  1909 E WifiService: Failed to start scan
+10-29 23:53:03.918 10006 10006 F DEBUG   : 
+10-29 23:53:03.918 10006 10006 F DEBUG   : backtrace:
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #00 pc 000000000020fc34  /apex/com.android.runtime/lib64/libart.so (art::gc::collector::ConcurrentCopying::AddLiveBytesAndScanRef(art::mirror::Object*)+348) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #01 pc 0000000000211058  /apex/com.android.runtime/lib64/libart.so (art::gc::collector::ConcurrentCopying::ProcessMarkStackForMarkingAndComputeLiveBytes()+464) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #02 pc 000000000020ac10  /apex/com.android.runtime/lib64/libart.so (art::gc::collector::ConcurrentCopying::MarkingPhase()+1176) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #03 pc 0000000000209dec  /apex/com.android.runtime/lib64/libart.so (art::gc::collector::ConcurrentCopying::RunPhases()+240) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #04 pc 0000000000228308  /apex/com.android.runtime/lib64/libart.so (art::gc::collector::GarbageCollector::Run(art::gc::GcCause, bool)+288) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #05 pc 00000000002471b4  /apex/com.android.runtime/lib64/libart.so (art::gc::Heap::CollectGarbageInternal(art::gc::collector::GcType, art::gc::GcCause, bool)+3200) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #06 pc 0000000000259568  /apex/com.android.runtime/lib64/libart.so (art::gc::Heap::ConcurrentGC(art::Thread*, art::gc::GcCause, bool)+124) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #07 pc 000000000025f170  /apex/com.android.runtime/lib64/libart.so (art::gc::Heap::ConcurrentGCTask::Run(art::Thread*)+36) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #08 pc 000000000028c8d4  /apex/com.android.runtime/lib64/libart.so (art::gc::TaskProcessor::RunAllTasks(art::Thread*)+64) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #09 pc 000000000004b4ec  /system/framework/arm64/boot-core-libart.oat (art_jni_trampoline+124) (BuildId: 19ae21cd748bf4fcae29ee92c16c2f04c4fbbf33)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #10 pc 0000000000136334  /apex/com.android.runtime/lib64/libart.so (art_quick_invoke_stub+548) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #11 pc 000000000014506c  /apex/com.android.runtime/lib64/libart.so (art::ArtMethod::Invoke(art::Thread*, unsigned int*, unsigned int, art::JValue*, char const*)+244) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #12 pc 00000000002df780  /apex/com.android.runtime/lib64/libart.so (art::interpreter::ArtInterpreterToCompiledCodeBridge(art::Thread*, art::ArtMethod*, art::ShadowFrame*, unsigned short, art::JValue*)+384) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #13 pc 00000000002daa60  /apex/com.android.runtime/lib64/libart.so (bool art::interpreter::DoCall<false, false>(art::ArtMethod*, art::Thread*, art::ShadowFrame&, art::Instruction const*, unsigned short, art::JValue*)+912) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #14 pc 0000000000598254  /apex/com.android.runtime/lib64/libart.so (MterpInvokeVirtual+648) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #15 pc 0000000000130814  /apex/com.android.runtime/lib64/libart.so (mterp_op_invoke_virtual+20) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #16 pc 00000000001b404a  /apex/com.android.runtime/javalib/core-libart.jar (java.lang.Daemons$HeapTaskDaemon.runInternal+38)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #17 pc 0000000000598564  /apex/com.android.runtime/lib64/libart.so (MterpInvokeVirtual+1432) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #18 pc 0000000000130814  /apex/com.android.runtime/lib64/libart.so (mterp_op_invoke_virtual+20) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #19 pc 00000000001b382e  /apex/com.android.runtime/javalib/core-libart.jar (java.lang.Daemons$Daemon.run+50)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #20 pc 0000000000599d58  /apex/com.android.runtime/lib64/libart.so (MterpInvokeInterface+1740) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #21 pc 0000000000130a14  /apex/com.android.runtime/lib64/libart.so (mterp_op_invoke_interface+20) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #22 pc 00000000000ea918  /apex/com.android.runtime/javalib/core-oj.jar (java.lang.Thread.run+8)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #23 pc 00000000002b03cc  /apex/com.android.runtime/lib64/libart.so (_ZN3art11interpreterL7ExecuteEPNS_6ThreadERKNS_20CodeItemDataAccessorERNS_11ShadowFrameENS_6JValueEbb.llvm.11038381426500388515+240) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #24 pc 000000000058985c  /apex/com.android.runtime/lib64/libart.so (artQuickToInterpreterBridge+1012) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #25 pc 000000000013f468  /apex/com.android.runtime/lib64/libart.so (art_quick_to_interpreter_bridge+88) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #26 pc 0000000000136334  /apex/com.android.runtime/lib64/libart.so (art_quick_invoke_stub+548) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #27 pc 000000000014506c  /apex/com.android.runtime/lib64/libart.so (art::ArtMethod::Invoke(art::Thread*, unsigned int*, unsigned int, art::JValue*, char const*)+244) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #28 pc 00000000004a9b48  /apex/com.android.runtime/lib64/libart.so (art::(anonymous namespace)::InvokeWithArgArray(art::ScopedObjectAccessAlreadyRunnable const&, art::ArtMethod*, art::(anonymous namespace)::ArgArray*, art::JValue*, char const*)+104) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #29 pc 00000000004aabdc  /apex/com.android.runtime/lib64/libart.so (art::InvokeVirtualOrInterfaceWithJValues(art::ScopedObjectAccessAlreadyRunnable const&, _jobject*, _jmethodID*, jvalue const*)+416) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #30 pc 00000000004ea98c  /apex/com.android.runtime/lib64/libart.so (art::Thread::CreateCallback(void*)+1176) (BuildId: 56f24a055ef0b5ed91239cf5f97c50c2)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #31 pc 00000000000e1100  /apex/com.android.runtime/lib64/bionic/libc.so (__pthread_start(void*)+36) (BuildId: c042ffb4e195c9462700c20f99189c2b)
+10-29 23:53:03.918 10006 10006 F DEBUG   :       #32 pc 0000000000083ab0  /apex/com.android.runtime/lib64/bionic/libc.so (__start_thread+64) (BuildId: c042ffb4e195c9462700c20f99189c2b)
+10-29 23:53:03.980  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:04.109  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:04.110  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:04.110  8080  8080 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:04.110  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:04.116   258   258 E /system/bin/tombstoned: Tombstone written to: /data/tombstones/tombstone_00
+10-29 23:52:52.907   368   368 I chatty  : uid=1000 system_server identical 4 lines
+10-29 23:52:52.908   368   368 V SettingsProvider: Notifying for 0: content://settings/global/policy_control
+10-29 23:53:04.119   368   406 I BootReceiver: Copying /data/tombstones/tombstone_00 to DropBox (SYSTEM_TOMBSTONE)
+10-29 23:53:04.119   368 10014 I DropBoxManagerService: add tag=data_app_native_crash isTagEnabled=true flags=0x2
+10-29 23:53:04.119   368   406 I DropBoxManagerService: add tag=SYSTEM_TOMBSTONE isTagEnabled=true flags=0x2
+10-29 23:53:04.122  8080  9896 D CarDesk/Ambient: 氛围灯颜色功能号按名解析不到 name=SETTING_FUNC_AMBIENCE_LIGHT_COLOR_SET
+10-29 23:53:04.125   368 10013 W ActivityTaskManager:   Force finishing activity com.ecarx.cardesk/com.cardesk.launcher.MainActivity
+10-29 23:53:04.146   368   469 W InputDispatcher: channel '98f8f4f com.ecarx.cardesk/com.cardesk.launcher.MainActivity (server)' ~ Consumer closed input channel or an error occurred.  events=0x9
+10-29 23:53:04.146   368   469 E InputDispatcher: channel '98f8f4f com.ecarx.cardesk/com.cardesk.launcher.MainActivity (server)' ~ Channel is unrecoverably broken and will be disposed!
+10-29 23:53:04.146   368  1048 D NotificationListeners: Removing active service ComponentInfo{com.ecarx.cardesk/com.ecarx.qq.tool.service.MusicBridgeService}
+10-29 23:53:04.147   368   721 D NotificationListeners: Removing active service ComponentInfo{com.ecarx.cardesk/com.cardesk.launcher.core.media.MediaNotificationListener}
+10-29 23:53:04.147   368   368 V NotificationListeners: 0 notification listener connection lost: ComponentInfo{com.ecarx.cardesk/com.ecarx.qq.tool.service.MusicBridgeService}
+10-29 23:53:04.147   368   368 V NotificationListeners: 0 notification listener connection lost: ComponentInfo{com.ecarx.cardesk/com.cardesk.launcher.core.media.MediaNotificationListener}
+10-29 23:53:04.147   368  1909 W AudioService.PlaybackActivityMonitor: client died
+10-29 23:53:04.147   368  8012 I ActivityManager: Process com.ecarx.cardesk (pid 8080) has died: fore TOP 
+10-29 23:53:04.150   368   385 I WindowManager: WIN DEATH: Window{98f8f4f u0 com.ecarx.cardesk/com.cardesk.launcher.MainActivity}
+10-29 23:53:04.150   368   385 W InputDispatcher: Attempted to unregister already unregistered input channel '98f8f4f com.ecarx.cardesk/com.cardesk.launcher.MainActivity (server)'
+10-29 23:53:04.151   368  8012 W ActivityManager: Scheduling restart of crashed service com.ecarx.cardesk/com.ecarx.qq.tool.service.MusicBridgeService in 1000ms
+10-29 23:53:04.151   368  8012 W ActivityManager: Scheduling restart of crashed service com.ecarx.cardesk/com.cardesk.launcher.core.media.MediaNotificationListener in 11000ms
+10-29 23:53:04.151   176   176 I Zygote  : Process 8080 exited due to signal 11 (Segmentation fault)
+10-29 23:53:04.151   200   309 W APM_AudioPolicyManager: unregisterEffect effect 11 enabled
+10-29 23:53:04.153   368  8012 W InputReader: Device has associated, but no associated display id.
+10-29 23:53:04.155   368   390 W ActivityManager: setHasOverlayUi called on unknown pid: 8080
+10-29 23:53:04.153   368  8012 I chatty  : uid=1000(system) Binder:368_19 identical 8 lines
+10-29 23:53:04.153   368  8012 W InputReader: Device has associated, but no associated display id.
+10-29 23:53:04.163   191  4404 W EmuHWC2 : No layers, exit, buffer 0x0
+10-29 23:53:04.167  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:04.167   368  8012 W ActivityManager: Permission Denial: opening provider com.android.providers.calendar.CalendarProvider2 from ProcessRecord{fba4ff7 3527:xyz.i4o.uni.launcher/u0a126} (pid=3527, uid=10126) requires android.permission.READ_CALENDAR or android.permission.WRITE_CALENDAR
+10-29 23:53:04.179   191  4404 W EmuHWC2 : No layers, exit, buffer 0x0
+10-29 23:53:04.189   190   227 D gralloc_ranchu: gralloc_alloc: Creating ashmem region of size 8298496
+10-29 23:53:04.191   190   227 D gralloc_ranchu: gralloc_alloc: Creating ashmem region of size 7868416
+10-29 23:53:04.194   368   398 I libprocessgroup: Successfully killed process cgroup uid 1000 pid 8080 in 44ms
+10-29 23:53:04.195   191  4404 W EmuHWC2 : No layers, exit, buffer 0x0
+10-29 23:53:04.196  3527  3556 D EGL_emulation: eglMakeCurrent: 0x78502865e0: ver 3 1 (tinfo 0x7850218f60)
+10-29 23:53:04.201   190   227 D gralloc_ranchu: gralloc_alloc: Creating ashmem region of size 7868416
+10-29 23:53:04.204  3527  3556 D EGL_emulation: eglMakeCurrent: 0x78502865e0: ver 3 1 (tinfo 0x7850218f60)
+10-29 23:53:04.206  3527  3549 D EGL_emulation: eglMakeCurrent: 0x7850285e60: ver 3 1 (tinfo 0x7850218c60)
+10-29 23:53:04.212   191  4404 W EmuHWC2 : No layers, exit, buffer 0x0
+10-29 23:53:04.217   190   227 D gralloc_ranchu: gralloc_alloc: Creating ashmem region of size 8298496
+10-29 23:53:04.229   191  4404 W EmuHWC2 : No layers, exit, buffer 0x0
+10-29 23:53:04.246  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:04.264   190   227 D gralloc_ranchu: gralloc_alloc: Creating ashmem region of size 8298496
+10-29 23:53:04.299  3527  3548 I 4o.uni.launche: Waiting for a blocking GC ProfileSaver
+10-29 23:53:04.299   190   227 D gralloc_ranchu: gralloc_alloc: Creating ashmem region of size 7868416
+10-29 23:53:04.379   190   227 D gralloc_ranchu: gralloc_alloc: Creating ashmem region of size 7868416
+10-29 23:53:04.491  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:04.491  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:04.492  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:04.492  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:04.626   368   390 W ActivityTaskManager: Activity top resumed state loss timeout for ActivityRecord{934e9c6 u0 com.ecarx.cardesk/com.cardesk.launcher.MainActivity t-1 f}
+10-29 23:53:04.758  1100  1100 D CarDesk/Media: 周期重扫 count=10686 sessions=0
+10-29 23:53:04.758  1100  1100 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:04.758  1100  1100 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:04.758  1100  1100 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:04.758  1100  1100 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:53:05.119  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:05.120  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:05.120  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:05.155   176   176 D Zygote  : Forked child process 10018
+10-29 23:53:05.158 10018 10018 I m.ecarx.cardes: Late-enabling -Xcheck:jni
+10-29 23:53:05.162   368   397 I ActivityManager: Start proc 10018:com.ecarx.cardesk/1000 for service {com.ecarx.cardesk/com.ecarx.qq.tool.service.MusicBridgeService}
+10-29 23:53:05.164 10018 10018 E m.ecarx.cardes: Unknown bits set in runtime_flags: 0x8000
+10-29 23:53:05.192 10018 10018 W m.ecarx.cardesk: type=1400 audit(0.0:548): avc: denied { write } for name="com.ecarx.cardesk-EQ3Z22J9alL0B5zegsW-mQ==" dev="vdc" ino=57380 scontext=u:r:system_app:s0 tcontext=u:object_r:apk_data_file:s0 tclass=dir permissive=0
+10-29 23:53:05.243 10018 10018 I CarDesk/Media: 媒体会话追踪启动 rescanMs=2500 tickMs=200 manager=true notifyAccess=true mediaContentControl=true enumeration=可用 notifyComponents=[com.ecarx.cardesk/com.cardesk.launcher.core.media.MediaNotificationListener, com.ecarx.cardesk/com.ecarx.qq.tool.service.MusicBridgeService]
+10-29 23:53:05.243   368   368 V NotificationListeners: 0 notification listener service connected: ComponentInfo{com.ecarx.cardesk/com.ecarx.qq.tool.service.MusicBridgeService}
+10-29 23:53:05.243   368   368 V NotificationListeners: 0 notification listener service connected: ComponentInfo{com.ecarx.cardesk/com.cardesk.launcher.core.media.MediaNotificationListener}
+10-29 23:53:05.244 10018 10018 I CarDesk/Media: 会话监听注册成功 component=com.ecarx.cardesk/com.cardesk.launcher.core.media.MediaNotificationListener notifyAccess=true
+10-29 23:53:05.244 10018 10018 D CarDesk/Media: 周期重扫 count=1 sessions=0
+10-29 23:53:05.244 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:05.245 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:05.245 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:05.245 10018 10018 I CarDesk/Media: 通知监听服务已连接（系统已授予通知使用权） service=com.cardesk.launcher.core.media.MediaNotificationListener services=1 useComponent=com.ecarx.cardesk/com.cardesk.launcher.core.media.MediaNotificationListener
+10-29 23:53:05.246 10018 10018 I CarDesk/Media: 读取上次歌曲状态 pkg=com.cardesk.mediaprobe title=小镇姑娘 artist=陶喆 durationMs=295666 positionMs=295666
+10-29 23:53:05.247 10018 10018 I CarDesk/Media: 唤醒上次播放的音乐应用 pkg=com.cardesk.mediaprobe reason=listener-connected
+10-29 23:53:05.247 10018 10018 W ContextImpl: Calling a method in the system process without a qualified user: android.app.ContextImpl.sendOrderedBroadcast:1141 android.content.ContextWrapper.sendOrderedBroadcast:485 com.cardesk.launcher.core.media.MusicSessionTracker.sendOrderedMediaButton:1709 com.cardesk.launcher.core.media.MusicSessionTracker.maybeWakeDefaultMusic:527 com.cardesk.launcher.core.media.MusicSessionTracker.onListenerConnected:504 
+10-29 23:53:05.247 10018 10018 W ContextImpl: Calling a method in the system process without a qualified user: android.app.ContextImpl.sendOrderedBroadcast:1141 android.content.ContextWrapper.sendOrderedBroadcast:485 com.cardesk.launcher.core.media.MusicSessionTracker.sendOrderedMediaButton:1716 com.cardesk.launcher.core.media.MusicSessionTracker.maybeWakeDefaultMusic:527 com.cardesk.launcher.core.media.MusicSessionTracker.onListenerConnected:504 
+10-29 23:53:05.247 10018 10018 I CarDesk/Media: 定向 MEDIA_BUTTON 已发送 pkg=com.cardesk.mediaprobe key=PLAY
+10-29 23:53:05.247 10018 10018 I CarDesk/Media: 按键接管（AudioManager） key=PLAY reason=唤醒上次音乐应用
+10-29 23:53:05.247 10018 10018 I CarDesk/Media: 通知监听服务已连接（系统已授予通知使用权） service=com.ecarx.qq.tool.service.MusicBridgeService services=2 useComponent=com.ecarx.cardesk/com.ecarx.qq.tool.service.MusicBridgeService
+10-29 23:53:05.248 10018 10018 I CarDesk/Media: 会话监听换用新组件重新注册 from=com.ecarx.cardesk/com.cardesk.launcher.core.media.MediaNotificationListener to=com.ecarx.cardesk/com.ecarx.qq.tool.service.MusicBridgeService
+10-29 23:53:05.248 10018 10018 I CarDesk/Media: 会话监听注册成功 component=com.ecarx.cardesk/com.ecarx.qq.tool.service.MusicBridgeService notifyAccess=true
+10-29 23:53:05.248 10018 10018 D CarDesk/Media: 周期重扫 count=2 sessions=0
+10-29 23:53:05.248 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:05.248 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:05.248 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:05.248 10018 10018 D CarDesk/Media: 周期重扫 count=3 sessions=0
+10-29 23:53:05.248 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:05.248 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:05.248 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:05.355  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:05.356  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:05.357  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:05.358  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:05.359  1100  1100 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:53:05.360  1100  1100 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:53:05.360  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:05.360  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:05.361  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:05.361  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:05.470  1100  1100 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:53:05.470  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:05.476  1100  1100 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:05.494  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:05.494  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:05.494  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:05.494  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:05.649 10018 10018 D CarDesk/Media: 周期重扫 count=4 sessions=0
+10-29 23:53:05.649 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:05.649 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:05.649 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:05.714  1969  1969 E mapautp.yh:pus: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+10-29 23:53:06.121  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:06.124  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:06.125  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:06.259  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:06.449 10018 10018 D CarDesk/Media: 周期重扫 count=5 sessions=0
+10-29 23:53:06.449 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:06.449 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:06.449 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:06.498  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:06.498  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:06.498  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:06.498  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:06.922   368  8012 I WifiService: startScan uid=10119
+10-29 23:53:06.923   368   479 I WifiScanRequestProxy: Scan request from com.autonavi.amapautp.yh throttled
+10-29 23:53:06.923   368  8012 E WifiService: Failed to start scan
+10-29 23:53:07.122  1836  1836 E locationservic: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+10-29 23:53:07.131  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:07.131  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:07.132  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:07.260  1100  1100 D CarDesk/Media: 周期重扫 count=10687 sessions=0
+10-29 23:53:07.260  1100  1100 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:07.260  1100  1100 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:07.260  1100  1100 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:07.260  1100  1100 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:53:07.359  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:07.360  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:07.360  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:07.361  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:07.498  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:07.498  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:07.499  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:07.499  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:07.508  1100  1100 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:53:07.508  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:07.519  1100  1100 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:07.715  1836  1888 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:07.735   368  1009 E TaskPersister: File error accessing recents directory (directory doesn't exist?).
+10-29 23:53:07.748 10018 10018 D CarDesk/Media: 周期重扫 count=6 sessions=0
+10-29 23:53:07.749 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:07.749 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:07.749 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:07.749 10018 10018 D CarDesk/Media: 周期重扫 count=7 sessions=0
+10-29 23:53:07.749 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:07.749 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:07.749 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:07.864  1100  1100 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:53:07.864  1100  1100 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:53:07.864  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:07.864  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:07.864  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:07.864  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:07.930   175   175 I netd    : trafficSwapActiveStatsMap() <19.61ms>
+10-29 23:53:07.932   175   175 I netd    : tetherGetStats() <1.95ms>
+10-29 23:53:08.130  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:08.130  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:08.130  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:08.262  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:08.488   190   227 D gralloc_ranchu: gralloc_alloc: Creating ashmem region of size 8298496
+10-29 23:53:08.498   121   121 I hwservicemanager: getTransport: Cannot find entry android.hardware.graphics.mapper@3.0::IMapper/default in either framework or device manifest.
+10-29 23:53:08.498 10070 10070 W Gralloc3: mapper 3.x is not supported
+10-29 23:53:08.499  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:08.499  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:08.499  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:08.499  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:08.500 10070 10070 D HostConnection: createUnique: call
+10-29 23:53:08.501 10070 10070 D HostConnection: HostConnection::get() New Host Connection established 0x7c5454f5a0, tid 10070
+10-29 23:53:08.502 10070 10070 D HostConnection: HostComposition ext ANDROID_EMU_CHECKSUM_HELPER_v1 ANDROID_EMU_native_sync_v2 ANDROID_EMU_dma_v1 ANDROID_EMU_direct_mem ANDROID_EMU_host_composition_v1 ANDROID_EMU_host_composition_v2 ANDROID_EMU_vulkan ANDROID_EMU_deferred_vulkan_commands ANDROID_EMU_vulkan_null_optional_strings ANDROID_EMU_vulkan_create_resources_with_requirements ANDROID_EMU_YUV_Cache ANDROID_EMU_vulkan_ignored_handles ANDROID_EMU_vulkan_free_memory_sync ANDROID_EMU_vulkan_shader_float16_int8 ANDROID_EMU_vulkan_async_queue_submit ANDROID_EMU_sync_buffer_data ANDROID_EMU_vulkan_async_qsri ANDROID_EMU_hwc_color_transform ANDROID_EMU_hwc_display_power_mode GL_OES_EGL_image_external_essl3 GL_OES_vertex_array_object ANDROID_EMU_host_side_tracing ANDROID_EMU_gles_max_version_3_1 
+10-29 23:53:08.502 10070 10070 D eglCodecCommon: allocate: Ask for block of size 0x1000
+10-29 23:53:08.502 10070 10070 D eglCodecCommon: allocate: ioctl allocate returned offset 0x1fef18000 size 0x8000
+10-29 23:53:08.526 10070 10070 D eglCodecCommon: allocate: Ask for block of size 0x7ea000
+10-29 23:53:08.526 10070 10070 D eglCodecCommon: allocate: ioctl allocate returned offset 0x1fe730000 size 0x7f0000
+10-29 23:53:09.130  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:09.130  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:09.131  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:09.131  1585 10082 D 天气  : GPS定位成功:39.237255,-123.15003166666665
+10-29 23:53:09.132  1585 10082 D 天气  : 请求URL(备用API): http://api.bigdatacloud.net/data/reverse-geocode-client?latitude=39.237255&longitude=-123.15003166666665&localityLanguage=zh-Hans&extensions=base
+10-29 23:53:09.366  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:09.367  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:09.367  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:09.368  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:09.500  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:09.500  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:09.501  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:09.501  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:09.503  1585 10082 D 天气  : HTTP响应码(备用): 200
+10-29 23:53:09.503  1585 10082 D 调试  : API响应(备用): {  "latitude": 39.237255,  "lookupSource": "coordinates",  "longitude": -123.15003166666665,  "localityLanguageRequested": "zh-hans",  "continent": "北美洲",  "continentCode": "NA",  "countryName": "美国",  "countryCode": "US",  "principalSubdivision": "加利福尼亚州",  "principalSubdivisionCode": "US-CA",  "city": "Redwood Valley-Potter Valley",  "locality": "尤奇亚",  "postcode": "95482",  "plusCode": "84FR6RPX+WX",  "fips": {    "state": "06",    "county": "045",    "countySubdivision": "93490"  },  "localityInfo": {    "administrative": [      {        "name": "美国",        "description": "北美洲国家",        "isoName": "United States of America",        "order": 2,        "adminLevel": 2,        "isoCode": "US",        "wikidataId": "Q30",        "geonameId": 6252001      },      {        "name": "加利福尼亚州",        "description": "美国州份",        "isoName": "California",        "order": 5,        "adminLevel": 4,        "isoCode": "US-CA",        "wikidataId": "Q99",        "geonameId": 5332921      },      {        "name": "门多西诺县",        "description": "county in northwestern California, United States",        "order": 6,        "adminLevel": 6,        "wikidataId": "Q108087",        "geonameId": 5372163      },      {        "name": "尤奇亚",        "description": "city in and county seat of Mendocino County, California, United States",        "order": 10,        "adminLevel": 8,        "wikidataId": "Q837105",        "geonameId": 5404476      }    ],    "informative": [      {        "name": "北美洲",        "description": "七大洲之一",        "isoName": "North America",        "order": 1,        "isoCode": "NA",        "wikidataId": "Q49",        "geonameId": 6255149      },      {        "name": "美国本土",        "description": "the 48 states of the United States (all but Alaska and Hawaii) and the District of Columbia",        "order": 3,        "wikidataId": "Q578170"      },      {        "name": "America/Los_Angeles",        "description": "时区",        "order": 4      },      {        "name": "Redwood Valley-Potter Valley",        "order": 7,        "geonameId": 12523212      },      {        "name": "95482",        "description": "邮政编码",        "order": 8      },      {        "name": "06-045-93490",        "description": "FIPS code",        "order": 9      }    ]  }}
+10-29 23:53:09.503  1585 10082 D 天气  : 逆地理编码成功，保存城市信息
+10-29 23:53:09.503  1585 10082 D 天气  : 开始更新城市信息
+10-29 23:53:09.503  1585 10082 D 天气  : 城市信息未变化，无需更新城市信息
+10-29 23:53:09.503  1585 10082 D 天气  : 执行成功
+10-29 23:53:09.543  1100  1100 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:53:09.543  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:09.549  1100  1100 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:09.762  1100  1100 D CarDesk/Media: 周期重扫 count=10688 sessions=0
+10-29 23:53:09.762  1100  1100 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:09.762  1100  1100 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:09.762  1100  1100 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:09.762  1100  1100 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:53:09.928   368  8012 I WifiService: startScan uid=10119
+10-29 23:53:09.928   368   479 I WifiScanRequestProxy: Scan request from com.autonavi.amapautp.yh throttled
+10-29 23:53:09.928   368  8012 E WifiService: Failed to start scan
+10-29 23:53:09.966  1100  1100 D CarDesk/NavUI: 车道线数据为空，忽略
+10-29 23:53:10.135  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:10.135  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:10.136  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:10.250 10018 10018 D CarDesk/Media: 周期重扫 count=8 sessions=0
+10-29 23:53:10.250 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:10.250 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:10.250 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:10.251 10018 10018 D CarDesk/Media: 周期重扫 count=9 sessions=0
+10-29 23:53:10.251 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:10.251 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:10.251 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:10.267  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:10.364  1100  1100 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:53:10.364  1100  1100 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:53:10.364  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:10.364  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:10.364  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:10.364  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:10.503  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:10.503  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:10.503  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:10.503  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:10.625  1100  1100 I CarDesk/NavUI: 高德导航状态 state=40
+10-29 23:53:10.727  1969  1969 E mapautp.yh:pus: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+10-29 23:53:11.145  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:11.145  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:11.145  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:11.368  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:11.369  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:11.369  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:11.370  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:11.505  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:11.505  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:11.506  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:11.506  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:11.571  1100  1100 I CarDesk/NavUI: 高德导航状态 state=8
+10-29 23:53:11.571  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:11.577  1100  1100 I CarDesk/NavUI: 收到导航引导数据 keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:12.129  1836  1836 E locationservic: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+10-29 23:53:12.150  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:12.150  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:12.151  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:12.266  1100  1100 D CarDesk/Media: 周期重扫 count=10689 sessions=0
+10-29 23:53:12.266  1100  1100 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:12.266  1100  1100 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:12.266  1100  1100 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:12.266  1100  1100 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:53:12.273  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:12.506  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:12.506  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:12.506  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:12.506  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:12.718  1836  1888 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:12.752 10018 10018 D CarDesk/Media: 周期重扫 count=10 sessions=0
+10-29 23:53:12.752 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:12.752 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:12.752 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:12.867  1100  1100 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:53:12.867  1100  1100 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:53:12.868  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:12.868  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:12.868  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:12.868  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:12.931   368   385 I WifiService: startScan uid=10119
+10-29 23:53:12.931   368   479 I WifiScanRequestProxy: Scan request from com.autonavi.amapautp.yh throttled
+10-29 23:53:12.931   368   385 E WifiService: Failed to start scan
+10-29 23:53:13.094  1100  1100 I CarDesk/NavUI: 高德导航状态 state=-1
+10-29 23:53:13.094  1100  1100 D CarDesk/NavUI: 忽略高德广播 keyType=10117
+10-29 23:53:13.094  1100  1100 I CarDesk/NavUI: 高德导航状态 state=200
+10-29 23:53:13.157  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:13.158  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:13.161  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:13.250 10018 10018 I CarDesk/Media: 唤醒音乐应用后仍未接管到会话，再叫一次 pkg=com.cardesk.mediaprobe retry=1
+10-29 23:53:13.251 10018 10018 I CarDesk/Media: 读取上次歌曲状态 pkg=com.cardesk.mediaprobe title=小镇姑娘 artist=陶喆 durationMs=295666 positionMs=295666
+10-29 23:53:13.251 10018 10018 I CarDesk/Media: 唤醒上次播放的音乐应用 pkg=com.cardesk.mediaprobe reason=wake-retry-1
+10-29 23:53:13.251 10018 10018 W ContextImpl: Calling a method in the system process without a qualified user: android.app.ContextImpl.sendOrderedBroadcast:1141 android.content.ContextWrapper.sendOrderedBroadcast:485 com.cardesk.launcher.core.media.MusicSessionTracker.sendOrderedMediaButton:1709 com.cardesk.launcher.core.media.MusicSessionTracker.maybeWakeDefaultMusic:527 com.cardesk.launcher.core.media.MusicSessionTracker.maybeWakeDefaultMusic$lambda$9:550 
+10-29 23:53:13.252 10018 10018 W ContextImpl: Calling a method in the system process without a qualified user: android.app.ContextImpl.sendOrderedBroadcast:1141 android.content.ContextWrapper.sendOrderedBroadcast:485 com.cardesk.launcher.core.media.MusicSessionTracker.sendOrderedMediaButton:1716 com.cardesk.launcher.core.media.MusicSessionTracker.maybeWakeDefaultMusic:527 com.cardesk.launcher.core.media.MusicSessionTracker.maybeWakeDefaultMusic$lambda$9:550 
+10-29 23:53:13.252 10018 10018 I CarDesk/Media: 定向 MEDIA_BUTTON 已发送 pkg=com.cardesk.mediaprobe key=PLAY
+10-29 23:53:13.252 10018 10018 I CarDesk/Media: 按键接管（AudioManager） key=PLAY reason=唤醒上次音乐应用
+10-29 23:53:13.259 10018 10018 D CarDesk/Media: 周期重扫 count=11 sessions=0
+10-29 23:53:13.260 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:13.260 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:13.260 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:13.371  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:13.372  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:13.372  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:13.372  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:13.508  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:13.508  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:13.509  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:13.509  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:13.602  1100  1100 I CarDesk/NavUI: 高德导航状态 state=8
+10-29 23:53:13.602  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:13.609  1100  1100 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:13.659 10018 10018 D CarDesk/Media: 周期重扫 count=12 sessions=0
+10-29 23:53:13.660 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:13.660 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:13.660 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:14.165  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:14.165  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:14.166  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:14.275  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:14.464 10018 10018 D CarDesk/Media: 周期重扫 count=13 sessions=0
+10-29 23:53:14.464 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:14.464 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:14.464 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:14.511  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:14.511  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:14.511  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:14.511  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:14.768  1100  1100 D CarDesk/Media: 周期重扫 count=10690 sessions=0
+10-29 23:53:14.768  1100  1100 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:14.768  1100  1100 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:14.768  1100  1100 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:14.768  1100  1100 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:53:15.167  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:15.168  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:15.168  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:15.254 10018 10018 D CarDesk/Media: 周期重扫 count=14 sessions=0
+10-29 23:53:15.254 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:15.254 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:15.254 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:15.370  1100  1100 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:53:15.370  1100  1100 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:53:15.370  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:15.370  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:15.370  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:15.370  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:15.374  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:15.374  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:15.374  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:15.375  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:15.511  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:15.511  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:15.511  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:15.511  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:15.633  1100  1100 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:53:15.633  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:15.639  1100  1100 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:15.734  1969  1969 E mapautp.yh:pus: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+10-29 23:53:15.759 10018 10018 D CarDesk/Media: 周期重扫 count=15 sessions=0
+10-29 23:53:15.759 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:15.759 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:15.759 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:15.935   368  8012 I WifiService: startScan uid=10119
+10-29 23:53:15.935   368   479 I WifiScanRequestProxy: Scan request from com.autonavi.amapautp.yh throttled
+10-29 23:53:15.935   368  8012 E WifiService: Failed to start scan
+10-29 23:53:16.171  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:16.171  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:16.172  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:16.280  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:16.517  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:16.517  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:16.517  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:16.517  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:17.134  1836  1836 E locationservic: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+10-29 23:53:17.181  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:17.181  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:17.181  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:17.270  1100  1100 D CarDesk/Media: 周期重扫 count=10691 sessions=0
+10-29 23:53:17.270  1100  1100 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:17.270  1100  1100 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:17.270  1100  1100 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:17.270  1100  1100 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:53:17.376  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:17.377  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:17.377  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:17.377  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:17.518  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:17.518  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:17.519  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:17.519  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:17.659  1100  1100 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:53:17.659  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:17.665  1100  1100 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:17.721  1836  1888 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:17.757 10018 10018 D CarDesk/Media: 周期重扫 count=16 sessions=0
+10-29 23:53:17.757 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:17.757 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:17.757 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:17.871  1100  1100 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:53:17.871  1100  1100 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:53:17.871  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:17.871  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:17.872  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:17.872  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:18.185  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:18.185  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:18.186  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:18.262 10018 10018 D CarDesk/Media: 周期重扫 count=17 sessions=0
+10-29 23:53:18.262 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:18.263 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:18.263 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:18.284  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:18.519  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:18.519  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:18.519  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:18.519  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:18.940   368   385 I WifiService: startScan uid=10119
+10-29 23:53:18.940   368   479 I WifiScanRequestProxy: Scan request from com.autonavi.amapautp.yh throttled
+10-29 23:53:18.940   368   385 E WifiService: Failed to start scan
+10-29 23:53:19.190  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:19.190  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:19.192  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:19.378  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:19.378  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:19.379  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:19.379  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:19.522  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:19.522  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:19.522  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:19.522  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:19.685  1100  1100 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:53:19.685  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:19.692  1100  1100 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:19.709   175   175 I netd    : trafficSwapActiveStatsMap() <22.61ms>
+10-29 23:53:19.711   175   175 I netd    : tetherGetStats() <0.93ms>
+10-29 23:53:19.773  1100  1100 D CarDesk/Media: 周期重扫 count=10692 sessions=0
+10-29 23:53:19.773  1100  1100 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:19.773  1100  1100 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:19.773  1100  1100 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:19.773  1100  1100 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:53:20.191  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:20.192  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:20.192  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:20.258 10018 10018 D CarDesk/Media: 周期重扫 count=18 sessions=0
+10-29 23:53:20.259 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:20.259 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:20.259 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:20.288  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:20.378  1100  1100 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:53:20.378  1100  1100 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:53:20.378  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:20.378  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:20.379  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:20.379  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:20.524  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:20.524  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:20.525  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:20.525  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:20.644  1100  1100 I CarDesk/NavUI: 高德导航状态 state=40
+10-29 23:53:20.749  1969  1969 E mapautp.yh:pus: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+10-29 23:53:21.197  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:21.198  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:21.206  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:21.260 10018 10018 I CarDesk/Media: 唤醒音乐应用后仍未接管到会话，再叫一次 pkg=com.cardesk.mediaprobe retry=2
+10-29 23:53:21.261 10018 10018 I CarDesk/Media: 读取上次歌曲状态 pkg=com.cardesk.mediaprobe title=小镇姑娘 artist=陶喆 durationMs=295666 positionMs=295666
+10-29 23:53:21.261 10018 10018 I CarDesk/Media: 唤醒上次播放的音乐应用 pkg=com.cardesk.mediaprobe reason=wake-retry-2
+10-29 23:53:21.263 10018 10018 W ContextImpl: Calling a method in the system process without a qualified user: android.app.ContextImpl.sendOrderedBroadcast:1141 android.content.ContextWrapper.sendOrderedBroadcast:485 com.cardesk.launcher.core.media.MusicSessionTracker.sendOrderedMediaButton:1709 com.cardesk.launcher.core.media.MusicSessionTracker.maybeWakeDefaultMusic:527 com.cardesk.launcher.core.media.MusicSessionTracker.maybeWakeDefaultMusic$lambda$9:550 
+10-29 23:53:21.264 10018 10018 W ContextImpl: Calling a method in the system process without a qualified user: android.app.ContextImpl.sendOrderedBroadcast:1141 android.content.ContextWrapper.sendOrderedBroadcast:485 com.cardesk.launcher.core.media.MusicSessionTracker.sendOrderedMediaButton:1716 com.cardesk.launcher.core.media.MusicSessionTracker.maybeWakeDefaultMusic:527 com.cardesk.launcher.core.media.MusicSessionTracker.maybeWakeDefaultMusic$lambda$9:550 
+10-29 23:53:21.264 10018 10018 I CarDesk/Media: 定向 MEDIA_BUTTON 已发送 pkg=com.cardesk.mediaprobe key=PLAY
+10-29 23:53:21.264 10018 10018 I CarDesk/Media: 按键接管（AudioManager） key=PLAY reason=唤醒上次音乐应用
+10-29 23:53:21.265 10018 10018 D CarDesk/Media: 周期重扫 count=19 sessions=0
+10-29 23:53:21.265 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:21.266 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:21.266 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:21.383  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:21.383  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:21.384  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:21.384  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:21.529  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:21.529  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:21.529  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:21.529  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:21.666 10018 10018 D CarDesk/Media: 周期重扫 count=20 sessions=0
+10-29 23:53:21.666 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:21.666 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:21.666 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:21.715  1100  1100 I CarDesk/NavUI: 高德导航状态 state=8
+10-29 23:53:21.716  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:21.723  1100  1100 I CarDesk/NavUI: 收到导航引导数据 keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:21.946   368  1048 I WifiService: startScan uid=10119
+10-29 23:53:21.948   368   479 I WifiScanRequestProxy: Scan request from com.autonavi.amapautp.yh throttled
+10-29 23:53:21.948   368  1048 E WifiService: Failed to start scan
+10-29 23:53:22.150  1836  1836 E locationservic: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+10-29 23:53:22.202  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:22.202  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:22.203  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:22.273  1100  1100 D CarDesk/Media: 周期重扫 count=10693 sessions=0
+10-29 23:53:22.273  1100  1100 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:22.273  1100  1100 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:22.273  1100  1100 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:22.273  1100  1100 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:53:22.290  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:22.467 10018 10018 D CarDesk/Media: 周期重扫 count=21 sessions=0
+10-29 23:53:22.467 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:22.467 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:22.467 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:22.532  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:22.532  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:22.532  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:22.532  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:22.723  1836  1888 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:22.759 10018 10018 D CarDesk/Media: 周期重扫 count=22 sessions=0
+10-29 23:53:22.759 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:22.759 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:22.759 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:22.875  1100  1100 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:53:22.875  1100  1100 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:53:22.875  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:22.875  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:22.876  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:22.876  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:23.217  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:23.218  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:23.219  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:23.385  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:23.386  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:23.386  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:23.386  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:23.534  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:23.534  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:23.534  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:23.534  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:23.748  1100  1100 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:53:23.748  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:23.761  1100  1100 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:23.766 10018 10018 D CarDesk/Media: 周期重扫 count=23 sessions=0
+10-29 23:53:23.767 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:23.767 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:23.767 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:24.232  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:24.235  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:24.235  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:24.296  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:24.535  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:24.535  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:24.535  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:24.535  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:24.776  1100  1100 D CarDesk/Media: 周期重扫 count=10694 sessions=0
+10-29 23:53:24.776  1100  1100 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:24.776  1100  1100 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:24.776  1100  1100 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:24.776  1100  1100 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:53:24.954   368  8012 I WifiService: startScan uid=10119
+10-29 23:53:24.955   368   479 I WifiScanRequestProxy: Scan request from com.autonavi.amapautp.yh throttled
+10-29 23:53:24.955   368  8012 E WifiService: Failed to start scan
+10-29 23:53:25.236  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:25.237  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:25.238  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:25.260 10018 10018 D CarDesk/Media: 周期重扫 count=24 sessions=0
+10-29 23:53:25.260 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:25.260 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:25.260 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:25.380  1100  1100 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:53:25.380  1100  1100 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:53:25.380  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:25.380  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:25.380  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:25.380  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:25.387  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:25.387  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:25.387  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:25.388  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:25.535  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:25.535  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:25.536  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:25.536  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:25.763  1969  1969 E mapautp.yh:pus: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+10-29 23:53:25.785   368   395 E memtrack: Couldn't load memtrack module
+10-29 23:53:25.785   368   395 W android.os.Debug: failed to get memory consumption info: -1
+10-29 23:53:25.786  1100  1100 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:53:25.786  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:25.794  1100  1100 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:26.240  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:26.243  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:26.243  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:26.266 10018 10018 D CarDesk/Media: 周期重扫 count=25 sessions=0
+10-29 23:53:26.266 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:26.266 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:26.266 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:26.300  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:26.538  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:26.538  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:26.538  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:26.538  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:27.161  1836  1836 E locationservic: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+10-29 23:53:27.243  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:27.243  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:27.244  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:27.283  1100  1100 D CarDesk/Media: 周期重扫 count=10695 sessions=0
+10-29 23:53:27.283  1100  1100 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:27.283  1100  1100 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:27.283  1100  1100 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:27.284  1100  1100 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:53:27.389  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:27.390  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:27.390  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:27.390  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:27.540  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:27.540  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:27.540  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:27.540  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:27.726  1836  1888 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:27.762 10018 10018 D CarDesk/Media: 周期重扫 count=26 sessions=0
+10-29 23:53:27.762 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:27.762 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:27.762 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:27.813  1100  1100 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:53:27.813  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:27.820  1100  1100 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:27.885  1100  1100 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:53:27.886  1100  1100 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:53:27.886  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:27.886  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:27.886  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:27.886  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:27.957   368  1048 I WifiService: startScan uid=10119
+10-29 23:53:27.958   368   479 I WifiScanRequestProxy: Scan request from com.autonavi.amapautp.yh throttled
+10-29 23:53:27.958   368  1048 E WifiService: Failed to start scan
+10-29 23:53:28.250  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:28.254  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:28.255  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:28.306  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:28.544  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:28.544  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:28.544  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:28.544  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:29.259  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:29.259  1100  1100 I CarDesk/NavUI: 丢弃无效的导航引导数据 keyType=12205 icon=-1 seg=-1
+10-29 23:53:29.260  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:29.266 10018 10018 I CarDesk/Media: 唤醒音乐应用后仍未接管到会话，再叫一次 pkg=com.cardesk.mediaprobe retry=3
+10-29 23:53:29.266 10018 10018 I CarDesk/Media: 读取上次歌曲状态 pkg=com.cardesk.mediaprobe title=小镇姑娘 artist=陶喆 durationMs=295666 positionMs=295666
+10-29 23:53:29.266 10018 10018 I CarDesk/Media: 唤醒上次播放的音乐应用 pkg=com.cardesk.mediaprobe reason=wake-retry-3
+10-29 23:53:29.267 10018 10018 W ContextImpl: Calling a method in the system process without a qualified user: android.app.ContextImpl.sendOrderedBroadcast:1141 android.content.ContextWrapper.sendOrderedBroadcast:485 com.cardesk.launcher.core.media.MusicSessionTracker.sendOrderedMediaButton:1709 com.cardesk.launcher.core.media.MusicSessionTracker.maybeWakeDefaultMusic:527 com.cardesk.launcher.core.media.MusicSessionTracker.maybeWakeDefaultMusic$lambda$9:550 
+10-29 23:53:29.268 10018 10018 W ContextImpl: Calling a method in the system process without a qualified user: android.app.ContextImpl.sendOrderedBroadcast:1141 android.content.ContextWrapper.sendOrderedBroadcast:485 com.cardesk.launcher.core.media.MusicSessionTracker.sendOrderedMediaButton:1716 com.cardesk.launcher.core.media.MusicSessionTracker.maybeWakeDefaultMusic:527 com.cardesk.launcher.core.media.MusicSessionTracker.maybeWakeDefaultMusic$lambda$9:550 
+10-29 23:53:29.268 10018 10018 I CarDesk/Media: 定向 MEDIA_BUTTON 已发送 pkg=com.cardesk.mediaprobe key=PLAY
+10-29 23:53:29.268 10018 10018 I CarDesk/Media: 按键接管（AudioManager） key=PLAY reason=唤醒上次音乐应用
+10-29 23:53:29.268 10018 10018 D CarDesk/Media: 周期重扫 count=27 sessions=0
+10-29 23:53:29.268 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:29.269 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:29.269 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:29.393  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:29.393  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:29.393  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:29.394  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:29.548  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:29.548  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:29.548  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:29.548  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:29.670 10018 10018 D CarDesk/Media: 周期重扫 count=28 sessions=0
+10-29 23:53:29.670 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:29.670 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:29.670 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:29.786  1100  1100 D CarDesk/Media: 周期重扫 count=10696 sessions=0
+10-29 23:53:29.786  1100  1100 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:29.786  1100  1100 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:29.786  1100  1100 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:29.786  1100  1100 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:53:29.842  1100  1100 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:53:29.842  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:29.848  1100  1100 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:30.258  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:30.259  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:30.259  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:30.263 10018 10018 D CarDesk/Media: 周期重扫 count=29 sessions=0
+10-29 23:53:30.263 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:30.263 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:30.263 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:30.312  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:30.390  1100  1100 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:53:30.390  1100  1100 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:53:30.391  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:30.391  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:30.391  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:30.391  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:30.471 10018 10018 D CarDesk/Media: 周期重扫 count=30 sessions=0
+10-29 23:53:30.471 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:30.471 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:30.471 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:30.549  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:30.549  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:30.549  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:30.549  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:30.669  1100  1100 I CarDesk/NavUI: 高德导航状态 state=40
+10-29 23:53:30.776  1969  1969 E mapautp.yh:pus: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+10-29 23:53:30.960   368  1048 I WifiService: startScan uid=10119
+10-29 23:53:30.961   368   479 I WifiScanRequestProxy: Scan request from com.autonavi.amapautp.yh throttled
+10-29 23:53:30.961   368  1048 E WifiService: Failed to start scan
+10-29 23:53:31.223   175   175 I netd    : trafficSwapActiveStatsMap() <15.23ms>
+10-29 23:53:31.225   175   175 I netd    : tetherGetStats() <1.14ms>
+10-29 23:53:31.275  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:31.275  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:31.275  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:31.399  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:31.400  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:31.400  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:31.400  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:31.549  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:31.549  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:31.550  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:31.550  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:31.769 10018 10018 D CarDesk/Media: 周期重扫 count=31 sessions=0
+10-29 23:53:31.769 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:31.769 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:31.769 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:31.888  1100  1100 I CarDesk/NavUI: 高德导航状态 state=8
+10-29 23:53:31.888  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:31.903  1100  1100 I CarDesk/NavUI: 收到导航引导数据 keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:32.170  1836  1836 E locationservic: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+10-29 23:53:32.273  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:32.274  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:32.274  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:32.289  1100  1100 D CarDesk/Media: 周期重扫 count=10697 sessions=0
+10-29 23:53:32.289  1100  1100 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:32.289  1100  1100 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:32.289  1100  1100 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:32.290  1100  1100 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:53:32.317  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:32.551  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:32.551  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:32.551  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:32.551  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:32.731  1836  1888 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:32.764 10018 10018 D CarDesk/Media: 周期重扫 count=32 sessions=0
+10-29 23:53:32.764 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:32.764 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:32.764 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:32.890  1100  1100 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:53:32.890  1100  1100 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:53:32.890  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:32.891  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:32.891  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:32.891  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:33.273  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:33.273  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:33.274  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:33.401  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:33.401  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:33.402  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:33.402  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:33.553  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:33.553  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:33.553  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:33.553  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:33.947  1100  1100 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:53:33.947  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:33.962  1100  1100 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:33.965   368   385 I WifiService: startScan uid=10119
+10-29 23:53:33.965   368   479 I WifiScanRequestProxy: Scan request from com.autonavi.amapautp.yh throttled
+10-29 23:53:33.965   368   385 E WifiService: Failed to start scan
+10-29 23:53:34.270 10018 10018 D CarDesk/Media: 周期重扫 count=33 sessions=0
+10-29 23:53:34.271 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:34.271 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:34.271 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:34.278  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:34.278  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:34.279  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:34.324  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:34.512   337   337 E netmgr  : Failed to open QEMU pipe 'qemud:network': Invalid argument
+10-29 23:53:34.555  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:34.555  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:34.556  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:34.556  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:34.641   368  8012 E memtrack: Couldn't load memtrack module
+10-29 23:53:34.641   368  8012 W android.os.Debug: failed to get memory consumption info: -1
+10-29 23:53:34.790  1100  1100 D CarDesk/Media: 周期重扫 count=10698 sessions=0
+10-29 23:53:34.791  1100  1100 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:34.791  1100  1100 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:34.791  1100  1100 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:34.791  1100  1100 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:53:35.267 10018 10018 D CarDesk/Media: 周期重扫 count=34 sessions=0
+10-29 23:53:35.267 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:35.267 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:35.267 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:35.286  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:35.286  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:35.286  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:35.392  1100  1100 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:53:35.392  1100  1100 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:53:35.393  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:35.393  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:35.393  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:35.393  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:35.402  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:35.403  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:35.403  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:35.403  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:35.557  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:35.557  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:35.557  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:35.557  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:35.786  1969  1969 E mapautp.yh:pus: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+10-29 23:53:35.992  1100  1100 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:53:35.992  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:35.998  1100  1100 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:36.285  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:36.286  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:36.286  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:36.330  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:36.562  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:36.562  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:36.562  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:36.562  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:36.792   343   343 E wifi_forwarder: RemoteConnection failed to initialize: RemoteConnection failed to open pipe
+10-29 23:53:36.969   368  1048 I WifiService: startScan uid=10119
+10-29 23:53:36.969   368   479 I WifiScanRequestProxy: Scan request from com.autonavi.amapautp.yh throttled
+10-29 23:53:36.970   368  1048 E WifiService: Failed to start scan
+10-29 23:53:37.178  1836  1836 E locationservic: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+10-29 23:53:37.270 10018 10018 D CarDesk/Media: 周期重扫 count=35 sessions=0
+10-29 23:53:37.270 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:37.270 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:37.270 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:37.293  1100  1100 D CarDesk/Media: 周期重扫 count=10699 sessions=0
+10-29 23:53:37.293  1100  1100 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:37.293  1100  1100 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:37.293  1100  1100 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:37.293  1100  1100 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:53:37.295  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:37.295  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:37.295  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:37.404  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:37.405  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:37.405  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:37.405  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:37.567  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:37.567  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:37.567  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:37.567  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:37.733  1836  1888 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:37.768 10018 10018 D CarDesk/Media: 周期重扫 count=36 sessions=0
+10-29 23:53:37.768 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:37.768 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:37.768 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:37.897  1100  1100 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:53:37.897  1100  1100 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:53:37.897  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:37.897  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:37.898  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:37.898  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:38.038  1100  1100 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:53:38.038  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:38.045  1100  1100 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:38.303  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:38.304  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:38.304  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:38.335  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:38.569  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:38.569  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:38.570  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:38.570  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:39.303  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:39.304  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:39.304  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:39.407  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:39.407  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:39.408  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:39.408  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:39.570  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:39.570  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:39.570  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:39.570  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:39.795  1100  1100 D CarDesk/Media: 周期重扫 count=10700 sessions=0
+10-29 23:53:39.795  1100  1100 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:39.795  1100  1100 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:39.795  1100  1100 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:39.795  1100  1100 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:53:39.973   368  1048 I WifiService: startScan uid=10119
+10-29 23:53:39.974   368   479 I WifiScanRequestProxy: Scan request from com.autonavi.amapautp.yh throttled
+10-29 23:53:39.974   368  1048 E WifiService: Failed to start scan
+10-29 23:53:40.073  1100  1100 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:53:40.073  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:40.073  1585 10287 D 天气  : GPS定位成功:39.237255,-123.15003166666665
+10-29 23:53:40.074  1585 10287 D 天气  : 请求URL(备用API): http://api.bigdatacloud.net/data/reverse-geocode-client?latitude=39.237255&longitude=-123.15003166666665&localityLanguage=zh-Hans&extensions=base
+10-29 23:53:40.091  1585 10292 D 天气  : GPS更新频率限制，跳过
+10-29 23:53:40.091  1100  1100 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:40.269 10018 10018 D CarDesk/Media: 周期重扫 count=37 sessions=0
+10-29 23:53:40.269 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:40.269 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:40.269 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:40.311  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:40.312  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:40.312  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:40.313  1585 10298 D 天气  : GPS更新频率限制，跳过
+10-29 23:53:40.338  1585 10287 D 天气  : HTTP响应码(备用): 200
+10-29 23:53:40.338  1585 10287 D 调试  : API响应(备用): {  "latitude": 39.237255,  "lookupSource": "coordinates",  "longitude": -123.15003166666665,  "localityLanguageRequested": "zh-hans",  "continent": "北美洲",  "continentCode": "NA",  "countryName": "美国",  "countryCode": "US",  "principalSubdivision": "加利福尼亚州",  "principalSubdivisionCode": "US-CA",  "city": "Redwood Valley-Potter Valley",  "locality": "尤奇亚",  "postcode": "95482",  "plusCode": "84FR6RPX+WX",  "fips": {    "state": "06",    "county": "045",    "countySubdivision": "93490"  },  "localityInfo": {    "administrative": [      {        "name": "美国",        "description": "北美洲国家",        "isoName": "United States of America",        "order": 2,        "adminLevel": 2,        "isoCode": "US",        "wikidataId": "Q30",        "geonameId": 6252001      },      {        "name": "加利福尼亚州",        "description": "美国州份",        "isoName": "California",        "order": 5,        "adminLevel": 4,        "isoCode": "US-CA",        "wikidataId": "Q99",        "geonameId": 5332921      },      {        "name": "门多西诺县",        "description": "county in northwestern California, United States",        "order": 6,        "adminLevel": 6,        "wikidataId": "Q108087",        "geonameId": 5372163      },      {        "name": "尤奇亚",        "description": "city in and county seat of Mendocino County, California, United States",        "order": 10,        "adminLevel": 8,        "wikidataId": "Q837105",        "geonameId": 5404476      }    ],    "informative": [      {        "name": "北美洲",        "description": "七大洲之一",        "isoName": "North America",        "order": 1,        "isoCode": "NA",        "wikidataId": "Q49",        "geonameId": 6255149      },      {        "name": "美国本土",        "description": "the 48 states of the United States (all but Alaska and Hawaii) and the District of Columbia",        "order": 3,        "wikidataId": "Q578170"      },      {        "name": "America/Los_Angeles",        "description": "时区",        "order": 4      },      {        "name": "Redwood Valley-Potter Valley",        "order": 7,        "geonameId": 12523212      },      {        "name": "95482",        "description": "邮政编码",        "order": 8      },      {        "name": "06-045-93490",        "description": "FIPS code",        "order": 9      }    ]  }}
+10-29 23:53:40.339  1585 10287 D 天气  : 逆地理编码成功，保存城市信息
+10-29 23:53:40.339  1585 10287 D 天气  : 开始更新城市信息
+10-29 23:53:40.339  1585 10287 D 天气  : 城市信息未变化，无需更新城市信息
+10-29 23:53:40.339  1585 10287 D 天气  : 执行成功
+10-29 23:53:40.339  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:40.397  1100  1100 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:53:40.398  1100  1100 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:53:40.398  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:40.398  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:40.398  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:40.398  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:40.572  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:40.572  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:40.572  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:40.572  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:40.683  1100  1100 I CarDesk/NavUI: 高德导航状态 state=40
+10-29 23:53:40.801  1969  1969 E mapautp.yh:pus: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+10-29 23:53:41.320  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:41.320  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:41.321  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:41.409  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:41.409  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:41.409  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:41.409  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:41.573  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:41.573  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:41.573  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:41.573  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:42.123  1100  1100 I CarDesk/NavUI: 高德导航状态 state=8
+10-29 23:53:42.123  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:42.130  1100  1100 I CarDesk/NavUI: 收到导航引导数据 keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:42.191  1836  1836 E locationservic: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+10-29 23:53:42.296  1100  1100 D CarDesk/Media: 周期重扫 count=10701 sessions=0
+10-29 23:53:42.296  1100  1100 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:42.296  1100  1100 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:42.296  1100  1100 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:42.296  1100  1100 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:53:42.326  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:42.326  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:42.326  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:42.343  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:42.575  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:42.575  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:42.575  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:42.575  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:42.738  1836  1888 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:42.772 10018 10018 D CarDesk/Media: 周期重扫 count=38 sessions=0
+10-29 23:53:42.772 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:42.772 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:42.772 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:42.897  1100  1100 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:53:42.898  1100  1100 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:53:42.899  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:42.899  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:42.900  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:42.900  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:42.984   368   385 I WifiService: startScan uid=10119
+10-29 23:53:42.985   368   479 I WifiScanRequestProxy: Scan request from com.autonavi.amapautp.yh throttled
+10-29 23:53:42.985   368   385 E WifiService: Failed to start scan
+10-29 23:53:43.167  1100  1100 I CarDesk/NavUI: 高德导航状态 state=-1
+10-29 23:53:43.167  1100  1100 I CarDesk/NavUI: 高德导航状态 state=200
+10-29 23:53:43.167  1100  1100 D CarDesk/NavUI: 忽略高德广播 keyType=10117
+10-29 23:53:43.332  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:43.333  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:43.333  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:43.410  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:43.410  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:43.410  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:43.410  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:43.575  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:43.575  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:43.575  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:43.575  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:44.151  1100  1100 I CarDesk/NavUI: 高德导航状态 state=8
+10-29 23:53:44.151  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:44.157  1100  1100 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:44.335  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:44.335  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:44.335  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:44.346  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:44.577  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:44.577  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:44.577  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:44.577  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:44.716  1100  1100 D CarDesk/NavUI: 忽略高德广播 keyType=60021
+10-29 23:53:44.797  1100  1100 D CarDesk/Media: 周期重扫 count=10702 sessions=0
+10-29 23:53:44.797  1100  1100 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:44.797  1100  1100 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:44.797  1100  1100 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:44.797  1100  1100 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:53:45.275 10018 10018 D CarDesk/Media: 周期重扫 count=39 sessions=0
+10-29 23:53:45.275 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:45.276 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:45.276 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:45.347  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:45.347  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:45.347  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:45.398  1100  1100 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:53:45.398  1100  1100 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:53:45.399  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:45.399  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:45.399  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:45.399  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:45.413  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:45.414  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:45.414  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:45.414  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:45.582  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:45.582  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:45.583  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:45.583  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:45.815  1969  1969 E mapautp.yh:pus: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+10-29 23:53:45.991   368   385 I WifiService: startScan uid=10119
+10-29 23:53:45.991   368   479 I WifiScanRequestProxy: Scan request from com.autonavi.amapautp.yh throttled
+10-29 23:53:45.992   368   385 E WifiService: Failed to start scan
+10-29 23:53:46.176   368   395 E memtrack: Couldn't load memtrack module
+10-29 23:53:46.176   368   395 W android.os.Debug: failed to get memory consumption info: -1
+10-29 23:53:46.179  1100  1100 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:53:46.179  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:46.185  1100  1100 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:46.351  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:46.355  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:46.355  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:46.356  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:46.583  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:46.584  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:46.584  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:46.584  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:47.200  1836  1836 E locationservic: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+10-29 23:53:47.299  1100  1100 D CarDesk/Media: 周期重扫 count=10703 sessions=0
+10-29 23:53:47.299  1100  1100 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:47.299  1100  1100 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:47.299  1100  1100 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:47.299  1100  1100 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:53:47.356  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:47.356  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:47.356  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:47.415  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:47.415  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:47.415  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:47.416  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:47.584  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:47.584  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:47.584  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:47.584  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:47.741  1836  1888 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:47.781 10018 10018 D CarDesk/Media: 周期重扫 count=40 sessions=0
+10-29 23:53:47.781 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:47.781 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:47.781 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:47.900  1100  1100 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:53:47.900  1100  1100 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:53:47.901  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:47.901  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:47.901  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:47.901  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:48.202  1100  1100 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:53:48.202  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:48.210  1100  1100 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:48.362  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:48.366  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:48.366  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:48.369  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:48.586  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:48.586  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:48.586  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:48.586  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:48.998   368   385 I WifiService: startScan uid=10119
+10-29 23:53:48.999   368   479 I WifiScanRequestProxy: Scan request from com.autonavi.amapautp.yh throttled
+10-29 23:53:48.999   368   385 E WifiService: Failed to start scan
+10-29 23:53:49.372  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:49.372  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:49.373  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:49.420  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:49.421  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:49.421  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:49.421  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:49.586  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:49.586  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:49.587  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:49.587  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:49.801  1100  1100 D CarDesk/Media: 周期重扫 count=10704 sessions=0
+10-29 23:53:49.801  1100  1100 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:49.801  1100  1100 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:49.801  1100  1100 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:49.801  1100  1100 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:53:50.237  1100  1100 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:53:50.237  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:50.244  1100  1100 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:50.287 10018 10018 D CarDesk/Media: 周期重扫 count=41 sessions=0
+10-29 23:53:50.287 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:50.287 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:50.287 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:50.375  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:50.379  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:50.379  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:50.379  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:50.404  1100  1100 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:53:50.404  1100  1100 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:53:50.404  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:50.404  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:50.404  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:50.404  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:50.587  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:50.587  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:50.587  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:50.587  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:50.716  1100  1100 I CarDesk/NavUI: 高德导航状态 state=40
+10-29 23:53:50.824  1969  1969 E mapautp.yh:pus: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+10-29 23:53:51.389  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:51.390  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:51.390  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:51.424  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:51.424  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:51.424  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:51.425  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:51.590  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:51.590  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:51.592  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:51.592  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:52.006   368   385 I WifiService: startScan uid=10119
+10-29 23:53:52.010   368   479 I WifiScanRequestProxy: Scan request from com.autonavi.amapautp.yh throttled
+10-29 23:53:52.011   368   385 E WifiService: Failed to start scan
+10-29 23:53:52.206  1836  1836 E locationservic: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+10-29 23:53:52.304  1100  1100 D CarDesk/Media: 周期重扫 count=10705 sessions=0
+10-29 23:53:52.304  1100  1100 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:52.305  1100  1100 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:52.305  1100  1100 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:52.305  1100  1100 I CarDesk/Media: 会话消失（延迟清空） delayMs=600
+10-29 23:53:52.319  1100  1100 I CarDesk/NavUI: 高德导航状态 state=8
+10-29 23:53:52.320  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:52.340  1100  1100 I CarDesk/NavUI: 收到导航引导数据 keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:52.382  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:52.402  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:52.403  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:52.403  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:52.592  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:52.592  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:52.592  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:52.592  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:52.744  1836  1888 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:52.790 10018 10018 D CarDesk/Media: 周期重扫 count=42 sessions=0
+10-29 23:53:52.790 10018 10018 D CarDesk/Media: 会话候选未变化 count=0 usable=0
+10-29 23:53:52.790 10018 10018 D CarDesk/Media: 会话选择 candidates= locked= selected= lastMusic= picked=无
+10-29 23:53:52.790 10018 10018 W CarDesk/Media: 没有选中任何会话（界面将清空） reason=reconcile candidates=0 locked= detail=
+10-29 23:53:52.905  1100  1100 I CarDesk/Media: 清空媒体状态（回到暂无播放）
+10-29 23:53:52.905  1100  1100 D CarDesk/Media: 歌词目录缓存失效（代数号 +1）
+10-29 23:53:52.906  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:52.906  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:52.906  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:52.906  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:53.404  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:53.404  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:53.404  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:53.428  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:53.429  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:53.429  1585  1684 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:53.429  1585  1684 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+10-29 23:53:53.597  1100  1100 D CarDesk/Dock: 状态栏时钟刷新 clock=23:53
+10-29 23:53:53.597  1100  1100 D CarDesk/Scene: 场景页数据绑定 wallpaper=0
+10-29 23:53:53.597  1100  1100 D CarDesk/Dock: Dock 可见性 hideDock=false lowerDock=false page=0
+10-29 23:53:53.597  1100  1100 D CarDesk/App: 状态栏显隐 page=0 hideJunjunStatus=false visible=true navContentTop=90
+10-29 23:53:54.375  1100  1100 D CarDesk/NavUI: 高德导航状态（未变化） state=8
+10-29 23:53:54.375  1100  1100 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+10-29 23:53:54.382  1100  1100 D CarDesk/NavUI: 收到导航引导数据（心跳内） keyType=10001 icon=1 seg=320 remainM=3000 remainS=600 road=NEXTRD lanesLen=0
+10-29 23:53:54.411  3527  3563 E BluetoothAdapter: Bluetooth binder is null
+10-29 23:53:54.420  1585  1807 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+10-29 23:53:54.420  1100  1100 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+10-29 23:53:54.421  1585  1807 I PermissionUtils: checkPermissions, noteProxyOp,result:0

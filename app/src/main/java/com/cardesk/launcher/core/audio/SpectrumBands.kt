@@ -115,33 +115,47 @@ object SpectrumBands {
      *
      * ## 采样点数与频点
      *
-     * `getFft()` 往缓冲区里写 `captureSize / 2` 个字节，
-     * 其中只有 `1`（DC）+ `1`（Nyquist）+ `(size−2)/2` 组实虚对是有效数据。
-     * 频率轴按 `N = fft.size × 2`（= captureSize）推：
-     * 第 k 个频点的频率是 `k × sampleRate / N`。
+     * **缓冲区就是 N 个字节**（AOSP 文档：1 DC + 1 Nyquist + (N/2−1) 组实虚对），
+     * 所以 **N = 缓冲区长度**（= captureSize），不是「缓冲区长度 × 2」。
+     * 频率轴按 `binHz = sampleRate / N` 推：第 k 个频点的频率是 `k × binHz`。
+     * 有效复频点 `k = 1 .. N/2−1`（k=0 是 DC，字节 1 是 Nyquist，不成对）。
+     *
+     * ## 第八十轮：为什么不能拿半截缓冲区
+     *
+     * 以前缓冲区只有 `captureSize / 2` 字节、频率轴靠 `fft.size × 2` 凑 ——
+     * 数字对上了，但**数组只有一半大**：ROM 往里写 N−1 个字节就是**越界写**，
+     * 会踩坏 Java 堆（第八十轮在模拟器上定位到的闪退根因）。
+     * 缓冲区给足之后，频点数也从 128 恢复到 **N/2 = 256** 个
+     * （与参照工程 `uni-launcher` 的 `bins = fft.length / 2` 一致）。
      *
      * @param fft `Visualizer.getFft()` 的原始字节
      * @param bandCount 分几段
      * @param sampleRate 采样率（Hz）
+     * @param points FFT 点数 N；0 = 按 `fft.size` 算。
+     *   调用方若拿到「这一帧只填了前 k 字节」，要显式传采集点数，
+     *   免得频率轴跟着缩水。
      */
     fun fromFft(
         fft: ByteArray,
         bandCount: Int = DEFAULT_BAND_COUNT,
         sampleRate: Int = DEFAULT_SAMPLE_RATE,
+        points: Int = 0,
     ): FloatArray {
         val bands = FloatArray(bandCount.coerceAtLeast(0))
         if (fft.size < 8 || bandCount <= 0) return bands
         val hz = sampleRate.toFloat()
         if (hz <= 0f) return bands
-        // FFT 点数 N = 缓冲区字节数 × 2（= captureSize）
-        val n = fft.size * 2
+        // FFT 点数 N（= captureSize）
+        val n = if (points > 0) points else fft.size
+        if (n < 8) return bands
         val binHz = hz / n
         // 频段上下界（同 uni-launcher）
         val top = minOf(TOP_HZ, hz / 2f)
         val bottom = minOf(BOTTOM_HZ, top / 2f)
         if (bottom <= 0f || top <= bottom) return bands
-        // 有效复频点：缓冲区里除 DC / Nyquist 外还有多少组实虚对
-        val maxBin = (fft.size - 2) / 2
+        // 有效复频点：k 从 1 起（k=0 是 DC），最多到 N/2−1；
+        // 还要受「这一帧实际填了多少字节」约束 —— 不能读越界。
+        val maxBin = minOf(n / 2 - 1, (fft.size - 2) / 2)
         if (maxBin < 1) return bands
 
         val ratio = top / bottom
@@ -194,8 +208,9 @@ object SpectrumBands {
         fft: ByteArray,
         bandCount: Int = DEFAULT_BAND_COUNT,
         sampleRate: Int = DEFAULT_SAMPLE_RATE,
+        points: Int = 0,
     ): Float {
-        val bands = calibrate(fromFft(fft, bandCount, sampleRate))
+        val bands = calibrate(fromFft(fft, bandCount, sampleRate, points))
         return bands.maxOrNull() ?: 0f
     }
 
@@ -260,8 +275,9 @@ object SpectrumBands {
         bandCount: Int = DEFAULT_BAND_COUNT,
         sampleRate: Int = DEFAULT_SAMPLE_RATE,
         decay: Float = 0.70f,
+        points: Int = 0,
     ): FloatArray {
-        val raw = fromFft(fft, bandCount, sampleRate)
+        val raw = fromFft(fft, bandCount, sampleRate, points)
         val calibrated = calibrate(raw)
         return smooth(previous, calibrated, decay)
     }
