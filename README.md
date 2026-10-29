@@ -123,9 +123,3 @@ echo "sdk.dir=/path/to/android-sdk" > local.properties
 再分发或商用授权；二次开发或分发前请先与作者确认。
 （App 内「设置 → 开源与声明」页展示的是同一口径。）
 
-## 不随仓库发布的内容
-
-- `platform-key/`：平台签名私钥（`.gitignore` 排除）；
-- `preview/`：单测跑出来的离屏渲染截图（`.gitignore` 排除，跑一次单测即可重新生成）；
-- 编译产物与 `dist/*.apk`：**最新安装包通过 GitHub Release 发布**；
-- 逆向分析文档：只保留在开发机，不随本仓库发布。
