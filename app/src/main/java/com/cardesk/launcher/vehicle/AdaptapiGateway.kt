@@ -49,6 +49,24 @@ class AdaptapiGateway(private val context: Context) : VehicleGateway {
     /** 最近一次已知的 360 开关状态（用于只记录「变化」而不是每次回调都记）。 */
     private var last360State: Boolean? = null
 
+    /**
+     * 反射方法的缓存（第七十九轮 P0）。
+     *
+     * `Class.getMethod()` 每次都要拷参数数组、跑权限校验、新建一个 `Method` 对象。
+     * 氛围灯是 10Hz 一帧，每帧 2 次 `findMethod` ⇒ 每秒 20 次反射，全在调用线程上。
+     * 缓存之后只在**第一次**（或句柄换了）才反射。
+     */
+    private val methodCache = java.util.Collections.synchronizedMap(HashMap<String, Method?>())
+
+    /** 缓存属于哪个句柄的类（句柄换了要清空 —— 不同固件的方法集合不一样）。 */
+    private var methodCacheOwner: Class<*>? = null
+
+    /** 「探测 setFunctionValue 重载」这条日志是不是已经记过了（只记首次）。 */
+    private val overloadProbed = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** 「写入属性成功」这条 INFO 的节流表（功能号 → 上次记录的时刻）。 */
+    private val successLogAt = java.util.concurrent.ConcurrentHashMap<Int, Long>()
+
     /** 车机服务是否已连上（来自 `IConnectWatcher.onConnected`）。 */
     @Volatile
     var carServiceConnected: Boolean = false
@@ -245,37 +263,22 @@ class AdaptapiGateway(private val context: Context) : VehicleGateway {
         val m2 = findMethod(f, "setFunctionValue", INT, INT)
         // 排障场景：固件重载不同会导致「方法不存在」而被误判成「写入失败」，
         // 这里把当前句柄上到底有哪些重载记下来，方便对照固件版本。
-        Logx.d(
-            LogTags.VEHICLE,
-            "探测 setFunctionValue 重载",
-            "func" to VehicleLog.hex(func),
-            "has3" to (m3 != null),
-            "has2" to (m2 != null),
-        )
-        if (m3 != null && invokeBool(m3, f, func, zone, value) == true) {
-            Logx.i(
+        // 第七十九轮：只在**首次**探测时记（每帧都记会把日志刷满）。
+        if (overloadProbed.compareAndSet(false, true)) {
+            Logx.d(
                 LogTags.VEHICLE,
-                "写入属性成功",
+                "探测 setFunctionValue 重载",
                 "func" to VehicleLog.hex(func),
-                "name" to VehicleLog.funcName(func),
-                "zone" to zone,
-                "value" to value,
-                "overload" to "3参",
-                "ok" to true,
+                "has3" to (m3 != null),
+                "has2" to (m2 != null),
             )
+        }
+        if (m3 != null && invokeBool(m3, f, func, zone, value) == true) {
+            logWriteSuccess(func, zone, value, "3参")
             return true
         }
         if (m2 != null && invokeBool(m2, f, func, value) == true) {
-            Logx.i(
-                LogTags.VEHICLE,
-                "写入属性成功",
-                "func" to VehicleLog.hex(func),
-                "name" to VehicleLog.funcName(func),
-                "zone" to zone,
-                "value" to value,
-                "overload" to "2参",
-                "ok" to true,
-            )
+            logWriteSuccess(func, zone, value, "2参")
             return true
         }
         lastError = "setFunctionValue 全部重载都失败 func=$func zone=$zone value=$value"
@@ -289,6 +292,46 @@ class AdaptapiGateway(private val context: Context) : VehicleGateway {
             "reason" to lastError,
         )
         return false
+    }
+
+    /**
+     * 「写入属性成功」这条日志（**节流**）。
+     *
+     * ## 第七十九轮 P0：为什么要节流
+     *
+     * 这条是 **INFO**（落盘），而 `setHvac` 是**氛围灯每帧都要调**的（10Hz）。
+     * 落盘是「开文件 → 写 → 关文件」，而且是在**调用线程**上做的 ——
+     * 也就是说每秒 10 次同步落盘全在主线程上，主线程一被拖住，
+     * 窗口就只剩 `windowBackground`（黑），再久就被看门狗当 ANR 杀掉。
+     *
+     * 所以：**同一个功能号最多每 [SUCCESS_LOG_INTERVAL_MS] 记一条**，
+     * 其余的走 DEBUG（只在 Logcat 里，不落盘）。
+     */
+    private fun logWriteSuccess(func: Int, zone: Int, value: Int, overload: String) {
+        val now = System.currentTimeMillis()
+        val last = successLogAt[func] ?: 0L
+        if (now - last < SUCCESS_LOG_INTERVAL_MS) {
+            Logx.d(
+                LogTags.VEHICLE,
+                "写入属性成功",
+                "func" to VehicleLog.hex(func),
+                "zone" to zone,
+                "value" to value,
+                "overload" to overload,
+            )
+            return
+        }
+        successLogAt[func] = now
+        Logx.i(
+            LogTags.VEHICLE,
+            "写入属性成功",
+            "func" to VehicleLog.hex(func),
+            "name" to VehicleLog.funcName(func),
+            "zone" to zone,
+            "value" to value,
+            "overload" to overload,
+            "ok" to true,
+        )
     }
 
     /**
@@ -749,9 +792,30 @@ class AdaptapiGateway(private val context: Context) : VehicleGateway {
 
     // ------------------------------------------------------------ 反射工具
 
-    /** 找方法：找不到重载返回 null（不同固件的重载集合不一样）。 */
-    private fun findMethod(target: Any, name: String, vararg params: Class<*>): Method? =
-        runCatching { target.javaClass.getMethod(name, *params) }.getOrNull()
+    /**
+     * 找方法：找不到重载返回 null（不同固件的重载集合不一样）。
+     *
+     * ## 第七十九轮 P0：加缓存
+     *
+     * 以前每次写都要反射两次（`Class.getMethod`），
+     * 而氛围灯是 10Hz 一帧 ⇒ 每秒 20 次反射。
+     * 现在按「句柄的类 + 方法名 + 参数签名」缓存，
+     * 句柄换了（重连）就清空重来 —— 不同固件的方法集合确实不一样。
+     */
+    private fun findMethod(target: Any, name: String, vararg params: Class<*>): Method? {
+        val owner = target.javaClass
+        synchronized(methodCache) {
+            if (owner !== methodCacheOwner) {
+                methodCache.clear()
+                methodCacheOwner = owner
+            }
+            val key = name + params.joinToString(prefix = "(", postfix = ")")
+            if (methodCache.containsKey(key)) return methodCache[key]
+            val m = runCatching { owner.getMethod(name, *params) }.getOrNull()
+            methodCache[key] = m
+            return m
+        }
+    }
 
     /**
      * 调用并取布尔结果。
@@ -909,6 +973,16 @@ class AdaptapiGateway(private val context: Context) : VehicleGateway {
 
         /** 固件用 -1 表示「该属性不可读」（-1 / Integer.MIN_VALUE 判定）。 */
         private const val INVALID = -1
+
+        /**
+         * 「写入属性成功」这条 INFO 的节流间隔（毫秒）。
+         *
+         * 氛围灯每帧都要写一次车控（10Hz），这条日志是 INFO（**落盘**），
+         * 不节流的话每秒 10 次「开文件→写→关文件」全在调用线程上 ——
+         * 主线程被拖住，窗口只剩背景色（黑），再久就被看门狗杀进程
+         * （第七十九轮 P0）。详见 [logWriteSuccess]。
+         */
+        private const val SUCCESS_LOG_INTERVAL_MS = 3000L
 
         /** 当前设备是否存在 AdaptAPI（即是否运行在 ECARX 车机上）。 */
         fun probe(): Boolean = try {

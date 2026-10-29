@@ -86,6 +86,15 @@ class AdaptapiAmbientLightApi(
     private var lastStationaryBrightnessValue: Int? = null
 
     /**
+     * 上一次写颜色**是不是失败了**（第七十九轮 P0）。
+     *
+     * 失败后要多等一会儿再试（[FAIL_BACKOFF_MS]）——
+     * 车机不认这个功能号时，10Hz 全量写会把主线程和车控 IO 一起拖死。
+     */
+    @Volatile
+    private var lastWriteFailed = false
+
+    /**
      * 体验模式（`CUSTOM`）这一轮有没有写过。
      *
      * 一次开灯周期里写一次就够 —— 频谱每帧都来，
@@ -151,6 +160,17 @@ class AdaptapiAmbientLightApi(
         val prev = lastColor
         if (prev != null && now - lastWriteAt < minIntervalMs) return true
         if (prev != null && AmbientPalette.colorDistance(prev, color) < MIN_COLOR_DELTA) return true
+        // 第七十九轮 P0：**写失败也要推进节流时间**。
+        //
+        // 以前 `lastWriteAt` 只在写成功时推进 —— 车机那边不认这个功能号时，
+        // 每一次都「失败」，于是节流形同虚设：频谱 10Hz ⇒ 每秒 10 次
+        // 同步 binder + 每秒 10 次日志落盘，全在主线程上，
+        // 主线程被拖死 → 窗口只剩背景色（黑）→ 看门狗杀进程。
+        //
+        // 现在无论成败都推进；失败了再多等一会儿（FAIL_BACKOFF_MS）。
+        val failedRecently = lastWriteFailed && now - lastWriteAt < FAIL_BACKOFF_MS
+        if (failedRecently) return false
+        lastWriteAt = now
         // 体验模式 = CUSTOM —— **必须在写自定义色之前**
         ensureExperienceCustom(gw)
         val rgb = (color.r.coerceIn(0, 255) shl 16) or
@@ -158,10 +178,11 @@ class AdaptapiAmbientLightApi(
             color.b.coerceIn(0, 255)
         val ok = gw.setHvac(func, ZONE, rgb)
         if (ok) {
-            lastWriteAt = now
+            lastWriteFailed = false
             lastColor = color
             Logx.d(LogTags.AMBIENT, "氛围灯颜色已下发", "hex" to color.toHex(), "rgb" to rgb)
         } else {
+            lastWriteFailed = true
             Logx.d(LogTags.AMBIENT, "氛围灯颜色下发失败", "hex" to color.toHex(), "rgb" to rgb)
         }
         return ok
@@ -380,6 +401,16 @@ class AdaptapiAmbientLightApi(
 
         /** 最小写入间隔（毫秒）。 */
         const val MIN_INTERVAL_MS = 120L
+
+        /**
+         * 写失败后的退避（毫秒）。
+         *
+         * 车机那边不认氛围灯的功能号时，写**每次都失败**。
+         * 以前节流只在成功时推进，等于没有节流 —— 10Hz 全量同步写，
+         * 主线程被拖死（第七十九轮 P0 的直接成因）。
+         * 现在失败后退避这么久再试。
+         */
+        const val FAIL_BACKOFF_MS = 1000L
 
         /** 颜色变化小于这个距离就不重写。 */
         const val MIN_COLOR_DELTA = 8

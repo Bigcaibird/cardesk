@@ -348,7 +348,14 @@ object McDoorSignals {
                 propId, z, raw.javaClass.simpleName, interpretAny(raw)?.toString() ?: "?",
             )
         }
-        return "$label 0x%08X 读不到".format(propId)
+        // 第七十九轮：**带类型这条路全失败时，用「无类型快照」问真相**。
+        //
+        // 车机的 `getProperty(int propId, int area)` 不做类型校验，
+        // 一定能拿回值 —— 哪怕值是 `byte[]`。
+        // 快照里带 status / 真实类名 / 字节长度 / 前若干字节，
+        // 这是判断「这组属性到底怎么编码」的唯一依据。
+        val snap = CarProperties.probeSnapshot(propId, zones.first())
+        return "$label 0x%08X 快照 %s".format(propId, snap.describe())
     }
 
     /** 数值属性：先按类型要 `Integer`，再退通用数值读法。 */

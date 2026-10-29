@@ -646,8 +646,34 @@ class ScenePage(context: Context) : View(context) {
      * 位置：引导卡的**右上角**，与「分段距离」同一水平带，右对齐到卡片内容右缘。
      *
      * ```
-     *  ● 红灯  12 秒
+     *      ●        ← 大圆（46px），灯色实心
+     *     12 秒     ← 读秒，在圆的**下方**
      * ```
+     *
+     * ## 第七十九轮重画：为什么从「横排」改成「大圆 + 下方读秒」
+     *
+     * 第七十六轮刚接上高德红绿灯时画的是**横排**：
+     * `● 14px 小圆点 + 「红灯」20px + 「12」34px 粗体 + 「秒」16px`。
+     * 四个元素挤在 46 高的一条横带里 —— 读秒是大号粗体、灯态是小号常规字，
+     * 两套字号并排，看着像两件不相干的东西拼在一起，而且左侧那颗小圆点
+     * 跟「红灯」两个字表达的是同一件事（颜色 + 文字），冗余。
+     *
+     * 用户要求：**红黄绿用一个大一点的圆表示即可，读秒放在圆的下方**。
+     * 于是改成**竖排**：一个大圆单独表示灯态，读秒（小一号粗体）居中放在圆的下面，
+     * 整块右对齐到卡片内容右缘。
+     *
+     * ## 灯态怎么表达
+     *
+     * 圆的颜色**就是**灯态（红 / 黄 / 绿）。
+     * 第七十六轮原本还有一行「红灯 / 黄灯 / 绿灯」文字兜底，
+     * 第七十九轮按用户要求**只留一个圆** —— 颜色成了唯一的灯态线索。
+     * `UNKNOWN`（信号在、灯态枚举没验证过）画成弱文字色，
+     * 和「没有信号」（不画）区分开。
+     *
+     * ## 为什么还留着「秒」字
+     *
+     * 光一个「12」到底是米还是秒会有歧义（引导卡左下角又写着「公里 / 分」），
+     * 所以补一个 15px 的「秒」。
      *
      * ## 为什么放在右上角而不是新开一行
      *
@@ -675,71 +701,65 @@ class ScenePage(context: Context) : View(context) {
             AmapTrafficLight.Lamp.AMBER -> Skin.WARN
             AmapTrafficLight.Lamp.UNKNOWN -> Skin.TEXT_DIM
         }
-        val label = NavGuideText.trafficLampText(signal.lamp)
         val seconds = signal.countdownSeconds
         val number = NavGuideText.trafficCountdownText(seconds)
 
         // —— 量尺寸（先量后画，避免画到一半发现放不下）——
-        val dotD = 14f
-        val gap1 = 10f
-        val gap2 = 14f
-        text.typeface = Typeface.DEFAULT
-        text.textSize = 20f
-        val labelW = text.measureText(label)
         text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        text.textSize = 34f
+        text.textSize = TRAFFIC_SECONDS_SIZE
         val numW = text.measureText(number)
         text.typeface = Typeface.DEFAULT
-        text.textSize = 16f
-        val unitW = if (seconds != null && seconds > 0) text.measureText("秒") else 0f
+        text.textSize = TRAFFIC_UNIT_SIZE
+        val hasUnit = seconds != null && seconds > 0
+        val unitW = if (hasUnit) text.measureText("秒") else 0f
+        // 读秒那行（数字 + 单位）的宽度，圆至少要一样宽才不显得歪
+        val textRowW = numW + (if (hasUnit) 4f + unitW else 0f)
+        val contentW = maxOf(TRAFFIC_LAMP_D, textRowW)
 
-        val chipW = dotD + gap1 + labelW + gap2 + numW + (if (unitW > 0f) 4f + unitW else 0f)
+        val chipW = contentW + TRAFFIC_PAD_X * 2f
         val chipLeft = right - chipW
         // 放不下就不画（不挤掉已有的距离信息）
         if (chipLeft < leftLimit) return
-        val chipH = 46f
+
         val chipTop = rowTop + 8f
-        val centerY = chipTop + chipH / 2f
+        val chipH = TRAFFIC_PAD_TOP + TRAFFIC_LAMP_D + TRAFFIC_GAP + TRAFFIC_SECONDS_SIZE + TRAFFIC_PAD_BOTTOM
 
         // —— 底：与卡片同族的扁平面 + 1px 描边 ——
         canvas.drawRoundRect(
-            RectF(chipLeft, chipTop, right, chipTop + chipH), 23f, 23f,
+            RectF(chipLeft, chipTop, right, chipTop + chipH), 20f, 20f,
             Paint(fill).apply { color = Skin.CHIP_FILL },
         )
         canvas.drawRoundRect(
-            RectF(chipLeft, chipTop, right, chipTop + chipH), 23f, 23f,
+            RectF(chipLeft, chipTop, right, chipTop + chipH), 20f, 20f,
             Paint(stroke).apply {
                 color = Skin.CHIP_STROKE
                 strokeWidth = 1.4f
             },
         )
 
-        // —— 灯点 ——
-        val dotCx = chipLeft + 14f
-        canvas.drawCircle(dotCx, centerY, dotD / 2f, Paint(fill).apply { color = lampColor })
+        // —— 灯态：一个大圆（**唯一**的灯态线索）——
+        val circleCx = chipLeft + chipW / 2f
+        val circleCy = chipTop + TRAFFIC_PAD_TOP + TRAFFIC_LAMP_D / 2f
+        canvas.drawCircle(circleCx, circleCy, TRAFFIC_LAMP_D / 2f, Paint(fill).apply { color = lampColor })
 
-        // —— 灯态文字（与灯点同色，不靠颜色单独表意）——
-        var cx = dotCx + dotD / 2f + gap1
-        text.textAlign = Paint.Align.LEFT
-        text.typeface = Typeface.DEFAULT
-        text.textSize = 20f
-        text.color = lampColor
-        canvas.drawText(label, cx, centerY + 7f, text)
-        cx += labelW + gap2
-
-        // —— 读秒（大号）+ 单位 ——
+        // —— 读秒：在圆的**下方**，居中 ——
+        val baseline = circleCy + TRAFFIC_LAMP_D / 2f + TRAFFIC_GAP + TRAFFIC_SECONDS_TEXT_ASCENT
+        text.textAlign = Paint.Align.CENTER
         text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        text.textSize = 34f
+        text.textSize = TRAFFIC_SECONDS_SIZE
         text.color = lampColor
-        canvas.drawText(number, cx, centerY + 12f, text)
-        if (unitW > 0f) {
+        canvas.drawText(number, circleCx, baseline, text)
+        if (hasUnit) {
+            // 「秒」跟着数字走：数字居中、秒紧跟在右侧，整体仍以圆心为准
+            val numLeft = circleCx - textRowW / 2f
             text.typeface = Typeface.DEFAULT
-            text.textSize = 16f
+            text.textSize = TRAFFIC_UNIT_SIZE
             text.color = Skin.TEXT_DIM
-            canvas.drawText("秒", cx + numW + 4f, centerY + 10f, text)
+            canvas.drawText("秒", numLeft + numW + 4f, baseline - 6f, text)
         }
-        // 交还画笔：读秒用的是粗体，不能漏给后面的绘制（道路名等）。
+        // 交还画笔：读秒用的是粗体 + 居中对齐，不能漏给后面的绘制（道路名等）。
         text.typeface = Typeface.DEFAULT
+        text.textAlign = Paint.Align.LEFT
     }
 
     /**
@@ -2824,6 +2844,43 @@ class ScenePage(context: Context) : View(context) {
          * `Math.min(8, driveWayTiles.length)`。
          */
         const val MAX_GUIDE_LANES = 8
+
+        // -------------------------------------------------- 红绿灯 chip（第七十九轮重画）
+
+        /**
+         * 灯圆的直径。
+         *
+         * 第七十六轮是 14px 的小圆点（跟「红灯」两个字并排），
+         * 第七十九轮按用户要求改成**一个大一点的圆**单独表示灯态。
+         */
+        const val TRAFFIC_LAMP_D = 46f
+
+        /** chip 左右内边距。 */
+        const val TRAFFIC_PAD_X = 14f
+
+        /** chip 上内边距（圆顶到 chip 顶）。 */
+        const val TRAFFIC_PAD_TOP = 10f
+
+        /** chip 下内边距。 */
+        const val TRAFFIC_PAD_BOTTOM = 8f
+
+        /** 圆底到读秒文字顶的间距。 */
+        const val TRAFFIC_GAP = 5f
+
+        /** 读秒字号（粗体，比数字大一号但比以前的 34 收小）。 */
+        const val TRAFFIC_SECONDS_SIZE = 30f
+
+        /**
+         * 读秒的**基线上提量**。
+         *
+         * 用字号推基线在不同 ROM 上会有几像素出入，
+         * 这里按「30px 粗体的上伸部 ≈ 24px」取整，
+         * 视觉上文字正好贴着圆的下方（见 `drawTrafficLight`）。
+         */
+        const val TRAFFIC_SECONDS_TEXT_ASCENT = 24f
+
+        /** 「秒」单位字号。 */
+        const val TRAFFIC_UNIT_SIZE = 15f
 
         /**
          * 场景页卡片圆角。

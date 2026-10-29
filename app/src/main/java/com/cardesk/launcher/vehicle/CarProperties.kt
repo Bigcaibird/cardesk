@@ -179,6 +179,12 @@ object CarProperties {
     /** `CarPropertyValue.getStatus()`（0 = 可用 / 1 = 不可用 / 2 = 出错）。 */
     private var mGetStatus: Method? = null
 
+    /** `CarPropertyValue.getAreaId()`（车机回读的区域号）。 */
+    private var mGetAreaId: Method? = null
+
+    /** `CarPropertyValue.getTimestamp()`（车机给的时间戳）。 */
+    private var mGetTimestamp: Method? = null
+
     /** 读 `byte[]` 属性的重载（`getProperty(int[], Class)`），只有 A 路有。 */
     private var mGetBytesA: Method? = null
 
@@ -647,6 +653,14 @@ object CarProperties {
         mGetStatus = valueClass?.methods?.firstOrNull {
             it.name == "getStatus" && it.parameterCount == 0
         }
+        // 第七十九轮：快照要用「回读的区域号」和「时间戳」——
+        // 区域号能证明我们传的 areaId 被车机认了。
+        mGetAreaId = valueClass?.methods?.firstOrNull {
+            it.name == "getAreaId" && it.parameterCount == 0
+        }
+        mGetTimestamp = valueClass?.methods?.firstOrNull {
+            it.name == "getTimestamp" && it.parameterCount == 0
+        }
     }
 
     /**
@@ -778,7 +792,7 @@ object CarProperties {
                 if (!isValueUsable(v)) return@runCatching null
                 val getValue = mGetValue ?: return@runCatching v
                 runCatching { getValue.invoke(v) }.getOrNull() ?: v
-            }.onFailure { failure = "${it.javaClass.simpleName}: ${it.message?.take(160) ?: "-"}" }
+            }.onFailure { failure = describeFailure(it) }
                 .getOrNull()
             if (value != null) {
                 if (clazz != classes.first() && shouldLog("typed-ok/$propId/$areaId/${clazz.simpleName}")) {
@@ -806,6 +820,23 @@ object CarProperties {
     }
 
     /**
+     * 把一次反射失败**剥到最内层**再描述（第七十九轮新增）。
+     *
+     * 实现放在纯逻辑的 [CarSignalMath] 里（可单测）；
+     * 这里只是转发，省得每处都写一遍。
+     */
+    internal fun describeFailure(t: Throwable, maxDepth: Int = 5): String =
+        CarSignalMath.describeFailure(t, maxDepth)
+
+    /**
+     * 剥到最内层的异常（不拼字符串，只拿异常本身）。
+     *
+     * 诊断包要的是**堆栈**，所以需要拿到最内层那个异常对象。
+     */
+    internal fun rootCause(t: Throwable, maxDepth: Int = 5): Throwable =
+        CarSignalMath.rootCause(t, maxDepth)
+
+    /**
      * 按一组常见类型**试读**一个属性，返回原始对象（类型不定）。
      *
      * 给「不知道车机返回什么类型」的场景用 —— 目前只有车门那组属性
@@ -818,19 +849,179 @@ object CarProperties {
         readTypedVariants(propId, areaId, TYPED_CANDIDATES)
 
     /**
+     * 属性的**原始快照**（第七十九轮新增）：不猜类型，直接问车机「你给的是什么」。
+     *
+     * ## 为什么需要它
+     *
+     * 带类型的 `getProperty(Class, propId, area)` 会**严格比对值的实际类**，
+     * 不对就抛 `IllegalArgumentException`；而异常又被反射包成
+     * `InvocationTargetException`（自身 message 为 null）⇒ 以前只看到
+     * 「InvocationTargetException: -」，什么信息都没有。
+     *
+     * 但车机的 `getProperty(int propId, int area)`（**无类型**重载）**不做类型校验**，
+     * 一定能把值拿回来 —— 哪怕值是 `byte[]`。
+     * 所以先用它问真相：真实类名 / status / 区域号 / 字节长度 / 前若干字节。
+     *
+     * ## 快照只「记录」，不「解释」
+     *
+     * 这里**不做**任何 decode（不解释 varint、不猜「0 是开还是关」）——
+     * 先把原始字节记下来；解释是拿到证据之后的下一件事。
+     */
+    data class PropSnapshot(
+        val propertyId: Int,
+        val requestedArea: Int,
+        /** 车机回读的区域号（证明我们传的 areaId 被认了）。 */
+        val returnedArea: Int?,
+        /** `CarPropertyValue.getStatus()`：0 = 可用 / 1 = 不可用 / 2 = 出错。 */
+        val status: Int?,
+        /** 车机给的时间戳。 */
+        val timestamp: Long?,
+        /** 值的实际 Java 类名（`[B` = `byte[]`）。 */
+        val valueClass: String?,
+        /** 非字节值的原文。 */
+        val valueText: String?,
+        /** `byte[]` 的长度。 */
+        val bytesLength: Int?,
+        /** `byte[]` 的前若干字节（hex）。 */
+        val bytesHex: String?,
+        /** `byte[]` 的前若干字节（十进制，车门开关通常是 0/1/2 这种小整数，hex 不直观）。 */
+        val bytesInt: String?,
+        /** 读取抛异常时的最内层异常类名。 */
+        val causeClass: String?,
+        /** 读取抛异常时的最内层异常消息。 */
+        val causeMessage: String?,
+    ) {
+        /** 快照的一行摘要（给日志用）。 */
+        fun describe(): String {
+            val sb = StringBuilder()
+            sb.append("prop=0x%08X".format(propertyId))
+            sb.append(" areaReq=").append(requestedArea)
+            sb.append(" areaGot=").append(returnedArea ?: "-")
+            sb.append(" status=").append(status ?: "-")
+            sb.append(" statusText=").append(statusText(status))
+            sb.append(" valueClass=").append(valueClass ?: "-")
+            if (bytesLength != null) {
+                sb.append(" bytesLen=").append(bytesLength)
+                sb.append(" bytesHex=").append(bytesHex ?: "-")
+                sb.append(" bytesInt=").append(bytesInt ?: "-")
+            } else if (valueText != null) {
+                sb.append(" value=").append(valueText)
+            }
+            if (causeClass != null) {
+                sb.append(" cause=").append(causeClass)
+                sb.append(": ").append(causeMessage ?: "-")
+            }
+            return sb.toString()
+        }
+
+        companion object {
+            /** status 的文字口径（jar `CarPropertyValue` 的三个常量）。 */
+            fun statusText(status: Int?): String = when (status) {
+                0 -> "AVAILABLE"
+                1 -> "UNAVAILABLE"
+                2 -> "ERROR"
+                null -> "-"
+                else -> "未知($status)"
+            }
+        }
+    }
+
+    /**
+     * 读一份属性的原始快照（**无类型**通道）。
+     *
+     * 读不到时也返回一份快照（`causeClass` 里有原因），不是 null ——
+     * 「读不到」本身就是要记录的事实。
+     */
+    fun probeSnapshot(propId: Int, areaId: Int): PropSnapshot {
+        val m = managerA
+        val getter = mGetProperty2A ?: m?.let {
+            resolveMethodsA(it)
+            mGetProperty2A
+        }
+        if (m == null || getter == null) {
+            return PropSnapshot(
+                propertyId = propId, requestedArea = areaId, returnedArea = null,
+                status = null, timestamp = null, valueClass = null, valueText = null,
+                bytesLength = null, bytesHex = null, bytesInt = null,
+                causeClass = "通道未就绪", causeMessage = "拿不到 CarPropertyManager（路 A 未连上）",
+            )
+        }
+        var cause: Throwable? = null
+        val holder = runCatching { getter.invoke(m, propId, areaId) }
+            .onFailure { cause = it }
+            .getOrNull()
+        if (holder == null) {
+            val root = cause?.let { rootCause(it) }
+            return PropSnapshot(
+                propertyId = propId, requestedArea = areaId, returnedArea = null,
+                status = null, timestamp = null, valueClass = null, valueText = null,
+                bytesLength = null, bytesHex = null, bytesInt = null,
+                causeClass = root?.javaClass?.name,
+                causeMessage = root?.message,
+            )
+        }
+        val getValue = mGetValue
+        val raw = if (getValue == null) holder else runCatching { getValue.invoke(holder) }.getOrNull()
+        val value = raw ?: holder
+        val status = mGetStatus?.let { runCatching { it.invoke(holder) as? Int }.getOrNull() }
+        val areaGot = mGetAreaId?.let { runCatching { it.invoke(holder) as? Int }.getOrNull() }
+        val ts = mGetTimestamp?.let { runCatching { it.invoke(holder) as? Long }.getOrNull() }
+        val bytes = value as? ByteArray
+        return PropSnapshot(
+            propertyId = propId,
+            requestedArea = areaId,
+            returnedArea = areaGot,
+            status = status,
+            timestamp = ts,
+            valueClass = value.javaClass.name,
+            valueText = if (bytes == null) value.toString().take(120) else null,
+            bytesLength = bytes?.size,
+            bytesHex = bytes?.let { b ->
+                b.take(SNAPSHOT_HEX_BYTES).joinToString("") { "%02X".format(it.toInt() and 0xFF) }
+            },
+            bytesInt = bytes?.let { b ->
+                b.take(SNAPSHOT_HEX_BYTES).joinToString(",") { (it.toInt()).toString() }
+            },
+            causeClass = null,
+            causeMessage = null,
+        )
+    }
+
+    /** 快照里最多记多少个字节（hex / 十进制各一份）。 */
+    private const val SNAPSHOT_HEX_BYTES = 16
+
+    /**
      * 试读时的候选类型（顺序即优先级）。
      *
      * 注意数值类型用**装箱类**（`java.lang.Integer`）而不是 `int`：
      * 车机那边比对的是值的**实际类**（`Integer.class`），
      * 传 `int.class` 一定对不上。
+     *
+     * ## 第七十九轮：向量候选从 `int[]` 改成 `Integer[]`
+     *
+     * 以前第 6 个候选是 `IntArray::class.java`（= `int[].class`）——
+     * **它永远匹配不上**：车机的类型校验比的是值的**实际类**
+     * （jar 里 `CarPropertyManager.getProperty` 是 `propVal.getValue().getClass() != clazz`），
+     * 而厂商自己的向量属性用的是 **`Integer[]`**（jar 的 `getIntArrayProperty` 就是
+     * `getProperty(Integer[].class, …)`）。用 `int[]` 去要一个 `Integer[]`，
+     * 类对象根本不是同一个 ⇒ 必然抛 `IllegalArgumentException`。
      */
+    /**
+     * `java.lang.Integer[]` 的类对象（厂商的向量属性就是这个类型）。
+     *
+     * 用反射造一个空数组拿它的类 —— Kotlin 的 `IntArray` 是**基本类型数组**
+     * (`int[]`)，与 `Integer[]` **不是同一个类**，车机那边对不上。
+     */
+    private val INTEGER_ARRAY_CLASS: Class<*> =
+        java.lang.reflect.Array.newInstance(java.lang.Integer::class.java, 0).javaClass
+
     private val TYPED_CANDIDATES: List<Class<*>> = listOf(
         ByteArray::class.java,
         java.lang.Integer::class.java,
         java.lang.Long::class.java,
         java.lang.Float::class.java,
         java.lang.String::class.java,
-        IntArray::class.java,
+        INTEGER_ARRAY_CLASS,
         Boolean::class.java,
     )
 

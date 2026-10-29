@@ -2450,9 +2450,27 @@ class SettingsOverlay(
                 statusReadout.text = text
             }
         }
-        com.cardesk.launcher.core.ambient.AmbientLightController.addListener(listener)
+        // 第七十九轮 P0：**注册与退订必须成对**。
+        //
+        // `addListener` 内部会立刻回调一次 `onAmbientStatus`（要改 TextView），
+        // 万一那一步抛异常，监听器**已经进集合**了、而退订的 teardown 还没挂上
+        // ⇒ 监听器泄漏 ⇒ 每进出一次页面就多一个回调者，回调数线性增长，越用越卡。
+        //
+        // 所以：**先挂上 teardown，再注册**；注册失败就把 teardown 撤掉。
+        var registered = false
         pageTeardown = {
-            com.cardesk.launcher.core.ambient.AmbientLightController.removeListener(listener)
+            if (registered) {
+                runCatching {
+                    com.cardesk.launcher.core.ambient.AmbientLightController.removeListener(listener)
+                }.onFailure { Logx.w(LogTags.SETTING, "氛围灯页退订实时刷新失败", it) }
+            }
+        }
+        runCatching {
+            com.cardesk.launcher.core.ambient.AmbientLightController.addListener(listener)
+            registered = true
+        }.onFailure {
+            Logx.w(LogTags.SETTING, "氛围灯页注册实时刷新失败", it)
+            pageTeardown = null
         }
     }
 

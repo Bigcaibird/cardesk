@@ -91,7 +91,6 @@ class SpectrumAnalyzer private constructor() {
 
     /** 采集线程（创建 Visualizer 与轮询都在这里，别占主线程）。 */
     private var worker: Handler? = null
-    private var workerThread: HandlerThread? = null
     private var pollTask: Runnable? = null
 
     private var visualizer: Visualizer? = null
@@ -170,15 +169,32 @@ class SpectrumAnalyzer private constructor() {
         start(context)
     }
 
-    /** 停止采集。 */
+    /**
+     * 停止采集。
+     *
+     * ## 第七十九轮 P0：**Visualizer 必须在采集线程上释放**
+     *
+     * 以前这里是：
+     * ```
+     * workerThread?.quitSafely()   // 不等待线程真正退出
+     * worker = null
+     * releaseVisualizer()          // 在**主线程**上 release
+     * ```
+     *
+     * 而采集线程可能正卡在 `v.getFft(buf)` 里 —— 主线程把句柄 release 掉，
+     * 采集线程再碰一次就是 **use-after-release**，
+     * 结果是 native 层 SIGSEGV（进程直接死，**我们自己的文件日志里一条都没有**）。
+     *
+     * 现在：
+     * - 采集线程**常驻**（不再 `quitSafely`），停采集只是「不再排下一次轮询」；
+     * - 释放句柄的任务**排到采集线程上**执行 ⇒ 与 `getFft` 天然串行，不会竞态。
+     */
     fun stop() {
         started = false
         pollTask?.let { worker?.removeCallbacks(it) }
         pollTask = null
-        workerThread?.quitSafely()
-        workerThread = null
-        worker = null
-        releaseVisualizer()
+        // 释放句柄排到采集线程上（同一线程 ⇒ 与 getFft 串行）
+        worker?.post { releaseVisualizer() }
         audioManager?.let { am ->
             runCatching { am.unregisterAudioPlaybackCallback(playbackCallback) }
         }
@@ -270,12 +286,21 @@ class SpectrumAnalyzer private constructor() {
 
     // ------------------------------------------------------------------ 输出混音（主路径）
 
-    /** 起采集线程。 */
+    /**
+     * 起采集线程。
+     *
+     * ## 第七十九轮：线程**常驻**，不再用完就退
+     *
+     * 以前 `stop()` 会 `quitSafely()`，下次 `start()` 再建一条新线程。
+     * 那样一来「旧线程还没退出」与「新线程已经建好」会撞在一起 ——
+     * 旧线程里排着的 `releaseVisualizer()` 可能把**新线程刚建好的句柄**给释放掉。
+     *
+     * 现在只保留**一条**线程：停采集 = 不再排轮询；句柄的释放也在这条线程上排队。
+     */
     private fun startWorker() {
         if (worker != null) return
         val thread = HandlerThread("cardesk-spectrum", Process.THREAD_PRIORITY_BACKGROUND)
         thread.start()
-        workerThread = thread
         worker = Handler(thread.looper)
     }
 
@@ -286,6 +311,8 @@ class SpectrumAnalyzer private constructor() {
      * 退到次选路径，并把失败原因记下来 —— 不能再像以前那样一声不吭。
      */
     private fun attachOutputMix(app: Context) {
+        // 跑在采集线程上；停采集之后就别再挂上（stop() 已经排了解放任务）
+        if (!started) return
         releaseVisualizer()
         val v = try {
             openVisualizer(SpectrumCapture.OUTPUT_MIX_SESSION_ID)
@@ -333,8 +360,23 @@ class SpectrumAnalyzer private constructor() {
         attachSession(id)
     }
 
-    /** 挂到指定的播放会话上。 */
+    /**
+     * 挂到指定的播放会话上。
+     *
+     * ## 第七十九轮 P0：**必须排到采集线程上做**
+     *
+     * 调用点有两个：主线程的播放配置回调、以及采集线程里的降级路径。
+     * 主线程那条路以前直接 `releaseVisualizer()`，
+     * 而采集线程可能正在 `getFft()` —— **use-after-release 会 native SIGSEGV**。
+     * 现在统一排到采集线程：与 `getFft` 天然串行。
+     */
     private fun attachSession(id: Int) {
+        worker?.post { attachSessionOnWorker(id) }
+    }
+
+    /** 采集线程上的「挂到播放会话」实现。 */
+    private fun attachSessionOnWorker(id: Int) {
+        if (!started) return
         releaseVisualizer()
         val v = try {
             openVisualizer(id)
@@ -428,6 +470,24 @@ class SpectrumAnalyzer private constructor() {
      * 采一帧（后台线程）。
      *
      * 失败**必须可见**：以前采集失败是静默的，日志里什么都没有。
+     *
+     * ## 第七十九轮 P0：**`getFft()` 的返回值不能拿来判成败**
+     *
+     * `Visualizer.getFft(byte[])` 的返回值语义**在不同 ROM 上不一样**：
+     *
+     * - 有的实现返回**写入的字节数**（> 0）；
+     * - 有的实现成功时返回 `Visualizer.SUCCESS`（= **0**）。
+     *
+     * 参照工程 `uni-launcher` 用的是后者口径：
+     * `if (visualizer.getFft(fft) != Visualizer.SUCCESS) throw ...` ——
+     * 它在这台车机上**跑得通**，说明这台 ROM 成功时返回的就是 0。
+     *
+     * 而我们以前写的是 `if (bytes <= 0) return`（把 0 当成「本帧无数据」）——
+     * **两套口径正好相反** ⇒ 在这台 ROM 上**每一帧成功都被当成没数据**，
+     * 频谱永远是空的（这就是「频谱也没有」的直接原因）。
+     *
+     * 现在：**不靠返回值判断成败**，只看有没有抛异常；
+     * 返回值只用来决定「这一帧用缓冲区的前几个字节」。
      */
     private fun captureOnce() {
         val v = visualizer ?: return
@@ -443,28 +503,33 @@ class SpectrumAnalyzer private constructor() {
             releaseVisualizer()
             return
         }
-        if (bytes <= 0) {
-            // 挂上了但这一帧没数据（静音 / ROM 不给）—— 不算失败，但留个痕
-            Logx.d(LogTags.AMBIENT, "频谱本帧无数据", "source" to sourceLabel)
-            return
-        }
-        val raw = SpectrumBands.fromFft(buf, SpectrumBands.DEFAULT_BAND_COUNT, sampleRate)
-        val norm = SpectrumBands.normalize(raw)
-        smoothed = SpectrumBands.smooth(smoothed, norm, SMOOTH_ALPHA)
+        // 返回值 > 0 且小于缓冲区长度 ⇒ 只用前这么多个字节；
+        // 返回 0（= SUCCESS 口径）⇒ 整个缓冲区都是这一帧的。
+        val frame = if (bytes > 0 && bytes < buf.size) buf.copyOf(bytes) else buf
+        val raw = SpectrumBands.fromFft(frame, SpectrumBands.DEFAULT_BAND_COUNT, sampleRate)
+        val calibrated = SpectrumBands.calibrate(raw)
+        smoothed = SpectrumBands.smooth(smoothed, calibrated, SMOOTH_DECAY)
         bands = smoothed
-        level = SpectrumBands.levelFromFft(buf)
+        level = smoothed.maxOrNull() ?: 0f
         publish()
     }
 
+    /**
+     * 释放 Visualizer 句柄。
+     *
+     * **只在采集线程上调用**（见 [stop]）——
+     * 与 `getFft()` 同一线程 ⇒ 不存在 use-after-release。
+     */
     private fun releaseVisualizer() {
-        visualizer?.let { v ->
-            runCatching { v.setEnabled(false) }
-            runCatching { v.release() }
-        }
+        val v = visualizer
+        // 先把字段清掉再释放：万一释放过程抛异常，也不会留下一个「看起来还在用」的句柄
         visualizer = null
         fftBuffer = null
         captureSize = 0
         sessionId = 0
+        if (v == null) return
+        runCatching { v.setEnabled(false) }
+        runCatching { v.release() }
     }
 
     /** 把这一帧推给订阅者（主线程）。 */
@@ -502,11 +567,13 @@ class SpectrumAnalyzer private constructor() {
         /** 采集点数（2 的幂，256~8192）。512 → FFT 字节 256 个 → 覆盖到采样率 / 4。 */
         const val CAPTURE_SIZE = 512
 
-        /** 采集帧率（Hz）。25 → 每 40ms 一帧，够跟得上鼓点又不费电。 */
-        const val CAPTURE_RATE_HZ = 25
-
-        /** 帧间平滑系数（越大越跟手）。 */
-        const val SMOOTH_ALPHA = 0.35f
+        /**
+         * 帧间**回落**系数（非对称平滑，第七十九轮对齐 uni-launcher）。
+         *
+         * `v = max(当前值, 上一帧 × 0.70)`：**瞬时上升、缓慢回落**。
+         * 以前是对称 EMA（α=0.35），上升沿只有 35% 权重 ⇒ 灯跟不上鼓点。
+         */
+        const val SMOOTH_DECAY = 0.70f
 
         @Volatile
         private var instance: SpectrumAnalyzer? = null

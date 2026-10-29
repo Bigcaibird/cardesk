@@ -657,6 +657,45 @@ def car_svg(open_doors=(), size=200, label_rows=True, theme="night"):
 </svg>"""
 
 
+def traffic_light_chip(w, theme, lamp="danger", seconds=12):
+    """红绿灯 chip（照 App `ScenePage.drawTrafficLight` 第七十九轮重画后的版式）。
+
+    版式：**一个大圆 + 下方读秒**，右对齐到卡片内容右缘。
+
+    ```
+        ●        ← 大圆（直径 46），灯色实心
+       12 秒     ← 读秒，在圆的下方
+    ```
+
+    App 侧几何（`ScenePage.kt` 的 `TRAFFIC_*` 常量）：
+    - 圆直径 `TRAFFIC_LAMP_D = 46`
+    - chip 左右内边距 `TRAFFIC_PAD_X = 14`、上 `TRAFFIC_PAD_TOP = 10`、下 `TRAFFIC_PAD_BOTTOM = 8`
+    - 圆底到读秒文字顶 `TRAFFIC_GAP = 5`
+    - 读秒字号 `TRAFFIC_SECONDS_SIZE = 30`、「秒」`TRAFFIC_UNIT_SIZE = 15`
+    - chip 圆角 20
+
+    卡内相对坐标：chip 右缘 = `w - 26`（= App 的 `x + w - pad`），
+    chip 顶 = `rowTop(26) + 8 = 34`（App 的 `rowTop + 8`）。
+    """
+    right = w - 26
+    chip_w = 81
+    chip_left = right - chip_w
+    chip_top = 34
+    chip_h = 10 + 46 + 5 + 30 + 8
+    circle_left = chip_left + (chip_w - 46) / 2
+    circle_top = chip_top + 10
+    # 文本基线 ≈ 圆底 + 间距 + 上伸部（30px 粗体约 24）= 119；div 的 top 换算成 95
+    text_top = circle_top + 46 + 5 + 24 - 30 * 0.8
+    return f"""
+  <div class="abs" style="left:{chip_left}px;top:{chip_top}px;width:{chip_w}px;height:{chip_h}px;
+    border-radius:20px;background:var(--surfaceSoft);border:1px solid var(--stroke)"></div>
+  <div class="abs" style="left:{circle_left}px;top:{circle_top}px;width:46px;height:46px;
+    border-radius:50%;background:var(--{lamp})"></div>
+  <div class="abs" style="left:{chip_left}px;top:{text_top:.1f}px;width:{chip_w}px;text-align:center;
+    font-size:30px;font-weight:600;color:var(--{lamp});line-height:1">{seconds}<span
+    style="font-size:15px;font-weight:400;color:var(--textDim)"> 秒</span></div>"""
+
+
 def nav_guide_card(x, y, w, theme):
     """导航引导卡（照 App `ScenePage.drawGuide` 的版式：转向图标 + 距离 + 道路 + 车道线 + 剩余/ETA）。
 
@@ -676,6 +715,7 @@ def nav_guide_card(x, y, w, theme):
         f'color:{"var(--accent)" if i in (2, 5) else "var(--textDim)"}">{icon(ic,32)}</div>'
         for i, ic in enumerate(lane_icons)
     )
+    traffic = traffic_light_chip(w, theme)
     return f"""
 <div class="abs card" style="left:{x}px;top:{y}px;width:{w}px;height:296px">
   <div class="abs" style="left:26px;top:37px;width:88px;height:88px;border-radius:26px;
@@ -691,6 +731,7 @@ def nav_guide_card(x, y, w, theme):
     <span style="font-size:24px;color:var(--textDim)">米</span>
   </div>
   <div class="abs" style="left:136px;top:106px;font-size:24px">文景路</div>
+  {traffic}
   {lane_chip}
   {lanes}
   <div class="abs" style="left:26px;top:228px;display:flex;align-items:baseline;gap:2px">

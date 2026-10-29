@@ -11,6 +11,59 @@ package com.cardesk.launcher.vehicle
 object CarSignalMath {
 
     /**
+     * 剥到**最内层**的异常（第七十九轮新增）。
+     *
+     * ## 为什么需要
+     *
+     * 反射调用抛的异常会被包一层 `InvocationTargetException`，
+     * 而它自己的 `message` 是 **null** ⇒ 以前只记到
+     * 「InvocationTargetException: -」，什么信息都没有（真机日志实证）。
+     *
+     * 剥开之后看到的是车机抛的**真异常**，例如
+     * `IllegalArgumentException: Invalid property type. Expected: class java.lang.Integer,
+     * but was: class [B` —— **`but was: class X` 就是车机亲口告诉我们值的真实类型**。
+     *
+     * @param maxDepth 最多剥几层（防异常链成环）
+     */
+    fun rootCause(t: Throwable, maxDepth: Int = 5): Throwable {
+        var cur = t
+        var depth = 0
+        while (depth < maxDepth) {
+            val c = cur.cause
+            if (c == null || c === cur) break
+            cur = c
+            depth++
+        }
+        return cur
+    }
+
+    /**
+     * 把一次反射失败剥到最内层，描述成一行（外层 + 内层）。
+     *
+     * 格式：`外层类名: 外层消息 | cause[N]=内层类名: 内层消息`
+     */
+    fun describeFailure(t: Throwable, maxDepth: Int = 5): String {
+        val outer = "${t.javaClass.simpleName}: ${t.message?.take(160) ?: "-"}"
+        val root = rootCause(t, maxDepth)
+        if (root === t) return outer
+        val depth = countDepth(t, maxDepth)
+        return "$outer | cause[$depth]=${root.javaClass.name}: ${root.message?.take(200) ?: "-"}"
+    }
+
+    /** 异常链的层数（自身算第 0 层）。 */
+    private fun countDepth(t: Throwable, maxDepth: Int): Int {
+        var cur = t
+        var depth = 0
+        while (depth < maxDepth) {
+            val c = cur.cause
+            if (c == null || c === cur) break
+            cur = c
+            depth++
+        }
+        return depth
+    }
+
+    /**
      * 续航原始值 → 公里数。
      *
      *

@@ -36,6 +36,9 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         // 日志系统要先于一切初始化（后面的每一步埋点都依赖它）
         Logx.init(applicationContext)
+        // 崩溃捕获（第七十九轮 P0）：**必须在日志系统之后、其它初始化之前**装上，
+        // 否则「一进某个页就崩」时我们自己的文件日志里一条线索都没有。
+        installCrashHandler()
         Logx.i(
             LogTags.APP,
             "桌面启动",
@@ -89,6 +92,41 @@ class MainActivity : Activity() {
         // 系统弹窗留到用户进「氛围灯」设置页时再要 —— 那时用户正要开这个功能，
         // 弹窗最自然（见 `ui/SettingsOverlay.pageAmbient`）。
         launcher.postDelayed(recordAudioCheck, RECORD_AUDIO_CHECK_DELAY_MS)
+    }
+
+    /**
+     * 装上**未捕获异常**的兜底（第七十九轮 P0）。
+     *
+     * ## 为什么必须有
+     *
+     * 以前本项目**没有**自定义 `UncaughtExceptionHandler`：
+     * 未捕获异常走系统默认流程 → FATAL 只进 logcat →
+     * 我们导出的诊断包里**只有我们自己的 `Logx` 输出**，崩溃栈一条都没有。
+     *
+     * 第七十八轮「氛围灯一打开就黑屏、过一会儿闪退」就是这么变成一笔糊涂账的：
+     * 诊断包里没有任何异常记录，只能靠代码审查反推。
+     *
+     * ## 现在
+     *
+     * 崩溃时先把**线程名 + 完整堆栈**落进文件日志，再交给系统原来的处理流程
+     * （系统该弹框还是弹框、该杀进程还是杀进程 —— 我们不改变系统的行为，
+     * 只是**在进程消失之前把证据留下来**）。
+     */
+    private fun installCrashHandler() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            runCatching {
+                val trace = error.stackTraceToString().replace("\n", " <- ")
+                Logx.e(
+                    LogTags.APP,
+                    "未捕获异常（进程即将退出）",
+                    error,
+                    "thread" to thread.name,
+                    "stack" to trace,
+                )
+            }
+            previous?.uncaughtException(thread, error)
+        }
     }
 
     /**

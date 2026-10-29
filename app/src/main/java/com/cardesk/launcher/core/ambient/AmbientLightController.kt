@@ -2,11 +2,15 @@ package com.cardesk.launcher.core.ambient
 
 import android.content.Context
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
+import android.os.Process
 import com.cardesk.launcher.core.Prefs
 import com.cardesk.launcher.core.audio.SpectrumAnalyzer
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * 氛围灯总控：**频谱 → 颜色 → 氛围灯通道**。
@@ -30,6 +34,34 @@ import com.cardesk.launcher.core.log.Logx
  *    不用频谱折算值（见 [setBrightness] 的注释）。
  *
  * 设置页里能看到实时频谱条与算出来的颜色。
+ *
+ * ## 第七十九轮 P0：**写车控一律不在主线程**
+ *
+ * 这一版修的是「一进氛围灯设置页就黑屏、过一会儿闪退」。
+ *
+ * ### 症状
+ *
+ * 打开氛围灯页 → 立刻黑屏 → 过一会儿闪退。
+ *
+ * ### 根因
+ *
+ * 以前 [update] 在**主线程**里调 `api.apply()`，
+ * 而 `api.apply()` 底下是对车控 AIDL 的**同步 binder 事务**（`ICarFunction.setFunctionValue`）。
+ * 频谱是 10Hz（见 `SpectrumCapture.POLL_INTERVAL_MS`），
+ * 于是变成：**每秒 10 次同步 binder + 每秒 10 次「开文件→写→关文件」落盘**，全在主线程上。
+ *
+ * 车机那边如果不认氛围灯的功能号，写就**每次都失败**，
+ * 而节流时间只在**写成功时**才推进 ⇒ 退化成 10Hz 全量写。
+ *
+ * 主线程被拖住 → 一帧都画不出来 → 窗口只剩 `windowBackground`（`#05080F`，**黑**），
+ * 再久就被系统看门狗当 ANR 杀掉 ⇒ **闪退**。
+ *
+ * ### 现在
+ *
+ * - 颜色 / 开关 / 亮度的**所有车控写入**都放到 [writer] 那个后台线程上；
+ * - 主线程只做「算颜色 + 更新界面」，一帧的活是纳秒级的；
+ * - 后台写入用**取最新一帧**的方式（[enqueueColor]）：
+ * 写得慢就丢中间帧，**不排队、不堆积**。
  */
 object AmbientLightController {
 
@@ -48,7 +80,20 @@ object AmbientLightController {
 
     private val main = Handler(Looper.getMainLooper())
 
+    /**
+     * 车控写入线程（第七十九轮 P0 新增）。
+     *
+     * **所有**对车机的同步调用都在这里，主线程不碰。
+     */
+    @Volatile
+    private var writerThread: HandlerThread? = null
+
+    @Volatile
+    private var writer: Handler? = null
+
     private var appContext: Context? = null
+
+    @Volatile
     private var api: AmbientLightApi = NullAmbientLightApi
     private var lastColor: AmbientColor? = null
     private var lastHue = 0f
@@ -67,12 +112,15 @@ object AmbientLightController {
     private var absoluteBrightness = 100
 
     /** 待写入的绝对亮度（写成功才清掉；写失败由 [stateWriter] 重试）。 */
+    @Volatile
     private var pendingBrightness: Int? = null
 
     /** 期望的开关状态（车控通道没就绪时先记着，等就绪了再写）。 */
+    @Volatile
     private var desiredEnabled: Boolean? = null
 
     /** 已经**写成功**的开关状态（null = 还没写成功过）。 */
+    @Volatile
     private var writtenEnabled: Boolean? = null
 
     /** 当前算出来的颜色（设置页显示用）。 */
@@ -110,6 +158,12 @@ object AmbientLightController {
      * 开关氛围灯。
      *
      * 关 → 停采集 + 通知通道熄灯；开 → 起采集。
+     *
+     * ## 写车控不在这里做
+     *
+     * 开灯一次要写 6~8 个功能号（主色来源 / 体验模式 / 三个分区 / 互动效果 / 两档亮度），
+     * 全是**同步 binder** —— 在主线程上连着做会卡住一帧。
+     * 所以这里只**改状态**，真正的写交给 [writer] 后台线程（见 [writeStateAsync]）。
      */
     fun setEnabled(context: Context, enabled: Boolean) {
         val app = context.applicationContext
@@ -121,7 +175,7 @@ object AmbientLightController {
         // 强制重写（车控通道可能刚就绪，也可能上一次写失败了）
         writtenEnabled = null
         if (enabled) start(app) else stop(app)
-        writeStateNow()
+        writeStateAsync()
         notifyStatus()
     }
 
@@ -141,7 +195,7 @@ object AmbientLightController {
         }
         // 开灯序列要重试（通道是异步就绪的）—— 见 stateWriter
         scheduleStateWrite()
-        writeStateNow()
+        writeStateAsync()
         notifyStatus()
     }
 
@@ -151,13 +205,13 @@ object AmbientLightController {
         writtenEnabled = null
         if (!running) {
             // 没在跑也要把「关灯」写出去（上次开灯可能没写成功）
-            writeStateNow()
+            writeStateAsync()
             return
         }
         running = false
         SpectrumAnalyzer.get().removeListener(spectrumListener)
         SpectrumAnalyzer.get().stop()
-        writeStateNow()
+        writeStateAsync()
         notifyStatus()
     }
 
@@ -178,7 +232,7 @@ object AmbientLightController {
         val v = absolute.coerceIn(0, 100)
         absoluteBrightness = v
         pendingBrightness = v
-        writeBrightnessNow()
+        writeStateAsync()
         // 立刻重算并下发颜色（不用等下一帧频谱）
         applySettings(context, "亮度")
     }
@@ -193,7 +247,7 @@ object AmbientLightController {
         val bands = lastBands
         if (bands.isEmpty()) {
             // 还没采到频谱 → 没有颜色可写，但亮度要写下去
-            writeBrightnessNow()
+            writeStateAsync()
             notifyStatus()
             return
         }
@@ -242,10 +296,17 @@ object AmbientLightController {
      *
      * 这里按 [STATE_WRITE_INTERVAL_MS] 节流重试，直到写成功为止。
      * 写成功就不再排下一次（不空转）。
+     *
+     * ## 第七十九轮：**重试的判据挪到后台线程上算**
+     *
+     * 以前是「在主线程写 → 写完立刻看成没成功 → 决定要不要再排一次」。
+     * 现在写本身在后台线程，主线程这里只负责**排下一次**，
+     * 判据读的是后台线程写完后更新的字段（[writtenEnabled] / [pendingBrightness]，
+     * 都是 `@Volatile`）—— 慢一拍没关系，重试本来就是 3 秒一档。
      */
     private val stateWriter = object : Runnable {
         override fun run() {
-            writeStateNow()
+            writeStateAsync()
             // 还有没写成功的东西 → 继续重试；否则不再排下一次
             if (pendingBrightness != null || (desiredEnabled != null && writtenEnabled != desiredEnabled)) {
                 main.postDelayed(this, STATE_WRITE_INTERVAL_MS)
@@ -265,6 +326,7 @@ object AmbientLightController {
      * 重试是每 3 秒一次，车控通道要是始终探不到，
      * 每 3 秒一条日志会把日志文件刷满 —— 所以**第一次**和**每第 10 次**才记。
      */
+    @Volatile
     private var failLogCount = 0
 
     /** 写失败时记一笔（带节流）。 */
@@ -275,7 +337,25 @@ object AmbientLightController {
     }
 
     /**
+     * 把「写期望状态」排到后台线程（**主线程不碰车控**）。
+     *
+     * 开灯一次要写 6~8 个功能号，全是同步 binder；
+     * 在主线程上连着做会卡住一帧（第七十九轮 P0 的成因之一）。
+     */
+    private fun writeStateAsync() {
+        writer()?.post(stateWriteTask)
+    }
+
+    /** 后台写任务（跑在 [writer] 线程上）。 */
+    private val stateWriteTask = Runnable {
+        runCatching { writeStateNow() }
+            .onFailure { Logx.w(LogTags.AMBIENT, "氛围灯状态下发异常", it) }
+    }
+
+    /**
      * 立刻写一次期望的状态（开关 + 亮度）。
+     *
+     * **只在后台线程调用**（见 [writeStateAsync]）。
      *
      * @return true = 都写成功了
      */
@@ -343,6 +423,15 @@ object AmbientLightController {
      *
      * 车机亮度是**用户拖出来的绝对值**（见 [setBrightness]），
      * 频谱的强弱体现在颜色的明暗上 —— 所以这里只写颜色。
+     *
+     * ## 第七十九轮 P0：**写车控挪到后台线程**
+     *
+     * 以前这里是主线程直接 `api.apply(scaled)`，
+     * 而它底下是对车控 AIDL 的**同步 binder**（10Hz 一帧），
+     * 再加一次「开文件→写→关文件」的日志落盘 —— 全在主线程上，
+     * 主线程一被拖住，窗口就只剩 `windowBackground`（黑），再久就被看门狗杀掉。
+     *
+     * 现在主线程只做「算颜色 + 通知界面」，写交给 [enqueueColor]。
      */
     fun update(bands: FloatArray, level: Float) {
         val ctx = appContext ?: return
@@ -368,8 +457,70 @@ object AmbientLightController {
         listeners.forEach { it.onAmbientSpectrum(bands, level) }
         // 颜色与亮度分开下发（车机氛围灯是「一组灯珠 + 一个统一亮度」）。
         // 通道自己会节流：亮度按三档折算后比较，颜色按间隔 + 变化幅度比较。
-        api.apply(scaled)
+        enqueueColor(scaled)
         listeners.forEach { it.onAmbientColor(scaled) }
+    }
+
+    // ------------------------------------------------------------------ 写入线程
+
+    /**
+     * 车控写入线程（懒创建）。
+     *
+     * 单例级的一个后台线程，全程只服务氛围灯写入。
+     * 线程优先级压到后台 —— 氛围灯是锦上添花，不能跟界面抢 CPU。
+     */
+    private fun writer(): Handler? {
+        writer?.let { return it }
+        synchronized(this) {
+            writer?.let { return it }
+            val thread = HandlerThread("cardesk-ambient-write", Process.THREAD_PRIORITY_BACKGROUND)
+            thread.start()
+            writerThread = thread
+            writer = Handler(thread.looper)
+            return writer
+        }
+    }
+
+    /** 待写的颜色（后台线程只取**最新**的一帧）。 */
+    private val pendingColor = AtomicReference<AmbientColor?>(null)
+
+    /** 颜色写入任务是否已经排上（避免每帧都 post 一次，队列会堆起来）。 */
+    private val colorWriterScheduled = AtomicBoolean(false)
+
+    /**
+     * 排一次颜色写入。
+     *
+     * ## 为什么是「取最新一帧」而不是「排队」
+     *
+     * 频谱 10Hz，车控写得慢的话队列会越堆越长（越堆越慢，越慢越堆）。
+     * 所以这里只保留**最新的一帧**颜色：
+     * 中间的帧直接丢掉 —— 颜色本来就是「当前该是什么颜色」，
+     * 补写历史帧没有意义。
+     */
+    private fun enqueueColor(color: AmbientColor) {
+        pendingColor.set(color)
+        if (colorWriterScheduled.compareAndSet(false, true)) {
+            writer()?.post(colorWriter)
+        }
+    }
+
+    /** 后台颜色写入任务（跑在 [writer] 线程上）。 */
+    private val colorWriter = object : Runnable {
+        override fun run() {
+            try {
+                val c = pendingColor.getAndSet(null)
+                if (c != null) {
+                    runCatching { api.apply(c) }
+                        .onFailure { Logx.w(LogTags.AMBIENT, "氛围灯颜色写入异常", it) }
+                }
+            } finally {
+                colorWriterScheduled.set(false)
+                // 写的这会儿又来了新颜色 → 再跑一轮（不排队、不堆积）
+                if (pendingColor.get() != null && colorWriterScheduled.compareAndSet(false, true)) {
+                    writer()?.post(this)
+                }
+            }
+        }
     }
 
     private fun notifyStatus() {

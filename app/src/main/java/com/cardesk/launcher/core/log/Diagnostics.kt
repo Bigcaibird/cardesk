@@ -415,6 +415,17 @@ object Diagnostics {
             sb.append("灯珠通道: ")
                 .append(com.cardesk.launcher.core.ambient.AmbientLightController.api().backendName)
                 .append('\n')
+            // 第七十九轮：频谱的**口径**也列出来 ——
+            // 「频谱有没有起来」只看状态不够，还要看我们按什么口径在算。
+            sb.append("频谱口径: 分段=")
+                .append(com.cardesk.launcher.core.audio.SpectrumBands.DEFAULT_BAND_COUNT)
+                .append(" 采集点数=").append(com.cardesk.launcher.core.audio.SpectrumAnalyzer.CAPTURE_SIZE)
+                .append(" 轮询=").append(com.cardesk.launcher.core.audio.SpectrumCapture.POLL_INTERVAL_MS)
+                .append("ms 回落=").append(com.cardesk.launcher.core.audio.SpectrumAnalyzer.SMOOTH_DECAY)
+                .append('\n')
+            sb.append("当前颜色: ")
+                .append(com.cardesk.launcher.core.ambient.AmbientLightController.color?.toHex() ?: "(无)")
+                .append('\n')
             sb.append("关键常量按名解析:\n")
             for (name in AMBIENT_CONSTANTS) {
                 val value = com.cardesk.launcher.vehicle.AdaptapiConstants.resolve(name)
@@ -430,7 +441,15 @@ object Diagnostics {
             if (keys.isEmpty()) sb.append("(空)\n")
             for (k in keys) {
                 val v = sp.all[k]
-                sb.append(k).append(" = ").append(truncate(v?.toString())).append('\n')
+                // 第七十九轮：连**类型**一起列出来。
+                //
+                // `SharedPreferences.getInt()` 在键值被存成别的类型时会**直接抛 ClassCastException** ——
+                // 氛围灯设置页一进来就要读 4 个整型设置键（ambient_mode / ambient_sensitivity /
+                // ambient_min_brightness / ambient_max_brightness），
+                // 任何一个类型不对整页就崩，而旧格式只印 `toString()`，看不出类型。
+                sb.append(k).append(" = ").append(truncate(v?.toString()))
+                    .append(" [").append(v?.javaClass?.simpleName ?: "null").append(']')
+                    .append('\n')
             }
         }.onFailure { sb.append("读取设置失败: ").append(it.message).append('\n') }
 

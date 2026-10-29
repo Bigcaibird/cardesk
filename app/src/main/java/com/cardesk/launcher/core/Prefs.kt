@@ -689,7 +689,32 @@ class Prefs(context: Context) {
         sp.edit().putBoolean(name, value).apply()
     }
 
-    fun intValue(name: String, def: Int): Int = sp.getInt(name, def)
+    /**
+     * 读一个整型设置。
+     *
+     * ## 第七十九轮 P0：**类型不符不能崩**
+     *
+     * `SharedPreferences.getInt()` 在键值被存成别的类型时**直接抛 ClassCastException**。
+     * 氛围灯设置页一进来就要读 4 个这样的键
+     * （`ambient_mode` / `ambient_sensitivity` / `ambient_min_brightness` / `ambient_max_brightness`），
+     * 任何一个类型不对，整页就崩 —— 而且崩在页面的构造函数里，
+     * 现场只剩「窗口黑了」，日志里连一行异常都没有。
+     *
+     * 现在读不到就**退一步取**：数字字符串按数字取、布尔按 0/1 取，
+     * 实在认不出来才用默认值。**宁可设置项不对，也不能让页面白屏。**
+     */
+    fun intValue(name: String, def: Int): Int {
+        val raw = runCatching { sp.all[name] }.getOrNull() ?: return def
+        return when (raw) {
+            is Int -> raw
+            is Long -> raw.toInt()
+            is Float -> raw.toInt()
+            is Double -> raw.toInt()
+            is Boolean -> if (raw) 1 else 0
+            is String -> raw.trim().toIntOrNull() ?: def
+            else -> def
+        }
+    }
 
     fun stringValue(name: String, def: String): String = sp.getString(name, def) ?: def
 
