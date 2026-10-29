@@ -1,0 +1,37 @@
+CarDesk 在线更新（GitHub Release）实测日志摘录
+采集时间：2026-10-29 11:41 ~ 11:49
+设备：emulator-5554 / Android 10 (API 29) / 1920x1080 @160dpi / adb root (uid=0)
+被测包：com.ecarx.cardesk（平台签名 + sharedUserId=android.uid.system）
+
+===== 基线（更新前） =====
+versionCode=4135  versionName=1.0.1039-system
+安装方式：adb install -r -d dist/CarDesk-ecarx-cardesk-4135.apk
+
+===== 远端（GitHub Release） =====
+tag   = v1.0.1042
+asset = CarDesk-ecarx-cardesk-4138.apk (1888392 bytes)
+sha256= f37ccf784d18d34b018c7d60258dff603ab9973df2615696000d16f0a100458a
+url   = https://github.com/Bigcaibird/cardesk/releases/download/v1.0.1042/CarDesk-ecarx-cardesk-4138.apk
+
+===== ① 检查更新（4135） =====
+11:41:27.087 26073 26073 I CarDesk/Setting: [EVT] 检查更新（手动触发） api=https://api.github.com/repos/Bigcaibird/cardesk/releases
+11:41:27.841 26073 26259 I CarDesk/Setting: 检查更新：有新版本 current=1.0.1039-system latest=v1.0.1042 asset=CarDesk-ecarx-cardesk-4138.apk
+
+===== ② 下载并更新 =====
+（UI 状态：下载中... -> 进度条 -> 安装）
+下载落地：/data/data/com.ecarx.cardesk/cache/cardesk-update-1.0.1042.apk
+落地大小：1888392 bytes（与 Release 附件逐字节一致）
+dumpsys package installer → installerPackageName=com.ecarx.cardesk
+    （App 用 PackageInstaller.Session 静默安装自己，无系统安装器弹窗）
+
+===== ③ 安装结果 =====
+lastUpdateTime=2026-10-29 11:42:32
+versionCode=4138  versionName=1.0.1042-system
+设备上的 base.apk sha256 = f37ccf784d18d34b018c7d60258dff603ab9973df2615696000d16f0a100458a
+    与本地 dist/CarDesk-ecarx-cardesk-4138.apk 完全相同
+
+===== ④ 复检（4138） =====
+11:48:55.496 26314 26314 I CarDesk/Setting: [EVT] 打开在线更新对话框
+11:48:55.500 26314 26314 I CarDesk/Setting: [EVT] 打开对话框 dialog=在线更新 type=UpdateDialog
+11:49:26.103 26314 26314 I CarDesk/Setting: [EVT] 检查更新（手动触发） api=https://api.github.com/repos/Bigcaibird/cardesk/releases
+11:49:26.827 26314 26639 I CarDesk/Setting: 检查更新：已是最新 current=1.0.1042-system latest=v1.0.1042

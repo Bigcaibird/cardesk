@@ -101,3 +101,21 @@ H 系统能力在 debug 签名下正确显示不可用 ✅（system 版待 priv-
 I 媒体/HUD/360 视频/真车通道需真车或系统权限，模拟器不可验证。
 
 实测中修复 5 类缺陷（触摸吞掉、面板穿透误关闭、日间主题 token、模拟器副屏焦点、UI 排版）。
+
+## 在线更新实测（Android 10 / API 29，ecarx 平台镜像）
+
+环境换成预装了 `com.ecarx.*` 系统的模拟器（`emulator-5554`，1920×1080@160dpi，`adb root`）。
+被测包 `com.ecarx.cardesk` 走平台签名 + `sharedUserId=android.uid.system`。
+
+| # | 项 | 操作 | 期望 | 结果 |
+|---|---|---|---|---|
+| J1 | 检查更新 | 设置 → 在线更新 → 检查更新（4135） | 检出 `v1.0.1042` | ✅ `检查更新：有新版本 current=1.0.1039-system latest=v1.0.1042` |
+| J2 | 下载 | 点「下载并更新」 | 进度条 + APK 落地 | ✅ `cache/cardesk-update-1.0.1042.apk` 1,888,392 B |
+| J3 | 静默安装 | 自动 | 无系统安装器弹窗，版本号变 | ✅ `installerPackageName=com.ecarx.cardesk`，变 4138 / `1.0.1042-system` |
+| J4 | 包完整性 | 拉设备 `base.apk` 算 SHA256 | 与 `dist/` 出的包一致 | ✅ `f37ccf78…58a` 双向一致 |
+| J5 | 复检 | 4138 再点检查更新 | 「已是最新」 | ✅ `检查更新：已是最新 current=1.0.1042-system latest=v1.0.1042` |
+
+证据：`emu-verify/upd-*.png`、`emu-verify/update-4138-log.txt`、`emu-verify/REPORT-update-4138.md`。
+
+注意：模拟器默认 HOME 是预装的旧包 `com.ecarx.qq.tool`（4354），测 `com.ecarx.cardesk`
+必须显式 `am start -n com.ecarx.cardesk/com.cardesk.launcher.MainActivity`。
