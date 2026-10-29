@@ -475,6 +475,17 @@ class DockBarView(context: Context) : View(context) {
         })
     }
 
+    /**
+     * home 键（主页）。
+     *
+     * 第七十七轮之前画的是「圆环 + 圆点」——
+     * 那个形状**看不出是主页**，用户反馈不直观。
+     * 现在改成**房子**（[HomeHouseIcon]），
+     * 和导航槽栏里的「主页」槽位**同一个形状**。
+     *
+     * 旧的圆环外径 28，这里房子的半宽取 13（宽高都是 26），
+     * 视觉重量与原来基本一致。
+     */
     private fun drawHome(canvas: Canvas, x: Float, cy: Float, slot: Float) {
         val cx = x + slot / 2f
         val active = activePage == 0
@@ -482,8 +493,7 @@ class DockBarView(context: Context) : View(context) {
         withPress(canvas, "home", cx, cy) {
             stroke.color = if (active) Skin.ACCENT_LIGHT else Skin.TEXT_SOFT
             stroke.strokeWidth = 2.8f
-            canvas.drawCircle(cx, cy, 14f, stroke)
-            canvas.drawCircle(cx, cy, 4.5f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = stroke.color })
+            HomeHouseIcon.draw(canvas, cx, cy, HOME_ICON_UNIT, stroke)
         }
         hit["home"] = RectF(x, cy - 44f, x + slot, cy + 44f)
     }
@@ -1330,6 +1340,14 @@ private fun tempItem(canvas: Canvas, right: Float, passenger: Boolean): Float {
     }
 
     companion object {
+        /**
+         * home 键房子图标的**半宽**（像素）。
+         *
+         * 第七十七轮把原来的「圆环 + 圆点」（外径 28）换成房子，
+         * 半宽取 13 ⇒ 宽高都是 26，视觉重量与原来基本一致。
+         */
+        const val HOME_ICON_UNIT = 13f
+
         /**
          * 空调簇里**图标型**按钮（内外循环 / 前除霜 / 后除霜 / 电源）的槽宽。
          *

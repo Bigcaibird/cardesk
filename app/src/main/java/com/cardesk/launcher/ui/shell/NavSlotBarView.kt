@@ -254,15 +254,9 @@ class NavSlotBarView(context: Context) : View(context) {
             }
             "home" -> {
                 icon.color = palette.text
-                val p = Path()
-                p.moveTo(cx - 9 * u, cy)
-                p.lineTo(cx, cy - 9 * u)
-                p.lineTo(cx + 9 * u, cy)
-                p.moveTo(cx - 7 * u, cy)
-                p.lineTo(cx - 7 * u, cy + 9 * u)
-                p.lineTo(cx + 7 * u, cy + 9 * u)
-                p.lineTo(cx + 7 * u, cy)
-                canvas.drawPath(p, icon)
+                // 第七十七轮：与桌面 Dock 的 home 键**共用同一份房子形状**
+                // （见 [HomeHouseIcon]）—— 同一个「主页」不能两处两个样。
+                HomeHouseIcon.draw(canvas, cx, cy, 9f * u, icon)
             }
             "tasks" -> {
                 icon.color = palette.text

@@ -313,6 +313,13 @@ DOCK_GEOM = {
     "quick_slots": 3, "quick_tile": 56, "quick_gap": 8, "quick_right": 22,
 }
 
+# 主页「房子」字形的几何（第七十七轮：原来是圆环 + 圆点，看不出是主页）。
+# 与 App 侧**逐项对应**（改一处必须改两处）：
+#   app/.../ui/shell/HomeHouseIcon.kt —— WALL_RATIO
+#   app/.../ui/shell/DockBarView.kt    —— HOME_ICON_UNIT
+HOME_ICON_UNIT = 13.0
+HOME_WALL_RATIO = 0.78
+
 
 def dock_sections():
     """四段布局的边界（与 App 的 `DockLayout.sections` 同一套算式）。
@@ -358,11 +365,27 @@ def dock_cluster_width():
 
 
 def _glyph_home():
-    """主页键字形：外圈圆环 + 实心圆点（App `drawHome`，当前页用强调色）。"""
+    """主页键字形：**房子**（App `HomeHouseIcon`，第七十七轮由「圆环 + 圆点」改成房子）。
+
+    形状与 App **完全一致**：
+    - 屋顶是一个**开口的尖角**（左斜 + 右斜两笔，不封底）；
+    - 房身是「左墙 → 地面 → 右墙」（上边开口，墙头正好落在屋顶那条线上）。
+
+    `HOME_ICON_UNIT` / `HOME_WALL_RATIO` 照抄 App
+    （`ui/shell/HomeHouseIcon.kt` 与 `DockBarView.HOME_ICON_UNIT`），
+    改了 App 就要改这里 —— 设计板与实现不许走样。
+    """
+    c = 15.5
+    u = HOME_ICON_UNIT
+    # 取两位小数：13 * 0.78 在浮点里是 10.140000000000001，直接写进 SVG 会变成
+    # 「5.359999999999999」这种脏字符串。
+    w = round(u * HOME_WALL_RATIO, 2)
+    r = lambda v: round(v, 2)  # noqa: E731
     return (
         f'<svg width="31" height="31" viewBox="0 0 31 31" fill="none" stroke="currentColor" '
-        f'stroke-width="2.8"><circle cx="15.5" cy="15.5" r="13.5"/>'
-        f'<circle cx="15.5" cy="15.5" r="4.5" fill="currentColor" stroke="none"/></svg>'
+        f'stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">'
+        f'<path d="M{r(c - u)} {c}L{c} {r(c - u)}L{r(c + u)} {c}"/>'
+        f'<path d="M{r(c - w)} {c}V{r(c + u)}H{r(c + w)}V{c}"/></svg>'
     )
 
 
