@@ -179,6 +179,28 @@ object AmbientPalette {
         return (lo + (hi - lo) * curve).roundToInt().coerceIn(lo, hi)
     }
 
+    /**
+     * 按亮度把颜色**整体缩放**（频谱的强弱 → 看得见的明暗）。
+     *
+     * ## 为什么要有这一步
+     *
+     * 车机那边的亮度只有 HIGH / LOW / OFF 三档，写下去的是**用户拖的绝对亮度**；
+     * 而「灵敏度 / 最低亮度 / 最高亮度」三个设置影响的是 [brightnessFor] 的结果。
+     * 如果不把亮度落到颜色上，这三个设置就**完全没有效果**（灯既不亮也不暗）。
+     *
+     * 缩放之后：鼓点一响颜色变亮，安静时压暗 —— 「音乐律动」看得出来，
+     * 而亮度档位由用户说了算。
+     */
+    fun scaleByBrightness(color: AmbientColor): AmbientColor {
+        val k = color.brightness.coerceIn(0, 100) / 100f
+        return AmbientColor(
+            (color.r * k).roundToInt().coerceIn(0, 255),
+            (color.g * k).roundToInt().coerceIn(0, 255),
+            (color.b * k).roundToInt().coerceIn(0, 255),
+            color.brightness,
+        )
+    }
+
     /** 色相归一到 0..360。 */
     fun normalizeHue(hue: Float): Float {
         var h = hue % 360f

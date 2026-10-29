@@ -255,7 +255,20 @@ object McDoorSignals {
             CarSignalMath.PropReadKind.UNKNOWN -> Unit
         }
 
-        // —— ② 类型没问出来：两种都试，字节优先 ——
+        // —— ② **多类型试读**（第七十八轮新增）——
+        //
+        // 上面那一档是「按属性 id 的类型位推断」来的（BYTES → 只要 byte[]），
+        // 但那只是推断：真机上这组 `PA_CP_Door*Sts` 到底返回什么类型，
+        // 之前谁也不知道 —— 因为读失败时**一条日志都没有**。
+        //
+        // 现在把常见类型挨个试一遍（byte[] / Integer / Long / Float / String /
+        // int[] / Boolean），谁对拿谁；拿到的原始值也会被记进日志，
+        // 下一次诊断包就能直接看出「这组属性到底是什么形状」。
+        for (z in zones) {
+            interpretAny(CarProperties.readAnyViaClass(propId, z))?.let { return it }
+        }
+
+        // —— ③ 老路兜底：字节优先 ——
         for (z in zones) {
             decodeVarint(CarProperties.readBytesViaClass(propId, z))?.let { return it }
         }
@@ -263,8 +276,79 @@ object McDoorSignals {
             readNumericZone(propId, z)?.let { return it }
         }
 
-        // —— ③ CEvt 平台形态的最后一搏 ——
+        // —— ④ CEvt 平台形态的最后一搏 ——
         return decodeVarint(CarProperties.readBytes(propId))
+    }
+
+    /**
+     * 把「类型不定」的原始值解释成数值。
+     *
+     * 第七十八轮新增。
+     *
+     * | 原始类型 | 解释 |
+     * | --- | --- |
+     * | `byte[]` | 按 protobuf varint 解（这组属性是 BYTES 类型，最常见） |
+     * | 数值 | 直接用 |
+     * | `int[]` / `Integer[]` | 取第一个元素（位图类属性的常见形状） |
+     * | `String` | 能解析成数字就用，否则记一笔原始文本 |
+     *
+     * 解释不出来时**记一笔原始值** —— 这是标定「0 是关还是开」的依据，
+     * 之前连原始值都看不到。
+     */
+    private fun interpretAny(raw: Any?): Long? = when (raw) {
+        null -> null
+        is ByteArray -> decodeVarint(raw)
+        is Number -> raw.toLong()
+        is IntArray -> raw.firstOrNull()?.toLong()
+        is Array<*> -> (raw.firstOrNull() as? Number)?.toLong()
+        is String -> raw.trim().toLongOrNull()
+            ?: run {
+                Logx.d(LogTags.SIGNAL, "车门属性返回字符串但不是数字", "text" to raw.take(64))
+                null
+            }
+        else -> {
+            Logx.d(LogTags.SIGNAL, "车门属性返回了未知类型", "type" to raw.javaClass.name)
+            null
+        }
+    }
+
+    /**
+     * 逐个探一次这组属性，把**原始值**与**命中的类型**列出来（给诊断包用）。
+     *
+     * 第七十八轮新增。
+     *
+     * ## 为什么需要它
+     *
+     * 「车门读不到」这件事上，之前的诊断包只能回答
+     * 「这 5 个属性在清单里、类型是 byte[]」，
+     * 却回答不了**最关键**的问题：**车机到底返回了什么**。
+     *
+     * 原因很简单：读失败时**一条日志都没有** ——
+     * `getProperty` 抛的类型不符异常被 `runCatching` 吞成了 null。
+     *
+     * 这一行就是来补这个洞的：下次诊断包里直接能看到
+     * 「主驾 0x21701414 area=0 类型=byte[] 值=1」这样的结论。
+     */
+    fun probeRaw(): List<String> {
+        val out = ArrayList<String>(DOOR_PROPS.size + 1)
+        for ((i, prop) in DOOR_PROPS.withIndex()) {
+            out += describeProp(DOOR_NAMES[i], prop)
+        }
+        out += describeProp("尾门", PROP_TRUNK)
+        return out
+    }
+
+    /** 探一个属性：命中哪个类型、值是多少。 */
+    private fun describeProp(label: String, propId: Int): String {
+        val zones = CarProperties.availableAreas(propId)?.toList()?.takeIf { it.isNotEmpty() }
+            ?: listOf(0)
+        for (z in zones) {
+            val raw = CarProperties.readAnyViaClass(propId, z) ?: continue
+            return "$label 0x%08X area=%d 类型=%s 值=%s".format(
+                propId, z, raw.javaClass.simpleName, interpretAny(raw)?.toString() ?: "?",
+            )
+        }
+        return "$label 0x%08X 读不到".format(propId)
     }
 
     /** 数值属性：先按类型要 `Integer`，再退通用数值读法。 */

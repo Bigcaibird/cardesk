@@ -13,6 +13,12 @@
 #      不在白名单里的话 Class.forName 会被 hidden API 拦截，**画中画必然降级成卡片**；
 #   2) privapp-permissions —— ActivityView 需要 INTERNAL_SYSTEM_WINDOW 签名级权限。
 # 白名单里的包名必须跟 APK 的实际包名一致，所以这里按 APK 动态生成。
+#
+# 氛围灯频谱还需要 RECORD_AUDIO / MODIFY_AUDIO_SETTINGS：
+#   - privapp 白名单里**也**写上（system app 走这条最快）；
+#   - 白名单只对 **privileged** 权限生效，而 RECORD_AUDIO 是 dangerous 权限，
+#     所以重启后再补一刀 `pm grant` + `appops set`（幂等，批过了也不报错）。
+#     没有这一步，频谱采集的第一道门就过不去 → 灯不亮、频谱条全空。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -60,9 +66,20 @@ cat > "$TMP/privapp-permissions-$PKG.xml" <<EOF
         <permission name="android.permission.INTERNAL_SYSTEM_WINDOW"/>
         <permission name="android.permission.MANAGE_USB"/>
         <permission name="android.permission.MEDIA_CONTENT_CONTROL"/>
+        <permission name="android.permission.MODIFY_AUDIO_SETTINGS"/>
         <permission name="android.permission.MOUNT_UNMOUNT_FILESYSTEMS"/>
         <permission name="android.permission.READ_LOGS"/>
         <permission name="android.permission.REBOOT"/>
+        <!-- 频谱采集（氛围灯）：抓输出混音必须要 RECORD_AUDIO。 -->
+        <permission name="android.permission.RECORD_AUDIO"/>
+        <!--
+          SET_APPOP：让 system app 能**直接把自己的 AppOps 打开**
+          （`pm grant` 只写 permission grant，不写 AppOps —— 结果就是
+          「权限显示已授予，但一个位置/音频都拿不到」）。
+          频谱的 RECORD_AUDIO 就是 danger 权限 + AppOp 双层，
+          对应代码 `core/Permissions.kt` 的 `tryGrantRecordAudioAppOps`。
+        -->
+        <permission name="android.permission.SET_APPOP"/>
         <permission name="android.permission.STATUS_BAR"/>
         <permission name="android.permission.WRITE_SECURE_SETTINGS"/>
         <permission name="android.permission.WRITE_SETTINGS"/>
@@ -94,3 +111,19 @@ echo "  adb shell dumpsys package $PKG | grep userId   # 应为 userId=1000"
 echo "  # 画中画是否为真嵌入（而不是降级卡片）："
 echo "  adb logcat -s CarDesk/NavUI | grep '画中画显示'"
 echo "    mode=embedded → 真嵌入成功；mode=fallback → 权限/白名单没生效"
+
+# ---- 录音权限（频谱采集用）----
+# privapp 白名单只对 privileged 权限生效，而 RECORD_AUDIO 是 dangerous 权限，
+# 所以这里再补一刀：pm grant 写 permission grant，appops set 写 AppOps mode。
+# 两层都写上，频谱采集的第一道门才不会卡住（都是幂等的，批过了也不报错）。
+echo "---- 授权录音权限（频谱采集）----"
+sleep 20
+$ADB shell pm grant "$PKG" android.permission.RECORD_AUDIO || \
+    echo "  (pm grant RECORD_AUDIO 失败：包还没装上？)"
+$ADB shell pm grant "$PKG" android.permission.MODIFY_AUDIO_SETTINGS || \
+    echo "  (pm grant MODIFY_AUDIO_SETTINGS 失败：包还没装上？)"
+$ADB shell appops set "$PKG" android:record_audio allow || \
+    echo "  (appops set record_audio 失败)"
+echo "  查状态："
+echo "    adb shell dumpsys package $PKG | grep -E 'RECORD_AUDIO|MODIFY_AUDIO'"
+echo "    adb shell appops get $PKG android:record_audio"

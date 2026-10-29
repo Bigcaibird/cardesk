@@ -93,15 +93,30 @@ class AdaptapiAmbientLightApi(
      */
     private var experienceCustomWritten = false
 
-    override fun isAvailable(): Boolean = gateway() != null
+    override fun isAvailable(): Boolean = gatewayProvider() != null
 
     /**
      * 当前车辆通道。
      *
      * 车控通道是**异步**选出来的（探不到就退模拟车），
      * 所以这里不能缓存句柄 —— 用的时候才取，取不到就当「通道还没就绪」。
+     *
+     * ## 为什么拿不到要打日志
+     *
+     * 以前这里是**完全静默**的 `gateway() ?: return false` ——
+     * 「通道还没就绪」这件事在日志里一个字都没有，
+     * 于是「灯不亮」看起来像「代码没跑」，而不是「车控没连上」。
+     * 这一轮把每一次跳过都留痕（`op` 说明是哪一步跳过的）。
+     *
+     * @param op 这次调用在做什么（写颜色 / 开灯 / 亮度……）
      */
-    private fun gateway(): VehicleGateway? = gatewayProvider()
+    private fun gateway(op: String): VehicleGateway? {
+        val gw = gatewayProvider()
+        if (gw == null) {
+            Logx.d(LogTags.AMBIENT, "氛围灯通道还没就绪，本次写入跳过", "op" to op)
+        }
+        return gw
+    }
 
     /**
      * 应用一个颜色。
@@ -126,7 +141,7 @@ class AdaptapiAmbientLightApi(
      * 这属于**未验证**项：真机上若自定义色仍不亮，要回头查这条。
      */
     override fun apply(color: AmbientColor): Boolean {
-        val gw = gateway() ?: return false
+        val gw = gateway("写颜色") ?: return false
         val func = AdaptapiConstants.resolve(AdaptapiConstants.FUNC_AMBIENT_COLOR_SET) ?: run {
             Logx.d(LogTags.AMBIENT, "氛围灯颜色功能号按名解析不到", "name" to AdaptapiConstants.FUNC_AMBIENT_COLOR_SET)
             return false
@@ -201,7 +216,7 @@ class AdaptapiAmbientLightApi(
      * **解析不到的分区就跳过**（不拿别的分区的号顶替）。
      */
     override fun setEnabled(enabled: Boolean): Boolean {
-        val gw = gateway() ?: return false
+        val gw = gateway("开关灯") ?: return false
         if (lastEnabled == enabled) return true
         val effectFunc = AdaptapiConstants.resolve(AdaptapiConstants.FUNC_AMBIENT_INTERACTIVE_EFFECT)
         if (effectFunc == null) {
@@ -275,7 +290,7 @@ class AdaptapiAmbientLightApi(
      * 不是「最低档」的写法 —— 别把它改成 `0 -> LOW`。
      */
     override fun setBrightness(brightness: Int): Boolean {
-        val gw = gateway() ?: return false
+        val gw = gateway("行车亮度") ?: return false
         val func = AdaptapiConstants.resolve(AdaptapiConstants.FUNC_AMBIENT_BRIGHTNESS_DRIVING)
         if (func == null) {
             Logx.d(LogTags.AMBIENT, "氛围灯亮度功能号按名解析不到")
@@ -320,7 +335,7 @@ class AdaptapiAmbientLightApi(
      * 上层按「车在不在动」挑一条调。
      */
     override fun setStationaryBrightness(brightness: Int): Boolean {
-        val gw = gateway() ?: return false
+        val gw = gateway("静止亮度") ?: return false
         val func = AdaptapiConstants.resolve(AdaptapiConstants.FUNC_AMBIENT_BRIGHTNESS_STATIONARY)
         if (func == null) {
             Logx.d(LogTags.AMBIENT, "氛围灯静止亮度功能号按名解析不到", "name" to AdaptapiConstants.FUNC_AMBIENT_BRIGHTNESS_STATIONARY)

@@ -75,6 +75,19 @@ class SpectrumBandsTest {
     }
 
     @Test
+    fun `FFT 电平取最强谱线`() {
+        // 输出混音这条路是轮询 getFft()（不挂回调）→ 拿不到波形，电平从 FFT 推
+        val loud = SpectrumBands.levelFromFft(toneFft(1000.0))
+        assertTrue("有单频信号时电平应该明显大于 0（实际 $loud）", loud > 0.5f)
+        assertTrue("电平不能超过 1", loud <= 1f)
+        // 静音
+        assertEquals(0f, SpectrumBands.levelFromFft(ByteArray(256)), 0.0001f)
+        // 空 / 太短
+        assertEquals(0f, SpectrumBands.levelFromFft(ByteArray(0)), 0.0001f)
+        assertEquals(0f, SpectrumBands.levelFromFft(ByteArray(2)), 0.0001f)
+    }
+
+    @Test
     fun `归一化把峰值拉到 1`() {
         val bands = floatArrayOf(0.1f, 0.2f, 0.5f, 0.05f)
         val out = SpectrumBands.normalize(bands)

@@ -45,4 +45,24 @@ class PermissionsTest {
         assertTrue(Permissions.OP_FINE.startsWith("android:"))
         assertTrue(Permissions.OP_COARSE.startsWith("android:"))
     }
+
+    @Test
+    fun `录音权限与定位权限的 requestCode 不一样`() {
+        // 两个权限各自回调 —— 复用同一个 requestCode 会让回调串门
+        // （定位的回调会当成录音的结果，反之亦然）。
+        assertTrue(Permissions.REQUEST_RECORD_AUDIO != Permissions.REQUEST_LOCATION)
+    }
+
+    @Test
+    fun `频谱采集要的两个权限都声明了`() {
+        // 少一个都采不到频谱：RECORD_AUDIO 抓输出，
+        // MODIFY_AUDIO_SETTINGS 注册播放配置监听（次选路径）。
+        assertEquals(2, Permissions.AUDIO_PERMISSIONS.size)
+        assertTrue(
+            Permissions.AUDIO_PERMISSIONS.contains(android.Manifest.permission.RECORD_AUDIO),
+        )
+        assertTrue(
+            Permissions.AUDIO_PERMISSIONS.contains(android.Manifest.permission.MODIFY_AUDIO_SETTINGS),
+        )
+    }
 }

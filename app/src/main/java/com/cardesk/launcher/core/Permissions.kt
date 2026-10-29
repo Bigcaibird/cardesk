@@ -54,6 +54,13 @@ object Permissions {
     const val REQUEST_LOCATION = 4401
 
     /**
+     * 请求录音权限（频谱采集用）的 requestCode。
+     *
+     * 与定位的 [REQUEST_LOCATION] 分开，两个权限各自回调，互不干扰。
+     */
+    const val REQUEST_RECORD_AUDIO = 4402
+
+    /**
      * 定位相关的 AppOps op 名（**公开 API 用的是字符串**，int 常量 `OP_FINE_LOCATION` 是 @hide 的）。
      */
     const val OP_FINE = "android:fine_location"
@@ -69,6 +76,20 @@ object Permissions {
     private val LOCATION_PERMISSIONS = arrayOf(
         Manifest.permission.ACCESS_FINE_LOCATION,
         Manifest.permission.ACCESS_COARSE_LOCATION,
+    )
+
+    /**
+     * 频谱采集要的两个权限。
+     *
+     * - `RECORD_AUDIO`：抓输出混音必须要它；
+     * - `MODIFY_AUDIO_SETTINGS`：注册播放配置监听器必须要它（只服务次选路径）。
+     *
+     * 两个都是**运行时 / 特权权限**，manifest 里声明了不等于拿到了 ——
+     * 之前全仓没有任何地方申请过 RECORD_AUDIO，频谱采集的第一道门就一直没过。
+     */
+    val AUDIO_PERMISSIONS = arrayOf(
+        Manifest.permission.RECORD_AUDIO,
+        Manifest.permission.MODIFY_AUDIO_SETTINGS,
     )
 
     /** 权限是否已授予（只看 permission grant 这一层）。 */
@@ -147,7 +168,14 @@ object Permissions {
      *
      * 调不通也不要紧 —— 运行时 `requestPermissions` 那条路能同时写 AppOps。
      */
-    private fun setMode(appOps: AppOpsManager, op: String, uid: Int, pkg: String, mode: Int): Boolean {
+    private fun setMode(
+        appOps: AppOpsManager,
+        op: String,
+        uid: Int,
+        pkg: String,
+        mode: Int,
+        tag: String = LogTags.WEATHER,
+    ): Boolean {
         val m = runCatching {
             AppOpsManager::class.java.getMethod(
                 "setMode",
@@ -158,12 +186,12 @@ object Permissions {
             )
         }.getOrNull()
         if (m == null) {
-            Logx.d(LogTags.WEATHER, "AppOps setMode 方法不可用（隐藏 API 未放行）", "op" to op)
+            Logx.d(tag, "AppOps setMode 方法不可用（隐藏 API 未放行）", "op" to op)
             return false
         }
         val ok = runCatching { m.invoke(appOps, op, uid, pkg, mode); true }.getOrDefault(false)
         if (!ok) {
-            Logx.w(LogTags.WEATHER, "AppOps setMode 调用失败", "op" to op, "uid" to uid)
+            Logx.w(tag, "AppOps setMode 调用失败", "op" to op, "uid" to uid)
         }
         return ok
     }
@@ -191,6 +219,76 @@ object Permissions {
     }
 
     /**
+     * 录音权限的 **permission grant** 那一层（只看系统批没批）。
+     *
+     * 与 [hasRecordAudioAppOp]（两层都看）分开：
+     * 这一层才是「用户点过允许 / privapp 白名单给到了」的证据，
+     * 诊断包里要把两者分开列 —— 只看 AppOps 会把「批了但 AppOps 没开」误判成「有权限」。
+     */
+    fun hasRecordAudioPermission(context: Context): Boolean =
+        context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+
+    /**
+     * 已经发起过一次录音权限申请。
+     *
+     * 设置页每次重建都会调 [ensureRecordAudio]（切页、切子页都会重建），
+     * 不加这个闸就会反复调 `requestPermissions` —— 系统在用户拒绝后
+     * 不再弹窗，但日志会被刷满。
+     */
+    @Volatile
+    private var recordAudioRequested = false
+
+    /**
+     * 确保录音权限可用：已授予就什么都不做；没授予就发起运行时授权。
+     *
+     * ## 顺序为什么是「先 AppOps，后弹窗」
+     *
+     * system app 有 `SET_APPOP` 时可以直接把自己的 AppOps 打开，
+     * **不打扰用户**、也不依赖车机 ROM 有没有权限弹窗 UI；
+     * 弹窗只留作最后的手段。
+     *
+     * ## 什么时候调
+     *
+     * **不要一启动就弹**（会打断首屏观感）。
+     * 调用点在「氛围灯设置页」—— 用户正在看氛围灯设置，这时弹权限框最自然。
+     *
+     * @return true = 已经有权限（可以立刻采集）
+     */
+    fun ensureRecordAudio(activity: Activity): Boolean {
+        val ctx = activity.applicationContext
+        if (hasRecordAudioAppOp(ctx)) {
+            Logx.i(
+                LogTags.AMBIENT, "录音权限已具备",
+                "state" to describeRecordAudioState(ctx),
+            )
+            return true
+        }
+        // 先试特权路径：system app 可以直接把自己的 AppOps 打开。
+        if (tryGrantRecordAudioAppOps(ctx)) {
+            return true
+        }
+        if (recordAudioRequested) {
+            // 已经问过一次了 —— 不重复弹（用户拒绝后系统也不会再弹）
+            Logx.d(LogTags.AMBIENT, "录音权限申请已发起过，不再重复弹窗")
+            return false
+        }
+        // 再走系统弹窗。
+        try {
+            recordAudioRequested = true
+            activity.requestPermissions(AUDIO_PERMISSIONS, REQUEST_RECORD_AUDIO)
+            Logx.i(
+                LogTags.AMBIENT, "已发起录音权限申请",
+                "requestCode" to REQUEST_RECORD_AUDIO,
+                "perms" to AUDIO_PERMISSIONS.joinToString(","),
+            )
+        } catch (t: Throwable) {
+            Logx.w(LogTags.AMBIENT, "发起录音权限申请失败", t)
+        }
+        return false
+    }
+
+    /**
      * 用 `SET_APPOP` 特权直接把本应用的录音 AppOps 打开（system app 才行）。
      *
      * @return true = 已成功打开
@@ -202,7 +300,7 @@ object Permissions {
         val mode = runCatching { appOps.unsafeCheckOpNoThrow(OP_RECORD_AUDIO, uid, pkg) }.getOrNull()
             ?: return false
         if (mode == AppOpsManager.MODE_ALLOWED) return true
-        val ok = setMode(appOps, OP_RECORD_AUDIO, uid, pkg, AppOpsManager.MODE_ALLOWED)
+        val ok = setMode(appOps, OP_RECORD_AUDIO, uid, pkg, AppOpsManager.MODE_ALLOWED, LogTags.AMBIENT)
         if (ok) {
             Logx.i(
                 LogTags.AMBIENT, "已直接打开录音 AppOps",
@@ -210,6 +308,26 @@ object Permissions {
             )
         }
         return ok
+    }
+
+    /**
+     * 录音权限状态的一行诊断。
+     *
+     * 一次把「permission grant / AppOps mode / 能不能用 / uid」全打出来 ——
+     * 「频谱起不来」的原因有好几种（没批 / 批了但 AppOps 没开 / AppOps 开了但 grant 没写），
+     * 这一行能直接分辨。
+     */
+    fun describeRecordAudioState(context: Context): String {
+        val sb = StringBuilder()
+        sb.append("uid=").append(Process.myUid())
+        sb.append(" permRecordAudio=").append(hasRecordAudioPermission(context))
+        sb.append(" permModifyAudioSettings=").append(
+            context.checkSelfPermission(Manifest.permission.MODIFY_AUDIO_SETTINGS) ==
+                PackageManager.PERMISSION_GRANTED,
+        )
+        sb.append(" appOpsRecordAudio=").append(appOpsModeName(context, OP_RECORD_AUDIO))
+        sb.append(" usable=").append(hasRecordAudioAppOp(context))
+        return sb.toString()
     }
 
     /**

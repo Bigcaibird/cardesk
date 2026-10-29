@@ -15,9 +15,19 @@
         <permission name="android.permission.INSTALL_PACKAGES"/>
         <permission name="android.permission.INTERNAL_SYSTEM_WINDOW"/>
         <permission name="android.permission.MANAGE_USB"/>
+        <!--
+          氛围灯频谱（第七十八轮）：抓**输出混音**必须要 RECORD_AUDIO，
+          注册播放配置监听器要 MODIFY_AUDIO_SETTINGS。
+          对应代码 `core/audio/SpectrumAnalyzer.kt` + `core/Permissions.kt`。
+
+          注意：白名单只对 **privileged** 权限生效，而 RECORD_AUDIO 是 dangerous 权限 ——
+          所以真正部署时还要补一刀 `pm grant` + `appops set`（见 `tools/push_system_app.sh`）。
+        -->
+        <permission name="android.permission.MODIFY_AUDIO_SETTINGS"/>
         <permission name="android.permission.MOUNT_UNMOUNT_FILESYSTEMS"/>
         <permission name="android.permission.READ_LOGS"/>
         <permission name="android.permission.REBOOT"/>
+        <permission name="android.permission.RECORD_AUDIO"/>
         <!--
           定位 AppOps：天气要用经纬度。`SET_APPOP` 让 system app 能直接把自己的
           定位 AppOps 打开 —— `pm grant` 只写 permission grant，不写 AppOps，

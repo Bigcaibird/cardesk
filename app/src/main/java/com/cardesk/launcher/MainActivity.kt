@@ -80,6 +80,36 @@ class MainActivity : Activity() {
         // 根因是 AppOps 没打开（pm grant 只写 permission grant）。
         // 这里走一次正常授权流程：system app 直接写 AppOps，普通安装走系统弹窗。
         launcher.postDelayed(locationCheck, LOCATION_CHECK_DELAY_MS)
+        // 录音权限（氛围灯频谱要用）。
+        //
+        // ## 为什么启动时**不弹窗**
+        //
+        // 弹窗会打断首屏观感，而频谱是「氛围灯」这个可选功能的附属品。
+        // 所以启动时只走**不打扰用户**的特权路径（system app 直接开 AppOps）；
+        // 系统弹窗留到用户进「氛围灯」设置页时再要 —— 那时用户正要开这个功能，
+        // 弹窗最自然（见 `ui/SettingsOverlay.pageAmbient`）。
+        launcher.postDelayed(recordAudioCheck, RECORD_AUDIO_CHECK_DELAY_MS)
+    }
+
+    /**
+     * 录音权限的**静默**检查（不弹窗）。
+     *
+     * system app 有 `SET_APPOP` 时直接把自己的录音 AppOps 打开；
+     * 拿不到也不影响任何功能（真正弹窗的时机在设置页）。
+     */
+    private val recordAudioCheck = Runnable {
+        runCatching {
+            val granted = com.cardesk.launcher.core.Permissions.hasRecordAudioAppOp(applicationContext)
+            if (!granted) {
+                com.cardesk.launcher.core.Permissions.tryGrantRecordAudioAppOps(applicationContext)
+            }
+            Logx.i(
+                LogTags.AMBIENT,
+                "录音权限检查（不弹窗）",
+                "granted" to granted,
+                "state" to com.cardesk.launcher.core.Permissions.describeRecordAudioState(this@MainActivity),
+            )
+        }.onFailure { Logx.w(LogTags.AMBIENT, "录音权限检查失败", it) }
     }
 
     /** 申请定位权限（延后一点，别和桌面首帧抢）。 */
@@ -94,6 +124,24 @@ class MainActivity : Activity() {
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        // 录音权限（频谱采集用）。批下来了就立刻重启采集 ——
+        // 采集器停在「缺 RECORD_AUDIO」的死状态里，不重启就永远起不来。
+        if (requestCode == com.cardesk.launcher.core.Permissions.REQUEST_RECORD_AUDIO) {
+            val granted = grantResults.isNotEmpty() &&
+                grantResults.all { it == android.content.pm.PackageManager.PERMISSION_GRANTED }
+            Logx.i(
+                LogTags.AMBIENT,
+                "录音权限申请结果",
+                "granted" to granted,
+                "state" to com.cardesk.launcher.core.Permissions.describeRecordAudioState(this),
+            )
+            if (granted) {
+                runCatching {
+                    com.cardesk.launcher.core.ambient.AmbientLightController.restartSpectrum(applicationContext)
+                }.onFailure { Logx.w(LogTags.AMBIENT, "录音授权后重启频谱失败", it) }
+            }
+            return
+        }
         if (requestCode != com.cardesk.launcher.core.Permissions.REQUEST_LOCATION) return
         val granted = grantResults.isNotEmpty() &&
             grantResults.any { it == android.content.pm.PackageManager.PERMISSION_GRANTED }
@@ -243,5 +291,13 @@ class MainActivity : Activity() {
          * 用户拒绝后不会重复弹（系统行为），只在 `onResume` 再判一次状态。
          */
         const val LOCATION_CHECK_DELAY_MS = 3500L
+
+        /**
+         * 延迟多久做**录音权限的静默检查**（只开 AppOps，不弹窗）。
+         *
+         * 跟定位一样延后一点，别和桌面首帧抢；
+         * 真正的系统弹窗在用户进「氛围灯」设置页时才发起。
+         */
+        const val RECORD_AUDIO_CHECK_DELAY_MS = 4000L
     }
 }

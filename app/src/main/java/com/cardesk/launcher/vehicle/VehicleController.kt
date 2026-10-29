@@ -456,6 +456,14 @@ object VehicleController {
         lines += "车门 MC 事件属性：${if (mc == null) "读不到（属性通道上没读到这组属性）" else {
             describeDoors(mc.doors) + " 后备箱=" + (mc.trunk?.let { if (it) "关" else "开" } ?: "?")
         }}"
+        // 第七十八轮新增：这组属性的**实读结果**（类型 / 原始值）。
+        // 之前只列了「清单里有什么」，却答不出「车机到底返回了什么」——
+        // 因为读失败时一条日志都没有（类型不符的异常被吞成 null）。
+        // 这一行把那个洞补上：下一份诊断包能直接看到
+        // 「左前门 0x21701414 area=0 类型=byte[] 值=1」这样的结论。
+        runCatching { McDoorSignals.probeRaw() }
+            .onSuccess { probe -> if (probe.isNotEmpty()) lines += "车门属性原始值：" + probe.joinToString("; ") }
+            .onFailure { lines += "车门属性原始值探测失败：${it.message}" }
 
         // 第七十二轮：属性清单 —— 唯一能回答「这台车到底支持哪些属性」的权威来源。
         val propCfgs = CarProperties.propertyConfigs()

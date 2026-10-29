@@ -79,6 +79,11 @@
 | H4 | ADB 开关 | 设置 → 启动切换 → 打开 ADB | `settings get global adb_enabled` = 1 | |
 | H5 | 按键注入 | 按键映射 → 测试注入音量+ | 音量变化，无异常 | |
 | H6 | 重启 | 设置 → 重启确认 | 设备重启并回到系统 | |
+| H7 | 频谱录音权限（氛围灯） | `dumpsys package` + `appops get` | RECORD_AUDIO granted=true **且** `record_audio` = allow（白名单只对 privileged 生效，dangerous 权限要 `pm grant` + `appops set`） | |
+| H8 | 隐藏 API 豁免 | 诊断包「车机定位能力探测」段 | `隐藏 API 豁免: 已放开`（旧版这里恒为「未放开(NoSuchMethodException)」） | |
+| H9 | 氛围灯自检 | 诊断包「氛围灯」段 | 频谱状态=采集中、来源=输出混音；灯随音乐变色 | |
+| H10 | 车门属性原始值 | 诊断包「车门属性原始值」行 | 出现 `类型=` / `值=`（据此标定 0 是关还是开） | |
+| H11 | 歌词当前句 | logcat 过滤 `CarDesk/Media` | 「歌词当前行」行的 `live` 有值，且与 QQ 音乐 App 内当前句一致 | |
 
 ## I. 稳定性
 

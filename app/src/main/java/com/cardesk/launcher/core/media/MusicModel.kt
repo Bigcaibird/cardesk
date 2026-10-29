@@ -35,6 +35,32 @@ data class TrackInfo(
      * 有就用它，不联网。空串 = 播放器没带（大多数车机都不带）。
      */
     val playerLyric: String = "",
+    /**
+     * **播放器自报的「当前正在唱的那一句」**。
+     *
+     * 第七十八轮新增。
+     *
+     * ## 为什么需要它
+     *
+     * QQ 音乐车机版（`com.tencent.wecarflow`）这类「歌词型来源」有个习惯：
+     * 把**当前正在唱的歌词行**塞进 `METADATA_KEY_TITLE`，
+     * 把真歌名放进 `METADATA_KEY_DISPLAY_TITLE` / `MediaDescription.title`。
+     *
+     * 真机诊断包实测（歌曲《怎么我睡不着你也不来救我》）：
+     * `METADATA_KEY_TITLE` 随着播放从
+     * 「OP/SP：北京有此山文化传媒有限公司」→「近日我体内寂寞癌细胞恶化」
+     * → 「害我成了原发性失眠者」→ …… 一句一句地变，
+     * 而 `DISPLAY_TITLE` 始终是真歌名。
+     *
+     * 也就是说：**「现在唱到哪一句」的权威答案就在播放器手里**，
+     * 我们却丢掉了它，只靠联网查来的 LRC 时间轴去猜 —— 版本或分段一对不上就错位。
+     *
+     * 参照实现（uni-launcher）也是这个口径：
+     * `liveLine.isNotEmpty ? liveLine : lrc[active]`（有播放器自报的就用自报的）。
+     *
+     * 空串 = 这个来源不报当前句（普通播放器），或者这一帧拿不到。
+     */
+    val playerCurrentLine: String = "",
 )
 
 /** 一行歌词及其时间戳（ms）。 */
@@ -66,6 +92,27 @@ class LyricTimeline(val lines: List<LyricLine>) {
     }
 
     fun lineAt(index: Int): String = lines.getOrNull(index)?.text.orEmpty()
+
+    /**
+     * 复制一份时间轴，把第 [index] 行的文字换成 [text]。
+     *
+     * ## 为什么要「复制」而不是直接改
+     *
+     * [LyricTimeline] 是**共享缓存**里的那一份（联网取回的原文），
+     * 直接改它会把缓存也改了 —— 下一次换歌复用同一份缓存时就带着
+     * 上一次的「当前句」，越用越乱。
+     *
+     * 第七十八轮新增：用来把「播放器自报的当前句」盖到时间轴的当前行上，
+     * **只改当前行**，上一句 / 下一句仍按 LRC 时间轴走
+     * （擦除进度 wipe 也是按时间轴算的，不能动）。
+     */
+    fun withLineText(index: Int, text: String): LyricTimeline {
+        if (index < 0 || index >= lines.size) return this
+        if (lines[index].text == text) return this
+        val copy = lines.toMutableList()
+        copy[index] = copy[index].copy(text = text)
+        return LyricTimeline(copy)
+    }
 
     /**
      * 当前行擦除比例 0..1。
@@ -435,6 +482,58 @@ object MediaText {
 
     /** 「不稳定标题」= 更像一句歌词。 */
     fun unstableTitle(title: String?): Boolean = LyricMatch.isLikelyLyricTitle(title)
+
+    /**
+     * 从原始 `METADATA_KEY_TITLE` 里认出「当前正在唱的歌词行」。
+     *
+     * 第七十八轮新增（纯函数，便于 JVM 单测）。
+     *
+     * ## 背景
+     *
+     * QQ 音乐车机版这类「歌词型来源」把**当前歌词行**放进 `METADATA_KEY_TITLE`，
+     * 真歌名放进 `DISPLAY_TITLE` / `MediaDescription.title`。
+     * 于是原始 TITLE 有三种可能：
+     *
+     * 1. 一句歌词（绝大多数时候）；
+     * 2. 真歌名（有些 App 两个字段填一样）；
+     * 3. 「歌名 - 歌手」（切歌那一瞬间会这样）。
+     *
+     * 只有第 1 种才是「当前句」，第 2、3 种必须排除掉 ——
+     * 否则界面会在唱到第一句之前显示「怎么我睡不着你也不来救我 - 焦迈奇」。
+     *
+     * ## 为什么不用「像不像歌词」来判
+     *
+     * [LyricMatch.isLikelyLyricTitle] 要求**有标点或 ≥16 字**，
+     * 而真机上的歌词行长这样：「近日我体内寂寞癌细胞恶化」（12 字、无标点）
+     * —— 用它判会把真歌词行判成歌名。
+     * 所以这里改用**与歌名 / 歌手比对**的硬判据，不猜。
+     *
+     * @param rawTitle 原始 `METADATA_KEY_TITLE`
+     * @param resolvedTitle 本次解析出来的真歌名
+     * @param artist 本次解析出来的歌手
+     * @param pkg 来源包名（只有「歌词型来源」才会报当前句）
+     * @return 认得出的当前歌词行；认不出返回空串
+     */
+    fun playerCurrentLine(
+        rawTitle: String,
+        resolvedTitle: String,
+        artist: String,
+        pkg: String,
+    ): String {
+        // 不是「歌词型来源」→ TITLE 就是歌名，不可能是歌词行
+        if (!LyricMatch.isLyricTitleSource(pkg)) return ""
+        val t = rawTitle.trim()
+        if (t.isEmpty()) return ""
+        val song = resolvedTitle.trim()
+        // 第 2 种：跟真歌名一模一样 → 那是歌名不是歌词
+        if (song.isNotEmpty() && t == song) return ""
+        // 第 3 种：「歌名 - 歌手」/「歌手 - 歌名」→ 切歌瞬间的格式，也不是歌词
+        val who = artist.trim()
+        if (song.isNotEmpty() && who.isNotEmpty()) {
+            if (t == "$song - $who" || t == "$who - $song") return ""
+        }
+        return t
+    }
 
     /**
      * 「稳定歌名」（纯函数）。

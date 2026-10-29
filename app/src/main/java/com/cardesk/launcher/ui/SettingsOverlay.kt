@@ -3,6 +3,7 @@ package com.cardesk.launcher.ui
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.app.Activity
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
@@ -2340,9 +2341,18 @@ class SettingsOverlay(
  * 2. **频谱预览**：实时显示正在采集的频段（低频在左、高频在右），
  *    以及按当前设置算出来的颜色 —— 让「频谱解析」这件事**看得见**。
  *
- * 灯珠下发的通道**先留空**（见 `core/ambient/AmbientLightApi.kt`）：
- * 现在能验收的是「频谱确实在动」「颜色确实在算」，
- * 等氛围灯的真实 API 到位，接上实现即可点亮。
+ * ## 这一页现在真的**接到控制器**了
+ *
+ * 以前五个设置项只写 Prefs + 日志，**完全不通知控制器** ——
+ * 改完设置，灯还是老样子（要等下一次进程重启才可能生效）。
+ * 现在每一项改完都立刻下发（见 `AmbientLightController.applySettings`
+ * 与 `AmbientLightController.setBrightness`），不用等下一帧频谱。
+ *
+ * ## 录音权限在**这一页**才要
+ *
+ * 频谱采集必须要 `RECORD_AUDIO`。
+ * 启动时弹窗会打断首屏观感，而用户点进「氛围灯」这一页就说明
+ * 他要用这个功能了 —— 这时弹权限框最自然（见 `ensureAmbientAudioPermission`）。
  */
     private fun pageAmbient() {
         section("音乐律动氛围灯")
@@ -2353,6 +2363,8 @@ class SettingsOverlay(
         ) { enabled ->
             com.cardesk.launcher.core.ambient.AmbientLightController.setEnabled(context, enabled)
             onApply?.invoke()
+            // 开灯是要采频谱的 → 没权限就在这里要（用户正要开这个功能）
+            if (enabled) ensureAmbientAudioPermission()
             // 状态文字会变（启用 → 采集 / 关闭 → 未启动）→ 重建这一页
             select(selectedKey)
         }
@@ -2373,6 +2385,8 @@ class SettingsOverlay(
             val from = prefs.ambientMode
             prefs.ambientMode = index
             logSetting("ambient_mode", "氛围灯颜色模式", from, index)
+            // 立刻生效：按新的模式重算颜色并下发
+            com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "颜色模式")
             onApply?.invoke()
             // 固定色那一行只在「固定色」模式下出现 → 重建这一页
             select(selectedKey)
@@ -2386,6 +2400,8 @@ class SettingsOverlay(
                 val to = hues.getOrElse(picked) { hues[0] }
                 prefs.ambientFixedHue = to
                 logSetting("ambient_fixed_hue", "氛围灯固定色", from, to)
+                // 立刻生效：按新的固定色重算并下发
+                com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "固定色")
                 onApply?.invoke()
             }
         }
@@ -2393,21 +2409,30 @@ class SettingsOverlay(
             val from = prefs.ambientSensitivity
             prefs.ambientSensitivity = v
             logSetting("ambient_sensitivity", "氛围灯灵敏度", from, v)
+            // 立刻生效：灵敏度决定「弱音有多亮」
+            com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "灵敏度")
         }
         sliderRow("最低亮度", prefs.ambientMinBrightness, 0, 100, "%") { v ->
             val from = prefs.ambientMinBrightness
             prefs.ambientMinBrightness = v
             logSetting("ambient_min_brightness", "氛围灯最低亮度", from, v)
+            // 亮度滑杆走**绝对亮度**（用户拖到哪就是哪），并立刻重算颜色
+            com.cardesk.launcher.core.ambient.AmbientLightController.setBrightness(context, v)
         }
         sliderRow("最高亮度", prefs.ambientMaxBrightness, 0, 100, "%") { v ->
             val from = prefs.ambientMaxBrightness
             prefs.ambientMaxBrightness = v
             logSetting("ambient_max_brightness", "氛围灯最高亮度", from, v)
+            // 亮度滑杆走**绝对亮度**（用户拖到哪就是哪），并立刻重算颜色
+            com.cardesk.launcher.core.ambient.AmbientLightController.setBrightness(context, v)
         }
         note(
             "灵敏度越高，弱音也越亮（灯更跟手）；亮度上下限决定灯的动态范围。\n\n" +
-                "氛围灯下发通道暂未接入：频谱与颜色照常计算，接上车机通道后即可点亮。",
+                "亮度滑杆是**绝对亮度**：拖到多少，车机那边就是多少（厂商只有高/低/关三档）。",
         )
+
+        // 进这一页就把录音权限要到手（不打断首屏，这里才是自然的时机）
+        ensureAmbientAudioPermission()
 
         // —— 实时刷新（频谱条 / 颜色 / 状态）
         val listener = object : com.cardesk.launcher.core.ambient.AmbientLightController.Listener {
@@ -2429,6 +2454,24 @@ class SettingsOverlay(
         pageTeardown = {
             com.cardesk.launcher.core.ambient.AmbientLightController.removeListener(listener)
         }
+    }
+
+    /**
+     * 要录音权限（频谱采集用）。
+     *
+     * ## 为什么在这一页要，而不是启动时
+     *
+     * 启动就弹权限框会打断首屏观感，而频谱只是「氛围灯」这个可选功能的附属品。
+     * 用户自己点进「氛围灯」设置页，说明他要用这个功能了 —— 这时弹最自然。
+     *
+     * 已经拿到了就什么都不做（不重复弹）。
+     */
+    private fun ensureAmbientAudioPermission() {
+        val activity = context as? Activity ?: return
+        if (com.cardesk.launcher.core.Permissions.hasRecordAudioAppOp(activity)) return
+        runCatching {
+            com.cardesk.launcher.core.Permissions.ensureRecordAudio(activity)
+        }.onFailure { Logx.w(LogTags.SETTING, "申请录音权限失败", it) }
     }
 
     /**

@@ -737,18 +737,130 @@ object CarProperties {
      *
      * @return 读不到 / 类型不符返回 null
      */
-    private fun readTypedA(propId: Int, areaId: Int, clazz: Class<*>): Any? {
+    private fun readTypedA(propId: Int, areaId: Int, clazz: Class<*>): Any? =
+        readTypedVariants(propId, areaId, listOf(clazz))
+
+    /**
+     * 按**多个候选类型**依次试读一个属性（第七十八轮新增）。
+     *
+     * ## 为什么要有「试多种类型」
+     *
+     * 车机的 `getProperty(Class, propId, area)` 会**严格比对值的实际类型**：
+     * 值的 Java 类跟我们要的类型不是同一个，就直接抛 `IllegalArgumentException`
+     * （jar 里 `CarPropertyManager.getProperty` 的实现就是这样写的）。
+     *
+     * 之前我们只按**属性 id 的类型位**推断（`0x70 << 16` = BYTES → 只试 `ByteArray`）。
+     * 但那是**推断**，不是事实 —— 真机上这组车门属性（`PA_CP_Door*Sts`）
+     * 到底返回 `byte[]` 还是被装成了 `Integer` / `Integer[]` / `String`，
+     * 没人知道，因为**读失败时一条日志都没有**（异常被 `runCatching` 吞成 null）。
+     *
+     * 现在按顺序试一遍，谁的类型对就拿谁；全不对就把**异常原文**记下来。
+     * 这既是修复，也是把排障的盲区补上 ——
+     * 下一次诊断包里就能直接看到「车机到底返回了什么类型」。
+     *
+     * ## 为什么这样算是安全的
+     *
+     * `getProperty` 的类型校验是车机**既有**的行为，我们只是多问了几次，
+     * 不会写、不会改车上的状态。
+     */
+    fun readTypedVariants(propId: Int, areaId: Int, classes: List<Class<*>>): Any? {
+        if (classes.isEmpty()) return null
         val m = managerA ?: return null
         val getter = mGetTypedA ?: run {
             resolveMethodsA(m)
             mGetTypedA
         } ?: return null
-        return runCatching {
-            val value = getter.invoke(m, clazz, propId, areaId) ?: return null
-            if (!isValueUsable(value)) return null
-            val getValue = mGetValue ?: return value
-            runCatching { getValue.invoke(value) }.getOrNull() ?: value
-        }.getOrNull()
+        var lastError: String? = null
+        for (clazz in classes) {
+            var failure: String? = null
+            val value = runCatching {
+                val v = getter.invoke(m, clazz, propId, areaId) ?: return@runCatching null
+                if (!isValueUsable(v)) return@runCatching null
+                val getValue = mGetValue ?: return@runCatching v
+                runCatching { getValue.invoke(v) }.getOrNull() ?: v
+            }.onFailure { failure = "${it.javaClass.simpleName}: ${it.message?.take(160) ?: "-"}" }
+                .getOrNull()
+            if (value != null) {
+                if (clazz != classes.first() && shouldLog("typed-ok/$propId/$areaId/${clazz.simpleName}")) {
+                    Logx.i(
+                        LogTags.SIGNAL, "属性按备用类型读到",
+                        "prop" to "0x%08X".format(propId), "area" to areaId,
+                        "type" to clazz.simpleName,
+                    )
+                }
+                return value
+            }
+            if (failure != null) lastError = failure
+        }
+        // —— 一个都没读到：把原因记下来（第七十八轮：原来这里是全静默的）——
+        val sig = "typed-fail/$propId/$areaId/${lastError ?: "-"}"
+        if (shouldLog(sig)) {
+            Logx.w(
+                LogTags.SIGNAL, "属性按类型读取失败",
+                "prop" to "0x%08X".format(propId), "area" to areaId,
+                "types" to classes.joinToString("|") { it.simpleName },
+                "err" to (lastError ?: "无异常（值为空或状态非可用）"),
+            )
+        }
+        return null
+    }
+
+    /**
+     * 按一组常见类型**试读**一个属性，返回原始对象（类型不定）。
+     *
+     * 给「不知道车机返回什么类型」的场景用 —— 目前只有车门那组属性
+     * （`PA_CP_Door*Sts`，类型位是 BYTES，但实际值类型未知）。
+     *
+     * 候选顺序按「最可能」排：字节优先（属性 id 的类型位指向 BYTES），
+     * 其次是数值、字符串。
+     */
+    fun readAnyViaClass(propId: Int, areaId: Int): Any? =
+        readTypedVariants(propId, areaId, TYPED_CANDIDATES)
+
+    /**
+     * 试读时的候选类型（顺序即优先级）。
+     *
+     * 注意数值类型用**装箱类**（`java.lang.Integer`）而不是 `int`：
+     * 车机那边比对的是值的**实际类**（`Integer.class`），
+     * 传 `int.class` 一定对不上。
+     */
+    private val TYPED_CANDIDATES: List<Class<*>> = listOf(
+        ByteArray::class.java,
+        java.lang.Integer::class.java,
+        java.lang.Long::class.java,
+        java.lang.Float::class.java,
+        java.lang.String::class.java,
+        IntArray::class.java,
+        Boolean::class.java,
+    )
+
+    /** 同一个签名最多打一次日志的时间窗（毫秒）。 */
+    private const val LOG_THROTTLE_MS = 60_000L
+
+    /** 各类日志的节流记录（签名 → 上次时间）。 */
+    private val lastLogged = LinkedHashMap<String, Long>()
+
+    /**
+     * 日志节流：同一个 [key] 在 [LOG_THROTTLE_MS] 内只打一次。
+     *
+     * 为什么需要：属性轮询是**每秒几次**的节奏，
+     * 而「读不到」是常态 —— 不节流的话，
+     * 几百行同一条警告会把真正的信号淹掉
+     * （真机诊断包里「车门状态读不到」刷了 730 条）。
+     */
+    @Synchronized
+    private fun shouldLog(key: String): Boolean {
+        val now = System.currentTimeMillis()
+        val last = lastLogged[key] ?: 0L
+        if (now - last < LOG_THROTTLE_MS) return false
+        lastLogged[key] = now
+        if (lastLogged.size > 64) {
+            val it = lastLogged.entries.iterator()
+            while (it.hasNext()) {
+                if (it.next().value < now - LOG_THROTTLE_MS) it.remove() else break
+            }
+        }
+        return true
     }
 
     /**

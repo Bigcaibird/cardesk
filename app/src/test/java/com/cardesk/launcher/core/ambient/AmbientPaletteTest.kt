@@ -153,6 +153,42 @@ class AmbientPaletteTest {
     }
 
     @Test
+    fun `按亮度缩放颜色 亮度为零就是全黑`() {
+        // 车机亮度写的是**用户拖的绝对亮度**，频谱的强弱落到颜色的明暗上 ——
+        // 不做这一步，灵敏度 / 亮度上下限就完全没有效果。
+        val black = AmbientPalette.scaleByBrightness(AmbientColor(200, 100, 50, 0))
+        assertEquals(0, black.r)
+        assertEquals(0, black.g)
+        assertEquals(0, black.b)
+        // 亮度字段本身不变（还是那个百分比）
+        assertEquals(0, black.brightness)
+    }
+
+    @Test
+    fun `按亮度缩放颜色 满亮时保持原样`() {
+        val full = AmbientPalette.scaleByBrightness(AmbientColor(200, 100, 50, 100))
+        assertEquals(200, full.r)
+        assertEquals(100, full.g)
+        assertEquals(50, full.b)
+    }
+
+    @Test
+    fun `按亮度缩放颜色 半亮就是一半`() {
+        val half = AmbientPalette.scaleByBrightness(AmbientColor(200, 100, 50, 50))
+        assertEquals(100, half.r)
+        assertEquals(50, half.g)
+        assertEquals(25, half.b)
+    }
+
+    @Test
+    fun `按亮度缩放颜色 亮度越界会被夹住`() {
+        val over = AmbientPalette.scaleByBrightness(AmbientColor(200, 100, 50, 150))
+        assertEquals(200, over.r)
+        val under = AmbientPalette.scaleByBrightness(AmbientColor(200, 100, 50, -10))
+        assertEquals(0, under.r)
+    }
+
+    @Test
     fun `颜色距离与亮度差`() {
         val a = AmbientColor(255, 0, 0, 50)
         val b = AmbientColor(0, 255, 0, 80)

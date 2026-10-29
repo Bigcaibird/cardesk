@@ -1006,6 +1006,17 @@ class MusicSessionTracker private constructor() {
         var title = MediaText.resolveTrackName(snapshot, lastTitle, lyricSource, allowFallback).orEmpty()
         // 取值链的第一手结果（后面可能被「稳定优先」规则替换，这里留一份用于日志）
         val resolvedTitle = title
+        // —— 播放器自报的「当前歌词行」（第七十八轮新增）
+        //
+        // 原始 `METADATA_KEY_TITLE`（snapshot.title）在「歌词型来源」里装的是
+        // **正在唱的那一句**，而不是歌名。这句话是「现在唱到哪」的权威答案，
+        // 丢了它就只能靠联网查来的 LRC 时间轴去猜 —— 猜错就整句错位。
+        val playerCurrentLine = MediaText.playerCurrentLine(
+            rawTitle = snapshot.title,
+            resolvedTitle = resolvedTitle,
+            artist = artist,
+            pkg = pkg,
+        )
         // —— 稳定优先，别让「不稳定标题」顶掉上一首
         if (lyricSource && lastTitle.isNotEmpty() && !trackChanged && title != lastTitle) {
             Logx.d(
@@ -1061,6 +1072,8 @@ class MusicSessionTracker private constructor() {
             artworkUri = snapshot.artworkUri,
             // 播放器自带的歌词（第四十一轮新增）：有就用它，不联网
             playerLyric = snapshot.playerLyric,
+            // 播放器自报的「当前歌词行」（第七十八轮新增）
+            playerCurrentLine = playerCurrentLine,
         )
         lastMusicPkg = next.pkg
         // 换歌判定：用来区分「用户点的下一首」和「自动切到下一曲」

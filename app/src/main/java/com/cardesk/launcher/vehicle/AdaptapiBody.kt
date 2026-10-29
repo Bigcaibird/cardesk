@@ -327,15 +327,40 @@ object AdaptapiBody {
                 Logx.i(LogTags.SIGNAL, "车门状态走 DOOR_POS 属性", "closed" to viaProp.joinToString(","))
                 return DoorState(viaProp, BodyState.aggregateAllClosed(viaProp), hood = hood, trunk = trunk)
             }
-            Logx.w(
-                LogTags.SIGNAL,
-                "车门状态读不到（BCM_DOOR_POS 所有探针都没有有效值）",
-                "func" to func,
-            )
+            // —— 这条日志**必须节流**（第七十八轮）——
+            //
+            // 之前它每次轮询都打一条 WARN，而轮询是**每秒约十次**的节奏 ——
+            // 真机诊断包里「车门状态读不到」刷了 730 条，
+            // 把整份日志里其它真正有用的信号全淹了。
+            //
+            // 而且这条路径**注定读不到**：
+            // 厂商的功能号分派表（`CarFunctionValueImpl.getFunctionValue`）
+            // 里根本没有 `BCM_FUNC_DOOR_POS` 这个 case，
+            // 它落进 `default:` 分支 → 恒返回 `255`（不支持）。
+            // （已核对 jar 反编译源码：该常量在 `CarFunctionValueImpl` 里出现 0 次。）
+            //
+            // 所以这里降级成「每分钟一条」，并把「固件没实现」这件事说清楚，
+            // 别让排障的人以为还有希望。
+            val now = System.currentTimeMillis()
+            if (now - lastDoorFailLogAt >= DOOR_LOG_THROTTLE_MS) {
+                lastDoorFailLogAt = now
+                Logx.w(
+                    LogTags.SIGNAL,
+                    "车门状态读不到（BCM_DOOR_POS 固件未实现，改走 MC 属性通道）",
+                    "func" to func,
+                    "hint" to "厂商分派表无此 case，恒返回 255",
+                )
+            }
             return DoorState(null, null, hood = hood, trunk = trunk)
         }
         return DoorState(perZone, allZoneClosed, hood = hood, trunk = trunk)
     }
+
+    /** 「车门读不到」日志的节流间隔（毫秒）。 */
+    private const val DOOR_LOG_THROTTLE_MS = 60_000L
+
+    /** 上次打「车门读不到」日志的时间。 */
+    private var lastDoorFailLogAt = 0L
 
     /**
      * 读一个「非门位」的区域（引擎盖 / 后备箱）。

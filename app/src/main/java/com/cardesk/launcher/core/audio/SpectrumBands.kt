@@ -117,6 +117,32 @@ object SpectrumBands {
     }
 
     /**
+     * FFT 字节 → 整体电平（0..1）。
+     *
+     * ## 为什么需要它
+     *
+     * 输出混音这条路是**轮询** `getFft()` 拿数据（与 uni-launcher 一致），
+     * 不挂数据采集回调 → 拿不到波形字节，电平只能从 FFT 的模长里取。
+     *
+     * 取的是**各频点模长的最大值**（不是 RMS）：
+     * FFT 是稀疏的（大部分频点是 0），RMS 会被摊薄，
+     * 而「最强的那根谱线有多高」更接近「这一刻有多响」。
+     */
+    fun levelFromFft(fft: ByteArray): Float {
+        if (fft.size < 4) return 0f
+        var peak = 0f
+        var k = 1
+        while (k < fft.size && 2 + 2 * k < fft.size) {
+            val re = fft[1 + 2 * k].toFloat()
+            val im = fft[2 + 2 * k].toFloat()
+            val mag = sqrt(re * re + im * im)
+            if (mag > peak) peak = mag
+            k++
+        }
+        return (peak / 128f).coerceIn(0f, 1f)
+    }
+
+    /**
      * 频段能量归一化（按本帧峰值做自动增益）。
      *
      * 不归一的话，音乐一小声整条频谱就贴地了 —— 什么都看不出来。

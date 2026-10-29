@@ -98,6 +98,23 @@ class MusicController private constructor() {
      */
     private var lyricSourceDurationMs = 0L
 
+    /**
+     * 播放器自报的「当前正在唱的那一句」（第七十八轮新增）。
+     *
+     * 空串 = 这个来源不报（普通播放器），或这一帧拿不到。
+     * 有值时**它优先于** LRC 时间轴算出来的当前行 —— 见 [recomputeLyric]。
+     */
+    private var playerCurrentLine: String = ""
+
+    /**
+     * 上一次**显示**出去的当前行文字（第七十八轮新增）。
+     *
+     * 用来判断「播放器自报的当前句变了」——
+     * LRC 的行号没变但自报句变了时，界面也得跟着刷新，
+     * 否则新的一句要等到行号跳了才显示出来。
+     */
+    private var lyricLiveText: String = ""
+
     /** 会话消失后的清空计时器代数。 */
     private var nullClearGeneration = 0
     private var pendingClearGeneration = 0
@@ -186,6 +203,13 @@ class MusicController private constructor() {
             val merged = mergeCachedCover(t)
             track = merged
             listeners.forEach { it.onMediaChanged(merged) }
+            // —— 播放器自报的当前句（第七十八轮新增）
+            //
+            // 变了就要重算当前行：LRC 的行号没动、但播放器报的那句变了，
+            // 界面也得立刻换成新的一句。
+            val liveChanged = playerCurrentLine != merged.playerCurrentLine
+            playerCurrentLine = merged.playerCurrentLine
+            if (liveChanged) recomputeLyric()
             // 会话没给封面 → 按优先级链自己取一张
             requestCover(merged)
             // 排障场景：换歌 / 歌手时长变了 → 落盘一条；每 2.5s 一次的重复推送只进 Logcat
@@ -208,17 +232,23 @@ class MusicController private constructor() {
             persistTrack(t, force = changed)
             if (changed) {
                 onTrackReset(t)
-            } else {
-                // 第四十轮：**总时长后到**时的歌词版本复核。
-                //
-                // 诊断包实测：本地音乐来源（com.tencent.wecarflow）第一次推的 metadata
-                // 里没有 DURATION，取词时 durationMs=0；3.1 秒后才推来真实的 318902。
-                // 取词那一刻没有时长，就判别不出「专辑原版」和「电台剪辑版」——
-                // 两者歌名歌手都相同，分数一样，只能靠运气。
-                // 等真实时长到齐，这里复核一次：对不上就丢掉重取。
-                if (prev != null && prev.durationMs <= 0 && t.durationMs > 0) {
-                    revalidateLyricVersion(prev, t)
-                }
+            }
+            // —— 歌词版本复核（第四十轮新增，第七十八轮把触发条件补齐）
+            //
+            // 取词那一刻如果车机会话还没给出总时长（换歌瞬间很常见），
+            // 就判别不出「专辑原版」和「电台剪辑版」—— 两者歌名歌手都相同，分数一样，
+            // 只能靠「同分取更长」来猜。猜错了整首歌的歌词就越走越偏。
+            //
+            // 原来的条件是 `prev.durationMs <= 0 && t.durationMs > 0`，而且**只在
+            // 「曲目内容没变」的分支里**调。可是「时长从 0 变成真值」在
+            // [isTrackChanged] 里恰好算「变了」（时长差 >2s）→ 走的是上面的
+            // `onTrackReset` 分支 → 这条复核**一次都没跑过**
+            // （真机诊断包实测：日志里「复核」0 命中）。
+            //
+            // 现在改成：**只要时长变了就复核**，与「曲目变没变」无关。
+            // 复核本身是安全的 —— 歌名/歌手/时长都没到齐时它会自己提前返回。
+            if (prev != null && t.durationMs > 0 && prev.durationMs != t.durationMs) {
+                revalidateLyricVersion(t)
             }
         }
 
@@ -433,6 +463,8 @@ class MusicController private constructor() {
         lyric = null
         lyricIndex = -1
         lyricWipe = 0f
+        lyricLiveText = ""
+        playerCurrentLine = ""
         lyricState = LYRIC_IDLE
         lyricNotFound = false
         lyricFetchInFlightKey = null
@@ -464,10 +496,15 @@ class MusicController private constructor() {
         lyric = null
         lyricIndex = -1
         lyricWipe = 0f
+        lyricLiveText = ""
         lyricSourceDurationMs = 0L
         if (!sameSong) {
             lastLyricSongKey = key
             lyricNotFound = false
+            // 换歌时**不**在这里清 `playerCurrentLine`：
+            // 它是在 [onTrackChanged] 里跟着新曲目一起赋值的，
+            // 清掉反而会把**新歌**自报的那一句也抹了（要等下一次推送才补回来）。
+            // 换歌作废旧句这件事，由「每次推送都按新曲目重新赋值」天然保证。
         }
 
         // 1) 广播歌词（QQ 音乐车机版自己推的整份 LRC —— 权威性最高）
@@ -560,7 +597,8 @@ class MusicController private constructor() {
     /**
      * 复核：挂上去的歌词是不是这首歌**那个长度**的版本。
      *
-     * 第四十轮新增（对应用户反馈「歌词和歌曲播放速度不匹配」）。
+     * 第四十轮新增（对应用户反馈「歌词和歌曲播放速度不匹配」）；
+     * 第七十八轮把调用点补齐（原来只在「曲目没变」的分支里调，等于没跑过）。
      *
      * 取词那一刻如果车机会话还没给出总时长（本地音乐来源很常见），
      * 就没法判别「专辑原版」和「电台剪辑版」—— 后者的歌词时间轴更短，
@@ -571,9 +609,10 @@ class MusicController private constructor() {
      * - 差得太多 → **挂错版本了** → 清掉缓存重取（这次时长已知，
      *   [LyricCandidatePicker] 的时长硬过滤会挑中长度对得上的那条。
      */
-    private fun revalidateLyricVersion(prev: TrackInfo, next: TrackInfo) {
+    private fun revalidateLyricVersion(next: TrackInfo) {
         val source = lyricSourceDurationMs
         if (lyric == null || source <= 0) return
+        if (next.durationMs <= 0) return
         val diff = kotlin.math.abs(next.durationMs - source)
         if (diff <= LyricCandidatePicker.DURATION_TOLERANCE_MS) {
             Logx.d(
@@ -593,6 +632,7 @@ class MusicController private constructor() {
         lyric = null
         lyricIndex = -1
         lyricWipe = 0f
+        lyricLiveText = ""
         lyricSourceDurationMs = 0L
         onTrackReset(next)
     }
@@ -660,6 +700,23 @@ class MusicController private constructor() {
             "sourceDurationMs" to sourceDurationMs,
         )
         recomputeLyric()
+        // —— 立刻复核一次版本（第七十八轮新增）
+        //
+        // 取词那一刻歌曲时长可能还是 0（换歌瞬间车机常常先推歌名、后推时长），
+        // 这时 [LyricCandidatePicker.durationTier] 判别不出「专辑原版」和
+        // 「电台剪辑版」—— 两者歌名歌手都一样，只能靠「同分取更长」猜。
+        //
+        // 猜错了的后果不是「差一点」，而是**整首歌越走越偏**：
+        // 2 分 17 秒的剪辑版配 4 分 37 秒的原曲，歌词进度会差出一大截。
+        //
+        // 现在歌已经挂上了、时长也到了，正是复核的时机：
+        // 差太多就把这份错的丢掉重取（这次时长已知，挑选时会挑长度对得上的那条）。
+        //
+        // 原来的复核只在「曲目内容没变」的分支里调，
+        // 而「时长从 0 变成真值」在 [isTrackChanged] 里算「变了」——
+        // 于是这条复核**一次都没跑过**（真机诊断包实测：日志里「复核」0 命中）。
+        val t = track
+        if (t != null && t.durationMs > 0) revalidateLyricVersion(t)
     }
 
     /**
@@ -690,18 +747,36 @@ class MusicController private constructor() {
         }
         val index = timeline.indexAt(t.positionMs)
         val wipe = if (index < 0) 0f else timeline.wipeFraction(t.positionMs, index, t.durationMs)
-        val changed = index != lyricIndex || kotlin.math.abs(wipe - lyricWipe) > 0.01f
+        // —— 播放器自报的当前句（第七十八轮新增）
+        //
+        // 「现在唱到哪一句」有两条来源：
+        // 1. 联网查来的 LRC 时间轴 + 播放位置（**猜**的：版本/分段一对不上就错位）；
+        // 2. 播放器自己报的那一句（**真值**：它就在播放的东西里）。
+        //
+        // 有第 2 条就用第 2 条 —— 口径跟 uni-launcher 一致
+        // （`liveLine.isNotEmpty ? liveLine : lrc[active]`）。
+        // 行号 / 擦除进度仍按 LRC 时间轴走（那是唯一有「上一句/下一句」的数据源）。
+        val live = playerCurrentLine
+        val liveChanged = live != lyricLiveText
+        val changed = index != lyricIndex || kotlin.math.abs(wipe - lyricWipe) > 0.01f || liveChanged
         val indexChanged = index != lyricIndex
         lyricIndex = index
         lyricWipe = wipe
+        lyricLiveText = live
         // 排障场景：歌词行跳得太快 / 停住不动时，这里能看到当前行与总行数。
         //
         // 第三十三轮加两个字段（**歌词不同步**的取证）：
         // - `lineMs`：当前行自己的时间戳；
         // - `offsetMs`：播放位置 − 当前行时间戳 = 「这首歌的歌词整体偏了多少」，
         //   正常应该是 0 ~ 下一行时间戳；**长期偏一个固定值 = 歌词源的时间轴不对**。
-        if (indexChanged) {
-            val lineMs = timeline.lines.getOrNull(index)?.timeMs ?: -1L
+        //
+        // 第七十八轮加 `live`：播放器自报的当前句（空 = 这个来源不报）。
+        // 有 `live` 而 `lineText` 与它不一致 → 这首歌的歌词版本 / 分段跟实际唱的**对不上**，
+        // 这是「歌词对不上」最直接的证据。
+        if (indexChanged || liveChanged) {
+            val line = timeline.lines.getOrNull(index)
+            val lineMs = line?.timeMs ?: -1L
+            val lineText = line?.text.orEmpty()
             Logx.d(
                 LogTags.MEDIA, "歌词当前行",
                 "index" to index, "total" to timeline.lines.size,
@@ -710,10 +785,13 @@ class MusicController private constructor() {
                 "offsetMs" to (if (lineMs >= 0) t.positionMs - lineMs else -1L),
                 "durationMs" to t.durationMs,
                 "playing" to t.playing,
+                "live" to live,
+                "lineText" to lineText,
             )
         }
         if (changed) {
-            listeners.forEach { it.onLyricChanged(timeline, index, wipe) }
+            val display = if (live.isNotEmpty() && index >= 0) timeline.withLineText(index, live) else timeline
+            listeners.forEach { it.onLyricChanged(display, index, wipe) }
         }
     }
 

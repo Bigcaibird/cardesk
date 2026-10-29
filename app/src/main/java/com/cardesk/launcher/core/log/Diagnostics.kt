@@ -86,6 +86,35 @@ object Diagnostics {
         // 本项目 compileSdk 29（一致）编不到 —— 这里用权限名字符串。
         "android.permission.QUERY_ALL_PACKAGES",
         android.Manifest.permission.WRITE_EXTERNAL_STORAGE,
+        // 频谱采集（氛围灯）：这两个之前**根本没在快照里**，
+        // 于是「频谱没起来」在诊断包里无法自证 —— 只能翻几百行日志猜。
+        android.Manifest.permission.RECORD_AUDIO,
+        android.Manifest.permission.MODIFY_AUDIO_SETTINGS,
+    )
+
+    /**
+     * 氛围灯自检要列的关键常量（**按名解析**，不硬编码十进制）。
+     *
+     * 真机上「灯不亮」有几种原因：功能号按名解析不到 /
+     * 通道没就绪 / 权限没批 / 频谱没数据。
+     * 这一段把这几件事一次性列清，不用再翻日志。
+     */
+    private val AMBIENT_CONSTANTS = listOf(
+        com.cardesk.launcher.vehicle.AdaptapiConstants.FUNC_AMBIENT_INTERACTIVE_EFFECT,
+        com.cardesk.launcher.vehicle.AdaptapiConstants.FUNC_AMBIENT_MAIN_COLOR,
+        com.cardesk.launcher.vehicle.AdaptapiConstants.FUNC_AMBIENT_EXPERIENCE,
+        com.cardesk.launcher.vehicle.AdaptapiConstants.FUNC_AMBIENT_COLOR_SET,
+        com.cardesk.launcher.vehicle.AdaptapiConstants.FUNC_AMBIENT_BRIGHTNESS_DRIVING,
+        com.cardesk.launcher.vehicle.AdaptapiConstants.FUNC_AMBIENT_BRIGHTNESS_STATIONARY,
+        com.cardesk.launcher.vehicle.AdaptapiConstants.FUNC_AMBIENT_MAIN_ZONES,
+        com.cardesk.launcher.vehicle.AdaptapiConstants.FUNC_AMBIENT_TOP_ZONES,
+        com.cardesk.launcher.vehicle.AdaptapiConstants.FUNC_AMBIENT_BOT_ZONES,
+        com.cardesk.launcher.vehicle.AdaptapiConstants.AMBIENT_MAIN_COLOR_SET_COLOR,
+        com.cardesk.launcher.vehicle.AdaptapiConstants.AMBIENT_BRIGHTNESS_HIGH,
+        com.cardesk.launcher.vehicle.AdaptapiConstants.AMBIENT_BRIGHTNESS_LOW,
+        com.cardesk.launcher.vehicle.AdaptapiConstants.AMBIENT_BRIGHTNESS_STATIONARY_HIGH,
+        com.cardesk.launcher.vehicle.AdaptapiConstants.AMBIENT_BRIGHTNESS_STATIONARY_LOW,
+        com.cardesk.launcher.vehicle.AdaptapiConstants.AMBIENT_EXPERIENCE_CUSTOM,
     )
 
     /**
@@ -368,6 +397,31 @@ object Diagnostics {
                 .append(com.cardesk.launcher.core.HiddenApiCompat.tryExempt()).append('\n')
             sb.append(com.cardesk.launcher.core.CarCapabilityProbe.probe(app)).append('\n')
         }.onFailure { sb.append("能力探测失败: ").append(it.message).append('\n') }
+
+        // 氛围灯自检（这一轮新增）：
+        // 「灯不亮」有好几种原因（频谱没权限 / 频谱没数据 / 车控通道没就绪 /
+        // 厂商功能号按名解析不到），以前诊断包里**一件都看不到**，
+        // 只能翻几百行日志猜。这里一次性列清。
+        sb.append("\n---- 氛围灯 ----\n")
+        runCatching {
+            val analyzer = com.cardesk.launcher.core.audio.SpectrumAnalyzer.get()
+            sb.append("录音权限: ")
+                .append(com.cardesk.launcher.core.Permissions.describeRecordAudioState(app)).append('\n')
+            sb.append("频谱状态: ").append(analyzer.state.label)
+            if (analyzer.stateReason.isNotBlank()) {
+                sb.append("（").append(analyzer.stateReason).append("）")
+            }
+            sb.append(" 来源=").append(analyzer.sourceLabel).append('\n')
+            sb.append("灯珠通道: ")
+                .append(com.cardesk.launcher.core.ambient.AmbientLightController.api().backendName)
+                .append('\n')
+            sb.append("关键常量按名解析:\n")
+            for (name in AMBIENT_CONSTANTS) {
+                val value = com.cardesk.launcher.vehicle.AdaptapiConstants.resolve(name)
+                sb.append("  ").append(name).append(" = ")
+                    .append(value?.toString() ?: "(解析不到)").append('\n')
+            }
+        }.onFailure { sb.append("氛围灯状态读取失败: ").append(it.message).append('\n') }
 
         sb.append("\n---- 设置全量键值（SharedPreferences: cardesk）----\n")
         runCatching {
