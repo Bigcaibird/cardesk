@@ -237,7 +237,91 @@ Worker 需要用户自己的 Cloudflare 账号执行 `npx wrangler deploy` 才�
 - 云端应用库：`cardesk/apks/CarDesk-ecarx-cardesk-4150.apk`（1,957,140 B）+
   `cardesk/apks.json`（1 个条目，324 B），公开域匿名可读、包与本地逐字节一致
 
-## 9. 未能覆盖 / 待办
+### 8.1 GitHub Release（源码与 tag 的分发渠道）
+
+GitHub Release 继续发，和「在线更新」无关 —— App 的更新检查读 R2，
+GitHub Release 只负责源码 / tag / APK 的分发。
+
+| 项 | 值 |
+|---|---|
+| 仓库 | `Bigcaibird/cardesk`（Public） |
+| Tag | `v1.0.1054`（= `versionCode 4150 - 3096`，沿用已推送的 Existing tag） |
+| Release 名称 | `CarDesk 4150 / 1.0.1054-system` |
+| 资产 | `CarDesk-ecarx-cardesk-4150.apk`（1,957,140 字节） |
+| SHA-256 | `2851c53f8e398a9b0dfe5bbdba43e72a8e531de16c40904eaef4603bbdcaa982` |
+| Release 标签 | `Latest` |
+| 发布提交 | `b628640` |
+| 发布时间 | `2026-10-30T10:03:07Z` |
+
+**API 回读核验**（`releases/tags/v1.0.1054` → 200）：
+
+```
+tag_name     : v1.0.1054
+name         : CarDesk 4150 / 1.0.1054-system
+draft        : False
+prerelease   : False
+published_at : 2026-10-30T10:03:07Z
+html_url     : https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1054
+assets_count : 1
+  asset      : CarDesk-ecarx-cardesk-4150.apk 1957140 bytes
+  digest     : sha256:2851c53f8e398a9b0dfe5bbdba43e72a8e531de16c40904eaef4603bbdcaa982
+releases/latest = v1.0.1054
+```
+
+**同一个包，四处一致** —— 本地 `dist/`、GitHub 资产、GitHub 自算 digest、
+R2 上那一份（`cardesk/apks/` 与 `cardesk/` 各一份），sha256 全是
+`2851c53f…caa982`；再从 Release 的下载链接把包拉下来 `cmp`，**逐字节相同**。
+
+Release 正文只写改动点，不写实现细节（与用户的要求一致）：
+
+```
+**改动点**
+
+- 新增「云端应用库」：手机上把 APK 传到 Cloudflare R2，车机上直接下载并安装
+- 出门前传好，到车上不用再插 U 盘，也不用和车机连同一个局域网
+- 云端应用下载新增文件长度与 SHA-256 校验，对不上就当没下成功
+```
+
+---
+
+## 9. 这一轮新踩的 GitHub 发布坑
+
+1. **刚 push 的 tag，Tag 下拉里看不到 —— 必须先 `reload`** ——
+   本轮发布页是在 push tag **之前**打开的，打开后页面里还挂着一个
+   `Uh oh! There was an error while loading. Please reload this page.` 的对话框，
+   Tag 按钮停在「Select tag」。`reload` 之后 tag 下拉里就有 `v1.0.1054` 了
+   （列表项 `role=menuitemradio`）。**tag 下拉是打开页面那一刻的快照**，不是实时的。
+2. **`upload_files` 又报 `browser_action_failed`，但文件其实已经挂上了** ——
+   和上一轮同一个坑，本轮第三次踩到。报错后页面已经从 `releases/new`
+   跳到 `releases/edit/untagged-e708763c41fb99fb1fba`（草稿自动落成），
+   资产行里文件名是 `CarDesk-ecarx-cardesk-4150.apk`、大小 `(1.87 MB)`，
+   字段名 `release[release_assets_attributes][][name]`。
+   ⇒ **已经是 release asset，不是待上传队列**，别重传。
+3. **别用 `query(kind="dom")` 的 `value=` 属性判断资产文件名在不在** ——
+   `input.js-release-asset-filename` 的 outerHTML 里 `value=""`，
+   但语义树里它的 `inlinetextbox` 子节点名字就是
+   `CarDesk-ecarx-cardesk-4150.apk`（GitHub 用 DOM property 填的，不写 attribute）。
+   上一轮记的「标题不能看 `value=` 属性」是同一个坑，这次扩展到资产文件名。
+4. **附件一挂上，页面会换 URL，但已填的标题和正文都不会丢** ——
+   本轮实测：`releases/new` → `releases/edit/untagged-…` 之后，
+   标题 `CarDesk 4150 / 1.0.1054-system` 仍在（语义树 `inlinetextbox`），
+   正文预览渲染出来也还是那三条改动点。
+5. **正文核对用 Preview 标签读渲染结果，比读 textarea 可靠** ——
+   点 `Preview` 标签后
+   `query(kind="text", selector=".markdown-body, .comment-body, #previewable-comment-form-component-…")`
+   直接读到「改动点 + 3 条」，一眼就能看出有没有丢字、有没有多字。
+6. **发布按钮的 `click` 这次报 `browser_action_failed`，但发布其实成功了** ——
+   上一轮用 `click` + `selector: button.btn-primary[type="submit"]` 是「成功 + 跳页」，
+   本轮同一个调用报了 `browser_action_failed`。**浏览器返回值不能作为发布成败的依据**，
+   判发没发出去一律看 API：`releases/tags/<tag>` 404 = 没发出去；
+   `releases/latest` 指到本轮才算发。（本轮是用户手动点了一下才发出去的。）
+7. `scroll` 报的 `atStart` 依旧不可信 —— 本轮又遇到
+   `actualDeltaY: -105, atStart: true`，实际页面还有一屏没滚完。
+   以 `inspect` 里的 `rect.y` 为准。
+
+---
+
+## 10. 未能覆盖 / 待办
 
 - **Worker 还没部署**：需要用户在 Cloudflare 账号下执行
   `npx wrangler login` → `npx wrangler secret put UPLOAD_TOKEN` → `npx wrangler deploy`。
