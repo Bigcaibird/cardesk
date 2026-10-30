@@ -192,6 +192,33 @@ pid 3108 -> 3108
 - SHA-256 `0cdd310adae03523b41998af78bc0a4692a65cb286951da6587d560ab47b53da`
 - 出包方式：`tools/release.sh`（rsync 到全新临时目录 + 干净全量构建 + 全量单测）
 
+## 7.1 发布记录（v1.0.1050 / 4146）
+
+- commit `c6f0872`、tag `v1.0.1050`（已推送）
+- Release API 回读核验：
+  - `tag_name=v1.0.1050`、`name=CarDesk 4146 / 1.0.1050-system`
+  - `draft=false`、`prerelease=false`
+  - `releases/latest` = v1.0.1050
+  - 资产 `CarDesk-ecarx-cardesk-4146.apk`，1,941,236 B，
+    `digest = sha256:0cdd310adae03523b41998af78bc0a4692a65cb286951da6587d560ab47b53da`
+  - 线上下载的包与本地 `dist/` 的包 **`cmp` 逐字节一致**
+
+> 发布过程中踩的坑（GitHub 网页发布，**下次照着避开**）：
+>
+> 1. **自动保存的草稿会先落成 `untagged-<id>`**，第一次点「Publish release」
+>    只把草稿建出来 + 资产传上去（`POST /releases` 201、资产 204/200），
+>    **并没有真正发布** —— 要再点一次才发出去。
+> 2. **标题输入框的 `fill` 不会持久化**：GitHub 的 release 标题只认自己的
+>    `change` 事件，`fill` 报成功但服务端存的是空。**填完必须按一次 Tab**（触发 change），
+>    否则发布出来是空标题（GitHub 会拦，但草稿里就一直是空的）。
+> 3. **网络不稳**：`POST /releases` 偶发 `ERR_CONNECTION_RESET`（10s 超时重置），
+>    报出来的是 GitHub 的一句看不懂的「Something went really wrong, and we can't process that file」。
+>    刷新页面重试即可（`upload_files` 报 `browser_action_failed` 也可能是这个原因，
+>    **先查页面上的附件有没有挂上，别急着重传**）。
+> 4. **判断「有没有发出去」要看 API，不要看页面**：
+>    `api.github.com/repos/Bigcaibird/cardesk/releases/tags/<tag>` 返回 404 = 没发出去；
+>    `releases/latest` 指到本轮 tag 才算真的发了。
+
 ## 8. 抓图过程中的坑
 
 1. **裁剪框写成了 (x, y, w, h)**，而 PIL 的 `crop` 要的是
