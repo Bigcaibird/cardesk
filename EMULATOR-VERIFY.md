@@ -82,7 +82,16 @@ adb logcat -d | grep -E "手势：单指横滑翻页|切页 "
 `com.ecarx.cardesk` 是**平台签名 + uid 1000**，车控链路（`AdaptapiGateway`）是**真链路**。
 
 **模拟器验不到、要真机的**（如实标注，不要写成 ✅）：车门 0/1 语义、
-频谱条是否随音乐跳动（模拟器没有能在后台持续播放的音源）、歌词与 QQ 音乐 App 的逐句一致性。
+歌词与 QQ 音乐 App 的逐句一致性。
+
+> 第八十五轮补上了一个缺口：**模拟器现在有能在后台持续播放的音源了**
+> —— `media-probe` 的 `ToneActivity`（`AudioTrack` 播鼓 + 贝斯循环，
+> 走 AudioFlinger ⇒ 输出混音的 Visualizer 抓得到）。
+> 于是「频谱条在动」「灯随音乐变色」「颜色在流动」都能在模拟器上验了，
+> 见 H8 段（H71~H77）。
+>
+> 仍然**只能真车验**的：亮度的快起慢落（模拟器音频链路有归一化，
+> 目标亮度几乎是常量）、真实音乐的观感、真车的 `Visualizer` 采集点数范围。
 
 ## A. 桌面主体
 
@@ -170,7 +179,7 @@ adb logcat -d | grep -E "手势：单指横滑翻页|切页 "
 |---|---|---|---|---|
 | H12 | 氛围灯页不黑屏 | 设置 → 氛围灯 → 打开开关 | 页面**不黑屏**；主线程不卡（`dumpsys gfxinfo` 无长帧）；灯随音乐变色 | |
 | H13 | 频谱真的有数据 | 氛围灯页的「频谱预览」条 | 条在动（不再是全 0）；诊断包「氛围灯」段 `频谱状态=采集中`、`来源=输出混音` | |
-| H14 | 频谱口径 | 诊断包「氛围灯」段的「频谱口径」行 | `分段=24 采集点数=512 轮询=100ms 回落=0.7` | |
+| H14 | 频谱口径 | 诊断包「氛围灯」段的「频谱口径」行 | `分段=24 采集点数=1024 轮询=100ms 回落=0.7`（第八十五轮起采集点数是 1024：512 点在 44.1kHz 下低频四段会塌进同一 bin ⇒ 色相恒为 0°） | ✅ 报的是**实际**用上的点数，不是期望值 |
 | H15 | 车控写入不占主线程 | logcat 过滤 `CarDesk/Ambient` | 颜色/开关/亮度的下发日志不密集（写失败时**每 3 秒**才一条，不是每 100ms 一条） | |
 | H16 | 车门属性快照 | 诊断包「车门属性原始值」行 | 出现 `快照 prop=0x21701414 … status=… valueClass=… bytesLen=… bytesHex=…` | |
 | H17 | 异常内层原因 | logcat 过滤 `属性按类型读取失败` | `err=` 后面带 `cause[N]=java.lang.IllegalArgumentException: … but was: class …`（不是只有 `InvocationTargetException: -`） | |
@@ -291,6 +300,28 @@ adb logcat -d | grep -E "手势：单指横滑翻页|切页 "
 > **装完之后系统弹了「Select a Home app」**：CarDesk 是 HOME 应用，
 > 被自己更新掉之后系统要重新确认主屏程序 —— 这是**重装 launcher 的正常副作用**，
 > 不是崩溃（`Fatal signal` 计数 0，应用照常起来）。
+
+## H8. 第八十五轮新增（红绿灯灯态 + 氛围灯动感）
+
+| # | 项 | 操作 | 期望 | 结果 |
+|---|---|---|---|---|
+| H67 | **官方协议红灯** | `python3 tools/traffic_shot.py standard red 12` | 画**红**灯 + 红灯读秒 | ✅ `lamp=RED countdown=12 rawStatus=1`；红块 x[475,519] y[117,162] 45×46（`r85-traffic-standard-red-zoom.png`） |
+| H68 | **官方协议绿灯**（故意带 19 秒红灯倒计时） | `python3 tools/traffic_shot.py standard green 8` | 画**绿**灯 + **绿灯**读秒；**红像素 = 0** | ✅ `lamp=GREEN countdown=8 rawStatus=4`；绿块 46×46，红像素 **0**（`r85-traffic-standard-green-zoom.png`） |
+| H69 | 巡航协议回归 | `python3 tools/traffic_shot.py cruise green 8` | 巡航 `status=1` 仍是**绿**（与官方正好相反） | ✅ `lamp=GREEN rawStatus=1`（`r85-traffic-cruise-green-zoom.png`） |
+| H70 | 方向枚举 | 官方协议日志 | `dir=直行`（官方 1=左/2=右/4=直） | ✅ `收到红绿灯数据（官方协议） lamp=… rawStatus=… rawDir=4 dir=直行` |
+| H71 | **合成音源能喂到频谱** | `adb shell am start -n com.cardesk.mediaprobe/.ToneActivity --es gain 0.05` | 输出混音的 Visualizer 抓得到 `AudioTrack` 的声音 | ✅ 氛围灯页「频谱状态：**采集中 · 来源：输出混音**」，24 根频谱条有形状（`r85-ambient-05.png`） |
+| H72 | **色相不再恒为 0°** | `adb logcat -s CarDesk/Ambient:D` 看「氛围灯帧」 | `targetHue` **不再恒为 0**（随贝斯音高在 0/15/45 之间走） | ✅ 1024 点下 `targetHue=45/15/0/33.6…`；512 点时恒为 0.0 |
+| H73 | **颜色在流动而不是在跳** | `python3 tools/ambient_shot.py 14 r85-ambient` | 平滑后的单步跳变明显小于目标跳变 | ✅ 目标最大跳 **51.0° / RGB 184.4** → 平滑后 **12.5° / RGB 45.2**（**4.1×**） |
+| H74 | 当前颜色是活的 | 看氛围灯页「当前颜色」 | 不是恒定的死红 | ✅ `#F77025 · 亮度 97%`（251 行逐帧日志里 hex 一直在变） |
+| H75 | **氛围灯重启后恢复** | 装包 → 重启 App → 看日志 | `ambient_enabled=true` 时启动要恢复采集与写灯 | ✅ 日志 `CarDesk/Ambient : 恢复上次开着的氛围灯`（以前这个开关**只写不读**，重启后灯再也不亮） |
+| H76 | 采集点数 | logcat `频谱已挂上输出混音` | `captureSize=1024`（设备支持 128~1024） | ✅ `captureSize=1024 fftBytes=1024`；设备不支持时自动退回 512 |
+| H77 | 不闪退 | 全程 | pid 不变、无 FATAL | ✅ 抓帧全程 pid 12468 未变；`Fatal signal` 计数 0 |
+
+> **H71 是这一轮补上的缺口**：早前 `EMULATOR-VERIFY.md` 第 0 节写着
+> 「模拟器没有能在后台持续播放的音源」，所以频谱与氛围灯一直只能标「要真机」。
+> 现在用 `media-probe` 的 `ToneActivity`（`AudioTrack` ⇒ 走 AudioFlinger ⇒ 输出混音抓得到）
+> 在模拟器里造了一个鼓 + 贝斯循环，频谱、色相、亮度第一次能在模拟器上验。
+> `media-probe` 是**仓库外的测试工具**，不进 CarDesk 仓库、不进 APK。
 
 > **上传端（Cloudflare Worker）本轮没上真机**：Worker 需要用户自己的 Cloudflare 账号
 > 执行 `npx wrangler deploy` 才能拿到地址（见 `worker/README.md`）。

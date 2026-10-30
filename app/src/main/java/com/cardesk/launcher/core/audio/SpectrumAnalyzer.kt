@@ -95,7 +95,17 @@ class SpectrumAnalyzer private constructor() {
 
     private var visualizer: Visualizer? = null
     private var fftBuffer: ByteArray? = null
-    private var captureSize = 0
+
+    /**
+     * **实际**用的采集点数（诊断包要报这个，不是「期望值」）。
+     *
+     * 期望值是 [SpectrumCapture.PREFERRED_CAPTURE_SIZE]，
+     * 但设备可能不支持（会被夹小），也可能被拒（会退回兜底值）——
+     * 诊断包报「期望」就骗人了，报「实际」。
+     */
+    @Volatile
+    var captureSize = 0
+        private set
     private var sampleRate = SpectrumBands.DEFAULT_SAMPLE_RATE
     private var sessionId = 0
     private var source: Source? = null
@@ -418,14 +428,30 @@ class SpectrumAnalyzer private constructor() {
             val minSize = if (range != null && range.size > 0) range[0] else 0
             val maxSize = if (range != null && range.size > 1) range[1] else 0
             val size = SpectrumCapture.resolveCaptureSize(minSize, maxSize)
+            // 第八十五轮：**设备报支持却实际拒绝时退回兜底点数**，别整个采集起不来。
+            //
+            // `getCaptureSizeRange()` 是 ROM 自己报的，理论上与 `setCaptureSize` 一致；
+            // 但只要有一台机器两者对不上，频谱就整个挂掉（灯再也不动）——
+            // 那比「低频分辨不出来」严重得多。
             val sizeOk = v.setCaptureSize(size)
             if (sizeOk != Visualizer.SUCCESS) {
-                throw IllegalStateException("setCaptureSize 返回 $sizeOk")
+                val fallback = SpectrumCapture.resolveCaptureSize(
+                    minSize, maxSize, SpectrumCapture.FALLBACK_CAPTURE_SIZE,
+                )
+                if (fallback == size || v.setCaptureSize(fallback) != Visualizer.SUCCESS) {
+                    throw IllegalStateException("setCaptureSize 返回 $sizeOk")
+                }
+                Logx.w(
+                    LogTags.AMBIENT, "采集点数被拒，退回兜底值",
+                    "want" to size, "fallback" to fallback, "ret" to sizeOk,
+                )
+                captureSize = fallback
+            } else {
+                captureSize = size
             }
-            captureSize = size
             // 缓冲区按 captureSize 分配（**不是一半** —— 少一半会被 ROM 越界写坏堆，
             // 见 SpectrumCapture.fftBufferSize 的说明）
-            fftBuffer = ByteArray(SpectrumCapture.fftBufferSize(size))
+            fftBuffer = ByteArray(SpectrumCapture.fftBufferSize(captureSize))
             sampleRate = resolveSampleRate(v)
             val enabled = v.setEnabled(true)
             if (enabled != Visualizer.SUCCESS) {
@@ -570,8 +596,13 @@ class SpectrumAnalyzer private constructor() {
         }.getOrNull() ?: SpectrumBands.DEFAULT_SAMPLE_RATE
 
     companion object {
-        /** 采集点数（2 的幂，256~8192）。512 → FFT 字节 256 个 → 覆盖到采样率 / 4。 */
-        const val CAPTURE_SIZE = 512
+        /**
+         * 期望的采集点数（2 的幂）。
+         *
+         * 真正的取值见 [SpectrumCapture.PREFERRED_CAPTURE_SIZE]；
+         * **实际**用了多少看 [captureSize]（会被设备范围夹小，也可能在被拒时退回兜底值）。
+         */
+        const val CAPTURE_SIZE = SpectrumCapture.PREFERRED_CAPTURE_SIZE
 
         /**
          * 帧间**回落**系数（非对称平滑，第七十九轮对齐 uni-launcher）。

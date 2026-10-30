@@ -29,16 +29,29 @@ class SpectrumCaptureTest {
 
     @Test
     fun `采集点数夹在设备支持的范围里`() {
-        // 常见范围 128~8192 → 512 直接可用
-        assertEquals(512, SpectrumCapture.resolveCaptureSize(128, 8192))
+        // 常见范围 128~8192 → 直接用期望值（1024，低频才分得开）
+        assertEquals(1024, SpectrumCapture.resolveCaptureSize(128, 8192))
         // 设备只支持到 256 → 降到 256
         assertEquals(256, SpectrumCapture.resolveCaptureSize(128, 256))
-        // 设备最小就是 512 → 用 512
-        assertEquals(512, SpectrumCapture.resolveCaptureSize(512, 8192))
+        // 设备最小就是 512，但上限够 → 还是用期望值 1024
+        assertEquals(1024, SpectrumCapture.resolveCaptureSize(512, 8192))
+        // 设备上限只有 512 → 夹到 512（老口径，不比从前差）
+        assertEquals(512, SpectrumCapture.resolveCaptureSize(128, 512))
+        // 设备不支持 1024（最大 512）→ 夹到 512（老口径，不比从前差）
+        assertEquals(512, SpectrumCapture.resolveCaptureSize(128, 512))
         // 设备不支持 512（最大 256）→ 夹到 256
         assertEquals(256, SpectrumCapture.resolveCaptureSize(128, 256, preferred = 512))
         // 范围是乱的（min > max）→ 不崩，取 min
         assertTrue(SpectrumCapture.resolveCaptureSize(1024, 128) in 1..4096)
+    }
+
+    @Test
+    fun `采集点数是 1024_低频才分得开`() {
+        // 第八十五轮：512 点在 44.1kHz 下 bin 间隔 86Hz，
+        // 60~149Hz 那四段全部落进同一个 bin ⇒ 跟随低频的色相永远是 0°。
+        assertEquals(1024, SpectrumCapture.PREFERRED_CAPTURE_SIZE)
+        // 兜底值是老口径：设备报支持却实际拒绝时退回它
+        assertEquals(512, SpectrumCapture.FALLBACK_CAPTURE_SIZE)
     }
 
     @Test

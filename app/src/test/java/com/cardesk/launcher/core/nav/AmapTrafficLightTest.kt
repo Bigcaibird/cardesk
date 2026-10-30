@@ -1,7 +1,6 @@
 package com.cardesk.launcher.core.nav
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -40,40 +39,72 @@ class AmapTrafficLightTest {
     }
 
     @Test
-    fun `官方协议 红灯读秒大于零时判红灯`() {
-        val signal = AmapTrafficLight.standard(standard(redCountdown = 23))
+    fun `官方协议 trafficLightStatus 为 1 时判红灯`() {
+        val signal = AmapTrafficLight.standard(standard(status = 1, redCountdown = 23))
         assertNotNull(signal)
         assertEquals(AmapTrafficLight.Lamp.RED, signal!!.lamp)
         assertEquals(23, signal.countdownSeconds)
-        assertEquals(0, signal.rawStatus)
+        assertEquals(1, signal.rawStatus)
         assertEquals(2, signal.rawDirection)
     }
 
     @Test
-    fun `官方协议 灯态枚举未实测 所以标记为未验证`() {
-        val signal = AmapTrafficLight.standard(standard(redCountdown = 5))
+    fun `官方协议 trafficLightStatus 为 4 时判绿灯`() {
+        val signal = AmapTrafficLight.standard(standard(status = 4, greenLastSecond = 12))
         assertNotNull(signal)
-        // 官方那一套的 `trafficLightStatus` 枚举没实测过，
-        // 绝不能像巡航协议那样标成已验证。
-        assertFalse(signal!!.enumVerified)
+        assertEquals(AmapTrafficLight.Lamp.GREEN, signal!!.lamp)
+        // 绿灯读秒取的是绿灯自己的秒数
+        assertEquals(12, signal.countdownSeconds)
+        assertEquals(4, signal.rawStatus)
+    }
+
+    @Test
+    fun `官方协议 绿灯时不拿红灯倒计时当读秒`() {
+        // 这一条就是真车报的那个毛病：
+        // 以前只看「红灯倒计时 > 0」就判红，绿灯期间那个字段照样可能是正数 ⇒ 绿灯画成红灯。
+        // 现在灯态看 `trafficLightStatus`，读秒也跟着灯态走。
+        val signal = AmapTrafficLight.standard(
+            standard(status = 4, redCountdown = 23, greenLastSecond = 9),
+        )
+        assertNotNull(signal)
+        assertEquals(AmapTrafficLight.Lamp.GREEN, signal!!.lamp)
+        assertEquals(9, signal.countdownSeconds)
+    }
+
+    @Test
+    fun `官方协议 灯态枚举已核对过`() {
+        val signal = AmapTrafficLight.standard(standard(status = 1, redCountdown = 5))
+        assertNotNull(signal)
+        // 官方那一套的 `trafficLightStatus` 枚举已经核对过
+        // （依据：高德自己的红绿灯语音模块 + 语音设置项文案，见 AmapTrafficLight 的注释）。
+        assertTrue(signal!!.enumVerified)
+    }
+
+    @Test
+    fun `官方协议 认不出的灯态按读秒字段兜底`() {
+        // 高德要是换了枚举取值，我们不猜它是什么意思，
+        // 改用自带字段名的读秒兜底 —— 不能退回到「永远画红灯」。
+        val green = AmapTrafficLight.standard(standard(status = 99, greenLastSecond = 9))
+        assertEquals(AmapTrafficLight.Lamp.GREEN, green!!.lamp)
+        assertEquals(9, green.countdownSeconds)
+
+        val red = AmapTrafficLight.standard(standard(status = 99, redCountdown = 7))
+        assertEquals(AmapTrafficLight.Lamp.RED, red!!.lamp)
+        assertEquals(7, red.countdownSeconds)
+
+        val none = AmapTrafficLight.standard(standard(status = 99))
+        assertEquals(AmapTrafficLight.Lamp.UNKNOWN, none!!.lamp)
+        assertNull(none.countdownSeconds)
     }
 
     @Test
     fun `官方协议 没有读秒时灯态是未知而不是猜绿灯`() {
-        val signal = AmapTrafficLight.standard(standard(status = 1))
+        val signal = AmapTrafficLight.standard(standard(status = 99))
         assertNotNull(signal)
         assertEquals(AmapTrafficLight.Lamp.UNKNOWN, signal!!.lamp)
         assertNull(signal.countdownSeconds)
         // 原始值仍然留着，只做诊断。
-        assertEquals(1, signal.rawStatus)
-    }
-
-    @Test
-    fun `官方协议 读秒为零时灯态是未知`() {
-        val signal = AmapTrafficLight.standard(standard(redCountdown = 0))
-        assertNotNull(signal)
-        assertEquals(AmapTrafficLight.Lamp.UNKNOWN, signal!!.lamp)
-        assertEquals(0, signal.countdownSeconds)
+        assertEquals(99, signal.rawStatus)
     }
 
     @Test
@@ -94,7 +125,7 @@ class AmapTrafficLightTest {
         assertNull(AmapTrafficLight.standard(standard(dir = "2", redCountdown = 23)))
         assertNull(AmapTrafficLight.standard(standard(status = "0", redCountdown = 23)))
         // 读秒只是「可选」——是字符串就当这一帧没带读秒（而不是当成 23 秒）。
-        val signal = AmapTrafficLight.standard(standard(redCountdown = "23"))
+        val signal = AmapTrafficLight.standard(standard(status = 99, redCountdown = "23"))
         assertNotNull(signal)
         assertNull(signal!!.countdownSeconds)
         assertEquals(AmapTrafficLight.Lamp.UNKNOWN, signal.lamp)
@@ -103,33 +134,47 @@ class AmapTrafficLightTest {
     @Test
     fun `官方协议 读秒越界就当没有读秒`() {
         // 超过 999 说明给的不是秒数（比如毫秒）。
-        val signal = AmapTrafficLight.standard(standard(redCountdown = 1000))
+        val signal = AmapTrafficLight.standard(standard(status = 99, redCountdown = 1000))
         assertNotNull(signal)
         assertNull(signal!!.countdownSeconds)
         assertEquals(AmapTrafficLight.Lamp.UNKNOWN, signal.lamp)
     }
 
     @Test
-    fun `官方协议 绿灯剩余秒数不当成绿灯倒计时`() {
-        // `greenLightLastSecond` 有条件门、语义未验证 —— 不能拿来显示绿灯读秒。
-        val signal = AmapTrafficLight.standard(standard(greenLastSecond = 18))
-        assertNotNull(signal)
-        assertNull(signal!!.countdownSeconds)
-        assertEquals(AmapTrafficLight.Lamp.UNKNOWN, signal.lamp)
+    fun `官方协议 绿灯剩余秒数只在绿灯时用`() {
+        // `greenLightLastSecond` 是「绿灯剩余秒数」——
+        // 灯态是绿的时候拿它当读秒，灯态不是绿的时候不碰它。
+        val green = AmapTrafficLight.standard(standard(status = 4, greenLastSecond = 18))
+        assertEquals(18, green!!.countdownSeconds)
+
+        // 灯态是红的时候，绿灯的秒数不参与（读秒走红灯倒计时）
+        val red = AmapTrafficLight.standard(standard(status = 1, redCountdown = 6, greenLastSecond = 18))
+        assertEquals(AmapTrafficLight.Lamp.RED, red!!.lamp)
+        assertEquals(6, red.countdownSeconds)
     }
 
     @Test
     fun `官方协议 整数值的浮点也认`() {
-        val signal = AmapTrafficLight.standard(standard(redCountdown = 23.0))
+        val signal = AmapTrafficLight.standard(standard(status = 1, redCountdown = 23.0))
         assertNotNull(signal)
         assertEquals(23, signal!!.countdownSeconds)
     }
 
     @Test
     fun `官方协议 小数读秒不认`() {
-        val signal = AmapTrafficLight.standard(standard(redCountdown = 23.5))
+        val signal = AmapTrafficLight.standard(standard(status = 1, redCountdown = 23.5))
         assertNotNull(signal)
         assertNull(signal!!.countdownSeconds)
+    }
+
+    @Test
+    fun `官方协议 方向枚举与巡航协议不是同一张表`() {
+        // 官方：1=左转 / 2=右转 / 4=直行；巡航：1=左 / 2=直 / 3=右。
+        assertEquals("左转", AmapTrafficLight.standardDirectionLabel(1))
+        assertEquals("右转", AmapTrafficLight.standardDirectionLabel(2))
+        assertEquals("直行", AmapTrafficLight.standardDirectionLabel(4))
+        assertEquals("掉头", AmapTrafficLight.standardDirectionLabel(8))
+        assertEquals("未知", AmapTrafficLight.standardDirectionLabel(null))
     }
 
     // ------------------------------------------------------------ 巡航协议

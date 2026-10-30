@@ -384,6 +384,8 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
             "countdown" to signal.countdownSeconds,
             "rawStatus" to signal.rawStatus,
             "rawDir" to signal.rawDirection,
+            // 方向带中文，真车日志里能直接看出是哪个方向。
+            "dir" to AmapTrafficLight.standardDirectionLabel(signal.rawDirection),
         )
         listener.onTrafficLight(signal)
     }

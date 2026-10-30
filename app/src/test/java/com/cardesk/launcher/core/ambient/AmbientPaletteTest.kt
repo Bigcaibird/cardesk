@@ -47,6 +47,52 @@ class AmbientPaletteTest {
     }
 
     @Test
+    fun `低频分辨不出来时改用强度映射色相`() {
+        // 第八十五轮：512 点 FFT 下 60~149Hz 那四段**全落进同一个 bin**
+        // ⇒ 四段能量永远相等 ⇒「取最响的那一段」永远取第 0 段
+        // ⇒ 色相恒为 0°（红）、亮度钉死 —— 灯一动不动。
+        val flat = bandsOf(0.9f, 0.9f, 0.9f, 0.9f)
+        assertTrue("四段一样 ⇒ 分辨不出来", AmbientPalette.isBassUnresolvable(flat))
+        // 此时不能再给「第 0 段的色相」（那是假信息），要按强度给
+        assertEquals(
+            AmbientPalette.intensityHue(0.9f),
+            AmbientPalette.bassHue(flat, 0f),
+            0.001f,
+        )
+        assertTrue(
+            "不能再是恒定的 0°",
+            abs(AmbientPalette.bassHue(flat, 0f) - AmbientPalette.hueForBand(0, 16)) > 1f,
+        )
+    }
+
+    @Test
+    fun `低频分辨得出来时照旧取最响的那一段`() {
+        val b = bandsOf(0.1f, 0.2f, 0.8f, 0.05f)
+        assertTrue("四段不一样 ⇒ 分辨得出来", !AmbientPalette.isBassUnresolvable(b))
+        assertEquals(AmbientPalette.hueForBand(2, 16), AmbientPalette.bassHue(b, 0f), 0.001f)
+    }
+
+    @Test
+    fun `没有低频能量不算分辨不出来`() {
+        // 全零 = 没声音，走「保留原色相」那条路，不是「分辨不出来」
+        assertTrue(!AmbientPalette.isBassUnresolvable(bandsOf(0f, 0f, 0f, 0f)))
+        // 差一点点（浮点噪声）也算相等
+        assertTrue(AmbientPalette.isBassUnresolvable(bandsOf(0.5f, 0.505f, 0.5f, 0.499f)))
+        // 差得够多就不算
+        assertTrue(!AmbientPalette.isBassUnresolvable(bandsOf(0.5f, 0.6f, 0.5f, 0.5f)))
+    }
+
+    @Test
+    fun `强度映射色相是冷到暖的线性曲线`() {
+        assertEquals(260f, AmbientPalette.intensityHue(0f), 0.001f)
+        assertEquals(20f, AmbientPalette.intensityHue(1f), 0.001f)
+        assertEquals(140f, AmbientPalette.intensityHue(0.5f), 0.001f)
+        // 超范围要夹住
+        assertEquals(260f, AmbientPalette.intensityHue(-1f), 0.001f)
+        assertEquals(20f, AmbientPalette.intensityHue(2f), 0.001f)
+    }
+
+    @Test
     fun `频谱色相用圆周平均而不是算术平均`() {
         // 第 0 段（0°）与第 15 段（337.5°）等能量 —— 正确答案在 348.75°（绕短边），
         // 算术平均会给出 168.75°（正好是最离谱的青绿）。
@@ -194,5 +240,68 @@ class AmbientPaletteTest {
         val b = AmbientColor(0, 255, 0, 80)
         assertEquals(30, AmbientPalette.brightnessDelta(a, b))
         assertTrue(AmbientPalette.colorDistance(a, b) > 300)
+    }
+
+    // ------------------------------------------------------------ 目标值（给动感层用）
+
+    @Test
+    fun `目标色相跟着模式走`() {
+        val b = bandsOf(0.1f, 0.9f, 0.2f)
+        // 跟随低频：取最响的那一段
+        assertEquals(
+            AmbientPalette.hueForBand(1, 16),
+            AmbientPalette.targetHue(b, AmbientPalette.MODE_BASS, 0f, 0f),
+            0.001f,
+        )
+        // 固定色：用设定的色相
+        assertEquals(120f, AmbientPalette.targetHue(b, AmbientPalette.MODE_FIXED, 120f, 0f), 0.001f)
+        // 没有能量时保留传入的色相（动感层传的是**当前**色相）
+        assertEquals(77f, AmbientPalette.targetHue(bandsOf(), AmbientPalette.MODE_BASS, 0f, 77f), 0.001f)
+    }
+
+    @Test
+    fun `目标亮度跟着模式走`() {
+        val b = bandsOf(0.8f)
+        // 跟随低频 → 低频能量
+        assertEquals(
+            80,
+            AmbientPalette.targetLevel(b, 0.1f, AmbientPalette.MODE_BASS, 1f, 0, 100),
+        )
+        // 跟随频谱 → 整体电平
+        assertEquals(
+            30,
+            AmbientPalette.targetLevel(b, 0.3f, AmbientPalette.MODE_SPECTRUM, 1f, 0, 100),
+        )
+        // 固定色 → 也是整体电平
+        assertEquals(
+            30,
+            AmbientPalette.targetLevel(b, 0.3f, AmbientPalette.MODE_FIXED, 1f, 0, 100),
+        )
+    }
+
+    @Test
+    fun `由色相和亮度直接产出颜色 亮度会整体缩放`() {
+        // 120° → 绿；亮度 100 → 满亮
+        val full = AmbientPalette.colorOf(120f, 100)
+        assertTrue("绿应该最亮（$full）", full.g > full.r && full.g > full.b)
+        // 亮度 0 → 全黑
+        val black = AmbientPalette.colorOf(120f, 0)
+        assertEquals(0, black.r)
+        assertEquals(0, black.g)
+        assertEquals(0, black.b)
+        // 亮度越界会被夹住
+        val over = AmbientPalette.colorOf(120f, 150)
+        assertEquals(100, over.brightness)
+    }
+
+    @Test
+    fun `由色相和亮度产出颜色 与先算再缩放一致`() {
+        val hue = 210f
+        val byColorOf = AmbientPalette.colorOf(hue, 40)
+        val rgb = AmbientPalette.hsvToRgb(hue, AmbientPalette.SATURATION, 1f)
+        val byScale = AmbientPalette.scaleByBrightness(AmbientColor(rgb[0], rgb[1], rgb[2], 40))
+        assertEquals(byScale.r, byColorOf.r)
+        assertEquals(byScale.g, byColorOf.g)
+        assertEquals(byScale.b, byColorOf.b)
     }
 }

@@ -408,8 +408,14 @@ class AdaptapiAmbientLightApi(
         const val STATIONARY_LOW = 537527809
         const val STATIONARY_HIGH = 537527810
 
-        /** 最小写入间隔（毫秒）。 */
-        const val MIN_INTERVAL_MS = 120L
+        /**
+         * 最小写入间隔（毫秒）。
+         *
+         * 取 **100ms = 10Hz**，与频谱帧率一致 ——
+         * 动感层算出来的颜色就是 10Hz 的连续变化，
+         * 写入再慢就会把平滑重新切成台阶（灯又「跳」起来了）。
+         */
+        const val MIN_INTERVAL_MS = 100L
 
         /**
          * 写失败后的退避（毫秒）。
@@ -421,7 +427,22 @@ class AdaptapiAmbientLightApi(
          */
         const val FAIL_BACKOFF_MS = 1000L
 
-        /** 颜色变化小于这个距离就不重写。 */
-        const val MIN_COLOR_DELTA = 8
+        /**
+         * 颜色变化小于这个距离就不重写。
+         *
+         * ## 为什么从 8 降到 2
+         *
+         * 以前颜色是**直接从频谱算出来**的，一帧一跳，变化幅度天然很大，
+         * 阈值 8 用来挡掉「同一个颜色反复写」。
+         *
+         * 现在颜色先过了 [AmbientMotion]（平滑 + 限速），
+         * **每帧只挪一点点**（色相每帧 ≤ 9°）——
+         * 阈值还留在 8 的话，一半以上的帧会被判成「没变」而丢掉，
+         * 平滑又被切回台阶，灯照样是跳的。
+         *
+         * 所以阈值必须跟着「平滑后的单帧变化幅度」一起调小。
+         * 真正的节流靠 [MIN_INTERVAL_MS]（10Hz 上限），不靠这个幅度阈值。
+         */
+        const val MIN_COLOR_DELTA = 2
     }
 }

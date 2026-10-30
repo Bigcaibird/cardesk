@@ -95,23 +95,73 @@ object AmbientPalette {
         maxBrightness: Int,
         fallbackHue: Float = 0f,
     ): AmbientColor {
+        val hue = targetHue(bands, mode, fixedHue, fallbackHue)
+        val brightness = targetLevel(bands, level, mode, sensitivity, minBrightness, maxBrightness)
+        val rgb = hsvToRgb(hue, SATURATION, 1f)
+        return AmbientColor(rgb[0], rgb[1], rgb[2], brightness)
+    }
+
+    /**
+     * 目标**色相**（0..360）。
+     *
+     * 单独拆出来是为了给 [AmbientMotion] 做平滑 ——
+     * 平滑要的是「色相」本身，不是已经转成 RGB 的颜色
+     * （RGB 再转回色相会有量化误差）。
+     *
+     * @param fallbackHue 没有声音时保留的色相（**由动感层传入当前色相**，
+     *   这样没声音时灯不会乱跳）
+     */
+    fun targetHue(
+        bands: FloatArray,
+        mode: Int,
+        fixedHue: Float,
+        fallbackHue: Float = 0f,
+    ): Float = when (mode) {
+        MODE_SPECTRUM -> spectrumHue(bands, fallbackHue)
+        MODE_FIXED -> normalizeHue(fixedHue)
+        else -> bassHue(bands, fallbackHue)
+    }
+
+    /**
+     * 目标**亮度**（0..100）。
+     *
+     * 亮度来源跟着颜色模式走：
+     * - 跟随频谱 / 固定色 → 整体电平；
+     * - 跟随低频 → 低频能量（鼓点一响就亮）。
+     */
+    fun targetLevel(
+        bands: FloatArray,
+        level: Float,
+        mode: Int,
+        sensitivity: Float,
+        minBrightness: Int,
+        maxBrightness: Int,
+    ): Int {
         val lo = minBrightness.coerceIn(0, 100)
         val hi = maxBrightness.coerceIn(0, 100)
-        val bass = bassEnergy(bands)
         val source = when (mode) {
             MODE_SPECTRUM -> level
             MODE_FIXED -> level
-            else -> bass
+            else -> bassEnergy(bands)
         }
-        val brightness = brightnessFor(source, sensitivity, lo, hi)
-        val hue = when (mode) {
-            MODE_SPECTRUM -> spectrumHue(bands, fallbackHue)
-            MODE_FIXED -> normalizeHue(fixedHue)
-            else -> bassHue(bands, fallbackHue)
-        }
-        val rgb = hsvToRgb(hue, 0.85f, 1f)
-        return AmbientColor(rgb[0], rgb[1], rgb[2], brightness)
+        return brightnessFor(source, sensitivity, lo, hi)
     }
+
+    /**
+     * 由色相 + 亮度直接产出颜色（亮度**整体缩放** RGB）。
+     *
+     * 这是动感层算完之后的那一步：
+     * 色相是平滑过的、亮度是平滑过的（还叠了起拍包络），
+     * 落到车上就是「流动的明暗」。
+     */
+    fun colorOf(hue: Float, brightness: Int): AmbientColor {
+        val rgb = hsvToRgb(hue, SATURATION, 1f)
+        val b = brightness.coerceIn(0, 100)
+        return scaleByBrightness(AmbientColor(rgb[0], rgb[1], rgb[2], b))
+    }
+
+    /** 颜色的饱和度（固定值：车机氛围灯是灯珠，饱和度拉满会显得脏）。 */
+    const val SATURATION = 0.85f
 
     /** 低频能量（前 [BASS_BANDS] 段的最大值）。 */
     fun bassEnergy(bands: FloatArray): Float {
@@ -135,8 +185,58 @@ object AmbientPalette {
             }
         }
         if (bestVal <= 0f) return normalizeHue(fallbackHue)
+        // 第八十五轮：**频谱分辨不了低频区时，别装作有信息**。
+        //
+        // 采集点数太少时（512 点 @ 44.1kHz ⇒ bin 间隔 86Hz），
+        // 60~149Hz 那四段会**全部落进同一个 bin** ⇒ 四段功率永远相等 ⇒
+        // 「取最响的那一段」永远取到第 0 段 ⇒ **色相恒为 0°（红）**，
+        // 低频能量也饱和 ⇒ 亮度钉死 —— 灯是红的、拉满、一动不动。
+        //
+        // 这种情况下「音高 → 色相」是**假信息**，于是改成用低频**强度**映射色相：
+        // 安静 = 深紫，响 = 橙红。宁可给一条粗但**真的**曲线，
+        // 也不要给一条卡住不动、看起来像「没声音」的假曲线。
+        if (isBassUnresolvable(bands, n)) return intensityHue(bestVal)
         return hueForBand(best, bands.size)
     }
+
+    /**
+     * 低频几段是不是**分辨不出来**（全都一样）。
+     *
+     * 判据：前 [BASS_BANDS] 段的能量**彼此相等**（差值在 [DEGENERATE_EPSILON] 内）
+     * 且**不为零**（为零是「没声音」，那种情况走别的分支）。
+     *
+     * 相等意味着这几段读的是同一批 FFT bin —— 也就是硬件分辨不了这个音区。
+     */
+    fun isBassUnresolvable(bands: FloatArray, count: Int = BASS_BANDS): Boolean {
+        val n = minOf(count, bands.size)
+        if (n <= 1) return false
+        val first = bands[0]
+        if (first <= 0f) return false
+        for (i in 1 until n) {
+            if (kotlin.math.abs(bands[i] - first) > DEGENERATE_EPSILON) return false
+        }
+        return true
+    }
+
+    /**
+     * 低频**强度** → 色相（频谱分辨不了低频区时的兜底）。
+     *
+     * 安静（0）= 深紫 260°，最响（1）= 橙红 20° —— 线性插值，
+     * 中间是蓝、青、绿 —— 跟「安静偏冷、响偏暖」的直觉一致。
+     */
+    fun intensityHue(level: Float): Float {
+        val t = level.coerceIn(0f, 1f)
+        return normalizeHue(INTENSITY_HUE_COLD - (INTENSITY_HUE_COLD - INTENSITY_HUE_WARM) * t)
+    }
+
+    /** 强度兜底的「冷端」色相（安静时）。 */
+    const val INTENSITY_HUE_COLD = 260f
+
+    /** 强度兜底的「暖端」色相（最响时）。 */
+    const val INTENSITY_HUE_WARM = 20f
+
+    /** 「两段能量相等」的判定容差。 */
+    const val DEGENERATE_EPSILON = 0.02f
 
     /** 频谱模式下的色相：按能量做圆周加权平均。 */
     fun spectrumHue(bands: FloatArray, fallbackHue: Float): Float {

@@ -419,7 +419,14 @@ object Diagnostics {
             // 「频谱有没有起来」只看状态不够，还要看我们按什么口径在算。
             sb.append("频谱口径: 分段=")
                 .append(com.cardesk.launcher.core.audio.SpectrumBands.DEFAULT_BAND_COUNT)
-                .append(" 采集点数=").append(com.cardesk.launcher.core.audio.SpectrumAnalyzer.CAPTURE_SIZE)
+                .append(" 采集点数=")
+                .append(
+                    // 报**实际**用上的点数（期望值会被设备范围夹小 / 被拒时退回兜底），
+                    // 没挂上采集器时（0）就报期望值。
+                    com.cardesk.launcher.core.audio.SpectrumAnalyzer.get().captureSize
+                        .takeIf { it > 0 }
+                        ?: com.cardesk.launcher.core.audio.SpectrumAnalyzer.CAPTURE_SIZE,
+                )
                 .append(" 轮询=").append(com.cardesk.launcher.core.audio.SpectrumCapture.POLL_INTERVAL_MS)
                 .append("ms 回落=").append(com.cardesk.launcher.core.audio.SpectrumAnalyzer.SMOOTH_DECAY)
                 .append('\n')

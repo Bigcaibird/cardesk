@@ -22,10 +22,26 @@
 ## 用法
 
 ```bash
-python3 tools/traffic_shot.py red 12                  # 红灯 + 12 秒
-python3 tools/traffic_shot.py green 8                 # 绿灯 + 8 秒
+python3 tools/traffic_shot.py red 12                  # 巡航协议（YH）：红灯 + 12 秒
+python3 tools/traffic_shot.py green 8                 # 巡航协议（YH）：绿灯 + 8 秒
 python3 tools/traffic_shot.py red 12 r80-check-red    # 自定义输出名
+
+# 官方标准协议（KEY_TYPE=60073）—— 真实车机走的就是这一套：
+#   trafficLightStatus 1 = 红灯，4 = 绿灯
+python3 tools/traffic_shot.py standard red 12 r85-traffic-standard-red
+python3 tools/traffic_shot.py standard green 8  r85-traffic-standard-green
 ```
+
+## 官方标准协议为什么单独一档
+
+真车（官方 / YH 修改版）广播的是 `AUTONAVI_STANDARD_BROADCAST_SEND` +
+`KEY_TYPE=60073`，灯态在 `trafficLightStatus` 里：**1 = 红灯，4 = 绿灯**。
+
+第八十五轮之前我们**把这个字段整个丢掉了**，只看「红灯倒计时 > 0 就判红」，
+于是绿灯被画成红灯（真车实测）。
+
+所以 `standard green` 这一档**故意同时带上一个正数的 `redLightCountDownSeconds`** ——
+复现老代码的错法，验证新代码不会被它带偏（灯态只看 `trafficLightStatus`）。
 
 ## 输出
 
@@ -48,6 +64,15 @@ DEVICE = "emulator-5554"
 
 ACTION_SEND = "AUTONAVI_STANDARD_BROADCAST_SEND"
 ACTION_CRUISE = "NAVITOOL_CRUISE_TRAFFIC_LIGHTS"
+
+# 官方标准协议：灯态在 `trafficLightStatus` 里（1 = 红灯，4 = 绿灯）。
+# 依据见 emu-verify/REPORT-r85.md 第 1 节（高德自己的红绿灯语音模块 + 语音设置项文案）。
+STANDARD_KEY_TYPE = 60073
+STANDARD_STATUS_RED = 1
+STANDARD_STATUS_GREEN = 4
+# 官方协议的 `dir`：1 左转 / 2 右转 / 4 直行（导航卡的箭头用的是我们自己的转向图标，
+# 这里给 4 = 直行，只是让帧「合法」）。
+STANDARD_DIR = 4
 
 # 灯色判定阈值（不写死品牌色，见 Skin.DANGER / Skin.OK）——
 # 「绿」用**色相**判：g 明显高于 r 和 b。
@@ -94,21 +119,38 @@ def kill_all_scripts():
     return killed
 
 
-def start_loop(status, countdown, suffix):
+def start_loop(status, countdown, suffix, protocol="cruise"):
     """后台循环发广播，返回 (pid, 远端脚本路径)。
 
     三个广播缺一不可 —— 只有红绿灯协议时导航卡不会出现，
     而红绿灯 chip 是画在**引导卡**里的。
     """
+    if protocol == "standard":
+        # 官方标准协议：灯态在 trafficLightStatus（1 红 / 4 绿）。
+        # 绿灯那一档**故意同时带一个正数的 redLightCountDownSeconds** ——
+        # 老代码只看这个字段，会把绿灯画成红灯；新代码必须不被它带偏。
+        light_status = STANDARD_STATUS_RED if status == 0 else STANDARD_STATUS_GREEN
+        red_seconds = countdown if status == 0 else countdown + 11
+        green_seconds = 0 if status == 0 else countdown
+        traffic = (
+            f"am broadcast -a {ACTION_SEND} --ei KEY_TYPE {STANDARD_KEY_TYPE} "
+            f"--ei dir {STANDARD_DIR} --ei trafficLightStatus {light_status} "
+            f"--ei redLightCountDownSeconds {red_seconds} "
+            f"--ei greenLightLastSecond {green_seconds} >/dev/null 2>&1; "
+        )
+    else:
+        traffic = (
+            f"am broadcast -a {ACTION_CRUISE} --es data "
+            f"'{{\"ts\":0,\"lights\":[{{\"direction\":2,\"status\":{status},\"countdown\":{countdown},"
+            "\"waitNum\":1,\"showType\":0}]}}' >/dev/null 2>&1; "
+        )
     script = (
         "while true; do "
         f"am broadcast -a {ACTION_SEND} --ei KEY_TYPE 10019 --ei EXTRA_STATE 8 >/dev/null 2>&1; "
         f"am broadcast -a {ACTION_SEND} --ei KEY_TYPE 10001 --ei ICON 1 --ei SEG_REMAIN_DIS 320 "
         "--es CUR_ROAD_NAME 'CURRD' --es NEXT_ROAD_NAME 'NEXTRD' "
         "--ei ROUTE_REMAIN_TIME 600 --ei ROUTE_REMAIN_DIS 3000 >/dev/null 2>&1; "
-        f"am broadcast -a {ACTION_CRUISE} --es data "
-        f"'{{\"ts\":0,\"lights\":[{{\"direction\":2,\"status\":{status},\"countdown\":{countdown},"
-        "\"waitNum\":1,\"showType\":0}]}}' >/dev/null 2>&1; "
+        f"{traffic}"
         "sleep 2; done"
     )
     local = f"/tmp/cardesk-nav-broadcast-{suffix}.sh"
@@ -191,14 +233,18 @@ def main():
     if len(sys.argv) < 2:
         print(__doc__)
         return
-    which = sys.argv[1]
-    countdown = int(sys.argv[2]) if len(sys.argv) > 2 else 12
-    tag = sys.argv[3] if len(sys.argv) > 3 else f"r80-traffic-{which}"
+    args = sys.argv[1:]
+    protocol = "cruise"
+    if args[0] in ("standard", "cruise"):
+        protocol = args.pop(0)
+    which = args[0]
+    countdown = int(args[1]) if len(args) > 1 else 12
+    tag = args[2] if len(args) > 2 else f"r85-traffic-{protocol}-{which}"
     status = 0 if which == "red" else 1
 
     os.makedirs(OUT, exist_ok=True)
     kill_all_scripts()
-    start_loop(status, countdown, "r" if status == 0 else "g")
+    start_loop(status, countdown, "r" if status == 0 else "g", protocol)
 
     full = os.path.join(OUT, f"{tag}.png")
     time.sleep(1)

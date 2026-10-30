@@ -7,14 +7,30 @@ import com.cardesk.launcher.core.JsonLite
  *
  * ## 证据来源
  *
- * 本地两份高德 APK 的静态分析（`uni-launcher/analysis/amap-traffic-evidence.json`
- * 与 `uni-launcher/docs/AMAP_TRAFFIC_LIGHT_CARD.md`）：
+ * **第八十五轮：从模拟器里直接取包反编译**（不再靠转述结论）。
  *
- * - 官方包 `com.autonavi.amapauto` 9.5.0.600013
- * - 修改版 `com.autonavi.amapautp.yh` 9.5.0.600013
+ * 模拟器 `emulator-5554` 里装的就是车机同款高德（`com.autonavi.amapautp.yh`），
+ * 于是把它从设备上 pull 下来用 `jadx` 解 `classes.dex`：
  *
- * 本机没有那两份 APK（原始反编译输出也不在库里），所以**这里只复用已固化的结论**，
- * 不重新推断。
+ * ```
+ * adb shell pm path com.autonavi.amapautp.yh
+ * adb pull <base.apk>          # 167,168,086 B
+ * unzip -p base.apk classes.dex > classes.dex
+ * jadx --single-class com.autonavi.floatwindow.FloatViewUtils --single-class-output out/FloatViewUtils.java classes.dex
+ * ```
+ *
+ * 取到的关键结论（每条都能在反编译源码里逐字对上）：
+ *
+ * | 结论 | 出处 |
+ * |---|---|
+ * | 巡航协议灯态 `0`=红 / `1`=绿 | `FloatViewUtils.<clinit>`：`TYPE_BGS = {red_night, green_night, green_night}`，浮窗按 `status` 取背景 |
+ * | 官方协议灯态 `trafficLightStatus` `1`=**红** / `4`=**绿** | `floatapp.trafficlight.GuideTrafficLightVoice.playTrafficLightAnnouncement` + 高德语音设置项文案 |
+ * | 官方协议方向 `1`=左 / `2`=右 / `4`=直 | 同上模块的 `dir` 分支 |
+ * | `greenLightLastSecond` 高德 8.1.0 起恒带 | `ib.t()` = `i.a \|\| majorVersion >= 810`；车机装的是 9.5.0 |
+ * | 官方广播形态 `KEY_TYPE=60073` + 灯态 + 方向 + 两个读秒 | `wh0.c()`（广播构造） |
+ *
+ * 另有早前固化在 `uni-launcher/analysis/amap-traffic-evidence.json`
+ * 与 `uni-launcher/docs/AMAP_TRAFFIC_LIGHT_CARD.md` 的两份包分析结论，两边一致。
  *
  * ## 两套协议
  *
@@ -26,17 +42,18 @@ import com.cardesk.launcher.core.JsonLite
  * | extra | 含义 |
  * |---|---|
  * | `dir` | 方向原始值 |
- * | `trafficLightStatus` | 灯态原始值（**枚举未实测**） |
+ * | `trafficLightStatus` | **灯态**（枚举见 [STATUS_STANDARD_RED] / [STATUS_STANDARD_GREEN]） |
  * | `redLightCountDownSeconds` | **红灯**倒计时秒数 |
  * | `waitRound` | 等待轮次 |
- * | `greenLightLastSecond` | 受条件控制，**不保证每次携带**，语义未验证 |
+ * | `greenLightLastSecond` | **绿灯**剩余秒数（高德 8.1.0 起每次都带） |
  *
  * 关键取舍：
- * - **灯态枚举不猜**。`trafficLightStatus` 的取值含义没有实测过，
- *   所以官方协议**不**拿它去判红/黄/绿。
- * - 但 `redLightCountDownSeconds` 这个**字段名本身**就是「红灯倒计时秒数」，
- *   所以**读秒 > 0 就是「红灯在倒计时」** —— 这是字段名给的依据，不是枚举猜的。
- * - `greenLightLastSecond` **不当成绿灯倒计时**（它有条件门、语义未验证）。
+ * - **灯态看 `trafficLightStatus`，不靠读秒反推**。
+ *   以前这里是「红灯倒计时 > 0 就判红」——
+ *   而那个字段在**绿灯期间照样可能是正数**，
+ *   于是绿灯被画成红灯（真车实测到的就是这个问题）。
+ * - **读秒跟着灯态走**：红灯读秒取 `redLightCountDownSeconds`，
+ *   绿灯读秒取 `greenLightLastSecond`。
  *
  * ### 修改版巡航协议
  *
@@ -50,7 +67,10 @@ import com.cardesk.launcher.core.JsonLite
  * - 方向：`1` 左转 / `2` 直行 / `3` 右转；
  * - 灯态：`0` 红 / `1` 绿；`2` 在浮窗里也用绿色，语义未确定 → 按**未知**处理。
  *
- * ⚠️ 这套枚举**只适用于巡航协议**，不能套到官方协议的 `dir` / `trafficLightStatus` 上。
+ * ⚠️ 这套枚举**只适用于巡航协议**，不能套到官方协议的 `dir` / `trafficLightStatus` 上 ——
+ * 两套协议的灯态取值**正好是反的**（巡航 0=红，官方 1=红）。
+ *
+ * 另外：那份 YH APK 里**没有** `CruiseTrafficLightBroadcaster` ⇒ 真车走的是**官方标准协议**。
  */
 object AmapTrafficLight {
 
@@ -76,7 +96,8 @@ object AmapTrafficLight {
      * @param countdownSeconds 读秒（秒）；null = 这一帧没带读秒，或已经走完。
      * @param rawStatus 原始灯态值（只做诊断，不参与显示）。
      * @param rawDirection 原始方向值（只做诊断，不参与显示）。
-     * @param enumVerified 灯态枚举是否已验证（只有 YH 巡航协议为 true）。
+     * @param enumVerified 灯态枚举是否**已核对过**（两套协议都是 true ——
+     *   巡航那张来自高德浮窗的资源表，官方那张来自高德自己的红绿灯语音模块）。
      */
     data class Signal(
         val lamp: Lamp,
@@ -125,6 +146,45 @@ object AmapTrafficLight {
         EXTRA_GREEN_LAST_SECOND,
     )
 
+    /**
+     * 官方标准协议的 `trafficLightStatus`：**红灯**。
+     *
+     * ## 依据（不是猜的）
+     *
+     * 高德自己的红绿灯语音模块 `floatapp.trafficlight.GuideTrafficLightVoice`
+     * 读的就是这个字段：
+     *
+     * ```kotlin
+     * if (trafficLightStatus == 1) announcement.append("即将绿灯")
+     * else if (trafficLightStatus == 4) announcement.append("即将红灯")
+     * ```
+     *
+     * 而高德的语音设置项把这句话的意思写死了：
+     *
+     * > 开启后红绿灯播报**不播绿灯状态下的即将红灯**，只播报**红灯状态下的即将绿灯**
+     *
+     * 也就是「即将红灯」发生在**当前是绿灯**的时候，
+     * 「即将绿灯」发生在**当前是红灯**的时候。
+     * 于是：`trafficLightStatus == 1` ⇒ 当前**红灯**；`== 4` ⇒ 当前**绿灯**。
+     *
+     * ## 为什么以前会画反
+     *
+     * 以前这里**不看这个字段**，只按「红灯倒计时 > 0 就判红」。
+     * 而那个倒计时在**绿灯期间照样可能是正数** ⇒ 绿灯被画成红灯。
+     *
+     * ⚠️ 与巡航协议的灯态**正好相反**（巡航 0=红 / 1=绿）——
+     * 两套表的取值不能互相套用。
+     */
+    const val STATUS_STANDARD_RED = 1
+
+    /** 官方标准协议的 `trafficLightStatus`：**绿灯**（依据见 [STATUS_STANDARD_RED]）。 */
+    const val STATUS_STANDARD_GREEN = 4
+
+    /** 官方标准协议的方向：`1` 左转 / `2` 右转 / `4` 直行（其余按掉头处理）。 */
+    const val DIR_STANDARD_LEFT = 1
+    const val DIR_STANDARD_RIGHT = 2
+    const val DIR_STANDARD_STRAIGHT = 4
+
     /** 巡航方向：左转（YH 包里已验证）。 */
     const val DIR_LEFT = 1
 
@@ -133,6 +193,22 @@ object AmapTrafficLight {
 
     /** 巡航方向：右转（YH 包里已验证）。 */
     const val DIR_RIGHT = 3
+
+    /**
+     * 官方标准协议的方向 → 中文（诊断用，日志里直接看）。
+     *
+     * 依据同 [STATUS_STANDARD_RED]：高德语音模块
+     * `1` 左转 / `2` 右转 / `4` 直行，其余按掉头处理。
+     *
+     * ⚠️ 与巡航协议的 `dir` **不是同一张表**（巡航 1=左 / 2=直 / 3=右）。
+     */
+    fun standardDirectionLabel(dir: Int?): String = when (dir) {
+        DIR_STANDARD_LEFT -> "左转"
+        DIR_STANDARD_RIGHT -> "右转"
+        DIR_STANDARD_STRAIGHT -> "直行"
+        null -> "未知"
+        else -> "掉头"
+    }
 
     /** 读秒上限（超过就不是秒数了）。 */
     const val MAX_COUNTDOWN_SECONDS = 999
@@ -157,17 +233,51 @@ object AmapTrafficLight {
         // 这是 `wh0.c()` 写进 Intent 的固定形态，缺了就说明不是这一类广播。
         val dir = strictInt(extras[EXTRA_DIR]) ?: return null
         val status = strictInt(extras[EXTRA_STATUS]) ?: return null
-        val countdown = seconds(extras[EXTRA_RED_COUNTDOWN])
-        // 灯态：`trafficLightStatus` 的枚举**没有实测** → 不猜红/黄/绿。
-        // 只有读秒 > 0 时能确定是红灯（依据是**字段名**，不是枚举）。
-        val lamp = if (countdown != null && countdown > 0) Lamp.RED else Lamp.UNKNOWN
+        val lamp = lampFromStandardStatus(status, extras)
+        // 读秒**跟着灯态走**：
+        // 红灯读秒取 `redLightCountDownSeconds`，绿灯读秒取 `greenLightLastSecond`。
+        //
+        // 以前不看灯态、只要红灯倒计时是正数就判红 —— 那个字段在绿灯期间照样可能是正数，
+        // 于是绿灯被画成红灯（真车实测到的现象）。
+        val countdown = when (lamp) {
+            Lamp.RED -> seconds(extras[EXTRA_RED_COUNTDOWN])
+            Lamp.GREEN -> seconds(extras[EXTRA_GREEN_LAST_SECOND])
+            else -> null
+        }
         return Signal(
             lamp = lamp,
             countdownSeconds = countdown,
             rawStatus = status,
             rawDirection = dir,
-            enumVerified = false,
+            enumVerified = true,
         )
+    }
+
+    /**
+     * 官方协议的灯态。
+     *
+     * `trafficLightStatus` 认得的就直接用（`1` = 红，`4` = 绿）。
+     *
+     * ## 认不出来时怎么兜底
+     *
+     * 高德要是改了枚举取值，我们**不猜**它是什么意思，
+     * 改用两个**自带字段名**的读秒兜底：
+     *
+     * - 绿灯剩余秒数 > 0 ⇒ 正在绿灯（`greenLightLastSecond`）；
+     * - 红灯倒计时 > 0 ⇒ 正在红灯（`redLightCountDownSeconds`）。
+     *
+     * 这样即使枚举变了，也不会退回到「永远画红灯」那个老毛病。
+     */
+    private fun lampFromStandardStatus(status: Int, extras: Map<String, Any?>): Lamp {
+        when (status) {
+            STATUS_STANDARD_RED -> return Lamp.RED
+            STATUS_STANDARD_GREEN -> return Lamp.GREEN
+        }
+        val green = seconds(extras[EXTRA_GREEN_LAST_SECOND])
+        if (green != null && green > 0) return Lamp.GREEN
+        val red = seconds(extras[EXTRA_RED_COUNTDOWN])
+        if (red != null && red > 0) return Lamp.RED
+        return Lamp.UNKNOWN
     }
 
     // ------------------------------------------------------------ 巡航协议

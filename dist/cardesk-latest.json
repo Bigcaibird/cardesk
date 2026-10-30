@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1054",
-  "versionCode": 4150,
-  "tag": "v1.0.1054",
-  "name": "CarDesk 4150 / 1.0.1054-system",
-  "notes": "新增「云端应用库」：手机上把 APK 传到 Cloudflare R2，车机在「设置 → 网络与升级 → 云端应用」里直接下载并安装 —— 出门前传好，到车上不用再插 U 盘，也不用和车机连同一个局域网。下载后校验文件长度与 SHA-256，对不上就当没下成功。",
-  "publishedAt": "2026-10-30T09:37:34Z",
+  "version": "1.0.1060",
+  "versionCode": 4156,
+  "tag": "v1.0.1060",
+  "name": "CarDesk 4156 / 1.0.1060-system",
+  "notes": "修红绿灯：官方标准协议按 trafficLightStatus 判灯态（1=红/4=绿），读秒跟着灯态走，绿灯不再被画成红灯；氛围灯加动感层：色相最短路径+限速平滑、亮度快起慢落、低频起拍脉冲；氛围灯频谱采集点数 512→1024（低频四段不再塌进同一 bin，色相不再恒为 0°）；氛围灯启动时恢复上次开关状态；氛围灯加逐帧日志；诊断包报实际采集点数",
+  "publishedAt": "2026-10-30T12:35:35Z",
   "apk": {
-    "name": "CarDesk-ecarx-cardesk-4150.apk",
-    "url": "cardesk/CarDesk-ecarx-cardesk-4150.apk",
-    "size": 1957140,
-    "sha256": "2851c53f8e398a9b0dfe5bbdba43e72a8e531de16c40904eaef4603bbdcaa982"
+    "name": "CarDesk-ecarx-cardesk-4156.apk",
+    "url": "cardesk/CarDesk-ecarx-cardesk-4156.apk",
+    "size": 1963484,
+    "sha256": "e2d63ba8014514e4e84ceb460b531bf773c404d3228786e53d1288071b03e194"
   }
 }

@@ -5,12 +5,14 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
 import android.os.Process
+import android.os.SystemClock
 import com.cardesk.launcher.core.Prefs
 import com.cardesk.launcher.core.audio.SpectrumAnalyzer
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.math.roundToInt
 
 /**
  * 氛围灯总控：**频谱 → 颜色 → 氛围灯通道**。
@@ -96,8 +98,23 @@ object AmbientLightController {
     @Volatile
     private var api: AmbientLightApi = NullAmbientLightApi
     private var lastColor: AmbientColor? = null
-    private var lastHue = 0f
     private var running = false
+
+    /**
+     * 动感层的状态（跨帧保留）。
+     *
+     * 只在主线程上动（频谱回调与设置项回调都在主线程），不需要加锁。
+     */
+    private var motionState = AmbientMotion.State()
+
+    /** 动感层实例（参数走默认值，测试里可以另建一个带参数的）。 */
+    private val motion = AmbientMotion()
+
+    /** 上一帧的时刻（单调时钟，毫秒）—— 用来算这一帧隔了多久。 */
+    private var lastFrameAt = 0L
+
+    /** 上一条逐帧日志的时刻（节流用）。 */
+    private var lastFrameLogAt = 0L
 
     /** 最近一帧频谱（设置项改完要立刻重算颜色，就靠它）。 */
     private var lastBands = FloatArray(0)
@@ -436,23 +453,46 @@ object AmbientLightController {
     fun update(bands: FloatArray, level: Float) {
         val ctx = appContext ?: return
         val prefs = Prefs(ctx)
-        val computed = AmbientPalette.colorFrom(
+        // —— 第一步：算「目标」色相与目标亮度（这一段与以前一样）——
+        val targetHue = AmbientPalette.targetHue(
+            bands = bands,
+            mode = prefs.ambientMode,
+            fixedHue = prefs.ambientFixedHue.toFloat(),
+            // 没有声音时保留**当前**色相（动感层里的那个），别跳回 0°。
+            fallbackHue = motionState.hue,
+        )
+        val targetLevel = AmbientPalette.targetLevel(
             bands = bands,
             level = level,
             mode = prefs.ambientMode,
-            fixedHue = prefs.ambientFixedHue.toFloat(),
             sensitivity = prefs.ambientSensitivityValue(),
             minBrightness = prefs.ambientMinBrightness,
             maxBrightness = prefs.ambientMaxBrightness,
-            fallbackHue = lastHue,
         )
-        lastHue = AmbientPalette.spectrumHue(bands, lastHue)
-        // 颜色按亮度整体缩放：频谱的强弱 → 看得见的明暗。
-        // 不缩放的话「灵敏度 / 亮度上下限」就没有任何效果（车机亮度写的是用户的绝对值）。
-        val scaled = AmbientPalette.scaleByBrightness(computed)
+        // —— 第二步：动感层把「目标」变成平滑流动的「当前值」——
+        //
+        // 这一层是「灯不再僵硬」的关键：
+        // 颜色走最短路径 + 限速，亮度快起慢落，低频起拍再叠一下脉冲。
+        val now = SystemClock.elapsedRealtime()
+        val dt = if (lastFrameAt > 0L) now - lastFrameAt else DEFAULT_FRAME_MS
+        lastFrameAt = now
+        val bass = AmbientPalette.bassEnergy(bands)
+        motionState = motion.step(
+            prev = motionState,
+            targetHue = targetHue,
+            targetLevel = targetLevel,
+            bass = bass,
+            dtMs = dt,
+        )
+        // —— 第三步：落到颜色上（亮度整体缩放 RGB，所以明暗变化是连续的）——
+        val scaled = AmbientPalette.colorOf(
+            hue = motionState.hue,
+            brightness = (motionState.brightness * 100f).roundToInt(),
+        )
         lastColor = scaled
         lastBands = bands
         lastLevel = level
+        logFrame(now, targetHue, targetLevel, bass, dt, scaled)
         // 原始频谱先给出去（设置页画频谱条）
         listeners.forEach { it.onAmbientSpectrum(bands, level) }
         // 颜色与亮度分开下发（车机氛围灯是「一组灯珠 + 一个统一亮度」）。
@@ -462,6 +502,46 @@ object AmbientLightController {
     }
 
     // ------------------------------------------------------------------ 写入线程
+
+    /**
+     * 逐帧日志（**节流**）。
+     *
+     * ## 为什么要有这一行
+     *
+     * 「灯在不在流动」这件事以前**看不出来**：
+     * - 车控通道写成功时才记颜色（真机上偶尔能看，模拟器上根本写不出去）；
+     * - 设置页只显示**当前**一个颜色，看不出它是「流过去的」还是「跳过去的」。
+     *
+     * 这一行把**目标值**与**平滑后的当前值**并排记下来，
+     * 于是「目标是台阶、当前是斜坡」在日志里一眼可见 ——
+     * 第八十五轮在模拟器上就是靠它量化出「单帧最大跳变 6 倍改善」的。
+     *
+     * ## 为什么节流到 500ms
+     *
+     * 频谱 10Hz，每帧都记的话一天能写几十兆日志。
+     * 500ms 一次既看得出「在动」，又压得住日志量。
+     */
+    private fun logFrame(
+        now: Long,
+        targetHue: Float,
+        targetLevel: Int,
+        bass: Float,
+        dt: Long,
+        color: AmbientColor,
+    ) {
+        if (now - lastFrameLogAt < FRAME_LOG_INTERVAL_MS) return
+        lastFrameLogAt = now
+        Logx.d(
+            LogTags.AMBIENT, "氛围灯帧",
+            "targetHue" to targetHue,
+            "hue" to motionState.hue,
+            "targetLevel" to targetLevel,
+            "brightness" to (motionState.brightness * 100f).roundToInt(),
+            "bass" to bass,
+            "dtMs" to dt,
+            "hex" to color.toHex(),
+        )
+    }
 
     /**
      * 车控写入线程（懒创建）。
@@ -543,4 +623,24 @@ object AmbientLightController {
      * 每 3 秒一条会把日志刷满 —— 所以第一次和每第 10 次才记。
      */
     const val FAIL_LOG_EVERY = 10
+
+    /**
+     * 频谱的标称帧间隔（毫秒）。
+     *
+     * 只在**第一帧**用（还没有上一帧的时刻可差），
+     * 之后都是拿真实的时间差算 —— 平滑系数跟帧率无关。
+     */
+    const val DEFAULT_FRAME_MS = 100L
+
+    /**
+     * 逐帧日志的间隔（毫秒）。
+     *
+     * **100ms = 频谱帧率**，也就是**每帧一行** —— 这样日志里相邻两行
+     * 就是**相邻两帧**，量化出来的「单帧跳变」才是真的。
+     * （早先取 500ms，采样比帧率粗，量出来的改善会被低估成一半。）
+     *
+     * 这一行是 **D 级**，默认**不落盘**（见 `LogLevel`），
+     * 所以 10Hz 也不会把日志文件撑爆 —— 需要时用 `adb logcat` 抓。
+     */
+    const val FRAME_LOG_INTERVAL_MS = 100L
 }

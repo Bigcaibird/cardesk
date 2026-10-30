@@ -92,6 +92,9 @@ class MainActivity : Activity() {
         // 系统弹窗留到用户进「氛围灯」设置页时再要 —— 那时用户正要开这个功能，
         // 弹窗最自然（见 `ui/SettingsOverlay.pageAmbient`）。
         launcher.postDelayed(recordAudioCheck, RECORD_AUDIO_CHECK_DELAY_MS)
+        // 恢复上次开着的氛围灯（排在录音权限检查之后 —— 采集要权限）。
+        launcher.removeCallbacks(ambientRestore)
+        launcher.postDelayed(ambientRestore, AMBIENT_RESTORE_DELAY_MS)
     }
 
     /**
@@ -148,6 +151,30 @@ class MainActivity : Activity() {
                 "state" to com.cardesk.launcher.core.Permissions.describeRecordAudioState(this@MainActivity),
             )
         }.onFailure { Logx.w(LogTags.AMBIENT, "录音权限检查失败", it) }
+    }
+
+    /**
+     * 恢复**上次开着的氛围灯**（第八十五轮新增）。
+     *
+     * ## 为什么要有这一步
+     *
+     * 以前 `ambient_enabled` 这个开关只写不读：
+     * 没有任何地方在进程启动时把它读回来 ⇒
+     * 用户开了氛围灯，桌面一重启（或车机重启），
+     * 设置页里的开关**还显示「开」**，但采集与写灯**根本没启动** ——
+     * 灯就是再也不亮了，而界面上看不出任何异常。
+     *
+     * ## 为什么延后一点
+     *
+     * 排在录音权限检查之后：频谱采集要 `RECORD_AUDIO`，
+     * 权限还没到位就起采集只会拿到「不可用」状态。
+     */
+    private val ambientRestore = Runnable {
+        runCatching {
+            if (!com.cardesk.launcher.core.ambient.AmbientLightController.isEnabled(applicationContext)) return@runCatching
+            Logx.i(LogTags.AMBIENT, "恢复上次开着的氛围灯")
+            com.cardesk.launcher.core.ambient.AmbientLightController.start(applicationContext)
+        }.onFailure { Logx.w(LogTags.AMBIENT, "恢复氛围灯失败", it) }
     }
 
     /** 申请定位权限（延后一点，别和桌面首帧抢）。 */
@@ -337,5 +364,13 @@ class MainActivity : Activity() {
          * 真正的系统弹窗在用户进「氛围灯」设置页时才发起。
          */
         const val RECORD_AUDIO_CHECK_DELAY_MS = 4000L
+
+        /**
+         * 延迟多久恢复上次开着的氛围灯。
+         *
+         * 要**晚于** [RECORD_AUDIO_CHECK_DELAY_MS]：
+         * 频谱采集需要 `RECORD_AUDIO`，权限还没到位就起采集只会拿到「不可用」。
+         */
+        const val AMBIENT_RESTORE_DELAY_MS = 5200L
     }
 }
