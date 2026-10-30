@@ -16,6 +16,8 @@
 #   tools/release.sh --no-test                        # 跳过单测（不推荐）
 #   tools/release.sh --package com.ecarx.qq.tool      # 换包名出包
 #   tools/release.sh --code 4200 --name 1.0.1104      # 指定版本号（不自动 +1）
+#   tools/release.sh --notes "这轮更新了什么"          # 写进 R2 更新清单的更新说明
+#   tools/release.sh --notes-file notes.md            # 更新说明从文件读（优先于 --notes）
 #
 # 环境变量（都有默认值，按仓库自带工具链走）：
 #   CARDESK_TOOLCHAIN   默认 <repo>/../toolchain
@@ -39,6 +41,8 @@ BUMP=1
 RUN_TEST=1
 FORCE_CODE=""
 FORCE_NAME=""
+NOTES=""
+NOTES_FILE=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -47,7 +51,9 @@ while [ $# -gt 0 ]; do
         --package) PACKAGE="$2"; shift ;;
         --code)    FORCE_CODE="$2"; shift ;;
         --name)    FORCE_NAME="$2"; shift ;;
-        -h|--help) sed -n '2,30p' "${BASH_SOURCE[0]}"; exit 0 ;;
+        --notes)   NOTES="$2"; shift ;;
+        --notes-file) NOTES_FILE="$2"; shift ;;
+        -h|--help) sed -n '2,34p' "${BASH_SOURCE[0]}"; exit 0 ;;
         *) echo "未知参数：$1" >&2; exit 2 ;;
     esac
     shift
@@ -140,6 +146,24 @@ SHA="$(sha256 "$OUT")"
 echo "== 产物：$OUT"
 echo "== SHA-256：$SHA"
 
+# ---------------------------------------------------------------- 4.1) R2 更新清单
+# App 的「在线更新」从 Cloudflare R2 拉这个清单（解析见 core/update/R2Release.kt）。
+# 清单里的 apk.url 是 **R2 对象 key**，和上传时用的 key 完全一致。
+MANIFEST="$DIST/cardesk-latest.json"
+if [ -n "$NOTES_FILE" ] && [ ! -f "$NOTES_FILE" ]; then
+    echo "更新说明文件不存在：$NOTES_FILE" >&2
+    exit 1
+fi
+python3 "$REPO/tools/make_manifest.py" \
+    --apk "$OUT" \
+    --version "$NAME" \
+    --code "$CODE" \
+    --tag "v$NAME" \
+    --name "CarDesk $CODE / $NAME-system" \
+    --notes "$NOTES" \
+    --notes-file "$NOTES_FILE" \
+    --out "$MANIFEST"
+
 # ---------------------------------------------------------------- 5) 重写 dist/README.md
 {
     echo "# dist/ 交付说明"
@@ -176,4 +200,6 @@ echo "包名        : $PACKAGE"
 echo "versionCode : $CODE"
 echo "versionName : $NAME-system"
 echo "SHA-256     : $SHA"
+echo "R2 清单     : $MANIFEST"
+echo "R2 对象 key : cardesk/$OUT_NAME"
 echo "===================================================="

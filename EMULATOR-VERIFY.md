@@ -231,6 +231,31 @@ adb logcat -d | grep -E "手势：单指横滑翻页|切页 "
 | H46 | 驾驶模式胶囊可点 | 点驾驶模式胶囊 | 开空调面板 | ✅ `状态栏驾驶模式胶囊点击`（**修掉既有 bug**：以前点不开，点天气反而误开） |
 | H47 | 不闪退 | 全程 | pid 不变、无 FATAL | ✅ pid 6151 → 6151 |
 
+## H6. 第八十三轮新增（在线更新源换 Cloudflare R2）
+
+被测包：`com.ecarx.cardesk`（平台签名，versionCode 4100 / 1.0.1004-system 的**临时构建**，
+把更新地址临时指向本机模拟 R2；验证完已改回 `file.chuxi.bid`）；
+设备：`emulator-5554`（AVD `cardesk-aosp`，android-10 / API 29 / 1920×1080@160dpi）。
+完整报告见 `emu-verify/REPORT-r83.md`。
+
+> **为什么用本地模拟 R2 而不是直接打真 R2**：改更新源这件事要验的是
+> 「清单解析 → 比版本 → 下载 → 校验 → 安装」这条链路本身，
+> 与清单从哪儿来无关。用本机 `http://10.0.2.2:8899/cardesk/latest.json`
+> 配一份同格式的清单，能把链路完整跑通又不依赖外网；
+> 真 R2 那次是交付前的终验。
+
+| # | 项 | 操作 | 期望 | 结果 |
+|---|---|---|---|---|
+| H48 | 更新源改了 | 设置 → 在线更新 | 显示「Cloudflare R2」而不是 GitHub | ✅ `r83-update-page-r2.png` |
+| H49 | **清单能解析** | 点「检查更新」 | 拉到清单、认出新版本 | ✅ `检查更新：有新版本 current=1.0.1004-system latest=1.0.1052` |
+| H50 | **相对 key 拼地址** | 看对话框里的下载地址 | `cardesk/x.apk` 拼成域名根 + key | ✅ `http://10.0.2.2:8899/cardesk/CarDesk-ecarx-cardesk-4148.apk` |
+| H51 | **下载 + SHA-256 校验** | 点「下载并更新」 | 下载完才报「下载完成」（校验不过就不算完成） | ✅ `更新下载完成 file=cardesk-update-1.0.1052.apk bytes=1941768 elapsedMs=49` |
+| H52 | **静默安装真的生效** | 自动 | 设备上版本号变成 4148 | ✅ `dumpsys package` → versionCode=4148 / `1.0.1052-system` |
+| H53 | 已是最新分支 | 再点一次「检查更新」 | 「已是最新版本」 | ✅ `检查更新：已是最新 current=1.0.1052-system latest=1.0.1052`（`r83-already-latest.png`） |
+| H54 | 不闪退 | 全程 | 无 FATAL | ✅ `Fatal signal` / `FATAL EXCEPTION` 计数 0 |
+
+证据：`emu-verify/r83-*.png`、`emu-verify/update-r2-log.txt`。
+
 ## I. 稳定性
 
 | # | 项 | 期望 | 结果 |

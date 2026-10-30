@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "version": "1.0.1053",
+  "versionCode": 4149,
+  "tag": "v1.0.1053",
+  "name": "CarDesk 4149 / 1.0.1053-system",
+  "notes": "在线更新源从 GitHub Release 换成 Cloudflare R2（file.chuxi.bid）：车机侧访问更快更稳；下载后新增文件长度与 SHA-256 校验，对不上就当没下成功。",
+  "publishedAt": "2026-10-30T08:22:57Z",
+  "apk": {
+    "name": "CarDesk-ecarx-cardesk-4149.apk",
+    "url": "cardesk/CarDesk-ecarx-cardesk-4149.apk",
+    "size": 1941656,
+    "sha256": "a09894ad776c37604a5188edfe3242df016f8b009d4a8c447380126d32c7423a"
+  }
+}

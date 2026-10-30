@@ -20,7 +20,7 @@ import com.cardesk.launcher.core.Skin
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.core.update.AppUpdate
-import com.cardesk.launcher.core.update.GitHubRelease
+import com.cardesk.launcher.core.update.R2Release
 import com.cardesk.launcher.ui.Ui
 import com.cardesk.launcher.ui.pressFeedback
 
@@ -225,23 +225,28 @@ private fun hsvOf(color: Int): FloatArray {
 }
 
 /**
- * 在线更新：检查 GitHub Release → 有新版本就下载并安装（第六十九轮重写）。
+ * 在线更新：拉 R2 上的更新清单 → 有新版本就下载并安装（第六十九轮重写，第八十三轮换源）。
  *
  * ## 更新源
  *
  * 原来是让用户手填一个 APK 地址（`prefs.updateUrl`）—— 填错就更新不了。
- * 现在固定检测**本项目自己的 GitHub Release**（`Bigcaibird/cardesk`）：
- * 拉 release 列表 → 按版本号挑最新的那个 → 和车机上装着的版本比。
+ * 接着固定检测**本项目自己的 GitHub Release**；
+ * 第八十三轮改成 **Cloudflare R2 自定义域**（`file.chuxi.bid`）：
+ * 拉 `cardesk/latest.json` → 读出版本和安装包地址 → 和车机上装着的版本比。
+ *
+ * 车机在国内访问 `api.github.com` 又慢又不稳，R2 走 Cloudflare 自己的 CDN。
+ * 清单格式见 `core/update/R2Release.kt`。
  *
  * ## 检测时机：**手动触发**
  *
  * 对话框打开后**不**自己发请求；只有用户点了「检查更新」才联网查一次。
  * 车机常年挂在后台，自动检查既费流量又会在用户没想更新的时候弹窗。
  *
- * ## 安装
+ * ## 下载与安装
  *
- * 下载 → 优先**静默安装**（system 变体有 `INSTALL_PACKAGES`）；
- * 静默不行就退到系统安装器（普通安装包唯一能走的路）。
+ * 下载 → 校验长度和 SHA-256（清单给了才校验）→ 优先**静默安装**
+ * （system 变体有 `INSTALL_PACKAGES`）；静默不行就退到系统安装器
+ * （普通安装包唯一能走的路）。
  */
 class UpdateDialog(context: Context, pal: Palette) :
     DialogSheet(context, pal, 860, 720, "在线更新") {
@@ -268,7 +273,7 @@ class UpdateDialog(context: Context, pal: Palette) :
         content.addView(section("更新详情"))
         // 这几行都用可换行高度 —— `note()` 是给单行标签用的，长了会被裁掉
         content.addView(line("当前版本：${AppUpdate.versionLabel(context)}"), Ui.linear(-1, -2))
-        content.addView(line("更新源：GitHub Releases · Bigcaibird/cardesk"), Ui.linear(-1, -2))
+        content.addView(line("更新源：Cloudflare R2 · ${AppUpdate.R2_HOST}"), Ui.linear(-1, -2))
         content.addView(line("检测需手动触发：不查后台、也不会自动下载。"), Ui.linear(-1, -2))
         content.addView(status, Ui.linear(-1, 36))
         // 详情放滚动区里 —— release 说明可能很长，不能把按钮顶出面板
@@ -293,7 +298,7 @@ class UpdateDialog(context: Context, pal: Palette) :
         downloadBtn?.let { footer.removeView(it) }
         downloadBtn = null
         // 排障场景：用户点了检查更新 —— 记下这次是**手动**触发
-        Logx.event(LogTags.SETTING, "检查更新（手动触发）", "api" to AppUpdate.RELEASES_API)
+        Logx.event(LogTags.SETTING, "检查更新（手动触发）", "url" to AppUpdate.MANIFEST_URL)
         Thread {
             val result = AppUpdate.check(context)
             handler.post { onChecked(result) }
@@ -304,7 +309,7 @@ class UpdateDialog(context: Context, pal: Palette) :
         when (result) {
             is AppUpdate.CheckResult.UpToDate -> {
                 status.text = "状态：已是最新版本（${result.current}）"
-                detail.text = "仓库最新：${result.latestVersion}\n${AppUpdate.REPO_URL}"
+                detail.text = "线上最新：${result.latestVersion}\n${AppUpdate.MANIFEST_URL}"
             }
             is AppUpdate.CheckResult.Available -> {
                 val r = result.release
@@ -312,13 +317,13 @@ class UpdateDialog(context: Context, pal: Palette) :
                 status.text = "状态：发现新版本 ${r.version}"
                 val notes = r.notes.trim().take(600)
                 detail.text = buildString {
-                    append(r.name.ifBlank { r.tag })
+                    append(r.name.ifBlank { r.tag.ifBlank { r.version } })
                     if (asset != null) {
                         append("\n安装包：${asset.name}")
                         if (asset.size > 0) append("（${asset.size / 1024 / 1024.0f} MB）")
                     }
                     if (notes.isNotEmpty()) append("\n\n$notes")
-                    append("\n\n${r.htmlUrl}")
+                    if (asset != null) append("\n\n下载地址：${asset.url}")
                 }
                 val btn = primaryButton("下载并更新") { download(r) }
                 downloadBtn = btn
@@ -326,12 +331,12 @@ class UpdateDialog(context: Context, pal: Palette) :
             }
             is AppUpdate.CheckResult.Failed -> {
                 status.text = "状态：检查失败"
-                detail.text = "${result.reason}\n\n检查更新需要车机能访问 api.github.com。"
+                detail.text = "${result.reason}\n\n检查更新需要车机能访问 ${AppUpdate.R2_HOST}。"
             }
         }
     }
 
-    private fun download(release: GitHubRelease) {
+    private fun download(release: R2Release) {
         status.text = "状态：下载中…"
         bar.visibility = View.VISIBLE
         bar.progress = 0

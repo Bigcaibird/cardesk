@@ -47,7 +47,7 @@ base64 → `krc1` 头 → 16 字节循环异或 → zlib 解压），
 | 目标平台 | Android 11+（API 30+） |
 | 包名 | `com.ecarx.cardesk` |
 | 构建变体 | `system`（平台签名 + `sharedUserId=android.uid.system`）/ `debug`（普通安装） |
-| 在线更新 | App 内「设置 → 在线更新」**手动**检测本仓库的 GitHub Release，有新版可一键下载并安装 |
+| 在线更新 | App 内「设置 → 在线更新」**手动**检测 **Cloudflare R2** 上的更新清单（`file.chuxi.bid`），有新版可一键下载并安装 |
 
 ## 已知限制
 
@@ -143,6 +143,61 @@ dcy11 是左舵车 → 只有主驾座能读能写，副驾通风**读回来恒 
 - 读秒按**本机单调时钟**往下减，减到 0 之后只抹掉数字、**不自动切换灯态**
   （「红灯读秒走完」不等于「变绿灯」，那是猜）。
 
+## 在线更新（Cloudflare R2）
+
+App 内「设置 → 在线更新」**手动**检查一次，源是本项目自己的 **Cloudflare R2 自定义域**：
+
+```
+GET https://file.chuxi.bid/cardesk/latest.json
+```
+
+**为什么从 GitHub Release 换到 R2**：车机在国内访问 `api.github.com` 又慢又不稳，
+R2 走 Cloudflare 自己的 CDN，实测可达性更好。GitHub Release 继续作为源码与 tag 的
+分发渠道，只是不再承担 App 的更新检查。
+
+R2 只是对象存储、没有「release」这种东西，所以清单格式是本项目自己定的
+（App 侧解析见 `app/src/main/java/com/cardesk/launcher/core/update/R2Release.kt`）：
+
+```json
+{
+  "schema": 1,
+  "version": "1.0.1053",
+  "versionCode": 4149,
+  "tag": "v1.0.1053",
+  "name": "CarDesk 4149 / 1.0.1053-system",
+  "notes": "……",
+  "publishedAt": "2026-10-30T08:22:57Z",
+  "apk": {
+    "name": "CarDesk-ecarx-cardesk-4149.apk",
+    "url": "cardesk/CarDesk-ecarx-cardesk-4149.apk",
+    "size": 1941656,
+    "sha256": "a09894ad776c37604a5188edfe3242df016f8b009d4a8c447380126d32c7423a"
+  }
+}
+```
+
+- `apk.url` 写的是 **R2 对象 key**（相对域名根），也就是上传时用的那个 key —— 填什么就传什么；
+- 下载完会校验**文件长度**和 **SHA-256**，对不上就当这次更新失败，不装残包；
+- App 端**不存任何密钥**：走自定义域匿名下载，凭据只在上传端用。
+
+发布一个新版本的流程：
+
+```bash
+bash tools/release.sh --notes "这轮更新了什么"
+#   → dist/CarDesk-ecarx-cardesk-<code>.apk
+#   → dist/cardesk-latest.json（就是上面那份清单）
+
+export R2_AK=<Access Key ID>
+export R2_SK=<Secret Access Key>
+python3 tools/publish_r2.py --bucket file \
+    --apk dist/CarDesk-ecarx-cardesk-<code>.apk \
+    --manifest dist/cardesk-latest.json
+#   → 上传后自动回读校验（长度 + SHA-256）
+```
+
+> **密钥不入库**：R2 的 S3 密钥只在环境变量里用，仓库是公开的，
+> 密钥一旦进代码或文档等于公开。创建密钥时只勾「指定 bucket + Object Read & Write」。
+
 ## 目录结构
 
 ```
@@ -163,6 +218,10 @@ cardesk/
 │       │   │   │   ├── KugouKrc.kt          酷狗 KRC 逐字歌词解密 + 解析
 │       │   │   │   ├── LyricWordTiming.kt   逐字时间语义自校准 + 贴词
 │       │   │   │   └── OnlineLyricCatalog.kt 在线歌词竞速（QQ / 网易 / 酷狗）
+│       │   │   ├── update/                 在线更新
+│       │   │   │   ├── AppUpdate.kt         检查 / 下载 / 安装
+│       │   │   │   ├── R2Release.kt         R2 更新清单格式与解析
+│       │   │   │   └── Digest.kt            SHA-256 完整性校验
 │       │   │   ├── nav/                    导航页逻辑
 │       │   │   └── log/                    日志
 │       │   ├── vehicle/                    车控层
@@ -191,6 +250,7 @@ cardesk/
 ├── emu-verify/                             模拟器验证记录与截图
 ├── system-patch/                           system 变体所需补丁（hiddenapi 白名单等）
 ├── tools/                                  构建、比对、发布、日志采集脚本
+│                                          （含 make_manifest.py / publish_r2.py）
 ├── gradle/                                 Gradle wrapper
 ├── build.gradle.kts                        全局构建脚本
 ├── settings.gradle.kts                     模块与仓库声明

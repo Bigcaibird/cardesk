@@ -14,18 +14,23 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * 「检测开源仓库 Release → 有新版就下载并安装」（第六十九轮）。
+ * 「检测 R2 上的最新版本清单 → 有新版就下载并安装」（第六十九轮起，第八十三轮换源）。
  *
- * ## 更新源
+ * ## 更新源：Cloudflare R2
  *
  * 原来是让用户手填一个 APK 地址（`prefs.updateUrl`）—— 填错就更新不了，
- * 而且地址一变就得重填。现在固定检测**本项目自己的 GitHub Release**：
+ * 而且地址一变就得重填；接着改成检测**本项目自己的 GitHub Release**。
+ *
+ * 第八十三轮改成 **Cloudflare R2 自定义域**：车机在国内访问 `api.github.com`
+ * 又慢又不稳，而 R2 自定义域走的是 Cloudflare 自己的 CDN，稳得多。
  *
  * ```
- * GET https://api.github.com/repos/Bigcaibird/cardesk/releases
+ * GET https://file.chuxi.bid/cardesk/latest.json
  * ```
  *
- * Release 的 tag 形如 `v1.0.1035`，附件是 `CarDesk-ecarx-cardesk-4131.apk`。
+ * R2 只是对象存储、没有「release」这种东西，所以清单格式是我们自己定的
+ * （见 [R2Release]）。**下载走同一个域名的匿名访问**——
+ * App 里不存任何密钥（仓库是公开的，密钥一旦进包就等于公开）。
  *
  * ## 检测时机：**手动触发**
  *
@@ -39,11 +44,17 @@ import java.net.URL
  */
 object AppUpdate {
 
-    /** 仓库地址（页面与日志里都用它）。 */
-    const val REPO_URL = "https://github.com/Bigcaibird/cardesk"
+    /** 更新源的域名（自定义域，走 Cloudflare CDN）。 */
+    const val R2_HOST = "file.chuxi.bid"
 
-    /** Release 列表接口（公开仓库，不需要 token）。 */
-    const val RELEASES_API = "https://api.github.com/repos/Bigcaibird/cardesk/releases"
+    /** 更新清单的路径（R2 对象 key）。 */
+    const val MANIFEST_PATH = "cardesk/latest.json"
+
+    /** 更新清单的完整地址（App 每次「检查更新」就拉这一个文件）。 */
+    const val MANIFEST_URL = "https://$R2_HOST/$MANIFEST_PATH"
+
+    /** 域名根（清单里写相对地址时按它拼开）。 */
+    const val R2_ROOT_URL = "https://$R2_HOST/"
 
     /** 公共目录下的子目录名（诊断包、下载的更新包都放这儿）。 */
     const val PUBLIC_DIR_NAME = "CarDesk"
@@ -56,9 +67,9 @@ object AppUpdate {
         data class UpToDate(val current: String, val latestVersion: String) : CheckResult
 
         /** 有新版本。 */
-        data class Available(val release: GitHubRelease, val current: String) : CheckResult
+        data class Available(val release: R2Release, val current: String) : CheckResult
 
-        /** 没查到（网络不通 / 仓库没有 release / 返回体看不懂）。 */
+        /** 没查到（网络不通 / 清单取不到 / 返回体看不懂）。 */
         data class Failed(val reason: String) : CheckResult
     }
 
@@ -101,18 +112,17 @@ object AppUpdate {
     // ------------------------------------------------------------------ 查询
 
     /**
-     * 拉 Release 列表（阻塞）。
+     * 拉 R2 上的最新版本清单（阻塞）。
      *
-     * @throws IOException 网络失败或 HTTP 非 200。
+     * @return 解析好的清单；**网络失败抛 IOException**，清单结构不对返回 null。
      */
-    fun fetchReleases(context: Context, timeoutMs: Int = 10_000): List<GitHubRelease> {
-        val conn = URL(RELEASES_API).openConnection() as HttpURLConnection
+    fun fetchRelease(context: Context, timeoutMs: Int = 10_000): R2Release? {
+        val conn = URL(MANIFEST_URL).openConnection() as HttpURLConnection
         conn.connectTimeout = timeoutMs
         conn.readTimeout = timeoutMs
         conn.instanceFollowRedirects = true
-        // GitHub API 没有 User-Agent 会直接 403
         conn.setRequestProperty("User-Agent", "CarDesk/${currentVersionName(context)}")
-        conn.setRequestProperty("Accept", "application/vnd.github+json")
+        conn.setRequestProperty("Accept", "application/json")
         val code = conn.responseCode
         if (code != HttpURLConnection.HTTP_OK) {
             conn.disconnect()
@@ -120,39 +130,51 @@ object AppUpdate {
         }
         val text = conn.inputStream.bufferedReader().use { it.readText() }
         conn.disconnect()
-        return GitHubRelease.parse(text)
+        return R2Release.parse(text, R2_ROOT_URL)
     }
 
     /**
      * 检查有没有新版本（阻塞）。
      *
-     * 拿「版本号最大」的那个 release（不是按发布时间，见 [GitHubRelease.pickLatest]），
-     * 再和本地版本比。
+     * 清单里只放**一个**最新版本，所以这里不需要「挑最新」那一步；
+     * 跟本地比的时候优先比 `versionCode`，清单没给才退回比版本号字符串。
      */
     fun check(context: Context): CheckResult {
         val current = currentVersionName(context)
+        val currentCode = currentVersionCode(context)
         return try {
-            val releases = fetchReleases(context)
-            val latest = GitHubRelease.pickLatest(releases)
-            if (latest == null) {
-                Logx.w(LogTags.SETTING, "检查更新：仓库里没有可用的 Release", "count" to releases.size)
-                return CheckResult.Failed("仓库里还没有发布 Release")
+            val release = fetchRelease(context)
+            if (release == null) {
+                Logx.w(LogTags.SETTING, "检查更新：清单读不懂", "url" to MANIFEST_URL)
+                return CheckResult.Failed("更新清单读不懂（格式不对）")
             }
-            if (ReleaseVersion.isNewer(latest.tag, current)) {
+            if (isNewer(release, current, currentCode)) {
                 Logx.i(
                     LogTags.SETTING, "检查更新：有新版本",
-                    "current" to current, "latest" to latest.tag,
-                    "asset" to (latest.apk?.name ?: ""),
+                    "current" to current, "latest" to release.version,
+                    "apk" to (release.apk?.name ?: ""),
                 )
-                CheckResult.Available(latest, current)
+                CheckResult.Available(release, current)
             } else {
-                Logx.i(LogTags.SETTING, "检查更新：已是最新", "current" to current, "latest" to latest.tag)
-                CheckResult.UpToDate(current, latest.version)
+                Logx.i(LogTags.SETTING, "检查更新：已是最新", "current" to current, "latest" to release.version)
+                CheckResult.UpToDate(current, release.version)
             }
         } catch (t: Throwable) {
-            Logx.w(LogTags.SETTING, "检查更新失败", t, "api" to RELEASES_API)
+            Logx.w(LogTags.SETTING, "检查更新失败", t, "url" to MANIFEST_URL)
             CheckResult.Failed(t.message ?: "网络异常")
         }
+    }
+
+    /**
+     * 远端是否比本地新。
+     *
+     * 优先比 `versionCode`：它是单调递增的整数，不会踩「1.0.9 比 1.0.10 新」
+     * 这种字符串比较的坑。清单里没给 `versionCode`（或本地读不到）时，
+     * 退回比版本号字符串，兼容手写的旧清单。
+     */
+    private fun isNewer(remote: R2Release, localName: String, localCode: Long): Boolean {
+        if (remote.versionCode > 0 && localCode > 0) return remote.versionCode > localCode
+        return ReleaseVersion.isNewer(remote.version, localName)
     }
 
     // ------------------------------------------------------------------ 下载
@@ -160,19 +182,22 @@ object AppUpdate {
     /**
      * 下载 APK（阻塞）。
      *
+     * 下载完做两道校验：长度（清单给了大小才查）和 SHA-256（清单给了摘要才查）。
+     * 任一对不上就删掉半成品、当作下载失败 —— 车机装一个残缺的 APK 比不更新更糟。
+     *
      * @param onProgress 0..100 的进度（主线程回调）。
      * @return 下载好的文件；失败返回 null。
      */
-    fun download(context: Context, release: GitHubRelease, onProgress: (Int) -> Unit): File? {
-        val asset = release.apk
-        if (asset == null || asset.downloadUrl.isBlank()) {
-            Logx.w(LogTags.SETTING, "更新下载失败：Release 没挂 APK", "tag" to release.tag)
+    fun download(context: Context, release: R2Release, onProgress: (Int) -> Unit): File? {
+        val apk = release.apk
+        if (apk == null || apk.url.isBlank()) {
+            Logx.w(LogTags.SETTING, "更新下载失败：清单里没有安装包", "version" to release.version)
             return null
         }
         val file = File(context.cacheDir, "cardesk-update-${release.version}.apk")
         val started = System.currentTimeMillis()
         val ok = try {
-            val conn = URL(asset.downloadUrl).openConnection() as HttpURLConnection
+            val conn = URL(apk.url).openConnection() as HttpURLConnection
             conn.connectTimeout = 10_000
             conn.readTimeout = 30_000
             conn.instanceFollowRedirects = true
@@ -199,13 +224,31 @@ object AppUpdate {
             conn.disconnect()
             file.length() > 1024
         } catch (t: Throwable) {
-            Logx.w(LogTags.SETTING, "更新下载失败", t, "url" to asset.downloadUrl)
+            Logx.w(LogTags.SETTING, "更新下载失败", t, "url" to apk.url)
             file.delete()
             return null
         }
         if (!ok) {
             file.delete()
             return null
+        }
+        // —— 长度校验：清单给了大小就必须对上 ——
+        if (apk.size > 0 && file.length() != apk.size) {
+            Logx.w(
+                LogTags.SETTING, "更新下载失败：长度对不上",
+                "expect" to apk.size, "actual" to file.length(), "url" to apk.url,
+            )
+            file.delete()
+            return null
+        }
+        // —— 摘要校验：清单给了摘要就必须对上 ——
+        if (apk.sha256.isNotEmpty()) {
+            val actual = Digest.sha256Hex(file)
+            if (actual == null || !actual.equals(apk.sha256, ignoreCase = true)) {
+                Logx.w(LogTags.SETTING, "更新下载失败：SHA-256 对不上", "url" to apk.url)
+                file.delete()
+                return null
+            }
         }
         Logx.i(
             LogTags.SETTING, "更新下载完成",

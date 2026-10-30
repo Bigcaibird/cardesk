@@ -3,7 +3,7 @@ package com.cardesk.launcher.core.update
 /**
  * 版本号比较（纯函数，第六十九轮）。
  *
- * 更新源是 GitHub Releases，tag 形如 `v1.0.1035`；
+ * 更新源换成 R2 之后（第八十三轮），远端版本号来自更新清单里的 `version` 字段，
  * 而车机上装着的版本号（`versionName`）是 `1.0.1038-system`
  * （system 变体在版本号后面加了 flavor 后缀）。
  *
@@ -12,9 +12,9 @@ package com.cardesk.launcher.core.update
  * - 去 `-system` 这类后缀；
  * - 再按 `.` 分段，逐段比数字。
  *
- * 为什么不比 `versionCode`：Release 的 tag 里只有 `versionName`，
- * `versionCode` 只出现在 release 的**标题**（`CarDesk 4131 / 1.0.1035-system`）里 ——
- * 那是个自由文本字段，拿它当版本依据太脆。
+ * 为什么不只比 `versionCode`：清单里两个都有，`versionCode` 是单调递增的整数、
+ * 更可靠（见 `AppUpdate.isNewer`）；但清单是可能被人手改的外部数据，
+ * 只给了版本号时还得靠这套字符串比较兜底，所以它得留着。
  */
 object ReleaseVersion {
 

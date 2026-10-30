@@ -2296,23 +2296,26 @@ class SettingsOverlay(
     }
 
     /**
- * 在线更新（第六十九轮重写）。
+ * 在线更新（第六十九轮重写，第八十三轮换源）。
  *
  * 原来这一页让用户手填一个 APK 地址（`prefs.updateUrl`）—— 填错就更新不了，
- * 地址变了还得重填。现在更新源固定为**本项目自己的 GitHub Release**：
- * `github.com/Bigcaibird/cardesk` 的 releases。
+ * 地址变了还得重填；接着改成读 GitHub Release；
+ * 第八十三轮改成读 **Cloudflare R2 自定义域**上的更新清单
+ * （`file.chuxi.bid/cardesk/latest.json`，格式见 `core/update/R2Release.kt`）——
+ * 车机在国内访问 `api.github.com` 又慢又不稳，R2 走 Cloudflare 自己的 CDN。
  *
  * **检测手动触发**：只有点「检查更新」才会联网查一次，
  * 桌面不在后台自动检测、也不会自动下载。
  */
     private fun pageUpdate() {
         section("更新通道")
-        kvRow("更新源", "GitHub Releases · Bigcaibird/cardesk", true)
+        kvRow("更新源", "Cloudflare R2 · file.chuxi.bid", true)
         kvRow("当前版本", com.cardesk.launcher.core.update.AppUpdate.versionLabel(context), true)
         note(
-            "检测手动触发：只有点下面的「检查更新」才会联网查询 Release；" +
+            "检测手动触发：只有点下面的「检查更新」才会联网拉一次更新清单；" +
                 "桌面不会在后台自动检查，也不会自动下载。\n\n" +
-                "查到新版本后可以一键下载并安装（system 版静默安装，普通安装包转系统安装器）。",
+                "查到新版本后可以一键下载并安装（system 版静默安装，普通安装包转系统安装器）。" +
+                "下载完会校验文件长度和 SHA-256，对不上就当没下成功。",
         )
         actionButton("检查更新", primary = true) {
             // 排障场景：点了检查更新没反应 —— 记下打开更新对话框
