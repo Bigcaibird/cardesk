@@ -515,5 +515,100 @@ Release 正文只写改动点，不写实现细节（与用户要求一致）：
 - **Worker 仍未部署**（上一轮遗留）：`cd worker && npx wrangler login &&
   npx wrangler secret put UPLOAD_TOKEN && npx wrangler deploy`。车机侧不依赖它。
 - **酷狗 KRC 在车机网络下的可达性**（更早遗留）：仍待真机验证。
-- **R2 Access Key ID 曾在 r83 报告里公开过**（Secret 从未入库，已遮盖），
-  建议在 Cloudflare 控制台轮换该对密钥。
+- **R2 密钥暴露已核查并立项处置**：Access Key ID 的完整明文在 r83 报告的
+  3 个提交里公开过（仓库是 Public，现在仍能匿名下载），Secret 从未外泄。
+  处置方式已定 = **在 Cloudflare 控制台轮换整对 AK/SK**；
+  核查范围、证据与处置步骤见 **§10**。
+
+---
+
+## 10. R2 密钥暴露核查与处置
+
+用户问起「Access Key ID 与 Secret 发布到过外部吗」，本轮做了一次**实测核查**
+（不靠记忆）：扫了当前工作树、全部历史提交、全部 git blob、14 个 Release 正文、
+所有提交信息、远端分支/tag，以及仓库外的 `docs/` `analysis/` `media-probe/`。
+
+### 10.1 结论速览
+
+| 凭据 | 是否外泄 | 范围 |
+|---|---|---|
+| **Access Key ID（32 位）** | **是 —— 现在仍可匿名公开取到** | `emu-verify/REPORT-r83.md` 的 3 个提交（`12432f3`、`5b3b2cb`、`ff4ccf5`），完整明文各 2 行 |
+| **Secret Access Key（64 位）** | **否 —— 从未进过任何公开渠道** | 仓库 / 全部历史 / 全部 blob / Release 正文 / 提交信息 / 仓库外目录，均无 |
+
+### 10.2 暴露面（实测证据）
+
+仓库可见性：`GET /repos/Bigcaibird/cardesk` → `private: false` / `visibility: public`。
+
+匿名直取历史版本（无需登录、无需 token）：
+
+```
+https://raw.githubusercontent.com/Bigcaibird/cardesk/12432f3/emu-verify/REPORT-r83.md  → 含完整 AK 的行数：2
+https://raw.githubusercontent.com/Bigcaibird/cardesk/5b3b2cb/emu-verify/REPORT-r83.md  → 含完整 AK 的行数：2
+https://raw.githubusercontent.com/Bigcaibird/cardesk/ff4ccf5/emu-verify/REPORT-r83.md  → 含完整 AK 的行数：2
+https://raw.githubusercontent.com/Bigcaibird/cardesk/main/emu-verify/REPORT-r83.md      → 含完整 AK 的行数：0（已遮盖）
+```
+
+- 当前 `main` 里的 `REPORT-r83.md` 已遮盖成 `0b6ea892…d628f2`（头 8 + 尾 6），
+  遮盖动作发生在 `b628640`（第八十四轮）。
+- 但**历史不会消失**：`git show 12432f3:emu-verify/REPORT-r83.md` 同样取得到完整明文。
+- 干净的地方（也都实测过）：14 个 Release 的正文（连 AK 的 8 位片段都没有）、
+  所有提交信息、其它分支与 tag、仓库外的 `docs/` `analysis/` `media-probe/`。
+- 仓库里**没有** `.env` / `.dev.vars` / pem / key 之类会夹带密钥的文件。
+
+### 10.3 Secret 为什么判定「未外泄」
+
+- 不在仓库任何文件、**任何历史提交、任何 git blob**
+  （逐提交 `git grep` + 全部对象 `cat-file` 扫描，均无命中）
+- 不在任何 Release 正文（14 个全查）、不在任何提交信息
+- 不在仓库外的 `docs/`、`analysis/`、`media-probe/`
+- 代码侧的凭据来源本身是干净的：
+  - `worker/src/index.js` 只读 `env.UPLOAD_TOKEN`，没配就 fail closed
+  - `tools/publish_apks.py` 只读 `os.environ["R2_AK"] / ["R2_SK"]`，缺了就退出
+- 它只出现在**本机会话日志**里 —— 来自用户当初粘贴的那条消息。
+  说清楚：把密钥发进对话的那一刻，它必然随对话内容经过模型服务，
+  这是「交给助手」的固有路径；但它没进代码库、没进 Release、没进任何公开渠道。
+
+### 10.4 风险评估
+
+- **AK 单独拿到签不了名** —— S3 签名要 AK + SK 配对，缺一把就签不出来，
+  所以这把 AK 不能直接用来读写 bucket。
+- 真实风险是两条：① **SK 一旦泄露，AK 立刻变成可用凭据**；
+  ② AK 作为公开标识，可被用于定向攻击或钓鱼。
+- 结论：**按已泄露处理**。仓库是 Public，历史里躺着一个完整的长期凭据 ID，
+  第三方爬虫随时可能抓走快照。
+
+### 10.5 处置（已与用户确认）
+
+**唯一的有效处置是轮换整对密钥**（在 Cloudflare 控制台执行，需要用户自己的账号）：
+
+1. Cloudflare 控制台 → R2 → API Tokens → 轮换 / 新建一对 AK/SK
+2. 本机更新环境变量：`R2_AK` / `R2_SK`（`tools/publish_apks.py` 只认这两个）
+3. 旧 AK 作废；Worker 侧若存过，也一并更新
+4. 以后任何文档、报告、提交里都不再出现完整 AK/SK
+
+**为什么不做「洗 git 历史」**：`git filter-repo` 能重写所有 commit SHA 和 14 个 tag，
+但改不掉「已经公开过」这个事实 —— 爬虫快照、已克隆的副本都收不回来，
+代价（所有人克隆失配、tag 全变）远大于收益。**轮换才是把风险真正关掉的动作。**
+
+### 10.6 下次自查（命令留在报告里，随时可复跑）
+
+```bash
+cd /Users/roy/Documents/desktopapp/cardesk
+# 1) 当前工作树 + 全部历史提交
+#    注意：用「前缀 + 长度通配」的形状匹配，别把真串写进命令行（命令行会进日志）
+git grep -nE '0b6ea892[0-9a-f]{24}|a90b[0-9a-f]{60}' -- .
+for c in $(git rev-list --all); do git grep -lE '0b6ea892[0-9a-f]{24}' "$c" -- .; done
+# 2) 公开面：Release 正文
+curl -s "https://api.github.com/repos/Bigcaibird/cardesk/releases?per_page=100" \
+  | grep -oE '0b6ea892[0-9a-f]{24}|a90b[0-9a-f]{60}' | sort -u
+# 3) 匿名直取历史版本（最直接的暴露面）
+for c in $(git rev-list --all); do
+  echo -n "$c "
+  curl -s "https://raw.githubusercontent.com/Bigcaibird/cardesk/$c/emu-verify/REPORT-r83.md" \
+    | grep -c '0b6ea892[0-9a-f]{24}'
+done
+```
+
+> **坑（这轮踩到的）**：`git log --all -S'0b6ea892'` 会报出一条**假阳性**
+> （本轮是 `587db2f`，其父提交与它自己的树里都查不到这串，diff 里也没有），
+> 所以**别拿 `-S` 当判据**，以逐提交 `git grep` 扫描为准。
