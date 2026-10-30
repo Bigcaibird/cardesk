@@ -244,9 +244,81 @@ GET https://file.chuxi.bid/cardesk/CarDesk-ecarx-cardesk-4149.apk
 GitHub Release 继续发，但**不再承担 App 的更新检查** ——
 App 从这一版起只读 R2。
 
+| 项 | 值 |
+|---|---|
+| 仓库 | `Bigcaibird/cardesk`（Public） |
+| Tag | `v1.0.1053`（= `versionCode 4149 - 3096`，沿用已推送的 Existing tag） |
+| Release 名称 | `CarDesk 4149 / 1.0.1053-system` |
+| 资产 | `CarDesk-ecarx-cardesk-4149.apk`（1,941,656 字节） |
+| SHA-256 | `a09894ad776c37604a5188edfe3242df016f8b009d4a8c447380126d32c7423a` |
+| Release 标签 | `Latest` |
+| 发布提交 | `5b3b2cb` |
+| 发布时间 | `2026-10-30T08:58:39Z` |
+
+**API 回读核验**（`releases/tags/v1.0.1053` → 200）：
+
+```
+tag_name     : v1.0.1053
+name         : CarDesk 4149 / 1.0.1053-system
+draft        : False
+prerelease   : False
+published_at : 2026-10-30T08:58:39Z
+html_url     : https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1053
+assets_count : 1
+  asset      : CarDesk-ecarx-cardesk-4149.apk 1941656 bytes
+releases/latest = v1.0.1053
+```
+
+**GitHub 自己算出来的附件摘要与本地包一致** —— 发布页 Assets 区直接显示
+`sha256:a09894ad776c37604a5188edfe3242df016f8b009d4a8c447380126d32c7423a`，
+和 `dist/CarDesk-ecarx-cardesk-4149.apk` 本地算的、以及 R2 上那个包**三处完全相同**
+（同一个包，三处一致）。
+
+Release 正文只写改动点，不写实现细节：
+
+```
+**改动点**
+
+- 在线更新源：GitHub Releases → Cloudflare R2
+- 下载后新增文件长度与 SHA-256 校验，对不上即判更新失败
+- 更新清单格式改为本项目自定（`apk.url` 写 R2 对象 key）
+```
+
 ---
 
-## 8. 未能覆盖 / 待办
+## 8. 这一轮新踩的 GitHub 发布坑
+
+1. **`upload_files` 报 `browser_action_failed`，但文件其实已经挂上了** ——
+   和上一轮同一个坑，本轮又踩了一次。报错后页面已经跳到
+   `releases/edit/untagged-f94ee1ba8cfcc4e02946`（草稿自动落成），
+   页面出现 `(1.85 MB)`，资产按钮的可访问名是
+   `1 file selected: CarDesk-ecarx-cardesk-4149.apk`，
+   字段名是 `release[release_assets_attributes][][name]`
+   ⇒ **已经是 release asset，不是待上传队列**。别急着重传，先查附件挂上没有。
+2. **`screenshot` 在这个 Electron 面板里会失败** —— `fullPage` 报
+   `BROWSER_OPERATION_TIMEOUT`（页面 1677px 高），`viewport` 直接 `browser_action_failed`。
+   目视核对只能改用结构化读取：
+   `query(kind="semantic", text="CarDesk 4149 / 1.0.1053-system")`
+   在语义树里唯一命中标题（`matchCount=1`，命中项是 `input#release_name` 的 `inlinetextbox` 子节点）。
+   **别用 `query(kind="dom")` 看 `value=` 属性判断标题在不在** ——
+   `fill` 只改 DOM property，不写 `value` 属性，看属性会误判成「标题丢了」。
+3. **`fill` 返回的 `textLength` 可以拿来核对长度** —— 本轮返回
+   `textLength: 30, textChanged: false`；30 正好是
+   `CarDesk 4149 / 1.0.1053-system` 的字符数，说明「上次的值还在」且没有多填。
+4. **`scroll` 报的 `atStart` 不可信** —— 页面明明还差一屏才到顶，`scroll` 却返回
+   `actualDeltaY: -461, atStart: true`，而 `inspect` 里的 `scrollPosition` 是 `y=477.5`。
+   两个数对不上时以 `inspect` 的 `rect.y` 为准（`rect.y < 0` 就是还在视口外）。
+5. **ref 只在同一次快照里有效** —— 草稿页 `inspect` 的返回元素数会跳（130 / 176 / 181），
+   拿过期的 ref 会报 `stale_element_ref`，重新 `inspect` 即可。
+6. 发布按钮用 `click` + `selector: button.btn-primary[type="submit"]` 可靠
+   （「Save draft」也是 `type=submit`，但 class 是 `btn js-save-draft`，不会误命中）。
+   点击后必然跳页（`UNEXPECTED_NAVIGATION`），**这在发布场景下是预期结果**，别当成失败重试。
+7. 本轮草稿页是 `releases/edit/untagged-…`（附件一挂上就自动落成草稿），
+   在这个页面上点一次 `Publish release` 就直接发布成功，不需要点第二次。
+
+---
+
+## 9. 未能覆盖 / 待办
 
 - **真车实测**：车机能不能访问 `file.chuxi.bid`（域名解析、TLS 证书链、国内网络），
   模拟器验证不了，只能上真车。模拟器测得公网下载 1.9 MB 用时 **8.4 秒**（未计车机网络差异）。
