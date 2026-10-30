@@ -577,7 +577,7 @@ https://raw.githubusercontent.com/Bigcaibird/cardesk/main/emu-verify/REPORT-r83.
 - 结论：**按已泄露处理**。仓库是 Public，历史里躺着一个完整的长期凭据 ID，
   第三方爬虫随时可能抓走快照。
 
-### 10.5 处置（已与用户确认）
+### 10.5 处置（已与用户确认 · 已执行完，证据见 §10.7）
 
 **唯一的有效处置是轮换整对密钥**（在 Cloudflare 控制台执行，需要用户自己的账号）：
 
@@ -612,3 +612,60 @@ done
 > **坑（这轮踩到的）**：`git log --all -S'0b6ea892'` 会报出一条**假阳性**
 > （本轮是 `587db2f`，其父提交与它自己的树里都查不到这串，diff 里也没有），
 > 所以**别拿 `-S` 当判据**，以逐提交 `git grep` 扫描为准。
+
+### 10.7 轮换闭环（已完成）
+
+用户在 Cloudflare 控制台**删掉旧令牌、新建了一对新的 R2 API Token**
+（账号级、bucket = `file`、对象读写），按下面四步验证闭环。
+
+**① 旧令牌确认失效** —— 用旧 AK/SK 打 R2，明文不进命令行
+（从本地会话记录里按形状取，见 §10.6）：
+
+```
+旧 AK/SK → GET file/cardesk/latest.json → HTTP 401 Unauthorized
+```
+
+⇒ **git 历史里那把 AK 现在已经没有任何权限**，轮换真正生效了。
+
+**② 新令牌上传 4156**（`tools/publish_r2.py`，脚本自带回读校验）：
+
+```
+== 上传成功：cardesk/CarDesk-ecarx-cardesk-4156.apk
+== 回读一致：1963484 字节，sha256 e2d63ba8014514e4e84ceb460b531bf773c404d3228786e53d1288071b03e194
+== 上传成功：cardesk/latest.json
+== 回读一致：852 字节，sha256 50c1e62ff6282c46f592f53ee4123b64a1a791fa7727a87d36f6cbf1fbae686f
+```
+
+云端应用库也同步挂上了 4156（`tools/publish_apks.py`）。
+
+**③ 公网匿名读取核验**（自定义域 `file.chuxi.bid`，不需要任何凭据）：
+
+```
+cardesk/CarDesk-ecarx-cardesk-4156.apk → http=200  1963484 字节  用时 64.7 秒
+  sha256 e2d63ba8014514e4e84ceb460b531bf773c404d3228786e53d1288071b03e194
+  cmp 本地 dist/CarDesk-ecarx-cardesk-4156.apk → BYTE_IDENTICAL
+cardesk/latest.json → version 1.0.1060 / versionCode 4156 / tag v1.0.1060
+                      apk.url = cardesk/CarDesk-ecarx-cardesk-4156.apk
+cardesk/apks.json   → 2 个条目（CarDesk 4156、CarDesk 4150）
+```
+
+**④ 车机侧端到端**（模拟器 `emulator-5554`，装的就是 4156）：
+设置 →「在线更新」→「检查更新」，日志：
+
+```
+[EVT] 检查更新（手动触发） url=https://file.chuxi.bid/cardesk/latest.json
+检查更新：已是最新 current=1.0.1060-system latest=1.0.1060
+```
+
+对话框显示「状态：已是最新版本（1.0.1060-system）」「线上最新：1.0.1060」。
+截图：`r85-settings.png`（设置面板）、`r85-update-page.png`（在线更新页）、
+`r85-update-check.png`（对话框初始态）、`r85-update-result.png`（检查结果）。
+
+> 这一条证明的是：**清单能公网拉到 → 能解析 → 版本比较正确**。
+> 模拟器上装的就是 4156，所以显示「已是最新」；
+> 「有新版本 → 下载 → 校验 → 静默安装」那条链路本轮没重跑
+> （要把版本降回 4150 才触发得了，而 `release.sh` 只升版本不降）。
+
+**闭环结论**：历史里那把 AK 已经作废（401），新令牌能写 R2，
+线上清单与包和本地逐字节一致，车机端能正常读到并比对版本。
+**这轮安全事件的处置到此闭环**；剩下的只有 §9 里那些真车项。
