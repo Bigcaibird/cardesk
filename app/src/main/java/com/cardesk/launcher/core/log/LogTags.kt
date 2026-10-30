@@ -29,6 +29,7 @@ package com.cardesk.launcher.core.log
  * | `CarDesk/Setting` | 设置页变更 |
  * | `CarDesk/Task` | 计划任务 |
  * | `CarDesk/Lan` | 局域网传输 |
+ * | `CarDesk/ApkStore` | 云端应用库（R2 上的 APK 列表 / 下载 / 安装） |
  * | `CarDesk/Weather` | 天气 |
  * | `CarDesk/Keys` | 按键增强 / 按键拦截 |
  * | `CarDesk/Sys` | 系统能力：policy_control / overscan / 状态栏 / 导航栏 |
@@ -54,6 +55,7 @@ object LogTags {
     const val SETTING = "CarDesk/Setting"
     const val TASK = "CarDesk/Task"
     const val LAN = "CarDesk/Lan"
+    const val APK_STORE = "CarDesk/ApkStore"
     const val WEATHER = "CarDesk/Weather"
     const val KEYS = "CarDesk/Keys"
     const val SYS = "CarDesk/Sys"
@@ -64,6 +66,6 @@ object LogTags {
     /** 全部 tag（导出诊断包时列出，方便排查「哪个域没日志」）。 */
     val ALL: List<String> = listOf(
         APP, VEHICLE, HVAC, CAM360, WINDOW, SIGNAL, MEDIA, AMBIENT, MUSIC_UI, NAV_UI,
-        SCENE, DOCK, DRAWER, SETTING, TASK, LAN, WEATHER, KEYS, SYS, THEME, FLOAT, LOG,
+        SCENE, DOCK, DRAWER, SETTING, TASK, LAN, APK_STORE, WEATHER, KEYS, SYS, THEME, FLOAT, LOG,
     )
 }

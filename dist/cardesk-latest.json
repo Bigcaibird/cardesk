@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1053",
-  "versionCode": 4149,
-  "tag": "v1.0.1053",
-  "name": "CarDesk 4149 / 1.0.1053-system",
-  "notes": "在线更新源从 GitHub Release 换成 Cloudflare R2（file.chuxi.bid）：车机侧访问更快更稳；下载后新增文件长度与 SHA-256 校验，对不上就当没下成功。",
-  "publishedAt": "2026-10-30T08:22:57Z",
+  "version": "1.0.1054",
+  "versionCode": 4150,
+  "tag": "v1.0.1054",
+  "name": "CarDesk 4150 / 1.0.1054-system",
+  "notes": "新增「云端应用库」：手机上把 APK 传到 Cloudflare R2，车机在「设置 → 网络与升级 → 云端应用」里直接下载并安装 —— 出门前传好，到车上不用再插 U 盘，也不用和车机连同一个局域网。下载后校验文件长度与 SHA-256，对不上就当没下成功。",
+  "publishedAt": "2026-10-30T09:37:34Z",
   "apk": {
-    "name": "CarDesk-ecarx-cardesk-4149.apk",
-    "url": "cardesk/CarDesk-ecarx-cardesk-4149.apk",
-    "size": 1941656,
-    "sha256": "a09894ad776c37604a5188edfe3242df016f8b009d4a8c447380126d32c7423a"
+    "name": "CarDesk-ecarx-cardesk-4150.apk",
+    "url": "cardesk/CarDesk-ecarx-cardesk-4150.apk",
+    "size": 1957140,
+    "sha256": "2851c53f8e398a9b0dfe5bbdba43e72a8e531de16c40904eaef4603bbdcaa982"
   }
 }

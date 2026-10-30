@@ -31,9 +31,12 @@ import com.cardesk.launcher.core.Palette
 import com.cardesk.launcher.core.Prefs
 import com.cardesk.launcher.core.ScheduledTasks
 import com.cardesk.launcher.core.Skin
+import com.cardesk.launcher.core.apkstore.ApkEntry
+import com.cardesk.launcher.core.apkstore.ApkStore
 import com.cardesk.launcher.core.log.LogLevel
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
+import com.cardesk.launcher.core.update.AppUpdate
 import com.cardesk.launcher.ui.widget.CardStylePreviewView
 import com.cardesk.launcher.ui.widget.OverlayBackdrop
 import com.cardesk.launcher.ui.widget.QrCodeView
@@ -151,6 +154,7 @@ class SettingsOverlay(
             "网络与升级",
             listOf(
                 NavItem("lan", "局域网传输"),
+                NavItem("apkstore", "云端应用"),
                 NavItem("update", "在线更新"),
             ),
         ),
@@ -236,6 +240,7 @@ class SettingsOverlay(
             "网络与升级",
             listOf(
                 NavItem("lan", "局域网传输"),
+                NavItem("apkstore", "云端应用"),
                 NavItem("update", "在线更新"),
             ),
         ),
@@ -544,6 +549,7 @@ class SettingsOverlay(
             "cardstyle" -> pageCardStyle()
             "dualpip" -> pageDualPip()
             "lan" -> pageLan()
+            "apkstore" -> pageApkStore()
             "update" -> pageUpdate()
             "p360" -> pageCamera360()
             "autostop" -> pageAutostop()
@@ -824,6 +830,36 @@ class SettingsOverlay(
         body.addView(tv, LinearLayout.LayoutParams(-2, 64).also {
             it.topMargin = 18
         })
+        return tv
+    }
+
+    /**
+     * 一个胶囊按钮，但**挂到指定容器**而不是 [body]。
+     *
+     * [actionButton] 固定往 [body] 里塞 —— 那适合「页脚一个按钮」。
+     * 「云端应用库」的每一行都有自己的按钮（列表是动态生成的，行数不定），
+     * 就得能指定挂到哪去。
+     *
+     * 视觉与 [actionButton] 一致（同一个 `.chip` 设计语言）。
+     */
+    private fun pillButton(
+        parent: ViewGroup,
+        label: String,
+        primary: Boolean = false,
+        onClick: () -> Unit,
+    ): TextView {
+        val tv = Ui.text(context, label, 19f, if (primary) pal.accentInk else pal.textDim, bold = true).apply {
+            gravity = Gravity.CENTER
+            setPadding(30, 14, 30, 14)
+            background = Ui.round(
+                if (primary) pal.accent else Skin.CHIP_FILL,
+                com.cardesk.launcher.core.Shape.PILL,
+                if (primary) 0f else 1f,
+                Skin.CHIP_STROKE,
+            )
+            setOnClickListener { onClick() }
+        }
+        parent.addView(tv, LinearLayout.LayoutParams(-2, 64))
         return tv
     }
 
@@ -2293,6 +2329,184 @@ class SettingsOverlay(
         paint()
         paintFiles()
         note("端口 18765..18775、`?t=<token>`；启动后把地址贴到电脑浏览器即可上传/下载。")
+    }
+
+    /**
+ * 云端应用库（第八十四轮新增）。
+ *
+ * ## 它解决什么
+ *
+ * 车机要装别的 App（导航、音乐、视频…）时，原来只有两条路：
+ *
+ * - 带 U 盘到车上插；
+ * - 在车上让电脑和车机连**同一个局域网**，用「局域网传输」推过去。
+ *
+ * 两条都要求**人在车旁边**。这里是第三条路：手机上把 APK 传到
+ * Cloudflare R2，车机在这一页直接下载并安装 ——
+ * **出门前传好，到车上不用插 U 盘，也不用和车机连同一个局域网**。
+ *
+ * 清单在 `cardesk/apks.json`（格式见 `core/apkstore/ApkIndex.kt`），
+ * 由上传端维护（手机上的 Worker 网页，或 `tools/publish_apks.py`）。
+ *
+ * ## 为什么进页面就自动拉一次清单
+ *
+ * 「在线更新」是**手动触发**（点「检查更新」才联网）——
+ * 那是后台更新，怕的是自动下载、自动弹窗。
+ * 这一页不一样：**用户点进这一页就是想看有哪些包**，自动拉一次清单
+ * 正是这一页存在的意义；而且拉清单只是几 KB，不下载任何东西。
+ * 真正的下载仍然要用户点每个包自己的「下载安装」。
+ */
+    private fun pageApkStore() {
+        section("云端应用库")
+        kvRow("应用源", "Cloudflare R2 · file.chuxi.bid", true)
+        note(
+            "手机上把 APK 传到云端，这里就能看到并直接安装 —— 出门前传好，到车上不用插 U 盘，" +
+                "也不用和车机连同一个局域网。\n\n" +
+                "下载完会校验文件长度和 SHA-256，对不上就当没下成功。",
+        )
+
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        // 离开这一页就别再往已经不存在的视图上贴东西了（和氛围灯页同一个道理）
+        var alive = true
+        pageTeardown = { alive = false }
+
+        val status = Ui.text(context, "状态：正在拉清单…", 22f, pal.textDim)
+        val listBox = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+
+        fun fmtSize(bytes: Long): String = when {
+            bytes >= 1 shl 20 -> String.format("%.1f MB", bytes / 1048576f)
+            bytes >= 1 shl 10 -> String.format("%.0f KB", bytes / 1024f)
+            else -> "$bytes B"
+        }
+
+        /** 下载一个包并装上（阻塞部分在后台线程，界面更新回主线程）。 */
+        fun downloadAndInstall(entry: ApkEntry, btn: TextView, bar: SeekBar) {
+            btn.isEnabled = false
+            btn.text = "下载中…"
+            bar.visibility = View.VISIBLE
+            bar.progress = 0
+            status.text = "状态：正在下载 ${entry.name}…"
+            Thread {
+                val file = ApkStore.download(context, entry) { p ->
+                    main.post { if (alive) bar.progress = p }
+                }
+                if (file == null) {
+                    main.post {
+                        if (!alive) return@post
+                        btn.isEnabled = true
+                        btn.text = "重新下载"
+                        bar.visibility = View.GONE
+                        status.text = "状态：${entry.name} 下载失败（请检查车机网络）"
+                    }
+                    return@Thread
+                }
+                main.post {
+                    if (!alive) return@post
+                    btn.text = "安装中…"
+                    status.text = "状态：${entry.name} 已下载，正在安装…"
+                }
+                val result = ApkStore.install(context, file)
+                main.post {
+                    if (!alive) return@post
+                    when (result) {
+                        AppUpdate.InstallResult.Silent -> {
+                            btn.text = "已提交安装"
+                            status.text = "状态：${entry.name} 已提交静默安装，装完重启车机生效"
+                        }
+                        is AppUpdate.InstallResult.Installer -> {
+                            btn.text = "已转系统安装器"
+                            status.text = "状态：${entry.name} 已转交系统安装器（${result.location}）"
+                        }
+                        is AppUpdate.InstallResult.Fail -> {
+                            btn.isEnabled = true
+                            btn.text = "重新下载"
+                            status.text = "状态：${entry.name} 安装失败：${result.reason}"
+                        }
+                    }
+                }
+            }.start()
+        }
+
+        /** 一个包一行：名字 + 文件信息 + 进度条 + 「下载安装」按钮。 */
+        fun apkRow(entry: ApkEntry): View {
+            val holder = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+            holder.addView(Ui.text(context, entry.name, 28f, pal.text, bold = true), LinearLayout.LayoutParams(-1, -2))
+            val meta = buildString {
+                append(entry.file)
+                if (entry.size > 0) append(" · ${fmtSize(entry.size)}")
+                if (entry.addedAt.isNotEmpty()) append(" · ${entry.addedAt.take(10)}")
+            }
+            holder.addView(
+                Ui.text(context, meta, 19f, pal.textDim),
+                LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 6 },
+            )
+            val bar = SeekBar(context).apply {
+                isEnabled = false
+                max = 100
+                visibility = View.GONE
+            }
+            holder.addView(bar, LinearLayout.LayoutParams(-1, 56).also { it.topMargin = 4 })
+            val btnRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+            holder.addView(btnRow, LinearLayout.LayoutParams(-1, -2))
+            val btn = pillButton(btnRow, "下载安装", primary = true) { }
+            btn.setOnClickListener { downloadAndInstall(entry, btn, bar) }
+            return holder
+        }
+
+        /** 重新画列表。 */
+        fun render(items: List<ApkEntry>) {
+            listBox.removeAllViews()
+            if (items.isEmpty()) {
+                listBox.addView(
+                    Ui.text(
+                        context,
+                        "云端还没有应用。在手机上打开上传页传一个 APK，回来点「刷新列表」就能看到。",
+                        22f,
+                        pal.textDim,
+                    ),
+                    LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 16 },
+                )
+                return
+            }
+            for (entry in items) {
+                listBox.addView(apkRow(entry), LinearLayout.LayoutParams(-1, -2).also { it.bottomMargin = 24 })
+            }
+        }
+
+        /** 拉一次清单（后台线程）。 */
+        fun refresh() {
+            status.text = "状态：正在拉清单…"
+            Thread {
+                val result = ApkStore.fetchIndex(context)
+                main.post {
+                    if (!alive) return@post
+                    when (result) {
+                        is ApkStore.FetchResult.Ok -> {
+                            val count = result.index.items.size
+                            val when0 = result.index.updatedAt.take(10)
+                            status.text = if (count == 0) {
+                                "状态：云端还没有应用"
+                            } else {
+                                "状态：云端有 $count 个应用" + if (when0.isNotEmpty()) "（清单更新于 $when0）" else ""
+                            }
+                            render(result.index.items)
+                        }
+                        is ApkStore.FetchResult.Failed -> {
+                            // 拉不到清单时**不清空列表**：可能只是这一次网络抖了，
+                            // 把刚才看到的包抹掉比不刷新更让人火大
+                            status.text = "状态：拉清单失败（${result.reason}）"
+                        }
+                    }
+                }
+            }.start()
+        }
+
+        // 按钮挂在列表上面：先建按钮，再把状态和列表加进 body
+        pillButton(body, "刷新列表", primary = true) { refresh() }
+        body.addView(status, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 12 })
+        body.addView(listBox, LinearLayout.LayoutParams(-1, -2))
+
+        refresh()
     }
 
     /**

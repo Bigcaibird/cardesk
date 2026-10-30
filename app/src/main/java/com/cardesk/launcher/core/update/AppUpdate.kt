@@ -8,6 +8,7 @@ import android.provider.MediaStore
 import com.cardesk.launcher.core.SystemOps
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
+import com.cardesk.launcher.core.net.FileDownload
 import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -185,6 +186,9 @@ object AppUpdate {
      * 下载完做两道校验：长度（清单给了大小才查）和 SHA-256（清单给了摘要才查）。
      * 任一对不上就删掉半成品、当作下载失败 —— 车机装一个残缺的 APK 比不更新更糟。
      *
+     * 第八十四轮：真正的下载 + 校验抽到了 [FileDownload]，
+     * 「云端应用库」用的是同一套逻辑（公网下载被截断不会报错，只看 HTTP 200 不够）。
+     *
      * @param onProgress 0..100 的进度（主线程回调）。
      * @return 下载好的文件；失败返回 null。
      */
@@ -195,68 +199,27 @@ object AppUpdate {
             return null
         }
         val file = File(context.cacheDir, "cardesk-update-${release.version}.apk")
-        val started = System.currentTimeMillis()
-        val ok = try {
-            val conn = URL(apk.url).openConnection() as HttpURLConnection
-            conn.connectTimeout = 10_000
-            conn.readTimeout = 30_000
-            conn.instanceFollowRedirects = true
-            conn.setRequestProperty("User-Agent", "CarDesk")
-            val code = conn.responseCode
-            if (code != HttpURLConnection.HTTP_OK) {
-                conn.disconnect()
-                throw IOException("HTTP $code")
-            }
-            val total = conn.contentLength
-            var read = 0L
-            conn.inputStream.use { input ->
-                file.outputStream().use { out ->
-                    val buf = ByteArray(64 * 1024)
-                    while (true) {
-                        val n = input.read(buf)
-                        if (n <= 0) break
-                        out.write(buf, 0, n)
-                        read += n
-                        if (total > 0) onProgress(((read * 100) / total).toInt().coerceIn(0, 100))
-                    }
-                }
-            }
-            conn.disconnect()
-            file.length() > 1024
-        } catch (t: Throwable) {
-            Logx.w(LogTags.SETTING, "更新下载失败", t, "url" to apk.url)
-            file.delete()
-            return null
-        }
-        if (!ok) {
-            file.delete()
-            return null
-        }
-        // —— 长度校验：清单给了大小就必须对上 ——
-        if (apk.size > 0 && file.length() != apk.size) {
-            Logx.w(
-                LogTags.SETTING, "更新下载失败：长度对不上",
-                "expect" to apk.size, "actual" to file.length(), "url" to apk.url,
-            )
-            file.delete()
-            return null
-        }
-        // —— 摘要校验：清单给了摘要就必须对上 ——
-        if (apk.sha256.isNotEmpty()) {
-            val actual = Digest.sha256Hex(file)
-            if (actual == null || !actual.equals(apk.sha256, ignoreCase = true)) {
-                Logx.w(LogTags.SETTING, "更新下载失败：SHA-256 对不上", "url" to apk.url)
-                file.delete()
-                return null
-            }
-        }
-        Logx.i(
-            LogTags.SETTING, "更新下载完成",
-            "file" to file.name, "bytes" to file.length(),
-            "elapsedMs" to (System.currentTimeMillis() - started),
+        val result = FileDownload.download(
+            url = apk.url,
+            target = file,
+            expectSize = apk.size,
+            expectSha256 = apk.sha256,
+            onProgress = onProgress,
         )
-        onProgress(100)
-        return file
+        return when (result) {
+            is FileDownload.Result.Ok -> {
+                Logx.i(
+                    LogTags.SETTING, "更新下载完成",
+                    "file" to file.name, "bytes" to result.bytes,
+                    "elapsedMs" to result.elapsedMs,
+                )
+                file
+            }
+            is FileDownload.Result.Failed -> {
+                Logx.w(LogTags.SETTING, "更新下载失败", "reason" to result.reason, "url" to apk.url)
+                null
+            }
+        }
     }
 
     // ------------------------------------------------------------------ 安装

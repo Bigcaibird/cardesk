@@ -36,7 +36,7 @@
 | `https://<acc>.r2.cloudflarestorage.com`（S3 兼容端点） | ✅ 可达（但本机网络抖动，必须带重试） |
 
 **卡点**：token 只有 account 读权限，列不出 bucket；`r2.dev` 也不可达。
-→ 向用户确认后拿到 **bucket 名 = `file`**、**Access Key ID = `0b6ea892593bd36caad50f189ad628f2`**。
+→ 向用户确认后拿到 **bucket 名 = `file`**、**Access Key ID = `0b6ea892…d628f2`**。
 
 **这个 AK 是不是真的？** 不用猜，用 S3 端点的错误码区分：
 
@@ -50,7 +50,7 @@ AK = 不存在的 key        →  InvalidAccessKeyId
 
 ### 2.1 S3 凭据格式的坑
 
-- 用户口中的「S3 秘钥」`0b6ea892593bd36caad50f189ad628f2` 是 **32 位 = Access Key ID**；
+- 用户口中的「S3 秘钥」`0b6ea892…d628f2` 是 **32 位 = Access Key ID**；
   **Secret Access Key 是 64 位**，两者是配对的两把钥匙，缺一把签不了名。
 - 用 cfat_ token 当 S3 密钥直接报错：
   `Credential access key has length 53, should be 32`。

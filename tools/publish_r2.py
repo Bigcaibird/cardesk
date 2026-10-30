@@ -49,6 +49,8 @@ class R2:
         self.ak = access_key
         self.sk = secret_key
         self.host = host or f"{account_id}.r2.cloudflarestorage.com"
+        # 最近一次响应的头（第八十四轮：读对象元数据 x-amz-meta-* 要用）
+        self.last_headers = {}
 
     def _sign(self, method, path, query, payload, headers):
         """headers 里除 Host 之外的头都要参与签名（S3 只允许少签，不能多签）。"""
@@ -92,9 +94,11 @@ class R2:
                 req.add_header(hk, hv)
             try:
                 with urllib.request.urlopen(req, timeout=120) as r:
+                    self.last_headers = dict(r.headers.items())
                     return r.status, r.read()
             except urllib.error.HTTPError as e:
                 body = e.read()
+                self.last_headers = dict(e.headers.items()) if e.headers else {}
                 if e.code in (500, 503) and attempt < retries - 1:
                     time.sleep(2)
                     continue
@@ -104,10 +108,13 @@ class R2:
                 time.sleep(2)
         return 0, f"transport-error: {last}".encode()
 
-    def put(self, bucket, key, data, content_type):
+    def put(self, bucket, key, data, content_type, headers=None):
+        # 自定义头（比如 x-amz-meta-*）要一起参与签名：S3 只允许少签，不允许多签
+        merged = {"Content-Type": content_type}
+        merged.update(headers or {})
         code, body = self.request(
             "PUT", f"/{bucket}/{quote(key)}", payload=data,
-            headers={"Content-Type": content_type},
+            headers=merged,
         )
         return code, body
 

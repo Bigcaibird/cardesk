@@ -269,6 +269,36 @@ adb logcat -d | grep -E "手势：单指横滑翻页|切页 "
 
 证据：`emu-verify/r83-*.png`、`emu-verify/update-r2-log.txt`。
 
+## H7. 第八十四轮新增（云端应用库：手机传 APK，车机直接装）
+
+被测包：`com.ecarx.cardesk`（平台签名，versionCode 4148 / 1.0.1052-system 的**临时构建**，
+源码与 4150 完全相同、只有版本号不同 —— 用来证明「装上去的确实是从云端下的那个包」）；
+设备：`emulator-5554`（AVD `cardesk-aosp`，android-10 / API 29 / 1920×1080@160dpi）。
+云端清单：`https://file.chuxi.bid/cardesk/apks.json`（公开只读，无需凭据）。
+完整报告见 `emu-verify/REPORT-r84.md`。
+
+| # | 项 | 操作 | 期望 | 结果 |
+|---|---|---|---|---|
+| H59 | 页面在 | 设置 → 网络与升级 → 云端应用 | 列出云端已有的包 | ✅ `r84-apkstore-list.png`：「CarDesk 4150（云端应用库自测）」/ `CarDesk-ecarx-cardesk-4150.apk` · 1.9 MB · 2026-10-30 |
+| H60 | **清单真能解析** | 进页面自动拉一次 | 日志有「清单已拉取」 | ✅ `云端应用清单已拉取 count=1 updatedAt=2026-10-30T09:45:37Z` |
+| H61 | **公网下载 + 校验** | 点「下载安装」 | 进度条 → 下完才报完成 | ✅ `云端应用下载完成 file=CarDesk-ecarx-cardesk-4150.apk bytes=1957140 elapsedMs=3644`（`r84-apkstore-downloading.png`） |
+| H62 | **静默安装真的生效** | 自动 | 设备版本从 4148 变 4150 | ✅ `dumpsys package` → versionCode=4150 / `1.0.1054-system` |
+| H63 | 装完确实是那个包 | 拉设备 `base.apk` 算 SHA256 | 与线上、本地三方一致 | ✅ `2851c53f8e398a9b0dfe5bbdba43e72a8e531de16c40904eaef4603bbdcaa982`（线上 = 本地 = 设备） |
+| H64 | 中文展示名没乱码 | 看列表 | 清单里的中文名原样显示 | ✅ `CarDesk 4150（云端应用库自测）`（`r84-apkstore-4150.png`） |
+| H65 | 刷新按钮 | 点「刷新列表」 | 重新拉一次清单 | ✅ 再次出现 `云端应用清单已拉取 count=1`（`r84-apkstore-refresh.png`） |
+| H66 | 不闪退 | 全程 | 无 FATAL | ✅ `Fatal signal` / `FATAL EXCEPTION` 计数 **0** |
+
+> **装完之后系统弹了「Select a Home app」**：CarDesk 是 HOME 应用，
+> 被自己更新掉之后系统要重新确认主屏程序 —— 这是**重装 launcher 的正常副作用**，
+> 不是崩溃（`Fatal signal` 计数 0，应用照常起来）。
+
+> **上传端（Cloudflare Worker）本轮没上真机**：Worker 需要用户自己的 Cloudflare 账号
+> 执行 `npx wrangler deploy` 才能拿到地址（见 `worker/README.md`）。
+> 本轮验的是**车机侧**的完整链路（读真 R2 的清单 → 下载 → 校验 → 静默安装），
+> 上传端用 `tools/publish_apks.py` 走 S3 API 产生同一份清单（格式与 Worker 完全一致）。
+
+证据：`emu-verify/r84-apkstore-*.png`、`emu-verify/update-apkstore-log.txt`。
+
 ## I. 稳定性
 
 | # | 项 | 期望 | 结果 |

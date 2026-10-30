@@ -48,6 +48,7 @@ base64 → `krc1` 头 → 16 字节循环异或 → zlib 解压），
 | 包名 | `com.ecarx.cardesk` |
 | 构建变体 | `system`（平台签名 + `sharedUserId=android.uid.system`）/ `debug`（普通安装） |
 | 在线更新 | App 内「设置 → 在线更新」**手动**检测 **Cloudflare R2** 上的更新清单（`file.chuxi.bid`），有新版可一键下载并安装 |
+| 云端应用库 | App 内「设置 → 网络与升级 → 云端应用」列出你自己传到 R2 的 APK，点一下直接下载并安装 |
 
 ## 已知限制
 
@@ -198,6 +199,69 @@ python3 tools/publish_r2.py --bucket file \
 > **密钥不入库**：R2 的 S3 密钥只在环境变量里用，仓库是公开的，
 > 密钥一旦进代码或文档等于公开。创建密钥时只勾「指定 bucket + Object Read & Write」。
 
+## 云端应用库（手机传 APK，车机直接装）
+
+App 内「设置 → 网络与升级 → **云端应用**」能列出你自己上传到 R2 的 APK，
+点一下就下载并安装（system 版静默装，普通安装包转系统安装器）。
+
+**解决的痛点**：车机装别的 App，原来只有「带 U 盘到车上插」和
+「在车上让电脑和车机连同一个局域网」两条路，两条都要求人在车旁边。
+这一条是**出门前在手机上上传，到车上直接装** —— 不用带 U 盘，
+也不用和车机连同一个局域网（车机走 4G 就行）。
+
+```
+手机浏览器 ──上传──▶ Cloudflare Worker ──▶ R2（cardesk/apks/xxx.apk）
+                                            │
+车机 CarDesk ──GET https://file.chuxi.bid/cardesk/apks.json ──▶ 清单
+              └── 下载 APK ──校验长度+SHA-256──▶ 静默安装 / 系统安装器
+```
+
+**上传端是一个 Cloudflare Worker**（`worker/` 目录，手机浏览器打开就能用）：
+R2 的写入必须带凭据，而凭据放进浏览器里的网页等于公开，
+所以网页只发请求、**真正的写入在 Worker 里**（R2 binding，凭据由 Cloudflare 托管，
+既不进代码、也不进仓库、也不进手机浏览器）。写操作要带口令，
+没配口令时**一律拒绝**（fail closed）。
+
+部署步骤见 [`worker/README.md`](worker/README.md)。
+**车机端只读 R2 公开域，不依赖 Worker 地址** —— 换域名不用重装 App。
+
+清单（`cardesk/apks.json`，App 侧解析见 `core/apkstore/ApkIndex.kt`）：
+
+```json
+{
+  "schema": 1,
+  "updatedAt": "2026-10-30T09:45:37Z",
+  "items": [
+    {
+      "name": "酷狗音乐",
+      "file": "kugou.apk",
+      "key": "cardesk/apks/kugou.apk",
+      "size": 12345678,
+      "sha256": "…64 位十六进制…",
+      "addedAt": "2026-10-30T09:45:25Z"
+    }
+  ]
+}
+```
+
+- `key` 写的是 **R2 对象 key**（相对域名根），也就是上传时用的那个 key —— 改域名不用改清单；
+- 下载完校验**长度**和 **SHA-256**，对不上就当没下成功，不装残包；
+- **一条坏数据只跳掉那一条**，不会让整份列表变空；
+- 电脑上不想部署 Worker 也能传：
+
+```bash
+export R2_AK=<Access Key ID>
+export R2_SK=<Secret Access Key>
+python3 tools/publish_apks.py --bucket file \
+    --apk /path/to/app.apk --name "酷狗音乐"
+#   → 上传包 + 重写 cardesk/apks.json，并回读校验
+```
+
+> **和「在线更新」的关系**：同一个 bucket、同一个公开域、同一套
+> 「下载 → 校验 → 安装」链路（`core/net/FileDownload.kt` + `core/update/AppUpdate.kt`）。
+> 区别只在清单语义 —— 一个只放 CarDesk 自己（要比 versionCode），
+> 一个放任意 APK（列表全给你，不比版本）。
+
 ## 目录结构
 
 ```
@@ -220,7 +284,12 @@ cardesk/
 │       │   │   │   └── OnlineLyricCatalog.kt 在线歌词竞速（QQ / 网易 / 酷狗）
 │       │   │   ├── update/                 在线更新
 │       │   │   │   ├── AppUpdate.kt         检查 / 下载 / 安装
-│       │   │   │   ├── R2Release.kt         R2 更新清单格式与解析
+│       │   │   │   └── R2Release.kt         R2 更新清单格式与解析
+│       │   │   ├── apkstore/               云端应用库（R2 上的 APK 列表）
+│       │   │   │   ├── ApkIndex.kt          云端应用清单格式与解析
+│       │   │   │   └── ApkStore.kt          拉清单 / 下载 / 安装
+│       │   │   ├── net/                    通用网络与文件工具
+│       │   │   │   ├── FileDownload.kt      下载 + 长度 / SHA-256 校验
 │       │   │   │   └── Digest.kt            SHA-256 完整性校验
 │       │   │   ├── nav/                    导航页逻辑
 │       │   │   └── log/                    日志
@@ -250,7 +319,9 @@ cardesk/
 ├── emu-verify/                             模拟器验证记录与截图
 ├── system-patch/                           system 变体所需补丁（hiddenapi 白名单等）
 ├── tools/                                  构建、比对、发布、日志采集脚本
-│                                          （含 make_manifest.py / publish_r2.py）
+│                                          （含 make_manifest.py / publish_r2.py /
+│                                            publish_apks.py）
+├── worker/                                 云端应用库的上传端（Cloudflare Worker）
 ├── gradle/                                 Gradle wrapper
 ├── build.gradle.kts                        全局构建脚本
 ├── settings.gradle.kts                     模块与仓库声明

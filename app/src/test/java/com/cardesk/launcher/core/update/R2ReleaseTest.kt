@@ -3,16 +3,16 @@ package com.cardesk.launcher.core.update
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.io.File
 
 /**
- * [R2Release] / [Digest] 单测（纯逻辑）。
+ * [R2Release] 单测（纯逻辑）。
  *
  * 这条链路是「车机上点检查更新」的全部依据：
  * 清单读不懂就查不到更新，包地址拼错就下不到，
  * 摘要算错就会把残包当好包装进车机。
+ *
+ * 摘要本身的单测在 `core/net/FileDownloadTest.kt`（第八十四轮 `Digest` 挪去了 `core.net`）。
  */
 class R2ReleaseTest {
 
@@ -132,36 +132,5 @@ class R2ReleaseTest {
         val r = R2Release.parse("""{"version":"1.0.1","apk":{"url":"cardesk/CarDesk-x.apk"}}""", root)
         assertEquals(0L, r?.apk?.size)
         assertEquals("CarDesk-x.apk", r?.apk?.name)
-    }
-
-    @Test
-    fun `摘要算得对`() {
-        val f = File.createTempFile("cardesk-digest", ".bin")
-        try {
-            f.writeBytes("abc".toByteArray())
-            // 已知值：SHA-256("abc")
-            assertEquals(
-                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
-                Digest.sha256Hex(f),
-            )
-        } finally {
-            f.delete()
-        }
-    }
-
-    @Test
-    fun `读不到的文件摘要返回空`() {
-        assertNull(Digest.sha256Hex(File("/definitely/not/exists.bin")))
-    }
-
-    @Test
-    fun `空文件也有摘要`() {
-        val f = File.createTempFile("cardesk-digest-empty", ".bin")
-        try {
-            f.writeBytes(ByteArray(0))
-            assertTrue(Digest.sha256Hex(f)!!.length == 64)
-        } finally {
-            f.delete()
-        }
     }
 }
