@@ -1957,6 +1957,11 @@ private fun showCam() {
         // 所以现在两页都显示状态栏 —— 用户要求「桌面第二页也需要显示状态栏」。
         val hideBar = page == PAGE_NAV && prefs.hideJunjunStatus
         statusBar.visibility = if (hideBar) View.GONE else View.VISIBLE
+        // 第八十二轮：翻页圆点搬进了**状态栏那一行**的中间，
+        // 所以状态栏被隐藏时圆点也要一起隐藏 —— 否则它会孤零零浮在屏幕顶部。
+        if (::dots.isInitialized) {
+            dots.visibility = statusBar.visibility
+        }
         // —— 顶部让位（第四十四轮：紧凑）——
         //
         // 是「导航页整体下移 110px 给状态栏让位」
@@ -2178,6 +2183,11 @@ private fun showCam() {
             MotionEvent.ACTION_POINTER_DOWN -> {
                 // 三指横滑换页（与
                 // ；第三十二轮把方向改成**横向**
+                //
+                // 第八十二轮：**多指一律作废单指判定**。
+                // 单指横滑的位移是按「第 1 根手指的落点」算的，
+                // 一旦变成双指/三指，位移会跳变，容易误判成一次翻页。
+                singleTracking = false
                 if (ev.pointerCount >= 3) {
                     threeFinger = true
                     threeFingerX = midX(ev)
@@ -2197,6 +2207,13 @@ private fun showCam() {
                 //
                 // 判定放在 `onInterceptTouchEvent` 里：位移超过接管阈值后才把事件抢回来，
                 // 子视图（底部卡片拖拽、画中画点位、Dock 媒体卡滑动）在此之前都还能正常响应。
+                //
+                // —— 但这条**只是「抢事件」**，不是翻页的最终判定（见 [onTouchEvent]）：
+                // Android 只有在「有子视图消费了 ACTION_DOWN」时才会继续回调
+                // `onInterceptTouchEvent` 处理后续 MOVE；没有任何子视图消费按下时
+                // （例如导航页右侧音乐卡的空白自绘区）这一层**根本收不到 MOVE**，
+                // 翻页就永远不触发。第八十二轮把最终判定挪到 [onTouchEvent]，
+                // 两条路径（子视图消费 / 没人消费）就都能翻页了。
                 if (singleTracking && ev.pointerCount == 1) {
                     singleDx = designX(ev.x) - singleDownX
                     singleDy = designY(ev.y) - singleDownY
@@ -2213,35 +2230,72 @@ private fun showCam() {
         return super.onInterceptTouchEvent(ev)
     }
 
+    /**
+     * 根视图自己的触摸处理：单指横滑翻页的**最终判定**在这里。
+     *
+     * **第八十二轮改这里的原因**（模拟器实测出来的）：
+     * 以前翻页判定挂在 `singleIntercepted` 上，而 `singleIntercepted`
+     * 只在 [onInterceptTouchEvent] 里才可能被置位。可 Android 只有在
+     * **有子视图消费了 ACTION_DOWN** 时才会继续把 MOVE 派发到
+     * `onInterceptTouchEvent`；一旦没人消费按下（导航页右侧音乐卡那种
+     * 纯自绘的空白区就是），这一层就再也收不到 MOVE，
+     * `singleIntercepted` 永远是 false → 那一块区域怎么滑都不翻页。
+     *
+     * 现象就是「翻到某一页就卡住了、不能循环」——
+     * 其实是**某些起点位置整片失灵**，用户很容易把它当成「到头了」。
+     *
+     * 现在两条路径都收敛到本方法：
+     * - **子视图消费了按下**（场景页、地图卡…）：MOVE 时被 [onInterceptTouchEvent]
+     *   抢走，子视图收到 CANCEL，本方法收到后续 MOVE/UP → 正常翻页；
+     * - **没人消费按下**（音乐卡空白区…）：本方法从 DOWN 一路收到 UP，
+     *   自己记录位移并判定 → 也能翻页。
+     *
+     * 两种路径**不会重复翻页**：本方法是唯一的判定点，
+     * [onInterceptTouchEvent] 只负责「抢事件」，不直接翻页。
+     */
     override fun onTouchEvent(ev: MotionEvent): Boolean {
         when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                // 能收到 DOWN，说明**没有任何子视图消费了这次按下**
+                // （否则事件根本到不了根视图），这次横滑由自己从头到尾处理。
+                singleTracking = true
+                singleIntercepted = false
+                singleDownX = designX(ev.x)
+                singleDownY = designY(ev.y)
+                singleDx = 0f
+                singleDy = 0f
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                // 多指一律作废单指判定（同 [onInterceptTouchEvent]）。
+                singleTracking = false
+            }
             MotionEvent.ACTION_MOVE -> {
                 // 三指横滑：持续记录三指中位点的当前位置。
                 // ACTION_UP 时只有最后一根手指还在事件里，直接用 UP 的坐标算位移会少算，
                 // 所以位移以「最后一次 MOVE 的中位点」为准。
                 if (threeFinger) threeFingerMid = midX(ev)
                 // 单指横滑：同理由「最后一次 MOVE」记录位移。
-                if (singleIntercepted) {
+                if (singleTracking) {
                     singleDx = designX(ev.x) - singleDownX
                     singleDy = designY(ev.y) - singleDownY
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 // 第三十七轮：单指横滑换页收尾
-                if (singleIntercepted) {
+                if (singleTracking) {
                     singleTracking = false
-                    singleIntercepted = false
                     val step = PageGesture.singleFingerStep(singleDx, singleDy, SINGLE_FINGER_PX)
                     if (step != 0) {
                         Logx.event(
                             LogTags.APP, "手势：单指横滑翻页",
                             "dx" to singleDx, "dy" to singleDy,
+                            "抢事件" to singleIntercepted,
                         )
                         swipePage(step)
                     }
+                    singleIntercepted = false
                     return true
                 }
-                singleTracking = false
                 // 三指横滑换页收尾（第三十二轮：竖滑 → 横滑）
                 if (threeFinger) {
                     threeFinger = false

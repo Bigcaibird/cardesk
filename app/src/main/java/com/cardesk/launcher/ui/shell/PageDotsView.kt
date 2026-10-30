@@ -29,6 +29,18 @@ import com.cardesk.launcher.core.log.Logx
  * **「底部 Dock 栏正上方、水平居中」**，并相应改成**横向**排列
  * （竖条挪到 Dock 上方居中会又高又怪）。
  * 颜色、尺寸比例、切换动画全部。
+ *
+ * **第八十二轮按用户要求再改位置**：从「Dock 栏正上方」改成
+ * **「状态栏那一行的正中」**。
+ *
+ * 为什么是这个位置：状态栏原来正中间摆着「位置 + 天气」两个胶囊，
+ * 第八十二轮把它们挪到了右侧图标行（和蓝牙/信号/时钟在一起），
+ * 正中就空出来了 —— 页面指示器放在状态栏正中，
+ * 既不再压在 Dock 上方（那里原来很挤），也不用另找位置。
+ *
+ * 几何直接引用 [ShellStatusBar.ROW_TOP] / [ShellStatusBar.ROW_H]，
+ * **不另写一份数值** —— 状态栏行高以后再改，圆点会自动跟着走，
+ * 两处各写一个常量早晚会不同步。
  */
 class PageDotsView(context: Context) : View(context) {
 
@@ -60,12 +72,18 @@ class PageDotsView(context: Context) : View(context) {
     private val hits = ArrayList<RectF>()
 
     // —— 第三十三轮：横向排列，贴在 Dock 上方居中 ——
+    // —— 第八十二轮：改到状态栏那一行的正中（横向排列保留）——
 
     /** 横向布局：玻璃条左右 padding。 */
     private val padH = 10f
 
-    /** 横向布局：玻璃条上下 padding。 */
-    private val padV = 8f
+    /**
+     * 横向布局：玻璃条上下 padding。
+     *
+     * 第八十二轮从 8 收到 3：玻璃条现在要放进**状态栏那一行**里
+     * （行高 43），原来 44 高的条根本塞不进去。
+     */
+    private val padV = 3f
 
     /** 每个点的命中高度（点带高度）。 */
     private val hitH = 28f
@@ -75,15 +93,6 @@ class PageDotsView(context: Context) : View(context) {
 
     /** 圆点高度（未选中点 10×10，横向布局里高度固定 10）。 */
     private val dotH = 10f
-
-    /** 底部 Dock 高（`LauncherView` 的 1864×104）。 */
-    private val dockH = 104f
-
-    /** Dock 距底（`LauncherView` 的 bottomMargin = 8）。 */
-    private val dockBottom = 8f
-
-    /** 与 Dock 的间距。 */
-    private val dockGap = 8f
 
     /** 每个点当前动画宽度（px），选中 30 / 未选中 10。 */
     private var heights: FloatArray = FloatArray(3) { if (it == 0) DOT_H_ON else DOT_H_OFF }
@@ -95,8 +104,13 @@ class PageDotsView(context: Context) : View(context) {
     /** 玻璃条高。 */
     private fun barHeight(): Float = padV * 2 + hitH
 
-    /** 玻璃条下沿（Dock 上方）。 */
-    private fun barBottom(): Float = Design.H - dockBottom - dockH - dockGap
+    /**
+     * 玻璃条上沿。
+     *
+     * 第八十二轮：条**垂直居中在状态栏那一行里**
+     * （行中心 = [ShellStatusBar.ROW_TOP] + [ShellStatusBar.ROW_H] / 2）。
+     */
+    private fun barTop(): Float = ShellStatusBar.ROW_TOP + (ShellStatusBar.ROW_H - barHeight()) / 2f
 
     /**
      * （:1915-1943）：每个点从当前高度动画到目标高度
@@ -128,11 +142,10 @@ class PageDotsView(context: Context) : View(context) {
         super.onDraw(canvas)
         val w = barWidth()
         val h = barHeight()
-        // 水平居中 + 贴在 Dock 上方
+        // 水平居中 + 垂直居中在状态栏那一行里（第八十二轮：从 Dock 上方挪过来）
         val left = (Design.W - w) / 2f
-        val bottom = barBottom()
-        val top = bottom - h
-        val rect = RectF(left, top, left + w, bottom)
+        val top = barTop()
+        val rect = RectF(left, top, left + w, top + h)
         canvas.drawRoundRect(rect, h / 2f, h / 2f, barPaint)
         canvas.drawRoundRect(rect, h / 2f, h / 2f, barStroke)
 

@@ -3,6 +3,7 @@ package com.cardesk.launcher.ui
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.view.MotionEvent
 import android.view.View
 import com.cardesk.launcher.ui.shell.ShellStatusBar
 import org.junit.Assert.assertEquals
@@ -22,8 +23,8 @@ import org.robolectric.annotation.GraphicsMode
  *
  * 1. **数据口径**：[ShellStatusBar.setLocationWeather] 收下城市 / 天气 / 温度，
  *    城市会去掉首尾空格；重复同样的数据不会反复刷（避免日志噪音）。
- * 2. **画得出来**：中置那段（定位针 + 城市 + 分隔点 + 天气图标 + 温度）
- *    在 1920×1080 的正中位置真的有像素。
+ * 2. **画得出来**：**右侧图标行**那一段（定位针 + 城市 + 天气图标 + 温度）
+ *    真的有像素；**屏幕正中不再有它**（第八十二轮挪走了，正中改放翻页圆点）。
  * 3. **没数据也不崩**：城市为空显示「位置获取中」、温度为空显示 `--°`。
  * 4. **第四十三轮 / 第五十二轮 / 第六十三轮**：顶部渐变遮罩（沉浸式）+
  *    状态栏元素整体缩小（第四十三轮缩一档、第五十二轮按用户要求统一缩到 **2/3**），
@@ -117,16 +118,23 @@ class StatusBarLocationWeatherTest {
     }
 
     @Test
-    fun `中置段真的画在屏幕正中`() {
+    fun `位置天气挪到右侧图标行且正中没有它`() {
         val bar = newBar()
         bar.setLocationWeather("北京市", "晴", 14)
         val bmp = render(bar)
-        // 正中一小块（避开左边头像/胶囊、右边图标/时钟）
+        // 第八十二轮：位置 + 天气**从中置挪到右侧图标行**（和蓝牙/信号/时钟在一起），
+        // 屏幕正中改放翻页指示圆点（那个在 PageDotsView 里，不在本 View）。
+        //
+        // 右侧：从「位置胶囊 + 天气胶囊」那一段量 ——
+        // 它紧挨着连接图标（蓝牙）的左边，右边界大约在 1545 附近。
+        val right = content(bmp, 1300, 30, 1545, 90)
+        assertTrue("右侧应该画着位置+天气，实际 $right", right > 0)
+        // 正中必须**空出来**（这里以前画的是位置+天气）
         val mid = content(bmp, 880, 30, 1060, 90)
-        assertTrue("状态栏中置段应有内容像素，实际 $mid", mid > 0)
-        // 正中往左一截（左半边是头像+胶囊，不该有这段内容）
+        assertEquals("状态栏正中没有位置/天气了，实际 $mid", 0, mid)
+        // 更左边（空白区）同样不能有
         val left = content(bmp, 620, 30, 780, 90)
-        assertTrue("中置段不该画到左边，实际 $left", left == 0)
+        assertEquals("位置/天气不该画到左边，实际 $left", 0, left)
     }
 
     @Test
@@ -135,7 +143,110 @@ class StatusBarLocationWeatherTest {
         bar.setLocationWeather("", "", null)
         val bmp = render(bar)
         assertEquals("", bar.locationText)
-        assertTrue(content(bmp, 880, 30, 1060, 90) > 0)
+        assertTrue(content(bmp, 1300, 30, 1545, 90) > 0)
+    }
+
+    // ---------------------------------------------------------------
+    // 第八十二轮：命中矩形必须与绘制一一对应
+    // ---------------------------------------------------------------
+
+    /**
+     * 点驾驶模式胶囊要能打开空调面板。
+     *
+     * **第八十二轮修掉的既有 bug**：以前位置/天气胶囊和驾驶模式胶囊
+     * **共用同一个 RectF**，而画顺序是「驾驶模式胶囊 → 位置胶囊 → 天气胶囊」，
+     * 所以那块 RectF 最后停在**天气胶囊**上：
+     * - 点驾驶模式胶囊 → `contains` 判的是天气胶囊的位置 → **点不开**；
+     * - 点天气胶囊 → **误开**空调面板。
+     *
+     * 现在三个胶囊各有各的矩形（头像 / 驾驶模式 / 位置 / 天气），
+     * 命中判定和绘制一一对应。
+     */
+    @Test
+    fun `点驾驶模式胶囊会触发回调`() {
+        val bar = newBar()
+        bar.setLocationWeather("北京市", "晴", 14)
+        var assist = 0
+        var avatar = 0
+        bar.onAssist = { assist++ }
+        bar.onAvatar = { avatar++ }
+        val bmp = render(bar)
+
+        // 驾驶模式胶囊在头像右边（x 81 起），这里取一个肯定落在它里面的点
+        var hitX = -1
+        for (x in 85..260) {
+            if (Color.red(bmp.getPixel(x, 38)) + Color.green(bmp.getPixel(x, 38)) +
+                Color.blue(bmp.getPixel(x, 38)) > 0
+            ) {
+                hitX = x
+                break
+            }
+        }
+        assertTrue("应该在驾驶模式胶囊上找到有内容的像素", hitX > 0)
+
+        tap(bar, hitX.toFloat(), 38f)
+        assertEquals("点驾驶模式胶囊应该触发 onAssist", 1, assist)
+        assertEquals("不应该误触发 onAvatar", 0, avatar)
+    }
+
+    /**
+     * 点右侧的位置/天气胶囊**不能**误开空调面板。
+     *
+     * 这条在旧代码下会挂：那时命中判定用的矩形停在天气胶囊上，
+     * 点天气胶囊正好会误触发 [ShellStatusBar.onAssist]。
+     */
+    @Test
+    fun `点右侧天气胶囊不会误触发驾驶模式回调`() {
+        val bar = newBar()
+        bar.setLocationWeather("北京市", "晴", 14)
+        var assist = 0
+        var avatar = 0
+        bar.onAssist = { assist++ }
+        bar.onAvatar = { avatar++ }
+        render(bar)
+
+        // 右侧图标行里的位置/天气胶囊（在连接图标左边、时钟更右边）
+        tap(bar, 1500f, 38f)
+        assertEquals("点天气胶囊不该开空调面板", 0, assist)
+        assertEquals("点天气胶囊不该触发行人", 0, avatar)
+    }
+
+    /**
+     * 超长城市名要**截断**，否则它会一路顶到状态栏正中的翻页圆点上。
+     *
+     * 背景：位置 + 天气是**从右往左**排的，城市名越长，位置胶囊的左边界越靠左。
+     * 模拟器的默认地名就有 26 个字符（`Redwood Valley-Potter Valley`），
+     * 真机上遇到更长的地名就可能压到圆点。
+     *
+     * 断言依据：翻页圆点的玻璃条占 x 916~1004（`PageDotsView`），
+     * 所以「位置胶囊的左边界必须 > 1050」（圆点右边还留 46px 间隙）。
+     */
+    @Test
+    fun `超长城市名会被截断且不挤到正中的圆点`() {
+        val bar = newBar()
+        bar.setLocationWeather("A".repeat(200), "晴", 14)
+        val bmp = render(bar)
+
+        // 从圆点右边开始往右找第一个有内容的像素 —— 那就是位置胶囊的左边界
+        var first = -1
+        for (x in 1005..1400) {
+            if (contentAt(bmp, x, 38)) {
+                first = x
+                break
+            }
+        }
+        assertTrue("应该能找到位置胶囊的左边界", first > 0)
+        assertTrue("位置胶囊不应该挤到正中的翻页圆点上，实际从 x=$first 开始", first > 1050)
+    }
+
+    /** 模拟一次点击（DOWN + UP）。 */
+    private fun tap(bar: ShellStatusBar, x: Float, y: Float) {
+        val down = MotionEvent.obtain(0L, 0L, MotionEvent.ACTION_DOWN, x, y, 0)
+        bar.dispatchTouchEvent(down)
+        down.recycle()
+        val up = MotionEvent.obtain(0L, 20L, MotionEvent.ACTION_UP, x, y, 0)
+        bar.dispatchTouchEvent(up)
+        up.recycle()
     }
 
     // ---------------------------------------------------------------

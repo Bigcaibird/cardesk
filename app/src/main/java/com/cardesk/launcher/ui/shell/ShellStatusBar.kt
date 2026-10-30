@@ -28,9 +28,12 @@ import java.util.Locale
  * 因此左右两段仍然对齐、内容基线整体上移。
  *
  * 左：36px 头像 + 29px 高"玻璃胶囊"（8px 状态点 + 13px 文案）。
- * 中：**位置 + 天气**（第四轮新增；状态栏没有这一段，是我们自加的）。
- * 右：蓝牙/热点/WiFi/信号 17×17 图标，燃油图标 16px + 13px 百分比，25px 时间。
+ * 右：蓝牙/热点/WiFi/信号 17×17 图标，燃油图标 16px + 13px 百分比，25px 时间，
+ *     **以及位置 + 天气两个胶囊**（第八十二轮从中置挪过来）。
  * 全部自绘，图标用 Path/圆角矩形近似（内部按 17×17 画，用 [drawIcon] 统一缩放）。
+ *
+ * **第八十二轮：状态栏正中空出来** —— 原先摆在中间的「位置 + 天气」挪到了右侧图标行，
+ * 正中改放**翻页指示圆点**（见 `PageDotsView`）。
  *
  * 第四十三轮曾整体缩小一档、第四十四轮按用户要求**恢复成原值**
  * 第五十二轮按用户要求**再缩到 2/3**（车机屏幕小，状态栏原来吃掉太多竖向空间）。
@@ -77,7 +80,7 @@ class ShellStatusBar(context: Context) : View(context) {
     // -------------------------------------------------- 位置 + 天气（第四轮新增）
 
     /**
-     * 状态栏中置的**位置**文案（城市名，来自天气/定位链路）。
+     * 状态栏右侧的**位置**文案（城市名，来自天气/定位链路）。
      *
      * 空串 = 还没拿到位置（画「位置获取中」）。
      */
@@ -180,7 +183,25 @@ class ShellStatusBar(context: Context) : View(context) {
     /** 顶部渐变遮罩（沉浸式）。 */
     private val scrimPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val avatarRect = RectF()
-    private val chipRect = RectF()
+
+    /**
+     * 驾驶模式胶囊的矩形。
+     *
+     * **第八十二轮：必须独立出来。**
+     * 以前位置/天气胶囊画在屏幕正中，和左侧的驾驶模式胶囊隔得很远，
+     * 所以「用同一个 RectF 复用」没暴露问题；现在天气胶囊挪到**右侧图标行**，
+     * 两者虽然还是分开的，但复用的那个 RectF 会被**最后画的那个胶囊覆盖**
+     * —— 点驾驶模式胶囊时 `contains` 判的是天气胶囊的位置，就再也点不开了。
+     * 命中判定和绘制用的矩形必须一一对应，所以拆成三个独立的。
+     */
+    private val assistRect = RectF()
+
+    /** 位置胶囊的矩形。 */
+    private val locRect = RectF()
+
+    /** 天气胶囊的矩形。 */
+    private val wxRect = RectF()
+
     private val tmp = RectF()
 
     private val avatarShader: Shader by lazy {
@@ -227,16 +248,16 @@ class ShellStatusBar(context: Context) : View(context) {
             it.textSize = CHIP_TEXT_SIZE
             it.color = Skin.TEXT
             val w = it.measureText(assistText)
-            chipRect.set(
+            assistRect.set(
                 chipX, top + (rowH - CHIP_H) / 2f,
                 chipX + CHIP_PAD_L + CHIP_DOT + CHIP_PAD_M + w + CHIP_PAD_R,
                 top + (rowH - CHIP_H) / 2f + CHIP_H,
             )
-            canvas.drawRoundRect(chipRect, CHIP_RADIUS, CHIP_RADIUS, chipPaint)
-            canvas.drawRoundRect(chipRect, CHIP_RADIUS, CHIP_RADIUS, chipStroke)
+            canvas.drawRoundRect(assistRect, CHIP_RADIUS, CHIP_RADIUS, chipPaint)
+            canvas.drawRoundRect(assistRect, CHIP_RADIUS, CHIP_RADIUS, chipStroke)
         }
-        val dotCx = chipRect.left + CHIP_PAD_L + CHIP_DOT / 2f
-        val dotCy = chipRect.centerY()
+        val dotCx = assistRect.left + CHIP_PAD_L + CHIP_DOT / 2f
+        val dotCy = assistRect.centerY()
         // 设计板：直径 12 的强调色实心圆（「光晕 + 内芯」双圈是旧版视觉）。
         canvas.drawCircle(dotCx, dotCy, CHIP_DOT / 2f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Skin.ACCENT })
         canvas.drawText(
@@ -245,9 +266,6 @@ class ShellStatusBar(context: Context) : View(context) {
             dotCy + CHIP_TEXT_SIZE / 3f,
             textPaint,
         )
-
-        // 中置：位置 + 天气（第四轮新增）
-        drawLocationWeather(canvas, cy = top + rowH / 2f)
 
         // 右侧图标行（从右往左排）
         val end = width - EDGE
@@ -274,6 +292,14 @@ class ShellStatusBar(context: Context) : View(context) {
         drawIcon(canvas, x - ICON, cy - ICON / 2f, ICON) { drawHotspot(it, 0f, 0f) }
         x -= ICON + ICON_GAP
         drawIcon(canvas, x - ICON, cy - ICON / 2f, ICON) { drawBluetooth(it, 0f, 0f) }
+        x -= ICON + ICON_GAP
+
+        // 第八十二轮：**位置 + 天气并入右侧图标行**（原来是单独中置的一段）。
+        //
+        // 为什么挪：状态栏正中这一行要放**翻页指示圆点**（第八十二轮同时改），
+        // 两段都摆正中会互相压住。挪到右侧后，中间的空出来正好给圆点，
+        // 右边的信息密度也更高 —— 时间在最右，地区/天气在连接图标左边。
+        x -= drawLocationWeather(canvas, cy, x)
     }
 
     /**
@@ -298,18 +324,22 @@ class ShellStatusBar(context: Context) : View(context) {
     }
 
     /**
-     * 中置的「位置 + 天气」段（第四轮新增）。
+     * 「位置 + 天气」段（第四轮新增，**第八十二轮挪到右侧图标行**）。
      *
-     * 状态栏只有左边（头像 + 驾驶模式胶囊）和
-     * 右边（连接图标 + 油量 + 时钟），中间是空的；这一段是我们自加的，
+     * 状态栏左右两边本来就有内容（左边头像 + 驾驶模式胶囊，右边连接图标 +
+     * 油量 + 时钟），中间这一段是我们自加的：
      * 位置取天气链路带回来的**城市名**，天气取同一个链路的**天气文案 + 温度**，
      * 所以状态栏和第一页天气卡显示的一定是同一份数据。
      *
-     * 整段**水平居中**（屏幕 1920 的正中），宽度随城市名长度变化。
+     * **第八十二轮的位置口径**：这一段不再水平居中，而是**并入右侧图标行**，
+     * 排在连接图标（蓝牙）的左边。原因是状态栏正中要留给**翻页指示圆点**。
+     * 段内顺序（从右往左）：天气胶囊 → 位置胶囊，与右侧整行的「右→左」一致。
      *
      * @param cy 状态栏这一行的中心 y
+     * @param rightX 这一段的**右边界**（左侧连接图标的左边）
+     * @return 这一段占用的宽度（调用方据此继续往左排）
      */
-    private fun drawLocationWeather(canvas: Canvas, cy: Float) {
+    private fun drawLocationWeather(canvas: Canvas, cy: Float, rightX: Float): Float {
         val hasLocation = locationText.isNotEmpty()
         val city = if (hasLocation) locationText else LOCATION_PENDING
         val temp = weatherTemp
@@ -325,30 +355,33 @@ class ShellStatusBar(context: Context) : View(context) {
         val cityW = locationPaint.measureText(city)
         val tempW = tempPaint.measureText(tempText)
 
+        // 第八十二轮：**城市名过长时截断**。
+        //
+        // 为什么：这一段是**从右往左**排的，城市名越长，位置胶囊的左边界越靠左 ——
+        // 而正中（第八十二轮起）摆着翻页指示圆点。地名一长就会顶到圆点上。
+        // 所以给位置胶囊一个宽度上限，超了就截断加省略号，
+        // 保证**这一段的左边界永远在圆点右边**。
+        val maxCityW = LOC_MAX_W - (PILL_PAD_X + PIN_W + PIN_GAP + PILL_PAD_X)
+        val cityText = if (cityW > maxCityW) clipEllipsis(city, maxCityW) else city
+        val cityWW = if (cityW > maxCityW) locationPaint.measureText(cityText) else cityW
+
         // 第四十九轮「浮屿」：**扁平分段胶囊行** ——
-        // 位置和天气各自一个圆角底板，两段之间留 10px 空档，整体仍然水平居中。
-        val locW = PILL_PAD_X + PIN_W + PIN_GAP + cityW + PILL_PAD_X
+        // 位置和天气各自一个圆角底板，两段之间留 10px 空档。
+        val locW = PILL_PAD_X + PIN_W + PIN_GAP + cityWW + PILL_PAD_X
         val wxW = PILL_PAD_X + WX_ICON_W + WX_ICON_GAP + tempW + PILL_PAD_X
         val total = locW + PILL_GAP + wxW
-        var x = (width - total) / 2f
+        var right = rightX
         val pillTop = cy - PILL_H / 2f
 
-        // ① 位置胶囊
-        chipRect.set(x, pillTop, x + locW, pillTop + PILL_H)
-        canvas.drawRoundRect(chipRect, PILL_RADIUS, PILL_RADIUS, chipPaint)
-        canvas.drawRoundRect(chipRect, PILL_RADIUS, PILL_RADIUS, chipStroke)
-        drawLocationPin(canvas, x + PILL_PAD_X + PIN_W / 2f, cy)
-        canvas.drawText(city, x + PILL_PAD_X + PIN_W + PIN_GAP, cy + LOCATION_TEXT_SIZE / 3f, locationPaint)
-        x += locW + PILL_GAP
-
-        // ② 天气胶囊
-        chipRect.set(x, pillTop, x + wxW, pillTop + PILL_H)
-        canvas.drawRoundRect(chipRect, PILL_RADIUS, PILL_RADIUS, chipPaint)
-        canvas.drawRoundRect(chipRect, PILL_RADIUS, PILL_RADIUS, chipStroke)
+        // ① 天气胶囊（这一段的右半，紧挨连接图标）
+        val wxLeft = right - wxW
+        wxRect.set(wxLeft, pillTop, right, pillTop + PILL_H)
+        canvas.drawRoundRect(wxRect, PILL_RADIUS, PILL_RADIUS, chipPaint)
+        canvas.drawRoundRect(wxRect, PILL_RADIUS, PILL_RADIUS, chipStroke)
         // 天气图标的图形是按 24×24 视觉框硬编码的（[WeatherGlyphs]），
         // 直接画会比设计板大一圈 —— 这里按 [WX_ICON_SIZE] / 24 等比缩放，
         // 描边也一起缩（传进去的是缩放前的值，缩放后正好落在 [WX_ICON_STROKE]）。
-        val wxCx = x + PILL_PAD_X + WX_ICON_W / 2f
+        val wxCx = wxLeft + PILL_PAD_X + WX_ICON_W / 2f
         canvas.save()
         canvas.scale(WX_ICON_SCALE, WX_ICON_SCALE, wxCx, cy)
         WeatherGlyphs.draw(
@@ -360,7 +393,32 @@ class ShellStatusBar(context: Context) : View(context) {
             WX_ICON_STROKE / WX_ICON_SCALE,
         )
         canvas.restore()
-        canvas.drawText(tempText, x + PILL_PAD_X + WX_ICON_W + WX_ICON_GAP, cy + TEMP_TEXT_SIZE / 3f, tempPaint)
+        canvas.drawText(tempText, wxLeft + PILL_PAD_X + WX_ICON_W + WX_ICON_GAP, cy + TEMP_TEXT_SIZE / 3f, tempPaint)
+        right = wxLeft - PILL_GAP
+
+        // ② 位置胶囊
+        val locLeft = right - locW
+        locRect.set(locLeft, pillTop, right, pillTop + PILL_H)
+        canvas.drawRoundRect(locRect, PILL_RADIUS, PILL_RADIUS, chipPaint)
+        canvas.drawRoundRect(locRect, PILL_RADIUS, PILL_RADIUS, chipStroke)
+        drawLocationPin(canvas, locLeft + PILL_PAD_X + PIN_W / 2f, cy)
+        canvas.drawText(cityText, locLeft + PILL_PAD_X + PIN_W + PIN_GAP, cy + LOCATION_TEXT_SIZE / 3f, locationPaint)
+
+        return total
+    }
+
+    /**
+     * 把文本截到不超过 [maxW]（超出部分用「…」收尾）。
+     *
+     * 与 `ScenePage.clipLabel` 同一套口径：**先按整串量，超了就一个字一个字地截**，
+     * 保证截完的宽度真的塞得进上限里。
+     */
+    private fun clipEllipsis(s: String, maxW: Float): String {
+        if (s.isEmpty()) return s
+        if (locationPaint.measureText(s) <= maxW) return s
+        var out = s
+        while (out.isNotEmpty() && locationPaint.measureText("$out…") > maxW) out = out.dropLast(1)
+        return "$out…"
     }
 
     /** 定位针（一个水滴形轮廓 + 中心点）。 */
@@ -442,7 +500,7 @@ class ShellStatusBar(context: Context) : View(context) {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 // 只有命中头像/胶囊才消费事件，其余位置放行给下层页面
-                downHit = avatarRect.contains(event.x, event.y) || chipRect.contains(event.x, event.y)
+                downHit = avatarRect.contains(event.x, event.y) || assistRect.contains(event.x, event.y)
                 return downHit
             }
             MotionEvent.ACTION_UP -> {
@@ -452,7 +510,7 @@ class ShellStatusBar(context: Context) : View(context) {
                         Logx.event(LogTags.DOCK, "状态栏头像点击")
                         onAvatar?.invoke()
                     }
-                    if (chipRect.contains(event.x, event.y)) {
+                    if (assistRect.contains(event.x, event.y)) {
                         Logx.event(LogTags.DOCK, "状态栏驾驶模式胶囊点击", "assist" to assistText)
                         onAssist?.invoke()
                     }
@@ -651,6 +709,19 @@ class ShellStatusBar(context: Context) : View(context) {
 
         /** 城市名与分隔点之间的间距。 */
         const val SEP_W = 17f
+
+        /**
+         * 位置胶囊的**最大宽度**（第八十二轮）。
+         *
+         * 位置 + 天气是**从右往左**排的，城市名越长，位置胶囊的左边界越靠左 ——
+         * 而状态栏正中（第八十二轮起）摆着翻页指示圆点，地名一长就会顶上去。
+         * 所以给一个宽度上限，超了就把地名截断加省略号。
+         *
+         * 取 300 的理由：按 [LOCATION_TEXT_SIZE] = 17 算，
+         * 中文大约 14 个字 / 英文大约 28 个字符 ——
+         * 正常城市名（「北京」「Shanghai」）远够不着这个上限，不会被截。
+         */
+        const val LOC_MAX_W = 300f
 
         /** 分隔点半径。 */
         const val SEP_DOT_R = 1.1f
