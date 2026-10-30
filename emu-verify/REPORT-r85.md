@@ -403,7 +403,99 @@ targetHue= 15.0°  hue= 15.7°
 
 ---
 
-## 7. 未能覆盖 / 待办
+## 7. 发布
+
+- 产物：`dist/CarDesk-ecarx-cardesk-4156.apk`，1,963,484 字节，
+  SHA-256 `e2d63ba8014514e4e84ceb460b531bf773c404d3228786e53d1288071b03e194`
+- 版本：`versionCode 4156` / `versionName 1.0.1060-system`
+- 干净全量构建（`clean assembleSystem testDebugUnitTest`）+ 1222 单测全绿
+- 提交 `f0707cb`（第八十五轮：红绿灯画反 + 氛围灯动感）已推 `origin/main`
+
+### 7.1 GitHub Release
+
+| 项 | 值 |
+|---|---|
+| 仓库 | `Bigcaibird/cardesk`（Public） |
+| Tag | `v1.0.1060`（= `versionCode 4156 - 3096`；本轮是**发布时新建** tag，不是复用已存在的 tag） |
+| Release 名称 | `CarDesk 4156 / 1.0.1060-system` |
+| 资产 | `CarDesk-ecarx-cardesk-4156.apk`（1,963,484 字节） |
+| SHA-256 | `e2d63ba8014514e4e84ceb460b531bf773c404d3228786e53d1288071b03e194` |
+| Release 标签 | `Latest`（非预发布） |
+| 发布提交 | `f0707cb` |
+| 发布时间 | `2026-10-30T13:05:54Z` |
+
+**API 回读核验**（`releases/tags/v1.0.1060` → 200）：
+
+```
+tag_name        : v1.0.1060
+name            : CarDesk 4156 / 1.0.1060-system
+draft           : False
+prerelease      : False
+target_commitish: main
+published_at    : 2026-10-30T13:05:54Z
+html_url        : https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1060
+body_head       : '**改动点**\r\n\r\n- 修红绿灯：官方标准协议改按 `trafficLight'
+asset           : CarDesk-ecarx-cardesk-4156.apk 1963484 bytes uploaded
+  digest        : sha256:e2d63ba8014514e4e84ceb460b531bf773c404d3228786e53d1288071b03e194
+releases/latest = v1.0.1060（与 tag release 同一个 id）
+```
+
+**同一个包，三处一致** —— 本地 `dist/`、GitHub 资产、GitHub 自算 digest，
+sha256 全是 `e2d63ba8…3e194`；再从 Release 的下载链接把包拉下来 `cmp`，
+**逐字节相同**（下载回来 1,963,484 字节，sha256 复算一致）。
+
+Release 正文只写改动点，不写实现细节（与用户要求一致）：
+
+```
+**改动点**
+
+- 修红绿灯：官方标准协议改按 `trafficLightStatus` 判灯态（`1`=红 / `4`=绿），读秒跟着灯态走 —— 绿灯不再被画成红灯
+- 氛围灯：颜色不再「跳」而是「流」—— 色相最短路径 + 限速平滑，亮度快起慢落，低频起拍再叠一下脉冲
+- 修氛围灯色相恒定不变：频谱采集点数 512 → 1024（512 点下低频四段会塌进同一个 FFT bin，色相永远是 0°）
+- 修氛围灯重启后不亮：开关状态以前只写不读，桌面/车机重启后采集与写灯根本没启动
+- 氛围灯加逐帧日志（目标色相 / 平滑后色相 / 亮度），并新增模拟器取证脚本
+```
+
+---
+
+## 8. 这一轮新踩的 GitHub 发布坑
+
+1. **会话压缩后旧的 ref 全部失效，得重新 inspect** ——
+   本轮是从压缩恢复的，第一件事就是重新 `inspect` 取当前 ref；
+   压缩前记下的 `browser-element:8-…` 拿去用，`upload_files` 直接报
+   `STALE_ELEMENT_REF: Browser target expired`。
+2. **Tag 面板里的「Create」按钮 ref 会指到 markdown 工具栏上** ——
+   `Create new tag` 面板打开后，DOM 里那个 `Create` 按钮的 rect（x=413,y=466）
+   正好压在 markdown 工具栏「Unordered list」按钮（x=433,y=469）上，
+   按 ref 点击**落到了「无序列表」**（动作后的自动截图里能看到 tooltip）。
+   ⇒ **tag 面板里的按钮别按 ref 点**。本轮的正确做法是：填完 tag 名后
+   **不再点面板的 Create** —— 面板上那句「v1.0.1060 will be created on publish」
+   已经说明 tag 选中了，直接点「Publish release」即可（GitHub 在发布时建 tag）。
+3. **`upload_files` 报 `browser_action_failed`，文件其实已经挂上了**（老坑又踩一次）——
+   报错后页面 URL 从 `releases/new` 变成
+   `releases/edit/untagged-69f27a382702bf1fb3c1`（草稿自动落成），
+   资产行 `data-state="uploaded"`、`id=692130430`、大小 `(1.87 MB)`、
+   文件名 `CarDesk-ecarx-cardesk-4156.apk`。⇒ 别重传。
+4. **资产行的 `input.js-release-asset-filename` 的 `value=` 仍然是空字符串** ——
+   文件名写在 `delete-pending` 那个 `role=status` 里的
+   `span.js-release-asset-filename`。要判断「资产在不在」，
+   看 `ul.uploaded-files li[data-state="uploaded"]` 的
+   `.js-release-asset-filesize`（`(1.87 MB)`）和 asset id，别看 `value=`。
+5. **发布按钮的 `click` 这轮报 `UNEXPECTED_NAVIGATION`（换了种报错）** ——
+   `click` + `selector: button.btn-primary[type="submit"]` 返回
+   「Ordinary click changed the active Browser page unexpectedly」，
+   同时 `navigation.urlChanged: true`、`generation: 3`。
+   **这其实是发布成功的正常表现**：紧接着 `query(kind="text")` 已经在
+   `/releases/tag/v1.0.1060` 页面，读到了正文 5 条改动点、资产名和 digest。
+   判成败依旧一律看 API。
+6. **想验证资产名，`query(kind="semantic", text=文件名)` 不好使** ——
+   它把大半个表单都算成匹配项，payload 巨大且没直接给出资产行。
+   `query(kind="dom", selector="[class*=\"asset\"]")` 一次就拿到整个
+   `ul.uploaded-files`，最省事。
+
+---
+
+## 9. 未能覆盖 / 待办
 
 - **红绿灯枚举建议真车复核一次**：官方协议 `trafficLightStatus` 的取值
   1=红 / 4=绿是从**高德自己的代码**里查出来的（语音模块 + 语音设置项文案，
