@@ -231,6 +231,18 @@ object OnlineLyricCatalog {
                 val perProvider = HashMap<String, Int>()
                 var tried = 0
                 val fetchStart = System.currentTimeMillis()
+                // 第八十一轮：优先选**带逐字时间**的歌词。
+                //
+                // 先记下第一个能用的（可能只有行级时间），
+                // 再到**同一层级**（= 同一个版本）里找带逐字的那份，
+                // 找到后把逐字数据**按行首时间戳贴到**第一份上 ——
+                // 只补逐字，不换歌词正文、不换行数 ⇒ 对显示零风险。
+                //
+                // 为什么不能直接换成带逐字的那一份：歌词正文/分段各家可能不同
+                // （实测网易云 62 行、QQ / 酷狗 54 行），
+                // 换一份就等于换了个分段版式 —— 那是另一个改动，不该顺手做。
+                var fallback: Hit? = null
+                var fallbackTier: MatchTier? = null
                 for (item in ordered) {
                     if (tried >= MAX_FETCH_TRY) break
                     if (System.currentTimeMillis() - fetchStart > FETCH_BUDGET_MS) {
@@ -272,14 +284,42 @@ object OnlineLyricCatalog {
                         "gotTitle" to c.title, "gotArtist" to c.artist,
                         "sourceDurationMs" to c.durationMs,
                         "lines" to lrc.lines.size,
+                        // 第八十一轮：这份带不带逐字时间
+                        "wordTiming" to lrc.hasWordTiming,
                     )
                     val hit = Hit(
                         item.provider.name, c.title, c.artist, c.durationMs, lrc, item.scored.score,
                     )
-                    main.post { deliver(hit) }
+                    if (fallback == null) {
+                        fallback = hit
+                        fallbackTier = item.scored.tier
+                        if (lrc.hasWordTiming) {
+                            main.post { deliver(hit) }
+                            return@execute
+                        }
+                        continue
+                    }
+                    // 已经有第一份了：只在**同一层级**（同一个版本）里补逐字，
+                    // 且只问**能给逐字**的渠道（别把请求浪费在给不出的渠道上）。
+                    if (item.scored.tier != fallbackTier) break
+                    if (!item.provider.canProvideWordTiming) continue
+                    if (!lrc.hasWordTiming) continue
+                    val merged = LyricTimeline(LyricWordTiming.mergeWords(fallback.lrc.lines, lrc.lines))
+                    if (!merged.hasWordTiming) continue
+                    Logx.i(
+                        LogTags.MEDIA, "歌词补上逐字时间",
+                        "baseProvider" to fallback.provider,
+                        "wordProvider" to item.provider.name,
+                        "wordLines" to merged.lines.count { it.words.isNotEmpty() },
+                    )
+                    val mergedHit = Hit(
+                        fallback.provider, fallback.title, fallback.artist, fallback.durationMs,
+                        merged, fallback.score,
+                    )
+                    main.post { deliver(mergedHit) }
                     return@execute
                 }
-                main.post { deliver(null) }
+                main.post { deliver(fallback) }
             }
         }
 
@@ -391,6 +431,17 @@ object OnlineLyricCatalog {
     private interface Provider {
         /** 渠道名（写日志用，便于在真机日志里区分 QQ / 网易 / 酷狗 三路结果）。 */
         val name: String
+
+        /**
+         * 这家渠道**能不能给逐字时间**（第八十一轮）。
+         *
+         * 目前只有酷狗能（`fmt=krc` 解密后带逐字），
+         * 网易云 / QQ 的网页接口实测只给明文 LRC。
+         *
+         * 取词循环靠它决定「要不要为了逐字数据再多试一家」——
+         * 免得为了找逐字数据把请求次数浪费在给不出的渠道上。
+         */
+        val canProvideWordTiming: Boolean get() = false
 
         /** 搜索候选歌（：三家都取 10 条）。 */
         fun search(title: String, artist: String): List<LyricCandidate>
@@ -585,6 +636,9 @@ object OnlineLyricCatalog {
     private object KugouProvider : Provider {
         override val name: String = "kugou"
 
+        /** 酷狗能给逐字时间（KRC 解密后带逐字）。 */
+        override val canProvideWordTiming: Boolean = true
+
         override fun search(title: String, artist: String): List<LyricCandidate> {
             // pagesize=10 + userid=-1 + platform=WebFilter
             val search = http(
@@ -620,6 +674,29 @@ object OnlineLyricCatalog {
             val id = JsonLite.str(cand, "id")
             val accessKey = JsonLite.str(cand, "accesskey")
             if (id.isEmpty() || accessKey.isEmpty()) return null
+            // ① 逐字：KRC（第八十一轮）
+            //
+            // `fmt=krc` 返回的是**加密**的 KRC（base64 + 异或 + zlib），
+            // 解密后每行带 `<相对行首偏移,时长,0>` 的逐字片段 ——
+            // 这是目前唯一实测能拿到逐字时间的在线通道。
+            val krcJson = http(
+                "https://lyrics.kugou.com/download?ver=1&client=pc&id=${enc(id)}" +
+                    "&accesskey=${enc(accessKey)}&fmt=krc&charset=utf8",
+                referer = "https://www.kugou.com/",
+            )
+            val krcLines = KugouKrc.parse(KugouKrc.decrypt(JsonLite.str(JsonLite.parseObject(krcJson), "content")))
+            if (krcLines.isNotEmpty()) {
+                val timeline = LyricTimeline(krcLines)
+                if (!timeline.isEmpty) {
+                    Logx.i(
+                        LogTags.MEDIA, "酷狗 KRC 逐字歌词命中",
+                        "lines" to timeline.lines.size,
+                        "wordLines" to timeline.lines.count { it.words.isNotEmpty() },
+                    )
+                    return timeline
+                }
+            }
+            // ② 回退：明文 LRC（这首歌没有 KRC，或者解密失败）
             val download = http(
                 "https://lyrics.kugou.com/download?ver=1&client=pc&id=${enc(id)}" +
                     "&accesskey=${enc(accessKey)}&fmt=lrc&charset=utf8",

@@ -2,6 +2,7 @@ package com.cardesk.launcher.core.media
 
 import android.os.Handler
 import android.os.Looper
+import com.cardesk.launcher.core.JsonLite
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import java.io.ByteArrayOutputStream
@@ -48,6 +49,13 @@ object KugouLyricFetcher {
         "http://mobilecdn.kugou.com/api/v3/search/song?keyword=%s&page=1&pagesize=5"
 
     const val LYRIC_URL = "http://m.kugou.com/app/i/krc.php?cmd=100&hash=%s&timelength=999999"
+
+    /**
+     * 酷狗**逐字歌词**（KRC）的歌词候选接口：hash → `id` + `accesskey`。
+     *
+     * 第八十一轮新增：`download?fmt=krc` 要用这两个参数。
+     */
+    const val KRC_SEARCH_URL = "https://lyrics.kugou.com/search?ver=1&man=yes&client=pc&hash=%s"
 
     /** 搜索结果里文件 hash 的固定长度。 */
     private const val HASH_LEN = 32
@@ -113,6 +121,22 @@ object KugouLyricFetcher {
             Logx.i(LogTags.MEDIA, "酷狗兜底失败：没找到匹配的文件 hash", "title" to title)
             return null
         }
+        // ① 逐字：KRC（第八十一轮）
+        //
+        // 目前唯一实测能拿到逐字时间的在线通道：`lyrics.kugou.com/download?fmt=krc`
+        // 返回的是**加密**的 KRC（base64 + 异或 + zlib），解密后每行带逐字片段。
+        // 拿不到（这首歌没有 KRC / 解密失败）就回退明文 LRC。
+        val krcLines = fetchKrcLines(hash)
+        if (krcLines != null && krcLines.isNotEmpty()) {
+            Logx.i(
+                LogTags.MEDIA, "酷狗兜底命中（KRC 逐字）",
+                "lines" to krcLines.size,
+                "wordLines" to krcLines.count { it.words.isNotEmpty() },
+                "hash" to hash,
+            )
+            return krcLines
+        }
+        // ② 回退：明文 LRC
         val raw = httpGet(LYRIC_URL.replace("%s", hash)) ?: run {
             Logx.i(LogTags.MEDIA, "酷狗兜底失败：歌词下载无响应", "hash" to hash)
             return null
@@ -128,6 +152,27 @@ object KugouLyricFetcher {
         }
         Logx.i(LogTags.MEDIA, "酷狗兜底命中", "lines" to lines.size, "hash" to hash)
         return lines
+    }
+
+    /**
+     * 取逐字歌词（KRC）。
+     *
+     * 流程：hash → 歌词候选（`id` + `accesskey`）→ 下载 `fmt=krc` → 解密 → 解析。
+     * 任何一步失败都返回 null（调用方回退明文 LRC）。
+     */
+    private fun fetchKrcLines(hash: String): List<LyricLine>? {
+        val search = httpGet(KRC_SEARCH_URL.replace("%s", encode(hash))) ?: return null
+        val root = JsonLite.parseObject(search) ?: return null
+        val cand = (root["candidates"] as? List<*>)?.firstOrNull() as? Map<String, Any?> ?: return null
+        val id = JsonLite.str(cand, "id")
+        val accessKey = JsonLite.str(cand, "accesskey")
+        if (id.isEmpty() || accessKey.isEmpty()) return null
+        val download = httpGet(
+            "https://lyrics.kugou.com/download?ver=1&client=pc&id=${encode(id)}" +
+                "&accesskey=${encode(accessKey)}&fmt=krc&charset=utf8",
+        ) ?: return null
+        val content = JsonLite.str(JsonLite.parseObject(download), "content")
+        return KugouKrc.parse(KugouKrc.decrypt(content))
     }
 
     /**

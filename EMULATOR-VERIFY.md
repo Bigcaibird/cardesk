@@ -48,6 +48,20 @@ python3 tools/traffic_shot.py green 8     # → r80-traffic-green.png + -zoom.pn
 > ③ `ps -A` 只显示进程名（脚本都叫 `sh`），清脚本必须用 `ps -ef` 按 PID 杀。
 > 详见 `emu-verify/REPORT-r80.md` 第 1.3 节。
 
+**逐字擦除这类「随时间变化」的效果**同理：设计板（静态重绘）根本看不出擦除边界落在哪，
+所以第八十一轮加了 `tools/lyric_shot.py` —— 把播放位置**钉死在某个毫秒**再截图，
+同一个位置可以反复截、也可以和旧包 A/B 对比：
+
+```bash
+# 钉到 103497ms（歌手已唱完这一句、但下一句还没开始的时刻）并截图 + 裁歌词区
+python3 tools/lyric_shot.py at 103497 r81-new-103497
+#   → emu-verify/r81-new-103497.png        全屏
+#   → emu-verify/r81-new-103497-lyric.png  歌词区放大 2 倍
+```
+
+> 钉位置的办法：媒体探针（`com.cardesk.mediaprobe`）用 `--es position <ms> --es play false`
+> 注入 MediaSession —— **暂停态位置是冻结的**，所以擦除进度也冻结，截图可复现。
+
 **推荐用 ecarx 平台镜像**（`emulator-5554`，android-10 / API 29）：预装 `com.ecarx.*` 与高德 YH，
 `com.ecarx.cardesk` 是**平台签名 + uid 1000**，车控链路（`AdaptapiGateway`）是**真链路**。
 
@@ -165,6 +179,23 @@ python3 tools/traffic_shot.py green 8     # → r80-traffic-green.png + -zoom.pn
 | H28 | 广播脚本互不打架 | `ps -ef \| grep broadcast` | 抓图前后**只有一个**广播脚本在跑 | ⚠️ 第七十九轮残留的红灯脚本活到 00:41，把绿灯盖成红 |
 | H29 | 清脚本用 `ps -ef` | `ps -A` 的 NAME 列 | 脚本进程名都叫 `sh`，必须用 `ps -ef` / `ps -A -o PID,ARGS` 才看得到参数 | ✅ 已固化进 `tools/traffic_shot.py`（按 PID kill） |
 | H30 | 灯态与图一致 | 脚本自动判定这一帧是红是绿 | 红灯帧红像素 > 0、绿灯帧红像素 = 0 | ✅ 红 1836 / 绿 0（`tools/traffic_shot.py` 会打印） |
+
+## H4. 第八十一轮新增（歌词逐字擦除）
+
+被测包：`dist/CarDesk-ecarx-cardesk-4145.apk`（修前）/ `-4146.apk`（修后）；
+设备：`emulator-5554`（AVD `cardesk-aosp`，android-10 / API 29 / 1920×1080@160dpi）。
+完整报告见 `emu-verify/REPORT-r81.md`。
+
+| # | 项 | 操作 | 期望 | 结果 |
+|---|---|---|---|---|
+| H31 | 逐字歌词取到 | 媒体探针注入 `怎么我睡不着你也不来救我` / 焦迈奇 | logcat 出现 `酷狗 KRC 逐字歌词命中`，且 `wordLines` = 总行数 | ✅ `lines=54 wordLines=54`；`wordTiming=true` |
+| H32 | 擦除随演唱推进 | 钉到 101000ms 截图 | 擦除边界落在**正在唱的那个字**上（不是全行/全暗） | ✅ 逐字 64.6%，边界卡在第 9 个字「不」中间（`r81-new-101000-lyric.png`） |
+| H33 | **歌手唱完当场满格** | 钉到 103497ms（末字 103197ms 结束，下一句 120588ms 才开始） | 整行全亮（100%）；旧包只有 23% | ✅ 新包全亮（`r81-new-103497-lyric.png`）；❌ 旧包「怎么我」三个字亮（`r81-old-103497-lyric.png`） |
+| H34 | 无逐字数据不倒退 | 无网络的歌 / 明文 LRC | 仍走行级线性（与原厂公式一致） | ✅ 单测 `lrcParser_plainLrcFallsBackToLineLevel` |
+| H35 | 判不出来就丢 | 语义判不出的 `<n,n,n>` | **不挂词**、回退行级，绝不瞎挂 | ✅ 单测 `attach_keepsNothingWhenAmbiguous` |
+| H36 | 不闪退 | 连续播放 + 反复换位置 | pid 不变；无 `Fatal signal`；tombstone 不新增 | ✅ pid 3108 → 3108，无崩溃 |
+| H37 | 正式包复验 | 装 `dist/CarDesk-ecarx-cardesk-4146.apk` 重截 | 与开发包一致 | ✅ `r81-release-103497-lyric.png` 全亮 |
+| H38 | 定位要能复现 | 同一毫秒反复截图 | 暂停态位置冻结 ⇒ 擦除进度冻结 | ✅ `tools/lyric_shot.py at <ms> <name>` |
 
 ## I. 稳定性
 

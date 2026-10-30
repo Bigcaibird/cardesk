@@ -63,8 +63,19 @@ data class TrackInfo(
     val playerCurrentLine: String = "",
 )
 
-/** 一行歌词及其时间戳（ms）。 */
-data class LyricLine(val timeMs: Long, val text: String)
+/**
+ * 一行歌词及其时间戳（ms）。
+ *
+ * @param words **逐字时间**（空 = 这行没有逐字数据，擦除回退行级线性）。
+ *   第八十一轮新增：行级线性擦除把「擦完」绑死在「下一行开始」上，
+ *   歌手提前唱完时高亮还在半路 ⇒ 用户看到的「这句还没擦完就跳下一句」。
+ *   有逐字时间就按字推进（见 [wipeFractionByWord]）。
+ */
+data class LyricLine(
+    val timeMs: Long,
+    val text: String,
+    val words: List<LyricWord> = emptyList(),
+)
 
 /**
  * 歌词时间轴：给定播放位置算出「当前行 / 上一行 / 下一行 / 当前行擦除比例」。
@@ -94,6 +105,14 @@ class LyricTimeline(val lines: List<LyricLine>) {
     fun lineAt(index: Int): String = lines.getOrNull(index)?.text.orEmpty()
 
     /**
+     * 这份时间轴里**有没有逐字时间**。
+     *
+     * 第八十一轮新增：取词渠道竞速时，「带逐字数据的候选」优先 ——
+     * 逐字擦除比行级线性准得多（歌手唱完当场到 100%）。
+     */
+    val hasWordTiming: Boolean get() = lines.any { it.words.isNotEmpty() }
+
+    /**
      * 复制一份时间轴，把第 [index] 行的文字换成 [text]。
      *
      * ## 为什么要「复制」而不是直接改
@@ -119,9 +138,17 @@ class LyricTimeline(val lines: List<LyricLine>) {
      *
      * 末行的跨度取**剩余时长**（曲目总长），总长不可用时退化为 +5000ms
      *
+     * ## 第八十一轮：优先按**逐字**推进
+     *
+     * 这一行带逐字时间（[LyricLine.words] 非空）时走 [wipeFractionByWord]：
+     * 按「唱完的字数 + 当前字的部分进度」算，擦除边界跟着**实际演唱**走。
+     *
+     * 没有逐字时间时才是行级线性 —— **与原厂 APK 的
+     * `MusicManager.computeLineWipeFraction` 公式完全一致**，不猜、不倒退。
      */
     fun wipeFraction(positionMs: Long, index: Int, durationMs: Long = 0L): Float {
         val line = lines.getOrNull(index) ?: return 0f
+        if (line.words.isNotEmpty()) return line.wipeFractionByWord(positionMs)
         var end = lines.getOrNull(index + 1)?.timeMs ?: durationMs
         if (end <= line.timeMs) end = line.timeMs + 5000L
         val span = (end - line.timeMs).coerceAtLeast(1L)
@@ -140,17 +167,32 @@ class LyricTimeline(val lines: List<LyricLine>) {
  * `java
  * Pattern.compile("\\[(\\d{2}):(\\d{2})(\\.(\\d{1,3}))?\\](.+)")
  *     matcher(str
- *         replaceAll("<\\d+,\\d+,\\d+>", "") // ① 剥掉逐字时间标签
- *         replaceAll("\\[(id|ti|ar|al|by|offset|total|hash|sign|qq|language):.*?\\]", "")) // ② 剥掉元数据标签
+ *         replaceAll("\\\\[(id|ti|ar|al|by|offset|total|hash|sign|qq|language):.*?\\]", "") // ① 剥掉元数据标签
  * `
  *
- * - ① QQ 音乐 / 网易的 LRC 行首会带 `<起始毫秒,结束毫秒,时长毫秒>` 这种**逐字时间标签**，
- *   直接**删掉**；我们之前没删，歌词正文前面就带着 `<0,0,0>` 这种垃圾。
- * - ②把 `[offset:...]` 当**元数据标签删掉**，**不把偏移量算进时间戳**
+ * - ① 把 `[offset:...]` 当**元数据标签删掉**，**不把偏移量算进时间戳**
  *   我们之前是**把 offset 加到时间戳上** —— 歌词整体前后平移几秒，
  *   表现就是「歌词跟唱对不上」。**这一条就是不同步的根因之一。**
  *
- * 这里照口径改：剥掉 `<n,n,n>`、剥掉元数据标签（**含 offset**，不参与时间戳计算）。
+ * 这里照口径改：剥掉元数据标签（**含 offset**，不参与时间戳计算）。
+ *
+ * ## 第八十一轮：`<n,n,n>` **不再直接剥掉**
+ *
+ * 以前这里是 `replaceAll("<\\d+,\\d+,\\d+>", "")` —— 把行首的逐字时间标签
+ * 当垃圾删掉。现在**保留**它，交给 [LyricWordTiming]：
+ *
+ * - 标签在**时间戳之后**、且行首就是标签 ⇒ 按**逐字片段**切
+ *   （切不出映射就当垃圾删掉，行为与旧版一致）；
+ * - 切出来的片段交给 [LyricWordTiming.attach] 做**语义自校准**
+ *   （绝对 / 相对行首两种口径，按全篇数据投票定，判不出来就丢弃、回退行级）。
+ *
+ * 动机：第八十一轮用户反馈「**一句歌词还没擦除完就到下一句**」——
+ * 行级线性擦除把「唱完」绑死在「下一行开始」上，只有拿到逐字时间才修得动。
+ *
+ * ## 另一条逐字通道：酷狗 KRC
+ *
+ * KRC 是**另一种格式**（`[行首,行时长]<相对行首偏移,时长,0>文字`），
+ * 语义有权威来源 ⇒ 走**独立解析器** [KugouKrc]，不经过这里的自校准。
  */
 object LrcParser {
 
@@ -165,15 +207,22 @@ object LrcParser {
 
     fun parse(raw: String?): LyricTimeline {
         if (raw.isNullOrBlank()) return LyricTimeline(emptyList())
-        // ① 剥掉逐字时间标签 ② 剥掉元数据标签（含 offset，口径：**不应用偏移**）
-        val cleaned = META_TAG.replace(WORD_TAG.replace(raw, ""), "")
-        val out = ArrayList<LyricLine>(64)
+        // ① 剥掉元数据标签（含 offset，口径：**不应用偏移**）
+        // ② 逐字时间标签**不再直接剥掉** —— 第八十一轮起要拿它做逐字擦除，
+        //    语义由 [LyricWordTiming] 用数据自证（详见那里的 KDoc）。
+        val cleaned = META_TAG.replace(raw, "")
+        // 行与它的逐字片段要**成对**排序，所以先存 pair。
+        val pairs = ArrayList<Pair<LyricLine, LyricWordTiming.Parsed?>>(64)
         for (line in cleaned.split('\n')) {
             val trimmed = line.trim()
             if (trimmed.isEmpty()) continue
             val matches = TIME_TAG.findAll(trimmed).toList()
             if (matches.isEmpty()) continue
-            val text = trimmed.substring(matches.last().range.last + 1).trim()
+            val body = trimmed.substring(matches.last().range.last + 1).trim()
+            if (body.isEmpty()) continue
+            // 能切出逐字片段就用它；切不出来（没有标签 / 标签前有正文）就把标签当垃圾去掉。
+            val parsed = LyricWordTiming.split(body)
+            val text = parsed?.text ?: body.replace(WORD_TAG, "").trim()
             if (text.isEmpty()) continue
             for (m in matches) {
                 val min = m.groupValues[1].toLongOrNull() ?: continue
@@ -185,11 +234,13 @@ object LrcParser {
                     2 -> fracRaw.toLong() * 10
                     else -> fracRaw.take(3).toLong()
                 }
-                out.add(LyricLine(min * 60_000 + sec * 1000 + frac, text))
+                pairs.add(LyricLine(min * 60_000 + sec * 1000 + frac, text) to parsed)
             }
         }
-        out.sortBy { it.timeMs }
-        return LyricTimeline(out)
+        pairs.sortBy { it.first.timeMs }
+        val sortedLines = pairs.map { it.first }
+        val sortedParsed = pairs.map { it.second }
+        return LyricTimeline(LyricWordTiming.attach(sortedLines, sortedParsed))
     }
 }
 
