@@ -254,6 +254,19 @@ adb logcat -d | grep -E "手势：单指横滑翻页|切页 "
 | H53 | 已是最新分支 | 再点一次「检查更新」 | 「已是最新版本」 | ✅ `检查更新：已是最新 current=1.0.1052-system latest=1.0.1052`（`r83-already-latest.png`） |
 | H54 | 不闪退 | 全程 | 无 FATAL | ✅ `Fatal signal` / `FATAL EXCEPTION` 计数 0 |
 
+### H6.2 第八十三轮续：**真 R2 终验**（公开自定义域，交付前）
+
+4149 的 APK 与清单已上传到 R2（bucket `file`），下面这条是**从公网**跑的真实链路：
+装一个同源的 4148 构建（源码与 4149 相同，只有版本号不同），让它去查真实的
+`https://file.chuxi.bid/cardesk/latest.json`。
+
+| # | 项 | 操作 | 期望 | 结果 |
+|---|---|---|---|---|
+| H55 | 公开域可读 | `curl` 两个对象 | 清单 200、APK 200 且字节一致 | ✅ 清单 590 B；APK 1,941,656 B，`sha256 a09894ad…c7423a`，与本地包逐字节一致 |
+| H56 | **真域名查更新** | 4148 包点「检查更新」 | 走 `file.chuxi.bid` 认出新版本 | ✅ `url=https://file.chuxi.bid/cardesk/latest.json`；`检查更新：有新版本 current=1.0.1052-system latest=1.0.1053` |
+| H57 | **公网下载 + 校验 + 安装** | 点「下载并更新」 | 下载、校验、静默安装全过 | ✅ `更新下载完成 … bytes=1941656 elapsedMs=8369`；设备变 4149 / `1.0.1053-system`；设备 `base.apk` 的 sha256 与线上、本地三方一致 |
+| H58 | 装完确实是新包 | 打开设置 → 在线更新 | 「更新源」显示 R2 | ✅ `Cloudflare R2 · file.chuxi.bid`（`r83-r2-installed-4149.png`）；复检「已是最新」 |
+
 证据：`emu-verify/r83-*.png`、`emu-verify/update-r2-log.txt`。
 
 ## I. 稳定性

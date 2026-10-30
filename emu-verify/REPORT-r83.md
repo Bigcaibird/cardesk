@@ -180,6 +180,46 @@ https://file.chuxi.bid/cardesk/latest.json
 `Fatal signal` / `FATAL EXCEPTION` 计数 0；安装过程中 App 被自己的包替换杀掉是正常现象
 （PackageInstaller 换包会重启进程），装完 `versionCode` 确实变了。
 
+### 6.4 真 R2 终验（交付前，公开自定义域）
+
+拿到凭据后把 4149 的 APK 与清单传上 R2（bucket `file`），然后**从公开域名**再验一遍。
+
+**上传**（`tools/publish_r2.py`，上传后自动回读校验）：
+
+```
+== 上传成功：cardesk/CarDesk-ecarx-cardesk-4149.apk
+== 回读一致：1941656 字节，sha256 a09894ad776c37604a5188edfe3242df016f8b009d4a8c447380126d32c7423a
+== 上传成功：cardesk/latest.json
+== 回读一致：590 字节，sha256 e4fb9327c2fff6358ca9d5f6f5499a52dbfa5f09c7073517f0cdbd9b6020992c
+```
+
+**公开域可读**（`curl` 实测，不带任何凭据）：
+
+```
+GET https://file.chuxi.bid/cardesk/latest.json          → 200，590 字节，内容与本地清单一致
+GET https://file.chuxi.bid/cardesk/CarDesk-ecarx-cardesk-4149.apk
+     → 200，1941656 字节，Content-Type: application/vnd.android.package-archive
+     → sha256 a09894ad…c7423a（与本地包逐字节一致）
+```
+
+**模拟器走真域名做一次完整升级**：装一个**同源**的 4148 构建
+（`-PcardeskVersionCode=4148`，源码与 4149 完全相同，只有版本号不同），
+它检查的就是真实 R2：
+
+| # | 项 | 结果 |
+|---|---|---|
+| — | 清单地址 | ✅ `url=https://file.chuxi.bid/cardesk/latest.json` |
+| — | 认出新版本 | ✅ `检查更新：有新版本 current=1.0.1052-system latest=1.0.1053 apk=CarDesk-ecarx-cardesk-4149.apk` |
+| — | 下载地址是公开域 | ✅ `https://file.chuxi.bid/cardesk/CarDesk-ecarx-cardesk-4149.apk` |
+| — | 下载 + 长度 + SHA-256 校验 | ✅ `更新下载完成 file=cardesk-update-1.0.1053.apk bytes=1941656 elapsedMs=8369`（公网 8.4 秒） |
+| — | 静默安装生效 | ✅ 设备上 `versionCode=4149` / `1.0.1053-system` |
+| — | **装上去的包字节一致** | ✅ 设备 `base.apk` 的 sha256 = `a09894ad…c7423a`，与线上、与本地三方一致 |
+| — | 已是最新分支 | ✅ `检查更新：已是最新 current=1.0.1053-system latest=1.0.1053` |
+| — | 装完的新包确实换了源 | ✅ 设置页「更新源」显示 `Cloudflare R2 · file.chuxi.bid`（`r83-r2-installed-4149.png`） |
+| — | 不闪退 | ✅ `Fatal signal` / `FATAL EXCEPTION` 计数 **0** |
+
+证据：`emu-verify/r83-r2-*.png`、`emu-verify/update-r2-log.txt`。
+
 ---
 
 ## 7. 发布
@@ -190,15 +230,26 @@ https://file.chuxi.bid/cardesk/latest.json
 - 清单：`dist/cardesk-latest.json`（出包时自动生成）
 - 干净全量构建（`clean assembleSystem testDebugUnitTest`）+ 1172 单测全绿
 
-> GitHub 发布与 R2 上传的实测结果见本文件后续小节。
+### 7.1 R2（**更新检查真正依赖的那一份**）
+
+| 对象 | key | 大小 | 状态 |
+|---|---|---|---|
+| 更新清单 | `cardesk/latest.json` | 590 B | ✅ 已上传，回读一致 |
+| 安装包 | `cardesk/CarDesk-ecarx-cardesk-4149.apk` | 1,941,656 B | ✅ 已上传，回读一致 |
+
+访问地址：`https://file.chuxi.bid/cardesk/latest.json`（公开只读，无需凭据）。
+
+### 7.2 GitHub Release（源码与 tag 的分发渠道）
+
+GitHub Release 继续发，但**不再承担 App 的更新检查** ——
+App 从这一版起只读 R2。
 
 ---
 
 ## 8. 未能覆盖 / 待办
 
-- **真 R2 终验**依赖 Secret Access Key；拿到后要跑一遍「模拟器里拉
-  `file.chuxi.bid/cardesk/latest.json` → 认版本 → 下载 → 校验 → 安装」。
 - **真车实测**：车机能不能访问 `file.chuxi.bid`（域名解析、TLS 证书链、国内网络），
-  模拟器验证不了，只能上真车。
+  模拟器验证不了，只能上真车。模拟器测得公网下载 1.9 MB 用时 **8.4 秒**（未计车机网络差异）。
 - **旧 GitHub Release 链路已下线**：App 不再读 GitHub。
   仓库的 GitHub Release 继续作为源码 / tag 的分发渠道，但**不再承担更新检查**。
+- **R2 凭据轮换**：上传用的 S3 密钥是长期凭据，建议只在发布机上用；换密钥不影响已发布内容。
