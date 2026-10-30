@@ -201,3 +201,49 @@ x1806-1891  时钟
 | 三指横滑 | `adb shell input` 不支持多指注入，只能靠代码审查（`ACTION_POINTER_DOWN` 的多指作废逻辑已核对） |
 | 右缘竖滑 | 同上（未改逻辑） |
 | 真车触控手感 | 模拟器是鼠标注入，没有真车的触摸采样率与惯性 |
+
+---
+
+## 7. 发布
+
+| 项 | 值 |
+|---|---|
+| 仓库 | `Bigcaibird/cardesk`（Public） |
+| Tag | `v1.0.1052`（= `versionCode 4148 - 3096`） |
+| Release 名称 | `CarDesk 4148 / 1.0.1052-system` |
+| 资产 | `CarDesk-ecarx-cardesk-4148.apk`（1,941,768 字节） |
+| SHA-256 | `b9a4ed58f19c9f4476c5a79b77bdd890aa32f4c8d5464144143daf7cd0dc56b9` |
+| 提交 | `758218f` |
+
+**API 回读核验**（`releases/tags/v1.0.1052` → 200）：
+
+```
+tag_name      : v1.0.1052
+name          : CarDesk 4148 / 1.0.1052-system
+draft         : False
+prerelease    : False
+target_commit : main
+asset         : CarDesk-ecarx-cardesk-4148.apk 1941768 bytes
+               digest sha256:b9a4ed58…dc56b9
+releases/latest = v1.0.1052（draft=False / prerelease=False）
+```
+
+**线上包与本地包 `cmp` 逐字节一致**（下载 → SHA-256 → cmp 三项全中）。
+
+### 7.1 这一轮新踩的 GitHub 发布坑
+
+1. **`upload_files` 报 `browser_action_failed`，但文件其实已经挂上了** ——
+   报错后页面跳到了 `releases/edit/untagged-145fb0aa1b8667be3ebf`（草稿自动落成），
+   资产行已经出现（文件名输入框 + `(1.85 MB)` + Remove 按钮，且字段名是
+   `release[release_assets_attributes][][name]` ⇒ 已经是 release asset，不是待上传队列）。
+   **别急着重传**，先查附件挂上没有。
+2. **草稿里的标题是空的** —— 页面跳转后服务端渲染的 `input#release_name` **没有 value 属性**，
+   说明「fill + Tab」的值没被草稿带走（`fill` 只改 DOM property，GitHub 只认自己的 change 事件）。
+   判据：`query(kind=dom, selector="input#release_name")` 看返回的 outerHTML 里有没有 `value=`。
+   这次是在草稿页**重新填了一次标题**才发布成功的。
+   （`textarea#release_body` 的正文反而留住了 —— 但稳妥起见同样重填了一遍。）
+3. **已经在草稿 edit 页时，点一次 `Publish release` 就直接发布成功**，不需要点第二次
+   （「要点两次」是「从 `releases/new` 新建页」时的行为）。
+4. 发布按钮用 `click` + `selector: button.btn-primary[type="submit"]` 可靠
+   （「Save draft」也是 `type=submit`，但 class 是 `btn js-save-draft`，不会误命中）。
+   点击后必然跳页（`UNEXPECTED_NAVIGATION`），**这在发布场景下是预期结果**，别当成失败重试。
