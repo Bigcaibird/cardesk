@@ -145,23 +145,89 @@ class TransportIntentTest {
 
     // ------------------------------------------- 意图窗口 + 实测滞后的仲裁（force）
 
-    /** force 只越过 already-satisfied；no-action 是硬闸门，force 也不能放行。 */
+    /**
+     * 第八十八轮语义：唯一被跳过的是「实测已满足」；**缺少 action 位不再静默**。
+     *
+     * 真车教训：车机音乐（`com.tencent.wecarflow`）的 `PlaybackState` 常常不声明
+     * `ACTION_PLAY`，第八十七轮的硬闸门把用户明确按下的播放整条吞掉 → 「按播放没反应」。
+     */
     @Test
-    fun shouldDispatch_forceOverridesSatisfiedButNeverNoAction() {
+    fun shouldDispatch_onlyAlreadySatisfiedIsSkipped() {
         val satisfied = TransportIntent.decide(TransportIntent.STATE_PLAYING, true, toggleActions)
         assertEquals(TransportIntent.REASON_ALREADY_SATISFIED, satisfied.reason)
         assertFalse("不加 force 时已满足不下发", TransportIntent.shouldDispatch(satisfied, false))
         assertTrue("force 越过已满足", TransportIntent.shouldDispatch(satisfied, true))
 
-        // 播放器连能力位都没有：force 也不许下发（否则回到无条件发全局键的老路）
+        // 播放器没声明能力位：命令照发（用户明确按了键，且走的是定向通道）
         val noAction = TransportIntent.decide(TransportIntent.STATE_PLAYING, false, 0L)
         assertEquals(TransportIntent.REASON_NO_ACTION, noAction.reason)
-        assertFalse(TransportIntent.shouldDispatch(noAction, true))
+        assertTrue("缺 action 位不再吞掉用户操作", TransportIntent.shouldDispatch(noAction, false))
+        assertTrue(TransportIntent.shouldDispatch(noAction, true))
 
         // 正常需要下发的，force 与否都一样
         val send = TransportIntent.decide(TransportIntent.STATE_PAUSED, true, toggleActions)
         assertTrue(TransportIntent.shouldDispatch(send, false))
         assertTrue(TransportIntent.shouldDispatch(send, true))
+    }
+
+    // ------------------------------------------- 第八十八轮：以界面显示态为切换基准
+
+    /**
+     * 真车核心场景：暂停后会话 `PlaybackState` 仍报 PLAYING（`stop()` 落地晚），
+     * 此时按「播放」必须以界面为准翻成播放，并且强推越过 `already-satisfied`。
+     */
+    @Test
+    fun toggleFromDisplayed_staleSessionStillResumes() {
+        val t = TransportIntent.toggleFromDisplayed(
+            displayedPlaying = false,
+            observedPlaying = true,
+            userIntentAtMs = 1_000L,
+            nowMs = 30_000L, // 意图窗口早已过期
+        )
+        assertFalse(t.coalesced)
+        assertTrue("按播放必须翻成播放，而不是再发一次暂停", t.desiredPlaying)
+        assertTrue("实测等于目标态 → 必须强推", t.force)
+        val decision = TransportIntent.decide(TransportIntent.STATE_PLAYING, t.desiredPlaying, toggleActions)
+        assertEquals(TransportIntent.REASON_ALREADY_SATISFIED, decision.reason)
+        assertTrue("强推后仍然下发", TransportIntent.shouldDispatch(decision, t.force))
+    }
+
+    /** 界面与实测一致时就是普通翻转，不需要 force。 */
+    @Test
+    fun toggleFromDisplayed_normalFlipDoesNotForce() {
+        val toPause = TransportIntent.toggleFromDisplayed(true, true, 0L, 5_000L)
+        assertFalse(toPause.coalesced)
+        assertFalse(toPause.desiredPlaying)
+        assertFalse(toPause.force)
+
+        val toPlay = TransportIntent.toggleFromDisplayed(false, false, 0L, 5_000L)
+        assertFalse(toPlay.coalesced)
+        assertTrue(toPlay.desiredPlaying)
+        assertFalse(toPlay.force)
+    }
+
+    /** 800ms 内的重复触摸不翻转（沿用界面当前态），边界值 800 算连点、801 算新按键。 */
+    @Test
+    fun toggleFromDisplayed_windowCoalescesRepeatTaps() {
+        val inside = TransportIntent.toggleFromDisplayed(false, false, 1_000L, 1_500L)
+        assertTrue(inside.coalesced)
+        assertFalse(inside.desiredPlaying)
+        assertFalse(inside.force)
+
+        assertTrue(TransportIntent.toggleFromDisplayed(false, false, 1_000L, 1_800L).coalesced)
+        assertFalse(TransportIntent.toggleFromDisplayed(false, false, 1_000L, 1_801L).coalesced)
+    }
+
+    /** 从没下发过（`0`）/ 时钟倒退：都按「新按键」处理。 */
+    @Test
+    fun toggleFromDisplayed_neverSentOrClockBackwardsFlips() {
+        val never = TransportIntent.toggleFromDisplayed(true, true, 0L, 100L)
+        assertFalse(never.coalesced)
+        assertFalse(never.desiredPlaying)
+
+        val backwards = TransportIntent.toggleFromDisplayed(true, true, 2_000L, 1_000L)
+        assertFalse(backwards.coalesced)
+        assertFalse(backwards.desiredPlaying)
     }
 
     /**

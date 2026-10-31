@@ -1563,29 +1563,31 @@ class MusicSessionTracker private constructor() {
         // `isPlaying || state == PLAYING(3) || state == BUFFERING(6)` 都算「在放」→ 按下就是暂停。
         // 之前只看 PLAYING，缓冲中(6)会被误判成「暂停中」→ 按下反而是继续播放。
         val observedPlaying = TransportIntent.isObservedPlaying(state)
-        val observedPaused = state == PlaybackState.STATE_PAUSED ||
-            state == PlaybackState.STATE_STOPPED ||
-            state == PlaybackState.STATE_NONE
-        // 断点续播：暂停期间会话可能还没把状态报上来，用「用户意图」修正实测值
-        val resolved = resolvePlaying(observedPlaying, observedPaused)
-        // 第八十七轮：连点仲裁 —— 800ms 内连点不再翻转（UNI setPlaying 的幂等语义）
-        val desired = TransportIntent.nextToggleTarget(
-            currentPlaying = resolved,
+        // 第八十八轮：切换基准是**界面显示态**，不是会话实测态。
+        // 真车回归：暂停下发的是 stop()，界面立刻变暂停，但会话 PlaybackState 可能长时间
+        // 仍报 PLAYING；以实测为基准会把「按播放」算成「再暂停一次」，于是永远恢复不了。
+        val displayed = current?.playing ?: observedPlaying
+        val toggle = TransportIntent.toggleFromDisplayed(
+            displayedPlaying = displayed,
+            observedPlaying = observedPlaying,
             userIntentAtMs = userTransportIntentAt,
             nowMs = System.currentTimeMillis(),
         )
-        // 上一次命令可能还在路上（意图窗口内、实测值没跟上）：此时若用户拨向**反方向**，
-        // 必须强制下发，否则 setPlaying 会拿落后的实测值判「已满足」而吞掉这次翻转。
-        // 方向没变则不强推 —— 连点重复下发同一条命令只会给播放器加负担。
-        val intentPending = hasUserTransportIntent()
-        val force = intentPending && userTransportIntentPlaying != desired
+        if (toggle.coalesced) {
+            Logx.i(
+                LogTags.MEDIA, "播放/暂停指令（连点仲裁）：不下发",
+                "pkg" to c.packageName, "state" to state,
+                "displayed" to displayed, "observed" to observedPlaying,
+            )
+            return
+        }
         Logx.i(
             LogTags.MEDIA, "播放/暂停指令（切换）",
             "pkg" to c.packageName, "state" to state,
-            "observedPlaying" to observedPlaying, "resolved" to resolved,
-            "desired" to desired, "force" to force,
+            "displayed" to displayed, "observed" to observedPlaying,
+            "desired" to toggle.desiredPlaying, "force" to toggle.force,
         )
-        setPlaying(desired, force)
+        setPlaying(toggle.desiredPlaying, toggle.force)
     }
 
     /**
@@ -1606,10 +1608,10 @@ class MusicSessionTracker private constructor() {
      * 见 [MediaButtonTransport] 的说明。
      *
      * @param desired true = 播放，false = 暂停
-     * @param force 仅用于「上一次命令还在路上，用户又拨向了反方向」：
+     * @param force 仅用于「界面态与会话实测态冲突」：
      *   此时只信实测值会把这次翻转吞掉（见下方 [TransportIntent.REASON_ALREADY_SATISFIED] 说明），
-     *   故允许越过「已满足」判定。**不会越过「无 action 位」** —— 不支持的播放器照样不下发。
-     * @return 是否真的下发了控制命令；false = 已满足 / 播放器不支持 / 没有会话且无需动作
+     *   故允许越过「已满足」判定。第八十八轮起**不再**用 action 位当闸门（见 [TransportIntent.shouldDispatch]）。
+     * @return 是否真的下发了控制命令；false = 已满足 / 没有会话且无需动作
      */
     fun setPlaying(desired: Boolean, force: Boolean = false): Boolean {
         val c = controller
@@ -1637,12 +1639,15 @@ class MusicSessionTracker private constructor() {
         // actions 为 0 时按 flags 补「有效 action 位」，否则幂等决策会一直判 no-action
         val actions = MediaButtonTransport.effectiveActions(pkg, rawActions, flags)
         val decision = TransportIntent.decide(state, desired, actions)
-        // 第八十七轮 · 意图窗口内的「方向翻转」不能被实测值吞掉：
+        // 第八十八轮 · 意图窗口内的「方向翻转」不能被实测值吞掉：
         // 按下暂停后会话上报有延迟（实测仍是 PLAYING），此刻用户再按播放，若只信实测
         // 就会判 already-satisfied 不下发；可那条 pause 其实已经在路上 → 最终停在暂停，
         // 与用户最后一次操作相反（pause/pause/play 三次连点最容易复现）。
-        // 所以 force 只越过 already-satisfied，**不越过 no-action**：不支持指令的播放器
-        // 依旧静默返回，避免又回到「无条件发全局键」的老路。
+        //
+        // 第八十八轮同时移除了「no-action 一律不下发」这条闸门：车机音乐
+        // （com.tencent.wecarflow）的 PlaybackState 经常不声明 ACTION_PLAY、甚至 actions==0，
+        // 老闸门会把用户明确按下的播放整条吞掉（真车日志里只剩一条「不下发」）。
+        // 现在缺 action 位只记一条 W 日志，命令照发 —— 发的是定向通道，最多被对方忽略。
         val send = TransportIntent.shouldDispatch(decision, force)
         if (!send) {
             Logx.i(
@@ -1652,6 +1657,13 @@ class MusicSessionTracker private constructor() {
                 "reason" to decision.reason,
             )
             return false
+        }
+        if (decision.reason == TransportIntent.REASON_NO_ACTION) {
+            Logx.w(
+                LogTags.MEDIA, "播放/暂停指令：播放器未声明动作位，仍按用户意图下发",
+                "pkg" to pkg, "desired" to desired, "state" to state,
+                "actions" to rawActions, "buttons" to buttons, "transport" to transport,
+            )
         }
         Logx.i(
             LogTags.MEDIA, "播放/暂停指令（幂等）",
@@ -1926,33 +1938,47 @@ class MusicSessionTracker private constructor() {
      */
     private fun playTransport(c: MediaController) {
         val pkg = c.packageName
-        val dmt = isDmtPkg(pkg)
         runCatching { c.transportControls.play() }
             .onFailure { Logx.w(LogTags.MEDIA, "播放下发失败", it, "pkg" to pkg) }
-        if (!dmt) return
-        Logx.i(LogTags.MEDIA, "车机多媒体播放：补发媒体按键", "pkg" to pkg)
-        // 1) AudioManager 媒体按键（KEYCODE_MEDIA_PLAY = 126，幂等键，不会误触「切换」）
-        dispatchMediaKey(KeyEvent.KEYCODE_MEDIA_PLAY, "车机多媒体补发")
-        // 2) 定向 MEDIA_BUTTON 广播
-        //    只在 isAiqutingPkg（wecarflow/aiquting/qqmusictv）时才发这一路
-        if (isAiqutingPkg(pkg)) {
-            sendOrderedMediaButton(pkg, KeyEvent.KEYCODE_MEDIA_PLAY)
-        }
-        // 3)两个兜底重试（400ms / 1000ms）
-        main.postDelayed({ retryDmtResume(c, "dmt-resume+400") }, DMT_RESUME_RETRY_MS)
-        main.postDelayed({ retryDmtResume(c, "dmt-resume+1000") }, DMT_RESUME_RETRY_MS * 2)
+        if (!isDmtPkg(pkg)) return
+        // 只有先走唯一一条正常通道，状态没起来才升级（见 KDoc）
+        Logx.i(LogTags.MEDIA, "车机多媒体播放：transport 已下发，等待状态确认", "pkg" to pkg)
+        main.postDelayed({ escalateDmtResume(c, 1) }, DMT_RESUME_RETRY_MS)
+        main.postDelayed({ escalateDmtResume(c, 2) }, DMT_RESUME_RETRY_MS * 2)
     }
 
-    /** 播放兜底重试（`RunnableC0766q4(this, 3/4)` → `tryResumeDmtPlayback`）。 */
-    private fun retryDmtResume(c: MediaController, reason: String) {
+    /**
+     * 播放兜底（第八十八轮：阶梯升级，取代旧的 `retryDmtResume` 全量重发）。
+     *
+     * ## 为什么改（真车会话消失）
+     *
+     * 第八十七轮对车机多媒体是一次性齐发「transport.play() + 全局 MEDIA_PLAY 键 +
+     * 定向 MEDIA_BUTTON 广播 + 400ms/1000ms 两轮全量重试」。真车日志
+     * （`cardesk-logs-20261024-150545`）里 `com.tencent.wecarflow` 报 playing=true 之后
+     * 1 秒内会话整体消失（候选只剩 bluetooth），与代码注释记录过的「多发一路定向广播
+     * 把会话搞没」事故同型。UNI 的 `MediaAdapter.command` 只有 `transportControls`
+     * 一条通道（只有网易云才走 `dispatchMediaButtonEvent`），这也是本轮要向它对齐的地方。
+     *
+     * 于是改成：+400ms 仍未 PLAYING → 补一路全局幂等 PLAY 键；
+     * +1000ms 仍未 PLAYING → 再补一路，`isAiqutingPkg`（wecarflow 一类）才追加定向广播。
+     *
+     * @param step 1 = 第一级兜底，2 = 第二级兜底
+     */
+    private fun escalateDmtResume(c: MediaController, step: Int) {
         if (controller?.packageName != c.packageName) return
         val state = c.playbackState?.state ?: PlaybackState.STATE_NONE
-        if (state == PlaybackState.STATE_PLAYING) return
-        Logx.i(LogTags.MEDIA, "车机多媒体播放兜底重试", "pkg" to c.packageName, "reason" to reason)
+        if (TransportIntent.isObservedPlaying(state)) {
+            Logx.i(LogTags.MEDIA, "车机多媒体播放：状态已恢复，不再升级", "pkg" to c.packageName)
+            return
+        }
+        Logx.i(
+            LogTags.MEDIA, "车机多媒体播放兜底（$step/2）",
+            "pkg" to c.packageName, "state" to state,
+        )
         runCatching { c.transportControls.play() }
             .onFailure { Logx.w(LogTags.MEDIA, "播放兜底下发失败", it, "pkg" to c.packageName) }
-        dispatchMediaKey(KeyEvent.KEYCODE_MEDIA_PLAY, "车机多媒体兜底")
-        if (isAiqutingPkg(c.packageName)) {
+        dispatchMediaKey(KeyEvent.KEYCODE_MEDIA_PLAY, "车机多媒体兜底($step/2)")
+        if (step >= 2 && isAiqutingPkg(c.packageName)) {
             sendOrderedMediaButton(c.packageName, KeyEvent.KEYCODE_MEDIA_PLAY)
         }
     }

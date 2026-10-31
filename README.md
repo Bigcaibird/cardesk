@@ -239,10 +239,11 @@ pull 下来用 `jadx` 反编译，结论有两处互相印证：
   `decide(观察到的播放态, 期望态, 可用 actions)` 给出 `send/reason`，
   **已经满足就不下发**（`already-satisfied`），日志里能直接看到
   `播放/暂停指令（幂等）：不下发` 以及 `desired/state/force/actions/buttons/transport`；
-- 用户意图有 800ms 窗口（`nextToggleTarget`）：连点两次 = 回到原状态，但**只发两条**，
+- 用户意图有 800ms 窗口（第八十七轮 `nextToggleTarget`，第八十八轮改由
+  `toggleFromDisplayed` 承担）：连点两次 = 回到原状态，但**只发两条**，
   不会因为观察态滞后而互相抵消成「一次都不发」或多发一条；
-- `force` 只越过 `already-satisfied`，**不越过**「播放器不支持该动作」——
-  再急也不能往不支持 pause 的会话上硬发。
+- `force` 只越过 `already-satisfied`；**第八十八轮起 `no-action` 也不再被闸门吞掉**
+  （见下面第 6 条：真车上这条闸门直接把用户按下的播放丢掉了）。
 
 ### 2. 原厂音源「实现了回调但没 setActions()」的补位
 
@@ -285,6 +286,60 @@ pull 下来用 `jadx` 反编译，结论有两处互相印证：
 - 网易云只认 `com.netease.cloudmusic.iot` 这一个包名；
 - 「没有会话时 `setPlaying(true)`」会走定向唤醒 + 拉起音乐 App，返回 true 只代表
   「命令发出去了」，**不保证真的响**（这是媒体会话本身的边界，不是本项目的 bug）。
+
+### 6. 第八十八轮：**「暂停后按播放恢复不了」的真车修复**
+
+用户真车反馈（领克 dcy11 / Android 9 / 播放器 `com.tencent.wecarflow` 爱趣听）：
+按下播放键「没反应」，只能重新点开音乐 App。日志与代码对照后是**两条叠加**的坏逻辑，
+都是第八十七轮那次「幂等化」留下的：
+
+- **坏逻辑 A：切换基准取了会话实测态，而会话状态滞后于界面。**
+  我们暂停下发的是 `stop()`，界面（乐观 UI）立刻变暂停，但会话 `PlaybackState`
+  要过几百毫秒才变、真车上甚至一直停在 `PLAYING`。于是「按播放」时
+  以实测为基准算出的目标态**还是暂停**（`desired=false`）→ 又发一条暂停 →
+  永远恢复不了。日志特征：两次 `播放/暂停指令` 的目标态都是 `to=false`。
+- **坏逻辑 B：`no-action` 闸门把用户的播放整条吞掉。**
+  爱趣听这类会话经常**不声明** `ACTION_PLAY`，甚至 `actions == 0`、flags 也没有 →
+  `decide()` 判 `no-action` → 闸门返回「不下发」→ 一个字节都没发出去。
+  日志特征：只有 `播放/暂停指令（幂等）：不下发`，没有任何后续下发记录。
+  第八十七轮之前是无条件下发，所以老日志里反而「能恢复」。
+
+修法（`core/media/TransportIntent.kt` + `MusicSessionTracker.kt`）：
+
+- **切换基准改成「界面显示态」**（`toggleFromDisplayed`）：界面就是用户刚看到并
+  据此按下的那个状态，取反即目标态；会话实测只用来判断会不会被 `already-satisfied`
+  吞掉 —— 一致就 `force=true` 强推（`setPlaying` 允许越过 `already-satisfied`）。
+  连点仲裁沿用 800ms 窗口。
+- **`shouldDispatch` 不再拦 `no-action`**：action 位只作参考，用户明确按了键就必须发；
+  我们下发的是**定向**通道（选中会话的 `transportControls` / 网易云定向按键），
+  发错了顶多被对方忽略，不会像全局 `MEDIA_BUTTON` 广播那样误伤别的 App。
+- **全局 Dock 的播放键改走 `playPause()`**：原来它自己算 `!playing` 再 `setPlaying`，
+  `force` 恒 false，最容易被「已满足」吞掉；现在桌面和全局 Dock 是同一条路径。
+- **DMT（爱趣听/车机多媒体）恢复改成阶梯升级**：t=0 只 `transportControls.play()`，
+  +400ms 仍未恢复才补一次全局 `KEYCODE_MEDIA_PLAY`，+1000ms 再补一次
+  （且只有爱趣听才加定向广播）。真车日志里「恢复瞬间 wecarflow 会话整体消失」
+  就是一次性齐发 transport + 全局键 + 定向广播造成的，参考工程 UNI 只用 transport 一条通道。
+
+模拟器可复现（`media-probe` 新增两个真车缺陷模式参数）：
+
+```bash
+# A：会话状态滞后 60s 仍报 PLAYING（暂停后按播放）
+adb shell am start -n com.cardesk.mediaprobe/.MainActivity \
+  --es title 海阔天空 --es artist Beyond --es play true --es lag 60000
+# B：不声明 action 位（按播放被闸门吞掉）
+adb shell am start -n com.cardesk.mediaprobe/.MainActivity \
+  --es play false --es actions none
+```
+
+实测日志（验证包 `com.cardesk.r88verify`，2026-10-31）：
+
+```
+# A：暂停（会话仍报 PLAYING）→ 等窗口过期 → 按播放，目标态 force=true 强推
+播放/暂停指令（切换） pkg=… state=3 displayed=false observed=true desired=true force=true
+播放/暂停指令（幂等） pkg=… desired=true state=3 from=false reason=already-satisfied force=true
+# B：actions=0 / flags 在时补位下发（不再「不下发」）
+播放/暂停指令（幂等） pkg=… desired=true state=2 from=false reason=send-play force=false actions=0
+```
 
 ## 在线更新（Cloudflare R2）
 

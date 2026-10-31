@@ -405,17 +405,21 @@ class GlobalDockService : Service() {
     /**
      * 播放 / 暂停。
      *
-     * 用 media 工作流新加的**幂等** `setPlaying(desired)`，不是 `playPause()`
-     * 的「切换」语义：全局 Dock 的播放键可能被连点（车机上很常见），
-     * 「切换」在连点时会互相抵消，界面和目标态对不上。
+     * **第八十八轮：改走 [MusicController.playPause]**，不再自己算 `!playing` 再
+     * `setPlaying(...)`。原因：
+     * 1. 桌面（HOME）的播放键走的也是 `playPause()`，两条路径算法不一致就会出现
+     *    「桌面上能恢复、全局 Dock 上恢复不了」这种差异；
+     * 2. 原实现 `setPlaying(!playing)` 的 `force` 恒为 false，一旦会话实测态与界面态
+     *    不一致就会被幂等闸门判「已满足」吞掉（真车表现就是「按播放没反应」）。
+     * 统一的 `playPause()` 内部以**界面显示态**为切换基准，实测冲突时强推。
      */
     private fun togglePlayback() {
         val controller = runCatching { MusicController.get() }.getOrNull() ?: return
         val playing = controller.track?.playing == true
-        val sent = runCatching { controller.setPlaying(!playing) }.getOrDefault(false)
-        Logx.event(LogTags.DOCK, "全局 Dock 播放键", "playing" to !playing, "sent" to sent)
+        runCatching { controller.playPause() }
+            .onFailure { Logx.w(LogTags.DOCK, "全局 Dock 播放键下发失败", it) }
+        Logx.event(LogTags.DOCK, "全局 Dock 播放键", "wasPlaying" to playing)
         dock?.refreshFromController()
-        if (!sent && controller.track == null) toast("没有正在播放的媒体")
     }
 
     /**
