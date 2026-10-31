@@ -243,13 +243,44 @@ distinct=6   回跳=无（单调：一路往下走）
 ## 6. 改动清单与发布
 
 - 干净全量构建（`clean assembleSystem testDebugUnitTest`）+ **1236 单测全绿**；
+- 提交 `0385247`「第八十六轮：红绿灯读秒锯齿（3↔2 来回跳）+ 真车取证探针」已推 `origin/main`；
 - 产物：`dist/CarDesk-ecarx-cardesk-4157.apk`
   - `com.ecarx.cardesk` / versionCode **4157** / versionName **1.0.1061-system**
   - 1,964,472 B
   - SHA-256 `2bc9301bb4a87d8516e6e9782145ce45e244bc6fe717f82781f71d74c1782de3`
 - R2 更新清单：`dist/cardesk-latest.json`，对象 key `cardesk/CarDesk-ecarx-cardesk-4157.apk`
 
-> GitHub Release 的发布与 API 回读核验见提交记录（`§7` 在提交后补）。
+### 6.1 GitHub Release：**表单已备好，但用户选择「先不发布」**
+
+浏览器里（github.com / Bigcaibird，仓库 `Bigcaibird/cardesk`）的
+「New release」表单已经按下面的内容填好并**上传了 APK 附件**：
+
+| 项 | 值 |
+|---|---|
+| Tag | `v1.0.1061`（新建，Target `main` ⇒ 提交 `0385247`） |
+| 标题 | `CarDesk 4157 / 1.0.1061-system` |
+| 正文 | 只写改动点的 4 条（读秒锯齿 / 读秒状态机 / `rawRed`·`rawGreen` 取证日志 / 取证脚本） |
+| 附件 | `CarDesk-ecarx-cardesk-4157.apk`（1.87 MB） |
+| Release label | Latest（非预发布、非草稿） |
+
+> **用户在被问到「确认发布吗」时选择了「先不发布，保持表单不动」**，
+> 所以**没有点 Publish**，页面上这一版 Release **并不存在**（不会出现在 Releases 列表里）。
+> 表单内容原样保留在浏览器标签页里，用户改主意时点一下 Publish 即可。
+
+### 6.2 R2 上传：**本轮没做**（凭据不在我这边）
+
+R2 的 Access Key / Secret 只从环境变量读，而当前环境里**没有** R2 相关环境变量，
+所以本轮**没有上传** `cardesk/CarDesk-ecarx-cardesk-4157.apk` 与 `cardesk/latest.json`。
+需要用户在自己的终端执行（与上一轮同一套流程）：
+
+```bash
+python3 tools/publish_r2.py \
+  cardesk/CarDesk-ecarx-cardesk-4157.apk \
+  cardesk/latest.json
+python3 tools/publish_apks.py     # 挂上云端应用库
+```
+
+> 在 R2 更新之前，车机上的「在线更新 → 检查更新」仍然只会看到上一版 4156。
 
 ---
 
