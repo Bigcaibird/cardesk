@@ -1,6 +1,7 @@
 package com.cardesk.launcher
 
 import android.app.Activity
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.os.Process
@@ -8,6 +9,7 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Toast
+import com.cardesk.launcher.core.dock.GlobalDockService
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.core.media.NotificationAccess
@@ -95,6 +97,10 @@ class MainActivity : Activity() {
         // 恢复上次开着的氛围灯（排在录音权限检查之后 —— 采集要权限）。
         launcher.removeCallbacks(ambientRestore)
         launcher.postDelayed(ambientRestore, AMBIENT_RESTORE_DELAY_MS)
+        // 全局 Dock（第八十七轮）：从「通知栏/开机广播/别的入口」带动作拉起的桌面，
+        // 先把动作排进消息队列（此时 launcher 还没完成布局），再确保服务在跑。
+        handleGlobalDockIntent(intent)
+        ensureGlobalDockStarted()
     }
 
     /**
@@ -233,11 +239,56 @@ class MainActivity : Activity() {
         // 从系统「应用权限」页返回时也再判一次定位。
         launcher.removeCallbacks(locationCheck)
         launcher.postDelayed(locationCheck, LOCATION_CHECK_DELAY_MS)
+        // 全局 Dock（第八十七轮）：桌面在前台 → 全局窗口隐身。
+        // 用自家 Activity 的生命周期做前台判定，**不申请** REAL_GET_TASKS
+        // （那要多一个系统权限，而且车机上拿不到）。
+        GlobalDockService.onHomeForeground(true)
+        // 用户可能刚在系统设置里授了悬浮窗权限（pageDock 引导跳转），
+        // 回到桌面时补一次启动；没有开关 / 没授权时 ensureStarted 自己会退。
+        ensureGlobalDockStarted()
+        // 授权 / 开关状态可能变了：重算「其它应用的沉浸策略」。
+        runCatching { launcher.syncGlobalDockPolicy() }
+            .onFailure { Logx.w(LogTags.DOCK, "同步全局 Dock 策略失败", it) }
     }
 
     override fun onPause() {
         Logx.i(LogTags.APP, "onPause")
+        // 桌面退到后台 → 全局窗口该出来了（别的应用现在是前台）。
+        GlobalDockService.onHomeForeground(false)
         super.onPause()
+    }
+
+    /**
+     * `singleTask` 的桌面已经活着时，从全局 Dock / 通知栏带动作拉起来走这里。
+     */
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleGlobalDockIntent(intent)
+    }
+
+    /**
+     * 把 [EXTRA_ACTION] 转给 [LauncherView.handleGlobalDockAction]。
+     *
+     * 为什么要 `post`：`onNewIntent` 可能在 `onPause→onResume` 之前到达，
+     * 那时抽屉 / 空调浮层的容器状态还没稳；排到消息队列末尾保证
+     * 「桌面已经在前台且完成一帧」后再动页面，动画才不会跳。
+     */
+    private fun handleGlobalDockIntent(intent: Intent?) {
+        val action = intent?.getStringExtra(EXTRA_ACTION) ?: return
+        // 动作是一次性的：同一个 Intent 再被系统复用时不该重复执行。
+        runCatching { intent.removeExtra(EXTRA_ACTION) }
+        Logx.event(LogTags.DOCK, "全局 Dock 带回桌面动作", "action" to action)
+        if (!::launcher.isInitialized) return
+        launcher.post {
+            runCatching { launcher.handleGlobalDockAction(action) }
+                .onFailure { Logx.w(LogTags.DOCK, "全局 Dock 动作执行失败", it, "action" to action) }
+        }
+    }
+
+    private fun ensureGlobalDockStarted() {
+        runCatching { GlobalDockService.ensureStarted(applicationContext) }
+            .onFailure { Logx.w(LogTags.DOCK, "拉起全局 Dock 失败", it) }
     }
 
     override fun onDestroy() {
@@ -340,7 +391,37 @@ class MainActivity : Activity() {
         return super.dispatchKeyEvent(event)
     }
 
-    private companion object {
+    companion object {
+        /**
+         * 全局 Dock 的「回桌面后要做什么」（第八十七轮）。
+         *
+         * 全局窗口没有 `LauncherView` 的页面上下文：抽屉、分屏、空调浮层、
+         * 360 环影这些都得回到桌面再执行。于是用 Intent extra 把动作带过来，
+         * 由 [handleGlobalDockIntent] 转发给 [LauncherView.handleGlobalDockAction]。
+         */
+        const val EXTRA_ACTION = "com.cardesk.launcher.extra.GLOBAL_DOCK_ACTION"
+
+        /** 回桌面并打开应用抽屉（`onApps` / `onAppsDrawer`）。 */
+        const val ACTION_DRAWER = "drawer"
+
+        /** 回桌面并打开应用抽屉（契约里的 `apps` 别名，语义与 [ACTION_DRAWER] 相同）。 */
+        const val ACTION_APPS = "apps"
+
+        /** 回桌面并打开空调浮层（契约 `climate`；全局 Dock 目前的风量键直调车控，不跳页）。 */
+        const val ACTION_CLIMATE = "climate"
+
+        /** 回桌面并切到下一页（`onSplit`）。 */
+        const val ACTION_SPLIT = "split"
+
+        /** 回桌面并切单/双画中画（`onSplitLongPress`）。 */
+        const val ACTION_SPLIT_LONG = "split_long"
+
+        /** 回桌面并打开 360 环影（`on360`）。 */
+        const val ACTION_CAMERA360 = "camera360"
+
+        /** 回桌面并打开媒体页（`onMediaTap` / `onMediaLongPress`）。 */
+        const val ACTION_MEDIA = "media"
+
         /**
          * 延迟多久再判通知使用权。
          *

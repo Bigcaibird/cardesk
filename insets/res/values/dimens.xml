@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  第八十七轮：系统导航预留区尺寸（覆盖 framework-res 的导航栏高度）。
+  =====================================================================
+  为什么是 112dp：车机屏幕 1920×1080 @ 160dpi，1dp = 1px。
+  cardesk 设计板里底层 Dock 高 104px、再留 8px 底边距，合计 112px；
+  系统导航栏被撑到 112px 后，每个应用窗口底部都会自动让出这条带子，
+  全局 Dock 窗口正好画进去 —— 既「顶替」原车 Dock，又不遮挡应用内容。
+
+  为什么必须有 sw600dp / sw720dp / sw900dp 三套 qualifier（本目录 + 三套子目录）：
+  RRO 覆盖的是**按 config 解析**的 dimen。拉 framework-res 可见
+  `navigation_bar_height` 默认 48dp、`values-sw900dp` 下 56dp，
+  `navigation_bar_height_car_mode` / `..._landscape_car_mode` = 96dp ——
+  只写 `values/`（无 qualifier）时，车机会先命中 sw900dp 的 56dp，
+  overlay 的默认值根本轮不到，表现就是「装上了、启用了，高度没变」。
+  所以每一套 qualifier 都必须把四个键各写一遍 112dp。
+
+  为什么四个键都写：AOSP 的 CarNavigationBar / StatusBarManagerService 会按
+  当前模式（普通 / 横屏 / car_mode）分别取用，只改一个，真车某些场景下
+  仍会拿到框架默认值，表现为「Dock 盖住应用底部一条」。
+-->
+<resources>
+    <dimen name="navigation_bar_height">112dp</dimen>
+    <dimen name="navigation_bar_height_landscape">112dp</dimen>
+    <dimen name="navigation_bar_height_car_mode">112dp</dimen>
+    <dimen name="navigation_bar_height_landscape_car_mode">112dp</dimen>
+</resources>

@@ -40,6 +40,12 @@ class BootReceiver : BroadcastReceiver() {
             // Android 10+ 后台启动 Activity 受限，作为 HOME 应用通常已被系统拉起，失败可忽略
             Logx.w(LogTags.APP, "开机广播拉起桌面失败（Android 10+ 后台启动受限）", e)
         }
+        // 全局 Dock（第八十七轮）：开机就要常驻。
+        // 不能只靠「桌面启动时顺手拉」—— 车机冷启动后用户可能直接开导航，
+        // 桌面进程（以及它里面的服务）要等用户回 HOME 才会起来，那时 Dock 早就缺位了；
+        // 这里直接 startForegroundService，独立于桌面 Activity。
+        runCatching { com.cardesk.launcher.core.dock.GlobalDockService.ensureStarted(context) }
+            .onFailure { Logx.w(LogTags.DOCK, "开机启动全局 Dock 失败", it) }
         applyAdbAutoStart(context)
     }
 

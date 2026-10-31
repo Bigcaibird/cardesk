@@ -47,6 +47,28 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
+    <!-- ================= 全局 Dock（第八十七轮）=================
+         这些权限只在**系统变体 / 平台签名**下真正授予；普通安装包里声明了
+         也拿不到，代码必须能在「没权限」时完整降级（模拟器验收走的就是这条）。
+
+         - SYSTEM_ALERT_WINDOW：TYPE_APPLICATION_OVERLAY(2038) 的前置权限；
+           这是默认路径（没有 RRO 时唯一能跑的路径）。
+         - FOREGROUND_SERVICE：startForegroundService 必须有；没有它
+           全局 Dock 服务一启动就崩（Android 8+）。
+         - INTERNAL_SYSTEM_WINDOW：TYPE_NAVIGATION_BAR_PANEL(2024) 的权限；
+           只有平台签名 / system 应用能拿。
+         - CHANGE_OVERLAY_PACKAGES：系统变体里管理覆盖包时用。
+         - STATUS_BAR_SERVICE：隐藏系统状态栏（StatusBarManager.disable）。
+         - INSTALL_PACKAGES：insets 覆盖包（RRO）只有在 system 变体里
+           才可能由本应用安装，普通包靠用户手动装。
+    -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.INTERNAL_SYSTEM_WINDOW" />
+    <uses-permission android:name="android.permission.CHANGE_OVERLAY_PACKAGES" />
+    <uses-permission android:name="android.permission.STATUS_BAR_SERVICE" />
+    <uses-permission android:name="android.permission.INSTALL_PACKAGES" />
+
     <application
         android:allowBackup="false"
         android:hardwareAccelerated="true"
@@ -81,6 +103,14 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- 全局 Dock 宿主（第八十七轮）：前台服务 + 常驻窗口。
+             exported=false：只由本应用（桌面 / 开机广播 / 设置页）拉起，
+             不接受外部应用绑定或 startService。 -->
+        <service
+            android:name=".core.dock.GlobalDockService"
+            android:exported="false"
+            android:label="@string/app_name" />
 
         <receiver
             android:name=".core.SystemOps$InstallResultReceiver"

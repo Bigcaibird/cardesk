@@ -203,7 +203,91 @@ pull 下来用 `jadx` 反编译，结论有两处互相印证：
 - 模拟器上已能验的部分：频谱状态「采集中 · 来源：输出混音」、当前颜色随音乐变、
   单帧颜色跳变降为 1/4.1（`emu-verify/REPORT-r85.md` §4）。
 
+### 6. 全局 Dock 能跨应用显示，但**「让系统真让出 112px」在 /data 装的 RRO 上做不到**（第八十七轮）
+
+- **能用的部分**（模拟器实测）：开关打开后 `core/dock/GlobalDockService.kt` 起前台服务，
+  在**其它应用**底部常驻一条 112px 的 Dock（首页 / 应用 / 分屏 / 360 / 媒体卡 / 空调 /
+  快捷应用，和桌面自带那条同源，`DockBarView` 复用），点按键能回桌面指定页
+  （`MainActivity.EXTRA_ACTION`）、能直接控媒体与空调；桌面自己回到前台时全局窗自动隐藏
+  （不留双 Dock）；长按主页键 = **注入返回**（原车导航栏被摘掉后这是唯一返回入口）。
+- **两条 policy 分支**：RRO 生效（`NavInsets.applied()`）→ 走 `SystemNavigationPolicy`，
+  **只摘状态栏、永不写 `immersive.navigation/full`**，窗口用 `TYPE_NAVIGATION_BAR_PANEL`(2024)，
+  由系统精确预留 112px；RRO 不生效 → 写 `immersive.navigation=*` 把原车导航栏整条摘掉，
+  全局窗改用 `TYPE_APPLICATION_OVERLAY`(2038) 盖在底部 112px 上。
+- **RRO 的实测结论（重要）**：`cardesk/insets/` 这套覆盖包（四条 `navigation_bar_height*` =
+  112dp，四套 qualifier，platform key 签名，`--no-resource-deduping` 构建）在模拟器上
+  `cmd overlay enable` 之后 `mState: STATE_ENABLED` 是成功的，**但 NavigationBar0 仍是
+  1920×56，重启也不变**。原因不在包：framework-res 的 dimen 有配置限定符
+  （默认 `48dp` / `sw900dp 56dp` / `car_mode 96dp`），而 **AOSP Android 10 不允许 `/data`
+  安装的 overlay 改 framework-res 的资源**——`/system/overlay` 一类系统分区预装才生效。
+  模拟器 `adb remount` 也不可用（overlayfs 依赖缺失），所以这一档**只能到真车上验**，
+  真车 ROM 允不允许由 ROM 决定（参考工程 UNI Launcher 的车机允许）。
+  拿不到 RRO 时功能照常，只是**其它应用底部 112px 会被 Dock 盖住**（相当于牺牲一条状态行）。
+- **不留死角**：关开关 / 服务 `onDestroy` / 通知栏关闭都会**无条件**把 `policy_control`
+  恢复成「没有全局 Dock 时该有的样子」，不会留下「既无原车 Dock 也无 CarDesk Dock」的空白底边。
+- 取舍：全局模式下 `hideDock`（原车 Dock 名单）对其它应用不再单独生效——统一由全局 Dock 接管；
+  `oemNavImmersive` 保持原语义不动。
+
+## 媒体播放/暂停（第八十七轮）
+
+这一轮把播放/暂停按参考工程 UNI Launcher 的三条系统级逻辑补齐，**桌面自己的 Dock、
+槽位条、全局 Dock、方控、仪表全都走同一条幂等入口**：
+
+### 1. 幂等：`setPlaying(desired)` 而不是「切换」
+
+- 连点播放键不再是「翻两次」：`core/media/TransportIntent.kt` 是纯逻辑决策器，
+  `decide(观察到的播放态, 期望态, 可用 actions)` 给出 `send/reason`，
+  **已经满足就不下发**（`already-satisfied`），日志里能直接看到
+  `播放/暂停指令（幂等）：不下发` 以及 `desired/state/force/actions/buttons/transport`；
+- 用户意图有 800ms 窗口（`nextToggleTarget`）：连点两次 = 回到原状态，但**只发两条**，
+  不会因为观察态滞后而互相抵消成「一次都不发」或多发一条；
+- `force` 只越过 `already-satisfied`，**不越过**「播放器不支持该动作」——
+  再急也不能往不支持 pause 的会话上硬发。
+
+### 2. 原厂音源「实现了回调但没 setActions()」的补位
+
+参考工程里这条补丁是给网易云写的（它的 `PlaybackState` 没有 `setActions()`，
+可 transport 回调其实都在）。这轮把它**推广到所有原厂音源**：
+`actions == 0` 且带 `FLAG_HANDLES_TRANSPORT_CONTROLS` 或 `FLAG_HANDLES_MEDIA_BUTTONS`
+→ 只补 `ACTION_PLAY | ACTION_PAUSE`（不补上一首/下一首/进度，避免假装支持）。
+不补的话这些音源在「幂等」这一层会被直接挡死（老实现是无条件下发，反而「能用」）。
+
+### 3. 网易云的定向按键通道
+
+`core/media/MediaButtonTransport.kt`：网易云（`com.netease.cloudmusic.iot`）的
+播放/暂停/上一首/下一首改成 `controller.dispatchMediaButtonEvent(KeyEvent)`，
+**DOWN + UP 两条**（它对 DOWN 不响应、只消费 UP），其它播放器仍是
+`transportControls` 优先、全局按键兜底。返回的是「派发是否被接受」，
+**不是**「播放态是否真的变了」——不据此重试，否则会二次翻转。
+
+### 4. 方控 / 仪表媒体桥（`core/media/OfficialMediaBridge.kt`）
+
+设置页「方控仪表 → 桥接开关」（`session_bridge_enabled`，默认关）打开后，
+把当前选中的**第三方在线播放器**注册进原车 MediaCenter，于是方控、仪表、
+原车媒体 UI 都能控制它（原车电台 / USB / 蓝牙仍归原车自己管）：
+
+- 反射 `com.ecarx.sdk.mediacenter.MediaCenterAPI` + `IMusicClient` / `IMusicPlaybackInfo` /
+  `IMediaInfo`，bind `ecarx.xsf.MEDIA_CENTER_SERVICE` → `ecarx.xsf.mediacenter.MediaCenterService`，
+  `registerMusic` 后 `updateMediaSourceTypeList(ONLINE = 6)`；
+- **所有 Binder 调用都在单独一条线程**，同步 getter 只读不可变缓存（绝不阻塞 UI 线程）；
+  原车回调 `onPlay/onPause/onNext/onPrevious` 转成幂等的 `setPlaying` / `next` / `previous`；
+- 源暂时消失时保留最后一份采样 2.5s（避免仪表闪烁）；进度推送 1s 节流；
+- **无 SDK / 无权限时只记 reason 并降级**，不影响普通播放控制
+  （模拟器实测日志：`原车媒体接入失败：NameNotFoundException`，没有崩溃）;
+- 开关**即时生效**（第八十七轮补的那一下）：不用重启桌面，切开关就 start/stop 桥。
+
+### 5. 这条链上「还没在真车验过」的部分
+
+- `ecarx.oem.permission.OPENAPI_MEDIACENTER_PERMISSION` 权限名、SDK 包名、
+  服务组件名、`ONLINE = 6`、`wirePlayback` 的 1/0 语义，**全部沿用参考工程**，
+  真车上第一次跑要看日志（`OEM 媒体桥启动` / `原车媒体接入失败：…` /
+  `原车媒体未接受播放信息`）；
+- 网易云只认 `com.netease.cloudmusic.iot` 这一个包名；
+- 「没有会话时 `setPlaying(true)`」会走定向唤醒 + 拉起音乐 App，返回 true 只代表
+  「命令发出去了」，**不保证真的响**（这是媒体会话本身的边界，不是本项目的 bug）。
+
 ## 在线更新（Cloudflare R2）
+
 
 App 内「设置 → 在线更新」**手动**检查一次，源是本项目自己的 **Cloudflare R2 自定义域**：
 
@@ -358,9 +442,19 @@ cardesk/
 │       │   │   ├── SystemOps.kt            系统层操作（隐藏原车 Dock/状态栏等）
 │       │   │   ├── ScheduledTasks.kt       计划任务模型与编解码
 │       │   │   ├── media/                  媒体接管（会话监听、来源、歌词）
+│       │   │   │   ├── MusicSessionTracker.kt 会话跟踪 / 幂等播放暂停 / 桥接线
+│       │   │   │   ├── TransportIntent.kt  播放暂停决策（幂等，纯逻辑）
+│       │   │   │   ├── MediaButtonTransport.kt 网易云定向按键通道（纯逻辑）
+│       │   │   │   ├── MediaBridgePolicy.kt 方控桥接管名单 / 报文取值（纯逻辑）
+│       │   │   │   ├── OfficialMediaBridge.kt 原车 MediaCenter 桥（反射，降级安全）
 │       │   │   │   ├── KugouKrc.kt          酷狗 KRC 逐字歌词解密 + 解析
 │       │   │   │   ├── LyricWordTiming.kt   逐字时间语义自校准 + 贴词
 │       │   │   │   └── OnlineLyricCatalog.kt 在线歌词竞速（QQ / 网易 / 酷狗）
+│       │   │   ├── dock/                   全局 Dock（第八十七轮）
+│       │   │   │   ├── GlobalDockService.kt 前台服务 + 跨应用覆盖窗
+│       │   │   │   ├── GlobalDockPolicyGate.kt 覆盖窗 / 原车导航栏 policy 闸口
+│       │   │   │   ├── NavInsets.kt         导航区域 RRO（安装 / 启用 / 恢复）
+│       │   │   │   └── SystemNavigationPolicy.kt 只摘状态栏的 policy 合并
 │       │   │   ├── update/                 在线更新
 │       │   │   │   ├── AppUpdate.kt         检查 / 下载 / 安装
 │       │   │   │   └── R2Release.kt         R2 更新清单格式与解析
@@ -396,10 +490,12 @@ cardesk/
 ├── design/                                 设计板：PNG 原图 + 生成脚本
 ├── dist/                                   交付产物目录（APK 不入库，走 Release）
 ├── emu-verify/                             模拟器验证记录与截图
+├── insets/                                 导航区域 RRO 覆盖包源码（第八十七轮）
 ├── system-patch/                           system 变体所需补丁（hiddenapi 白名单等）
 ├── tools/                                  构建、比对、发布、日志采集脚本
 │                                          （含 make_manifest.py / publish_r2.py /
-│                                            publish_apks.py）
+│                                            publish_apks.py / build_insets.py /
+│                                            r87_verify.py）
 ├── worker/                                 云端应用库的上传端（Cloudflare Worker）
 ├── gradle/                                 Gradle wrapper
 ├── build.gradle.kts                        全局构建脚本

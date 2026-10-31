@@ -8,6 +8,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
+import android.net.Uri
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
@@ -29,6 +30,7 @@ import com.cardesk.launcher.core.NavSlots
 import com.cardesk.launcher.core.OemDockPolicy
 import com.cardesk.launcher.core.Palette
 import com.cardesk.launcher.core.Prefs
+import com.cardesk.launcher.core.media.MusicController
 import com.cardesk.launcher.core.ScheduledTasks
 import com.cardesk.launcher.core.Skin
 import com.cardesk.launcher.core.apkstore.ApkEntry
@@ -955,10 +957,12 @@ class SettingsOverlay(
             val from = prefs.flag(KEY_BRIDGE_ENABLED)
             prefs.setFlag(KEY_BRIDGE_ENABLED, it)
             logSetting(KEY_BRIDGE_ENABLED, "方控桥接开关", from, it)
+            // 第八十七轮：桥不跟着开关即时启停的话，用户会以为「开了没反应」
+            MusicController.get().syncBridgePreference()
         }
         note(
-            "本机没有车机 SDK 的 SessionBridge（需要系统权限）；" +
-                "这里只保存开关位，实际桥接由车辆通道模块负责。"
+            "已接入仪表/方控媒体桥（需车机 MediaCenter SDK 与平台权限）；无 SDK 时自动降级。" +
+                "开关即时生效，不用重启桌面。",
         )
     }
 
@@ -1974,16 +1978,63 @@ class SettingsOverlay(
             onShowStatusApps?.invoke()
         }
         note("勾选后立即生效；清空表示不对任何应用生效。Dock 与状态栏名单互不影响。")
+        // ---------------- 全局 Dock（第八十七轮） ----------------
+        // 模型：Dock 不再只活在桌面窗口里，而是起一个前台服务，
+        // 在**其它应用**底部常驻一个 Dock 窗口，把原车导航栏 / 原车 Dock 遮住。
+        // 桌面自己（HOME 前台）不用全局窗口 —— 桌面里本来就有同一套 Dock，
+        // 重复画既没价值还会闪（详见 work/r87-design.md「二、全局 Dock 工作流」）。
+        section("全局 Dock")
+        switchRow(
+            "全局 Dock 栏（其他应用也显示）",
+            prefs.globalDockEnabled,
+            "在其它应用底部常驻 Dock，遮住原车导航栏；长按主页键 = 返回",
+        ) {
+            val from = prefs.globalDockEnabled
+            prefs.globalDockEnabled = it
+            logSetting(com.cardesk.launcher.core.Prefs.KEY_GLOBAL_DOCK, "全局 Dock 栏", from, it)
+            if (it) ensureGlobalDockPermission()
+            // 开关关掉时 ensureStarted 会停服务；服务销毁时把 policy 恢复成
+            // 「普通桌面」状态（否则原车 Dock 和 CarDesk Dock 会同时消失）。
+            com.cardesk.launcher.core.dock.GlobalDockService.ensureStarted(context.applicationContext)
+            // 开关会导致下面的 note 与 policy 分支变化，重画本页。
+            select("dock")
+        }
+        if (prefs.globalDockEnabled) {
+            val navInsetsApplied = runCatching {
+                com.cardesk.launcher.core.dock.NavInsets.applied(context)
+            }.getOrDefault(false)
+            if (navInsetsApplied) {
+                note(
+                    "原车导航栏高度已由系统预留（RRO 生效）：Dock 只占那 112px，" +
+                        "不会盖住其它应用内容。主页键短按回桌面，长按 = 系统返回。",
+                )
+            } else {
+                note(
+                    "原车导航栏高度未接管：Dock 会盖住其它应用底部 112px，" +
+                        "原车导航键也不再显示；需要平台签名 / 系统应用才能接管（RRO）。" +
+                        "长按主页键 = 返回 —— 关掉原车导航栏后这是唯一的返回入口。",
+                )
+            }
+            note(
+                "全局 Dock 与「增强导航栏」「下移 Dock」互斥，开启时会自动关掉它们；" +
+                    "关闭全局 Dock 后原车 Dock 会自动恢复。",
+            )
+        }
         section("增强导航栏")
         switchRow("增强导航栏（贴底 pill）", prefs.enhancedNav, "与隐藏 Dock / 下移 Dock 互斥") {
             val from = prefs.enhancedNav
             prefs.enhancedNav = it
             logSetting("navbar_enhanced_enabled", "增强导航栏", from, it)
+            // 第八十七轮：增强导航栏与全局 Dock 互斥（prefs 的 setter 会关掉全局 Dock），
+            // 这里同步把前台服务停掉，否则别处应用底部还会留着那个窗口。
+            com.cardesk.launcher.core.dock.GlobalDockService.ensureStarted(context.applicationContext)
         }
         switchRow("下移 Dock", prefs.lowerDock, "与增强导航栏互斥") {
             val from = prefs.lowerDock
             prefs.lowerDock = it
             logSetting("dockbar_lower_dock", "下移 Dock", from, it)
+            // 同上：下移 Dock 也会关掉全局 Dock（setter 互斥）。
+            com.cardesk.launcher.core.dock.GlobalDockService.ensureStarted(context.applicationContext)
         }
         // 导航栏样式（两种形态）
         // - 「设计 Dock」：pill 里装我们那套 1864×104 的设计版 Dock；
@@ -2014,6 +2065,49 @@ class SettingsOverlay(
                 "只在「普通槽之后、第一个空调槽前」插一根分隔线；媒体槽最小 200dp、歌词槽最小 150dp、温度槽最小 112dp。\n" +
                 "默认 15 槽：返回 / 主页 / 应用列表 / 分屏 / 360 / 媒体 / 空调电源 / 主驾温度 / 风扇 / 副驾温度 / AC / AUTO / 内外循环 / 前除霜 / 后除霜。"
         )
+    }
+
+    /**
+     * 全局 Dock 的悬浮窗授权引导（第八十七轮）。
+     *
+     * ## 为什么要跳系统页而不是直接 `requestPermissions`
+     *
+     * `SYSTEM_ALERT_WINDOW` 不是运行时权限，没有系统弹窗，只能让用户去
+     * 「显示在其他应用上层」页手动开。带 `package:` 的 Uri 能直接落到本应用
+     * 那一项（`Settings.ACTION_MANAGE_OVERLAY_PERMISSION`），少让用户找两屏。
+     *
+     * ## 为什么授完权不用在这等
+     *
+     * 授权页返回时 Activity 会 `onResume`，`MainActivity.onResume` 里已经
+     * 重新 `ensureStarted` + 重算 policy —— 这里只要负责把人送过去。
+     *
+     * 已经能接管导航栏（`NavInsets.supported()`）时不引导：那条路径不需要悬浮窗。
+     */
+    private fun ensureGlobalDockPermission() {
+        val app = context.applicationContext
+        if (runCatching { Settings.canDrawOverlays(context) }.getOrDefault(false)) return
+        if (runCatching {
+                com.cardesk.launcher.core.dock.NavInsets.supported(app)
+            }.getOrDefault(false)
+        ) {
+            return
+        }
+        Logx.event(LogTags.SETTING, "全局 Dock 缺少悬浮窗权限，跳系统授权页")
+        val intent = Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:" + app.packageName),
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val opened = runCatching { context.startActivity(intent) }.isSuccess
+        Toast.makeText(
+            context,
+            if (opened) {
+                "请允许「显示在其他应用上层」，返回桌面后全局 Dock 会自动生效"
+            } else {
+                "请在系统设置中允许「显示在其他应用上层」"
+            },
+            Toast.LENGTH_LONG,
+        ).show()
+        Logx.i(LogTags.SETTING, "全局 Dock 授权引导结束", "opened" to opened)
     }
 
     /** 已选应用数（不含「一个都不隐藏」的哨兵）。 */

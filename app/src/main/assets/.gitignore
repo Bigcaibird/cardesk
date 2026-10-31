@@ -1,0 +1,5 @@
+# 第八十七轮：系统导航预留区覆盖包（RRO）必须入库。
+# 顶层 .gitignore 的 `*.apk` 是为了拦住构建产物（dist/、平台 APK 等），
+# 但这个 assets 里的 APK 是运行期需要静默安装的「资源」，属于源码的一部分，
+# 所以在本目录（嵌套 .gitignore 优先级更高）把它反忽略回来。
+!cardesk-nav-insets.apk

@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1061",
-  "versionCode": 4157,
-  "tag": "v1.0.1061",
-  "name": "CarDesk 4157 / 1.0.1061-system",
-  "notes": "红绿灯读秒修锯齿：同一灯态内读秒只减不增，不再在 3↔2 之间来回跳（新增 TrafficCountdown 显示状态机）；新增真车取证日志 rawRed/rawGreen，用于核对绿灯读秒字段的真实语义。",
-  "publishedAt": "2026-10-31T01:34:03Z",
+  "version": "1.0.1062",
+  "versionCode": 4158,
+  "tag": "v1.0.1062",
+  "name": "CarDesk 4158 / 1.0.1062-system",
+  "notes": "",
+  "publishedAt": "2026-10-31T02:43:59Z",
   "apk": {
-    "name": "CarDesk-ecarx-cardesk-4157.apk",
-    "url": "cardesk/CarDesk-ecarx-cardesk-4157.apk",
-    "size": 1964472,
-    "sha256": "2bc9301bb4a87d8516e6e9782145ce45e244bc6fe717f82781f71d74c1782de3"
+    "name": "CarDesk-ecarx-cardesk-4158.apk",
+    "url": "cardesk/CarDesk-ecarx-cardesk-4158.apk",
+    "size": 2033622,
+    "sha256": "295e8d272ecdbe2e1656c15bfd7b18ed2914a17a542c1de5a65d1774f65d75d1"
   }
 }

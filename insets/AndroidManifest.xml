@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  第八十七轮：CarDesk 的系统导航预留区资源覆盖包（RRO）。
+  =====================================================================
+  为什么需要它：cardesk 的 Dock 平时只是 HOME 内的一个 View；把全局 Dock
+  窗口叠到别的应用底部时，必须让**系统自己**在屏幕底部留出一条 112px 的
+  导航预留带，否则全局 Dock 只能盖在应用内容上。
+
+  实现方式是 Android 的 Runtime Resource Overlay（运行时资源覆盖，RRO）：
+  这个包不含任何代码（hasCode=false），只覆盖 `android`（framework-res）
+  里的导航栏高度尺寸；系统在布局窗口时按覆盖后的尺寸给每个应用让出
+  预留区，于是这条带子就是「原车 Dock 的位置」。
+
+  关键约束：
+  - targetPackage 必须是 `android`（框架资源），所以覆盖包**必须用平台签名**
+    安装/启用（AOSP OverlayManagerService 只信任平台签名的框架覆盖包）；
+  - isStatic=false：动态覆盖，运行期由 cardesk 通过 IOverlayManager 启用，
+    不要求预先塞进 /system，也不改动 framework-res 本体；
+  - 高度必须是 112dp：车机屏幕 1920×1080 @ 160dpi 时 1dp = 1px，
+    112px = Dock 104 + 底边距 8（与 GlobalDockService 的窗口高度算法一致）。
+    改动这里必须同步改 NavInsets.HEIGHT_DP 与全局 Dock 窗口高度。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.ecarx.cardesk.insets"
+    android:versionCode="1"
+    android:versionName="1.0">
+
+    <!-- 覆盖包只被 Android 9 车机使用（与主工程 minSdk 26 / targetSdk 29 不同，
+         覆盖包目标只有 framework-res，按参考实现的 API 28 即可安装启用）。 -->
+    <uses-sdk
+        android:minSdkVersion="28"
+        android:targetSdkVersion="28" />
+
+    <!-- 覆盖对象：framework-res（android）；isStatic=false → 动态覆盖，
+         由 cardesk 在运行期通过 IOverlayManager.setEnabled 启用。 -->
+    <overlay
+        android:targetPackage="android"
+        android:isStatic="false" />
+
+    <!-- 纯资源包：没有任何 code，安装体积最小、也不会被加载进进程。 -->
+    <application
+        android:hasCode="false"
+        android:label="CarDesk 导航区域适配" />
+</manifest>

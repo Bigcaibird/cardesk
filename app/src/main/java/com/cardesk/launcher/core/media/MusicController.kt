@@ -914,9 +914,30 @@ class MusicController private constructor() {
     // ---------------------------------------------------------------- controls
 
     fun playPause() = MusicSessionTracker.get().playPause()
+
+    /**
+     * **幂等**设置播放态（第八十七轮）：`true` = 播放，`false` = 暂停。
+     *
+     * 全局 Dock 的播放键、仪表盘、方控（原车 MediaCenter 桥）都调这个，
+     * 而不是各自调 [playPause] 的「切换」——「切换」在多点并发 / 连点时会互相抵消。
+     *
+     * 返回值 = **是否真的下发了控制命令**：已满足（界面在放、再设一次在放）、
+     * 播放器不支持该动作、没有会话且不需要动作时返回 `false`。
+     * 乐观 UI 由 [MusicSessionTracker] 内部统一处理，这里**不再**重复加一层。
+     */
+    fun setPlaying(desired: Boolean): Boolean = MusicSessionTracker.get().setPlaying(desired)
+
     fun next() = MusicSessionTracker.get().next()
     fun previous() = MusicSessionTracker.get().previous()
     fun seekTo(positionMs: Long) = MusicSessionTracker.get().seekTo(positionMs)
+
+    /**
+     * 设置页「桥接开关」切换后立刻应用（第八十七轮）。
+     *
+     * 桥的启停在 [MusicSessionTracker] 里按 `session_bridge_enabled` 判，
+     * 只有桌面启动时读一次；这里让用户不用重启桌面就能生效。
+     */
+    fun syncBridgePreference() = MusicSessionTracker.get().syncBridgePreference()
 
     /**
      * 切来源：锁定包 → 启动该 App → **立即**释放锁。

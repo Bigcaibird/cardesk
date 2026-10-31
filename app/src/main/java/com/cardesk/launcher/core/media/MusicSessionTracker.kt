@@ -15,6 +15,7 @@ import android.os.SystemClock
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.view.KeyEvent
+import com.cardesk.launcher.core.Prefs
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 
@@ -315,6 +316,15 @@ class MusicSessionTracker private constructor() {
     private var userTransportIntentPlaying: Boolean? = null
     private var userTransportIntentUntil = 0L
 
+    /**
+     * 上一次**真正下发**播放/暂停指令的时刻（第八十七轮）。
+     *
+     * 连点仲裁的锚点，见 [TransportIntent.nextToggleTarget]：
+     * 只有真正下发过，才存在「命令还在路上、会话状态还没跟上」的时间窗；
+     * 没下发的重复点击不应该延长窗口（否则连续轻点会让播放键失效）。
+     */
+    private var userTransportIntentAt = 0L
+
     /** 进度外推用的锚点（`MusicManager.lastPlaybackPosition/lastPositionUpdateTime`）。 */
     private var lastObservedPosition = 0L
     private var lastObservedPlaying = false
@@ -398,9 +408,17 @@ class MusicSessionTracker private constructor() {
         // MusicSessionTracker:461-462 —— 2.5s 周期重扫
         main.removeCallbacks(periodicRescan)
         main.postDelayed(periodicRescan, RESCAN_MS)
+        // 第八十七轮：按设置页开关决定要不要接原车 MediaCenter（默认关）
+        startBridgeIfEnabled()
     }
 
     fun stop() {
+        // 第八十七轮：桥必须跟着 tracker 一起停 —— 否则后台线程还在拿 Binder 回调，
+        // 用户关了「桥接」却仍被原车方控驱动（且会一直持有服务绑定）。
+        if (bridgeEnabled) {
+            bridgeEnabled = false
+            OfficialMediaBridge.stop()
+        }
         started = false
         attached = false
         attachedComponent = null
@@ -865,6 +883,8 @@ class MusicSessionTracker private constructor() {
             "locked" to (lockedPkg ?: ""),
         )
         pushMetadata(null)
+        // 第八十七轮：换选中会话 = 仪表该换歌，立刻推一次（不等 200ms tick 的节流）
+        syncBridge(force = true)
     }
 
     /**
@@ -875,6 +895,9 @@ class MusicSessionTracker private constructor() {
      * 之前我们在解绑时清空，暂停一下就会把歌名和歌词一起清掉。
      */
     private fun releaseController() {
+        // 第八十七轮：解绑时通知原车媒体桥。注意桥内部有 2.5s 防误清空延迟，
+        // 暂停时车机 App 销毁会话不会让仪表立刻闪成空。
+        if (bridgeEnabled) OfficialMediaBridge.update(null)
         controller = null
         // —— 解绑时清 selectedToken。
         selectedTokenKey = null
@@ -1297,6 +1320,149 @@ class MusicSessionTracker private constructor() {
             positionMs = position,
             playing = playing,
         )
+        // 第八十七轮：把播放态/元数据同步给原车媒体桥（内部 1s 节流，见 syncBridge）
+        syncBridge()
+    }
+
+    // ---------------------------------------------------------------- OEM 媒体桥（第八十七轮）
+
+    /** 上一次把采样推给原车媒体桥的时刻（`syncBridge` 节流用）。 */
+    private var bridgeLastPushAt = 0L
+
+    /** 上一次推给桥的播放态：播放/暂停一变就**绕过节流**立刻推。 */
+    private var bridgeLastPushPlaying = false
+
+    /** 桥是否启用（对应设置页 `session_bridge_enabled`，默认关）。 */
+    private var bridgeEnabled = false
+
+    /**
+     * 原车方控 / 仪表动作的落点（第八十七轮）。
+     *
+     * 为什么先校验包名：原车的回调是**异步**的，从「原车发回调」到「我们收到」之间
+     * 用户可能已经切到别的音乐 App。若直接 `setPlaying`，就会把暂停/切歌打到新会话上。
+     * 校验 `packageName == source` 正好把「这条回调是不是还属于当前会话」钉死。
+     *
+     * 为什么走 [setPlaying] 而不是直接 transport：原车方控连按两下时，
+     * 幂等决策保证「最终状态 = 最后一次意图」，不会来回翻转。
+     */
+    private val mediaBridgeCommands = object : OfficialMediaBridge.Commands {
+        override fun send(action: String, source: String): Boolean {
+            val c = controller
+            if (c == null || c.packageName != source) {
+                Logx.i(
+                    LogTags.MEDIA, "OEM 方控回调已过期，忽略",
+                    "action" to action, "source" to source,
+                    "current" to (c?.packageName ?: ""),
+                )
+                return false
+            }
+            return when (action) {
+                MediaButtonTransport.ACTION_PLAY -> setPlaying(true)
+                MediaButtonTransport.ACTION_PAUSE -> setPlaying(false)
+                MediaButtonTransport.ACTION_NEXT -> {
+                    next(); true
+                }
+                MediaButtonTransport.ACTION_PREVIOUS -> {
+                    previous(); true
+                }
+                else -> false
+            }
+        }
+    }
+
+    /** 按设置页开关启动 OEM 媒体桥（`session_bridge_enabled`，默认 false）。 */
+    private fun startBridgeIfEnabled() {
+        val ctx = appContext ?: return
+        bridgeEnabled = runCatching { Prefs(ctx).flag(BRIDGE_PREF_KEY) }.getOrDefault(false)
+        if (!bridgeEnabled) {
+            // 默认关：普通手机 / 没开开关的用户走到这里就结束，什么都不碰
+            Logx.i(LogTags.MEDIA, "OEM 媒体桥未启用（session_bridge_enabled=false）")
+            return
+        }
+        Logx.i(LogTags.MEDIA, "OEM 媒体桥启用，开始注册到原车媒体中心")
+        OfficialMediaBridge.start(ctx, mediaBridgeCommands) { onBridgeChanged() }
+    }
+
+    /**
+     * 设置页切「桥接开关」后**立即**生效（第八十七轮）。
+     *
+     * 为什么需要：桥只在 [start] 里按开关判一次（见 [startBridgeIfEnabled]）。
+     * 用户在设置页打开开关时桌面前台还在跑、[start] 早就过去了，不补这一下
+     * 就会「开了没反应，得重启桌面」。启动 / 停止本身是幂等的
+     * （[OfficialMediaBridge.start] / [OfficialMediaBridge.stop] 各有 running 判断），
+     * 重复调用安全；开着的时候再调一次什么都不做。
+     */
+    fun syncBridgePreference() {
+        val ctx = appContext ?: return
+        val enabled = runCatching { Prefs(ctx).flag(BRIDGE_PREF_KEY) }.getOrDefault(false)
+        if (enabled == bridgeEnabled) return
+        if (!enabled) {
+            bridgeEnabled = false
+            Logx.i(LogTags.MEDIA, "OEM 媒体桥关闭（设置页切换，即时生效）")
+            OfficialMediaBridge.stop()
+            return
+        }
+        bridgeEnabled = true
+        Logx.i(LogTags.MEDIA, "OEM 媒体桥启用（设置页切换，即时生效），开始注册到原车媒体中心")
+        OfficialMediaBridge.start(ctx, mediaBridgeCommands) { onBridgeChanged() }
+        // 新注册的桥手上还没有任何播放信息，先推一帧当前会话，仪表不用等下一个 tick
+        main.post { syncBridge(force = true) }
+    }
+
+    /**
+     * 原车回调之后的刷新（第八十七轮）。
+     *
+     * 原车方控把动作转给我们之后，会话状态要过一会儿才变；主动推一次进度，
+     * 让 UI / 仪表尽快对齐（不用等 200ms tick）。
+     */
+    private fun onBridgeChanged() {
+        main.post { pushProgress() }
+    }
+
+    /**
+     * 把当前会话采样给原车媒体桥（第八十七轮）。
+     *
+     * 节流 1s：`pushProgress` 是 200ms 一次 tick，而原车 MediaCenter 的 Binder
+     * 不需要这么勤（而且 `worker` 是单线程，堆太多任务反而把方控回调堵在后面）。
+     * 播放态一变、或换会话（[force]）时绕过节流立即推。
+     *
+     * @param force 忽略节流，立刻采样（换会话 / 用户刚按下播放暂停）
+     */
+    private fun syncBridge(force: Boolean = false) {
+        if (!bridgeEnabled) return
+        val now = SystemClock.uptimeMillis()
+        val playing = controller?.playbackState?.state == PlaybackState.STATE_PLAYING
+        if (!force && playing == bridgeLastPushPlaying && now - bridgeLastPushAt < BRIDGE_PUSH_MS) return
+        bridgeLastPushAt = now
+        bridgeLastPushPlaying = playing
+        OfficialMediaBridge.update(controller)
+    }
+
+    /**
+     * 媒体链路诊断快照（第八十七轮）。
+     *
+     * 为什么需要：OEM 桥这条链（权限 → SDK 类 → 服务绑定 → 注册 → 原车接受）
+     * 在真车上任何一环断了都只是「仪表不亮」，光看日志很难定位。这里把
+     * **`String -> 基础类型` 的扁平 map** 暴露出来，设置页 / emu-verify 报告可以直接展示。
+     *
+     * 键分两组：
+     * - `session*`：cardesk 自己看到的会话状态；
+     * - `bridge.*`：原车桥的状态（键名与 [MediaBridgePolicy.snapshotKeywords] 一致，
+     *   加前缀是为了不与会话字段撞名；`bridgeEnabled=false` 时这一组只有 `registered=false`）。
+     */
+    fun snapshot(): Map<String, Any?> {
+        val c = controller
+        val state = c?.playbackState?.state ?: PlaybackState.STATE_NONE
+        val out = LinkedHashMap<String, Any?>()
+        out["sessionPkg"] = c?.packageName.orEmpty()
+        out["sessionState"] = state
+        out["sessionPlaying"] = state == PlaybackState.STATE_PLAYING
+        out["sessionTitle"] = current?.title.orEmpty()
+        out["bridgeEnabled"] = bridgeEnabled
+        for ((key, value) in OfficialMediaBridge.snapshot()) {
+            out["bridge.$key"] = value
+        }
+        return out
     }
 
     // ---------------------------------------------------------------- transport
@@ -1304,12 +1470,16 @@ class MusicSessionTracker private constructor() {
     private fun applyOptimisticTransport(playing: Boolean) {
         userTransportIntentPlaying = playing
         userTransportIntentUntil = System.currentTimeMillis() + USER_TRANSPORT_INTENT_MS
+        // 第八十七轮：连点仲裁的锚点只在下发时更新（见 TransportIntent.nextToggleTarget）。
+        userTransportIntentAt = System.currentTimeMillis()
         // 暂停意图记在**会话记录**上（`Record.userPauseRequested`）
         // 有了它，播放状态变成 STOPPED 时也不会把暂停态元数据丢掉。
         if (!playing) currentRecord()?.userPauseRequested = true
         // —— 乐观操作后重置停滞检测的时间锚
         lastObservedMediaPosAt = if (playing) SystemClock.uptimeMillis() else 0L
         applyPlayingUi(playing)
+        // 第八十七轮：方控按下的瞬间就把新状态报给仪表，不要等下一次采样
+        syncBridge(force = true)
     }
 
     /** 当前绑定会话的记录。 */
@@ -1392,28 +1562,187 @@ class MusicSessionTracker private constructor() {
         //
         // `isPlaying || state == PLAYING(3) || state == BUFFERING(6)` 都算「在放」→ 按下就是暂停。
         // 之前只看 PLAYING，缓冲中(6)会被误判成「暂停中」→ 按下反而是继续播放。
-        val playing = state == PlaybackState.STATE_PLAYING || state == PlaybackState.STATE_BUFFERING
-        Logx.i(
-            LogTags.MEDIA, "播放/暂停指令",
-            "pkg" to c.packageName, "from" to playing, "to" to !playing, "state" to state,
+        val observedPlaying = TransportIntent.isObservedPlaying(state)
+        val observedPaused = state == PlaybackState.STATE_PAUSED ||
+            state == PlaybackState.STATE_STOPPED ||
+            state == PlaybackState.STATE_NONE
+        // 断点续播：暂停期间会话可能还没把状态报上来，用「用户意图」修正实测值
+        val resolved = resolvePlaying(observedPlaying, observedPaused)
+        // 第八十七轮：连点仲裁 —— 800ms 内连点不再翻转（UNI setPlaying 的幂等语义）
+        val desired = TransportIntent.nextToggleTarget(
+            currentPlaying = resolved,
+            userIntentAtMs = userTransportIntentAt,
+            nowMs = System.currentTimeMillis(),
         )
-        if (playing) {
-            //
+        // 上一次命令可能还在路上（意图窗口内、实测值没跟上）：此时若用户拨向**反方向**，
+        // 必须强制下发，否则 setPlaying 会拿落后的实测值判「已满足」而吞掉这次翻转。
+        // 方向没变则不强推 —— 连点重复下发同一条命令只会给播放器加负担。
+        val intentPending = hasUserTransportIntent()
+        val force = intentPending && userTransportIntentPlaying != desired
+        Logx.i(
+            LogTags.MEDIA, "播放/暂停指令（切换）",
+            "pkg" to c.packageName, "state" to state,
+            "observedPlaying" to observedPlaying, "resolved" to resolved,
+            "desired" to desired, "force" to force,
+        )
+        setPlaying(desired, force)
+    }
+
+    /**
+     * 幂等设置播放态（第八十七轮，对齐 UNI `MediaAdapter.setPlaying(boolean)`）。
+     *
+     * ## 为什么（第八十七轮）
+     *
+     * 以前 [playPause] 是「按当前快照无条件翻转」。这在三个场景翻车：
+     * 1. Dock 连点两次：第一次暂停，会话状态还没上报，第二次又读到「在放」→ 再暂停一次，
+     *    部分播放器把第二次当「切换」→ 歌反而播起来；
+     * 2. 全局 Dock 与仪表盘各调一次 = 发了两次指令；
+     * 3. 界面/会话都说「在放」，此时「设成在放」根本不需要下发。
+     *
+     * 改成「表达期望状态」后，[TransportIntent.decide] 只在「期望 ≠ 实测」且播放器
+     * 声明了对应 action 位时下发**一次**，其余静默返回 —— 这就是幂等。
+     *
+     * 网易云单独一条通道：它不 `setActions()`，走 [dispatchNeteaseButton]（DOWN+UP），
+     * 见 [MediaButtonTransport] 的说明。
+     *
+     * @param desired true = 播放，false = 暂停
+     * @param force 仅用于「上一次命令还在路上，用户又拨向了反方向」：
+     *   此时只信实测值会把这次翻转吞掉（见下方 [TransportIntent.REASON_ALREADY_SATISFIED] 说明），
+     *   故允许越过「已满足」判定。**不会越过「无 action 位」** —— 不支持的播放器照样不下发。
+     * @return 是否真的下发了控制命令；false = 已满足 / 播放器不支持 / 没有会话且无需动作
+     */
+    fun setPlaying(desired: Boolean, force: Boolean = false): Boolean {
+        val c = controller
+        if (c == null) {
+            if (!desired) {
+                // 没有会话时「暂停」没有任何对象可以暂停，静默即可（不要误发全局键，
+                // 全局 MEDIA_PAUSE 会打到「当前正在出声的 App」身上，可能不是用户想暂停的那个）。
+                Logx.i(LogTags.MEDIA, "暂停指令（幂等）：没有活动会话，忽略")
+                return false
+            }
+            // 没有会话时「播放」仍然有意义：从暂停态恢复 / 叫醒上次的音乐包（第六十八轮路径）。
+            playWithoutSession()
+            return true
+        }
+        val pkg = c.packageName
+        val playbackState = c.playbackState
+        val state = playbackState?.state ?: PlaybackState.STATE_NONE
+        val rawActions = playbackState?.actions ?: 0L
+        val flags = controllerFlags(c)
+        // 两条通道分开算：按键通道（dispatchMediaButtonEvent）看 MEDIA_BUTTONS，
+        // transport 通道（transportControls.*）看 TRANSPORT_CONTROLS。
+        // 网易云 / 原厂音源常把 actions 留成 0，只有这两位上能看出它们收不收指令。
+        val buttons = MediaButtonTransport.canMediaButtons(flags)
+        val transport = MediaButtonTransport.canTransport(flags)
+        // actions 为 0 时按 flags 补「有效 action 位」，否则幂等决策会一直判 no-action
+        val actions = MediaButtonTransport.effectiveActions(pkg, rawActions, flags)
+        val decision = TransportIntent.decide(state, desired, actions)
+        // 第八十七轮 · 意图窗口内的「方向翻转」不能被实测值吞掉：
+        // 按下暂停后会话上报有延迟（实测仍是 PLAYING），此刻用户再按播放，若只信实测
+        // 就会判 already-satisfied 不下发；可那条 pause 其实已经在路上 → 最终停在暂停，
+        // 与用户最后一次操作相反（pause/pause/play 三次连点最容易复现）。
+        // 所以 force 只越过 already-satisfied，**不越过 no-action**：不支持指令的播放器
+        // 依旧静默返回，避免又回到「无条件发全局键」的老路。
+        val send = TransportIntent.shouldDispatch(decision, force)
+        if (!send) {
+            Logx.i(
+                LogTags.MEDIA, "播放/暂停指令（幂等）：不下发",
+                "pkg" to pkg, "desired" to desired, "state" to state, "force" to force,
+                "actions" to rawActions, "buttons" to buttons, "transport" to transport,
+                "reason" to decision.reason,
+            )
+            return false
+        }
+        Logx.i(
+            LogTags.MEDIA, "播放/暂停指令（幂等）",
+            "pkg" to pkg, "desired" to desired, "state" to state,
+            "from" to !desired, "reason" to decision.reason, "force" to force,
+            "actions" to rawActions, "buttons" to buttons, "transport" to transport,
+            "netease" to MediaButtonTransport.isNetease(pkg),
+        )
+        if (!desired) {
+            // 暂停前先把「暂停态元数据」存好（第六十七轮：会话被销毁后还能恢复歌名）
             prepareUserPause()
             applyOptimisticTransport(false)
-            if (isDmtPkg(c.packageName)) {
+            if (isDmtPkg(pkg)) {
                 // 车机多媒体暂停：记下「用户自己按过」
                 // 下次点播放会走 DMT 专用恢复路径，而不是普通 play()。
                 customPlayFlag = true
                 dmtResumeRequested = false
             }
-            pauseTransport(c)
+            if (MediaButtonTransport.shouldDispatchMediaButton(pkg, buttons)) {
+                dispatchNeteaseButton(c, MediaButtonTransport.ACTION_PAUSE, false)
+            } else {
+                pauseTransport(c)
+            }
+            return true
+        }
+        applyOptimisticTransport(true)
+        if (isDmtPkg(pkg)) dmtResumeRequested = true
+        if (MediaButtonTransport.shouldDispatchMediaButton(pkg, buttons)) {
+            dispatchNeteaseButton(c, MediaButtonTransport.ACTION_PLAY, true)
         } else {
-            applyOptimisticTransport(true)
-            if (isDmtPkg(c.packageName)) dmtResumeRequested = true
             playTransport(c)
         }
+        return true
     }
+
+    /**
+     * 读会话的 `MediaSession.flags`（第八十七轮）。
+     *
+     * 为什么需要它：很多播放器（网易云、原厂多媒体、DMT）**实现了 transport 回调却
+     * 没给 `PlaybackState` 调 `setActions()`**，`actions` 恒为 0。这种会话能不能收指令，
+     * 只能看 flags：
+     * - `FLAG_HANDLES_MEDIA_BUTTONS` → 能收 `dispatchMediaButtonEvent`（定向按键通道）；
+     * - `FLAG_HANDLES_TRANSPORT_CONTROLS` → 能收 `transportControls.*` 调用。
+     *
+     * 拿不到（会话已销毁 / 系统抛 SecurityException）时按 0 处理：不补位、走老路径兜底。
+     */
+    private fun controllerFlags(c: MediaController): Long =
+        runCatching { c.flags }.getOrDefault(0L)
+
+    /**
+     * 网易云定向按键（第八十七轮，对齐 UNI `NeteaseMediaAdapter.command`）。
+     *
+     * ## 为什么（第八十七轮）
+     *
+     * 网易云实现了 transport 回调，但 `getActions()` 返回 0；旧路径「看 action 位再决定发不发」
+     * 对它永远不发，而全局 `MEDIA_BUTTON` 广播又会被别的播放器接走 → 「按了没反应 / 按了乱跳」。
+     * 所以给它单独一条：`dispatchMediaButtonEvent(DOWN)` + `(UP)`。
+     *
+     * ## 两个真机教训（UNI 注释）
+     *
+     * - **DOWN + UP 都要发**，网易云的接收方只消费 `ACTION_UP`；
+     * - 返回值只代表「有没有派发成功」，**不是播放态已确认**；
+     *   失败也**不要**补发全局广播重试（会打到别的 App 身上）。
+     *
+     * 本类所有 transport 都在主线程（main Handler）上调用，这里不再切线程。
+     */
+    private fun dispatchNeteaseButton(c: MediaController, action: String, playing: Boolean): Boolean {
+        val key = MediaButtonTransport.keyFor(action, playing)
+        if (key == MediaButtonTransport.KEYCODE_UNKNOWN) return false
+        return runCatching {
+            val now = SystemClock.uptimeMillis()
+            // 坑：dispatchMediaButtonEvent 在 **MediaController** 上（不是 TransportControls 上），
+            // UNI 也是 `controller.dispatchMediaButtonEvent(...)`。
+            val down = c.dispatchMediaButtonEvent(
+                KeyEvent(now, now, KeyEvent.ACTION_DOWN, key, 0),
+            )
+            val up = c.dispatchMediaButtonEvent(
+                KeyEvent(now, now + 1, KeyEvent.ACTION_UP, key, 0),
+            )
+            Logx.i(
+                LogTags.MEDIA, "网易云定向按键",
+                "pkg" to c.packageName, "action" to action, "key" to keyName(key),
+                "down" to down, "up" to up,
+            )
+            up || down
+        }.getOrElse {
+            Logx.w(LogTags.MEDIA, "网易云定向按键失败", it, "pkg" to c.packageName, "action" to action)
+            false
+        }
+    }
+
 
     /**
      * 没有绑定会话时的播放。
@@ -1733,6 +2062,14 @@ class MusicSessionTracker private constructor() {
         userSkipPending = true
         Logx.i(LogTags.MEDIA, "切歌指令：下一首", "pkg" to c.packageName)
         stopDmtIfPaused(c)
+        // 第八十七轮：网易云没有 action 位，只能走定向按键（否则 skipToNext 根本不生效）
+        if (MediaButtonTransport.shouldDispatchMediaButton(
+                c.packageName, MediaButtonTransport.canMediaButtons(controllerFlags(c)),
+            )
+        ) {
+            dispatchNeteaseButton(c, MediaButtonTransport.ACTION_NEXT, false)
+            return
+        }
         runCatching { c.transportControls.skipToNext() }
             .onFailure { Logx.w(LogTags.MEDIA, "下一首下发失败", it, "pkg" to c.packageName) }
     }
@@ -1749,6 +2086,14 @@ class MusicSessionTracker private constructor() {
         userSkipPending = true
         Logx.i(LogTags.MEDIA, "切歌指令：上一首", "pkg" to c.packageName)
         stopDmtIfPaused(c)
+        // 第八十七轮：网易云同上，走定向按键
+        if (MediaButtonTransport.shouldDispatchMediaButton(
+                c.packageName, MediaButtonTransport.canMediaButtons(controllerFlags(c)),
+            )
+        ) {
+            dispatchNeteaseButton(c, MediaButtonTransport.ACTION_PREVIOUS, false)
+            return
+        }
         runCatching { c.transportControls.skipToPrevious() }
             .onFailure { Logx.w(LogTags.MEDIA, "上一首下发失败", it, "pkg" to c.packageName) }
     }
@@ -1840,6 +2185,17 @@ class MusicSessionTracker private constructor() {
         const val PROGRESS_TICK_MS = 200L
 
         const val USER_TRANSPORT_INTENT_MS = 4_000L
+
+        /**
+         * 第八十七轮：原车 MediaCenter 桥的开关键（设置页 `session_bridge_enabled`，默认关）。
+         *
+         * 这里直接写字面量、不依赖 `SettingsOverlay`：media 包不该反向依赖 UI 层，
+         * 而 `Prefs` 的键本来就是跨模块约定（值必须与 SettingsOverlay 里的一致）。
+         */
+        const val BRIDGE_PREF_KEY = "session_bridge_enabled"
+
+        /** 第八十七轮：把采样推给原车桥的最小间隔（播放态变化时绕过节流）。 */
+        const val BRIDGE_PUSH_MS = 1_000L
 
         /**
          * 车机多媒体恢复播放的兜底重试间隔（400L / 1000L 两个兜底）。

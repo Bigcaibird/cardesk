@@ -167,6 +167,14 @@ class LauncherView(context: Context) : FrameLayout(context) {
      */
     private var builtEnhancedNav = false
     private var navSlotDialog: NavSlotDialog? = null
+
+    /**
+     * 上一次写 policy 时的状态签名（全局 Dock 开关 + RRO 是否生效），第八十七轮。
+     *
+     * `policy_control` 是写系统设置：resume 一次写一次会拖慢首页恢复，
+     * 而且真车上每次写都可能触发系统 UI 重排。只在签名变化时重写。
+     */
+    private var lastPolicySignature: String? = null
     private var taskList: com.cardesk.launcher.ui.dialogs.TaskListDialog? = null
     private var taskEditor: com.cardesk.launcher.ui.dialogs.TaskEditorDialog? = null
     private var overlayDialog: View? = null
@@ -568,30 +576,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
             // 单击切换页面（dockSplit「单击切换页面」= showPage((page + 1) % 3)）
             onSplit = { showPage(nextPage(page)) }
             // 长按切换单画 / 双画（dockSplit「长按切换单画和双画」）
-            onSplitLongPress = {
-                // —— 开双画时主副画不能是同一个应用
-                // 否则直接拒绝并提示。
-                //
-                // 为什么必须拦：同一个应用不能同时挂到两个 VirtualDisplay ——
-                // 副画再 new 一个承载面时，`startActivity` 会把应用的 task
-                // 从**主画**拉到副画，主画当场黑屏（模拟器已复现）。
-                val nextDual = !prefs.dualPip
-                val sameApp = nextDual && prefs.pipApp.isNotBlank() && prefs.pipApp == prefs.pip2App
-                if (sameApp) {
-                    toast("双画中画请选择不同应用")
-                    Logx.w(
-                        LogTags.NAV_UI,
-                        "开启双画中画被拒：主副画是同一个应用",
-                        "pkg" to prefs.pipApp,
-                    )
-                } else {
-                    prefs.dualPip = nextDual
-                    navPage.syncPipState(prefs.dualPip, pipFullscreen)
-                    // 双画开关会决定副画承载面建不建（MainActivity:924-946 走 applyDesktopLayout）
-                    refreshPip()
-                    toast(if (prefs.dualPip) "已切换双画中画" else "已切换单画中画")
-                }
-            }
+            onSplitLongPress = { toggleDualPip() }
             // 媒体卡左右滑动切歌
             onMediaNext = { MusicController.get().next(); refresh() }
             onMediaPrev = { MusicController.get().previous(); refresh() }
@@ -797,11 +782,107 @@ class LauncherView(context: Context) : FrameLayout(context) {
     /** 当前是不是画中画全屏态（供 Activity 拦截返回键用）。 */
     fun isPipFullscreen(): Boolean = pipFullscreen
 
+    // ------------------------------------------------------- 全局 Dock（第八十七轮）
+
+    /**
+     * 全局 Dock 把用户拉回桌面后，执行对应动作。
+     *
+     * ## 为什么动作要「回桌面再做」
+     *
+     * 全局窗口（[com.cardesk.launcher.core.dock.GlobalDockService]）只负责画 Dock，
+     * 抽屉 / 空调浮层 / 分屏页都属于本 `LauncherView`。在别的应用前台时直接把浮层
+     * 开在桌面窗口里，用户看到的会是「一回到桌面就凭空多了一层」；先回前台再执行，
+     * 动画和层级才是用户预期的顺序。
+     *
+     * 动作来自 `MainActivity.EXTRA_ACTION`（见 `MainActivity.onNewIntent`），
+     * 取值与契约一致：`drawer` / `apps` / `climate` / `split` / `split_long` /
+     * `camera360` / `media`。
+     */
+    fun handleGlobalDockAction(action: String) {
+        Logx.event(LogTags.DOCK, "全局 Dock 回桌面动作", "action" to action)
+        when (action) {
+            com.cardesk.launcher.MainActivity.ACTION_DRAWER,
+            com.cardesk.launcher.MainActivity.ACTION_APPS -> {
+                // 抽屉是「开关」语义：先收掉再开，避免回到桌面时它已经开着、
+                // 这里又当成「打开」空转一次（用户会以为点了没反应）。
+                if (drawerShowing()) closeDrawer()
+                showDrawer()
+            }
+            com.cardesk.launcher.MainActivity.ACTION_CLIMATE -> showClimate()
+            com.cardesk.launcher.MainActivity.ACTION_MEDIA -> showPage(PAGE_NAV)
+            com.cardesk.launcher.MainActivity.ACTION_SPLIT -> showPage(nextPage(page))
+            com.cardesk.launcher.MainActivity.ACTION_SPLIT_LONG -> toggleDualPip()
+            com.cardesk.launcher.MainActivity.ACTION_CAMERA360 -> showCam()
+            else -> Logx.w(LogTags.DOCK, "未知的全局 Dock 动作", "action" to action)
+        }
+    }
+
+    /**
+     * 桌面回到前台时重算 policy。
+     *
+     * `NavInsets.applied()` 是 prefs 里的状态，用户可能刚在系统设置里授了悬浮窗、
+     * 刚启用/停用 RRO，或者刚在设置页开关了全局 Dock —— 这些都不经过本页面，
+     * 所以在 `MainActivity.onResume` 调这里按状态签名补齐。
+     *
+     * 只有签名变化才重写：`policy_control` 是写系统设置，每次 resume 都写会拖慢
+     * 首页恢复（真车上是几百毫秒级的）。
+     */
+    fun syncGlobalDockPolicy() {
+        val globalDock = prefs.globalDockEnabled
+        val navInsets = runCatching {
+            com.cardesk.launcher.core.dock.NavInsets.applied(context)
+        }.getOrDefault(false)
+        val signature = policySignature(globalDock, navInsets)
+        if (signature == lastPolicySignature) return
+        Logx.i(
+            LogTags.SYS,
+            "全局 Dock 策略状态变化，重写 policy",
+            "from" to lastPolicySignature,
+            "to" to signature,
+        )
+        applyOemPolicy()
+    }
+
+    private fun policySignature(globalDock: Boolean, navInsets: Boolean): String =
+        "global=$globalDock/navInsets=$navInsets"
+
     /** 下一个页面（：取模循环）。 */
     private fun nextPage(from: Int): Int = PageGesture.wrapIndex(from, 1, PAGE_COUNT)
 
     /** 上一个页面（取模循环）。 */
     private fun prevPage(from: Int): Int = PageGesture.wrapIndex(from, -1, PAGE_COUNT)
+
+    /**
+     * 单画 / 双画切换（Dock 分屏键长按、全局 Dock 的 `split_long` 动作）。
+     *
+     * ## 为什么主副画不能是同一个应用
+     *
+     * 同一个应用不能同时挂到两个 VirtualDisplay —— 副画再 new 一个承载面时，
+     * `startActivity` 会把应用的 task 从**主画**拉到副画，主画当场黑屏
+     * （模拟器已复现）。所以这里必须先拦。
+     *
+     * 第八十七轮把这段逻辑从 Dock 回调里抽成函数：全局 Dock 的窗口在别的进程
+     * 场景下也会触发同一个动作（`MainActivity.EXTRA_ACTION = "split_long"`），
+     * 两处必须走**同一份**判断，否则「桌面里点会拦、全局 Dock 点不拦」。
+     */
+    private fun toggleDualPip() {
+        val nextDual = !prefs.dualPip
+        val sameApp = nextDual && prefs.pipApp.isNotBlank() && prefs.pipApp == prefs.pip2App
+        if (sameApp) {
+            toast("双画中画请选择不同应用")
+            Logx.w(
+                LogTags.NAV_UI,
+                "开启双画中画被拒：主副画是同一个应用",
+                "pkg" to prefs.pipApp,
+            )
+            return
+        }
+        prefs.dualPip = nextDual
+        navPage.syncPipState(prefs.dualPip, pipFullscreen)
+        // 双画开关会决定副画承载面建不建（MainActivity 的 applyDesktopLayout）
+        refreshPip()
+        toast(if (prefs.dualPip) "已切换双画中画" else "已切换单画中画")
+    }
 
     // --------------------------------------------------------------- 抽屉浮层
 
@@ -1657,7 +1738,13 @@ private fun showCam() {
     /**
      * 应用原车 Dock / 状态栏的隐藏策略。
      *
-     * - `policy_control` 写 `immersive.navigation=` / `immersive.status=` 两个策略；
+     * - 第八十七轮起，`policy_control` 的具体内容交给
+     *   [com.cardesk.launcher.core.dock.GlobalDockPolicyGate] 统一计算：
+     *   - 全局 Dock 关闭 → 原来的「隐藏原车 Dock / 状态栏 / 沉浸」逻辑；
+     *   - 全局 Dock 开 && `NavInsets.applied()` → 只写状态栏沉浸，**不写**
+     *     `immersive.navigation/full`（RRO 预留区必须保住）；
+     *   - 全局 Dock 开 && 未 applied → 写 `immersive.navigation=*`，让原车导航栏
+     *     整体退出窗口布局，2038 悬浮窗才能贴底把这块位置占住（详见闸口注释）。
      * - 「下移 Dock」用 overscan 把底部裁掉 50px；
      * - 隐藏状态栏时反射调 `StatusBarManager.disable`。
      */
@@ -1670,28 +1757,32 @@ private fun showCam() {
         //
         // `immersive.navigation` 是把导航栏**从窗口布局里摘掉**：
         // 不再收触摸，只有「从底部向上滑」的系统手势能临时把它叫出来。
-        val immersivePackages = if (prefs.oemNavImmersive) listOf(context.packageName) else emptyList()
-        val value = com.cardesk.launcher.core.OemDockPolicy.buildPolicyValue(
-            hideDock = prefs.hideDock,
-            hideStatus = prefs.hideStatus,
-            hideDockPackages = prefs.hideDockApps,
-            hideStatusPackages = prefs.hideStatusApps,
-            immersivePackages = immersivePackages,
-        )
+        val globalDock = prefs.globalDockEnabled
+        val navInsets = runCatching {
+            com.cardesk.launcher.core.dock.NavInsets.applied(context)
+        }.getOrDefault(false)
+        lastPolicySignature = policySignature(globalDock, navInsets)
         Logx.i(
             LogTags.SYS,
             "应用原车 Dock/状态栏策略",
-            "policy" to value,
+            "globalDock" to globalDock,
+            "navInsets" to navInsets,
             "hideDock" to prefs.hideDock,
             "hideStatus" to prefs.hideStatus,
             "oemNavImmersive" to prefs.oemNavImmersive,
         )
-        val applied = com.cardesk.launcher.core.SystemOps.applyPolicyControl(context, value)
+        val applied = com.cardesk.launcher.core.dock.GlobalDockPolicyGate.apply(context)
         if (!applied) {
-            Logx.w(LogTags.SYS, "policy_control 写入失败（已用 overscan 兜底）", "policy" to value)
+            Logx.w(
+                LogTags.SYS,
+                "policy_control 写入失败（已用 overscan 兜底）",
+                "globalDock" to globalDock,
+            )
             // 没有系统权限时至少把状态栏开关用 overscan 兜住，避免桌面被原车栏压住
             if (prefs.hideDock) com.cardesk.launcher.core.SystemOps.setOverscan(context, 0, 0, 0, 0)
         }
+        // 全局 Dock 模式下原车导航栏要么被 RRO 预留、要么被 immersive.navigation 摘掉，
+        // 都不需要再靠 overscan 挪 Dock（lowerDock 与 globalDock 互斥，这里自然是 0）。
         val overscan = if (prefs.lowerDock && !prefs.hideDock) -50 else 0
         com.cardesk.launcher.core.SystemOps.setOverscan(context, 0, 0, 0, overscan)
         if (prefs.hideStatus) {

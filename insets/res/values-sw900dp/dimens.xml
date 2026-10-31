@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  第八十七轮：values-sw900dp 下的导航预留区尺寸（112dp）。
+  RRO 只有命中与 framework-res **相同 config qualifier** 时才盖得住，
+  详见 values/dimens.xml 顶部注释；本目录必须与 values/ 写全同样的四个键。
+-->
+<resources>
+    <dimen name="navigation_bar_height">112dp</dimen>
+    <dimen name="navigation_bar_height_landscape">112dp</dimen>
+    <dimen name="navigation_bar_height_car_mode">112dp</dimen>
+    <dimen name="navigation_bar_height_landscape_car_mode">112dp</dimen>
+</resources>

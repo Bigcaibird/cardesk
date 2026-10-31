@@ -585,7 +585,11 @@ class Prefs(context: Context) {
         get() = flag("dockbar_lower_dock")
         set(v) {
             setFlag("dockbar_lower_dock", v)
-            if (v) setFlag("navbar_enhanced_enabled", false)
+            if (v) {
+                setFlag("navbar_enhanced_enabled", false)
+                // 第八十七轮：全局 Dock 与下移 Dock 互斥（见 globalDockEnabled）。
+                setFlag(KEY_GLOBAL_DOCK, false)
+            }
         }
 
     /**
@@ -599,6 +603,36 @@ class Prefs(context: Context) {
             setFlag("navbar_enhanced_enabled", v)
             if (v) {
                 setFlag("dockbar_hide_dock", false)
+                setFlag("dockbar_lower_dock", false)
+                // 第八十七轮：全局 Dock 也是「另一种底栏形态」，同样互斥。
+                // 两套形态同时开会让人在桌面里看到 A、在别的应用里看到 B。
+                setFlag(KEY_GLOBAL_DOCK, false)
+            }
+        }
+
+    /**
+     * 全局 Dock（第八十七轮）。
+     *
+     * 打开后 Dock 变成**常驻其它应用底部**的全局窗口（见
+     * `core/dock/GlobalDockService`），顶替原车导航栏；桌面自己仍然画自己的
+     * Dock（沉浸窗口不回缩，见设计契约「二、全局 Dock 工作流」）。
+     *
+     * ## 为什么与 [enhancedNav] / [lowerDock] 互斥
+     *
+     * 这两种形态改变的是「桌面底栏的高度 / 位置」，而全局窗口画的是同一套
+     * [com.cardesk.launcher.ui.shell.DockBarView]。同时开启时，
+     * 桌面里看到的底栏和别的应用里看到的底栏会对不上，
+     * 用户会以为开了两个功能（契约要求任意时刻只有一种 Dock 形态）。
+     *
+     * 互斥写法照搬 [hideDock]：**本项打开时关掉对方**；反向互斥写在
+     * [enhancedNav] / [lowerDock] 的 setter 里（它们打开时关本项）。
+     */
+    var globalDockEnabled: Boolean
+        get() = flag(KEY_GLOBAL_DOCK, false)
+        set(v) {
+            setFlag(KEY_GLOBAL_DOCK, v)
+            if (v) {
+                setFlag("navbar_enhanced_enabled", false)
                 setFlag("dockbar_lower_dock", false)
             }
         }
@@ -731,6 +765,16 @@ class Prefs(context: Context) {
     }
 
     companion object {
+        /**
+         * 全局 Dock 开关（第八十七轮）。
+         *
+         * 单独抽成常量是因为有三处要写同一个键：设置页（`SettingsOverlay.pageDock`）、
+         * 前台服务（`GlobalDockService` 启动/通知栏关闭）、以及这里与
+         * 增强导航栏 / 下移 Dock 的互斥逻辑。键名写错一次 = 开关看起来能点但
+         * 窗口永远不出现，所以不散落成字面量。
+         */
+        const val KEY_GLOBAL_DOCK = "global_dock_enabled"
+
         /** 天气定位：最近一次拿到的城市名。 */
         const val KEY_WEATHER_CITY = "weather_fix_city"
 
