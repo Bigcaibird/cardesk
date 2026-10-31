@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1060",
-  "versionCode": 4156,
-  "tag": "v1.0.1060",
-  "name": "CarDesk 4156 / 1.0.1060-system",
-  "notes": "修红绿灯：官方标准协议按 trafficLightStatus 判灯态（1=红/4=绿），读秒跟着灯态走，绿灯不再被画成红灯；氛围灯加动感层：色相最短路径+限速平滑、亮度快起慢落、低频起拍脉冲；氛围灯频谱采集点数 512→1024（低频四段不再塌进同一 bin，色相不再恒为 0°）；氛围灯启动时恢复上次开关状态；氛围灯加逐帧日志；诊断包报实际采集点数",
-  "publishedAt": "2026-10-30T12:35:35Z",
+  "version": "1.0.1061",
+  "versionCode": 4157,
+  "tag": "v1.0.1061",
+  "name": "CarDesk 4157 / 1.0.1061-system",
+  "notes": "红绿灯读秒修锯齿：同一灯态内读秒只减不增，不再在 3↔2 之间来回跳（新增 TrafficCountdown 显示状态机）；新增真车取证日志 rawRed/rawGreen，用于核对绿灯读秒字段的真实语义。",
+  "publishedAt": "2026-10-31T01:34:03Z",
   "apk": {
-    "name": "CarDesk-ecarx-cardesk-4156.apk",
-    "url": "cardesk/CarDesk-ecarx-cardesk-4156.apk",
-    "size": 1963484,
-    "sha256": "e2d63ba8014514e4e84ceb460b531bf773c404d3228786e53d1288071b03e194"
+    "name": "CarDesk-ecarx-cardesk-4157.apk",
+    "url": "cardesk/CarDesk-ecarx-cardesk-4157.apk",
+    "size": 1964472,
+    "sha256": "2bc9301bb4a87d8516e6e9782145ce45e244bc6fe717f82781f71d74c1782de3"
   }
 }

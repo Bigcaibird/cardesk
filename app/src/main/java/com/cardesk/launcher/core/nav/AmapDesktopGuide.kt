@@ -106,6 +106,18 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
     private var lightCruiseAt = 0L
 
     /**
+     * 两条信号各自的读秒显示状态机（第八十六轮）。
+     *
+     * 为什么不能直接拿「原始值 − 本机经过的秒数」显示 ——
+     * 高德**不是每秒都刷**这个字段（真车上帧间隔约 2 秒），
+     * 原始值没变时每次重新锚回原始值，等于**把已经走掉的秒数又加回去**，
+     * 显示就变成 `3 → 2 → 3 → 2` 的锯齿（真车实测到的现象）。
+     * 状态机保证**同一灯态里读秒只减不增**，详见 [TrafficCountdown]。
+     */
+    private val standardCountdown = TrafficCountdown()
+    private val cruiseCountdown = TrafficCountdown()
+
+    /**
      * 最近一次引导数据的转向图标。
      *
      * 巡航协议一次会带上**同一个路口的多个方向**，
@@ -376,12 +388,23 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
             return
         }
         lightStandard = signal
-        lightStandardAt = SystemClock.elapsedRealtime()
+        val now = SystemClock.elapsedRealtime()
+        lightStandardAt = now
+        // 断档超过 TTL → 判成「这一轮结束了」，重新起一轮读秒（不接着上一轮减）。
+        if (now - standardCountdown.lastAnchorAt() >= TRAFFIC_LIGHT_TTL_MS) {
+            standardCountdown.reset()
+        }
+        standardCountdown.accept(signal.lamp, signal.countdownSeconds, now)
         Logx.i(
             LogTags.NAV_UI,
             "收到红绿灯数据（官方协议）",
             "lamp" to signal.lamp,
             "countdown" to signal.countdownSeconds,
+            // 两个读秒字段的**原始值**都记下来 ——
+            // `greenLightLastSecond` 的语义至今未验证（真车上绿灯读秒不往下走），
+            // 只看被灯态挑过的那一个字段，看不出到底是哪一路在动。
+            "rawRed" to map[AmapTrafficLight.EXTRA_RED_COUNTDOWN],
+            "rawGreen" to map[AmapTrafficLight.EXTRA_GREEN_LAST_SECOND],
             "rawStatus" to signal.rawStatus,
             "rawDir" to signal.rawDirection,
             // 方向带中文，真车日志里能直接看出是哪个方向。
@@ -408,7 +431,12 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
             return
         }
         lightCruise = signal
-        lightCruiseAt = SystemClock.elapsedRealtime()
+        val now = SystemClock.elapsedRealtime()
+        lightCruiseAt = now
+        if (now - cruiseCountdown.lastAnchorAt() >= TRAFFIC_LIGHT_TTL_MS) {
+            cruiseCountdown.reset()
+        }
+        cruiseCountdown.accept(signal.lamp, signal.countdownSeconds, now)
         Logx.i(
             LogTags.NAV_UI,
             "收到红绿灯数据（巡航协议）",
@@ -452,20 +480,33 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
         // 巡航那份的枚举已验证，优先。
         val cruise = lightCruise
         if (cruise != null && now - lightCruiseAt < TRAFFIC_LIGHT_TTL_MS) {
-            return withRemaining(cruise, now - lightCruiseAt)
+            val shown = cruiseCountdown.current(now)
+            logShown(cruise, shown)
+            return cruise.copy(countdownSeconds = shown)
         }
         val standard = lightStandard
         if (standard != null && now - lightStandardAt < TRAFFIC_LIGHT_TTL_MS) {
-            return withRemaining(standard, now - lightStandardAt)
+            val shown = standardCountdown.current(now)
+            logShown(standard, shown)
+            return standard.copy(countdownSeconds = shown)
         }
         return null
     }
 
-    /** 按已过去的毫秒数把读秒往下减；走到 0 就把读秒抹掉（不猜灯态变化）。 */
-    private fun withRemaining(signal: AmapTrafficLight.Signal, ageMs: Long): AmapTrafficLight.Signal {
-        val countdown = signal.countdownSeconds ?: return signal
-        val left = countdown - (ageMs / 1000L).toInt()
-        return signal.copy(countdownSeconds = if (left > 0) left else null)
+    /**
+     * 读秒的显示值（**DEBUG 级，不落盘**）。
+     *
+     * 真车上「绿灯读秒来回跳」这种问题，光看原始帧看不出来 ——
+     * 得看**显示值**是不是单调递减。这行日志就是给逐秒核对用的。
+     */
+    private fun logShown(signal: AmapTrafficLight.Signal, shown: Int?) {
+        Logx.d(
+            LogTags.NAV_UI,
+            "红绿灯读秒显示",
+            "lamp" to signal.lamp,
+            "raw" to signal.countdownSeconds,
+            "shown" to shown,
+        )
     }
 
     /** 收起卡片。 */
@@ -478,6 +519,8 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
         lightCruise = null
         lightStandardAt = 0L
         lightCruiseAt = 0L
+        standardCountdown.reset()
+        cruiseCountdown.reset()
         // 下一段导航的状态要重新记 INFO（状态值可能和上次一样）
         lastLoggedState = null
         Logx.i(LogTags.NAV_UI, "收起导航引导卡片")

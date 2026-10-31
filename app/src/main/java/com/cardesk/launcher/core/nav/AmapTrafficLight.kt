@@ -133,7 +133,27 @@ object AmapTrafficLight {
     /** 等待轮次。 */
     const val EXTRA_WAIT_ROUND = "waitRound"
 
-    /** 绿灯剩余秒数（**语义未验证，不用于显示**）。 */
+    /**
+     * 绿灯剩余秒数（**语义至今未验证**）。
+     *
+     * ## 第八十六轮补充
+     *
+     * 上一轮照字段名把它当绿灯倒计时用了 —— 真车实测发现**绿灯读秒一直在 3 与 2 之间跳**，
+     * 说明「它是剩余秒数」这个推断**站不住**。
+     *
+     * 取证结论（本轮重新反编译高德包确认）：
+     * - 这个字段是**服务端透传**的（模型 `RspTrafficLightsCountdownInfoModel`，
+     *   `wh0.c()` 只做 `putExtra`，本地不算）；
+     * - 高德**自己没有任何消费端**（全仓只有序列化/反序列化调用）——
+     *   也就是说高德车机版自己都不拿它画读秒，语义只存在于服务端。
+     *
+     * 所以现在的口径是：
+     * - **灯态**仍然看 `trafficLightStatus`（已由高德语音模块确认）；
+     * - **读秒**交给 [TrafficCountdown] 显示层保证「同一灯态只减不增」，
+     *   不再出现锯齿；
+     * - 到底是哪个字段在动（`redLightCountDownSeconds` 还是 `greenLightLastSecond`），
+     *   靠真车日志里的 `rawRed` / `rawGreen` 定论，**不猜**。
+     */
     const val EXTRA_GREEN_LAST_SECOND = "greenLightLastSecond"
 
     /** 官方协议里需要取的那几个 extra（其余忽略）。 */

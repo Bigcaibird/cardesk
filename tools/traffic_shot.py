@@ -104,9 +104,13 @@ def kill_all_scripts():
     out = sh_out("shell ps -ef")
     killed = []
     for line in out.splitlines():
-        # 注意：脚本名带状态后缀（`cardesk-nav-broadcast-g.sh`），
+        # 注意：脚本名可能带状态后缀（`cardesk-nav-broadcast-g.sh`），
+        # 也可能是**另一个脚本**起的（第八十六轮新增 `cardesk-countdown-*.sh`），
+        # 所以按「含 .sh 且名字里有 broadcast 或 countdown」匹配，
         # **不能**按 "nav-broadcast.sh" 整串匹配 —— 那样连新脚本都匹配不到。
-        if "broadcast" not in line or ".sh" not in line:
+        if ".sh" not in line:
+            continue
+        if "broadcast" not in line and "countdown" not in line:
             continue
         m = re.match(r"\S+\s+(\d+)\s", line)
         if m:

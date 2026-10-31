@@ -330,6 +330,30 @@ adb logcat -d | grep -E "手势：单指横滑翻页|切页 "
 
 证据：`emu-verify/r84-apkstore-*.png`、`emu-verify/update-apkstore-log.txt`。
 
+## H9. 第八十六轮新增（红绿灯读秒锯齿：3↔2 来回跳）
+
+| # | 项 | 操作 | 期望 | 结果 |
+|---|---|---|---|---|
+| H78 | **旧包复现锯齿** | 装 4156 → `python3 tools/traffic_countdown_shot.py r86-before --lamp green --raw 6 --frames 14 --interval 0.45 --warmup 0.8` | 显示值在两个值之间**来回跳** | ✅ `distinct=2`、**回跳=有**；序列 `6→6→…→5→6→…→5`（`r86-before-frames.png`） |
+| H79 | **新包单调递减** | 装 4157 → 同上（tag 换 `r86-after`） | 一路往下走，**不再回来** | ✅ `distinct=6`、**回跳=无**；序列 `6→5→4→3→2→1→消失`（`r86-after-frames.png`） |
+| H80 | **显示值有日志可对** | logcat `CarDesk/NavUI` 过滤「红绿灯读秒显示」 | `raw`（供应商原值）与 `shown`（显示值）都打出来 | ✅ `raw=6 shown=6` → `shown=5` → `4` → `3` → `2` → `1` → `null` |
+| H81 | **两个原始字段都落日志** | logcat 过滤「收到红绿灯数据（官方协议）」 | `rawRed` / `rawGreen` 都在 | ✅ `rawRed=… rawGreen=…`（真车取证的探针） |
+| H82 | **红灯读秒同样受益** | `… --lamp red --raw 12` | 红灯也单调递减 | ✅ `12→11→10→9→8→7→6→5→4`，`distinct=7`、回跳=无（`r86-red-frames.png`） |
+| H83 | 不闪退 | 全程 | pid 不变、无 FATAL、无 tombstone | ✅ pid `21836` 未变；`Fatal signal` / `FATAL EXCEPTION` 计数 **0** |
+
+> **抓「随时间变化」的效果必须按帧连抓**（第八十六轮新增 `tools/traffic_countdown_shot.py`）：
+> `tools/traffic_shot.py` 只截**一帧**，锯齿这种**时间维度**的缺陷截一帧看不出来。
+> 新脚本按帧抓下读秒那一小块做 md5 —— 同一个数字逐像素相同 ⇒ 同一个哈希，
+> 于是「到底在几个值之间跳」一眼可见。
+>
+> 抓图时踩的三个坑（**都出过假图**）：
+> ① 设置面板/弹窗开着 → 截到的是「在线更新」弹窗，脚本把弹窗的绿色按钮当成了灯圆
+>    （脚本现在会先按两次 BACK 回场景页，灯圆识别也限制在导航卡区域内）；
+> ② **残留广播脚本没杀掉** → 两三个脚本一起发广播，帧率翻倍、读秒反而不跳了（**假象**）；
+>    匹配条件已从「名字含 broadcast」放宽成「名字含 broadcast **或** countdown」；
+> ③ **读秒是倒着走的** → `raw=3` 时等 3 秒再去抓，整段递减已经走完了 ⇒
+>    要用 `--raw 6 --warmup 0.8` 这类参数把整段抓全。
+
 ## I. 稳定性
 
 | # | 项 | 期望 | 结果 |
