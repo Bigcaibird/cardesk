@@ -2723,23 +2723,322 @@ class SettingsOverlay(
             // 立刻生效：灵敏度决定「弱音有多亮」
             com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "灵敏度")
         }
-        sliderRow("最低亮度", prefs.ambientMinBrightness, 0, 100, "%") { v ->
-            val from = prefs.ambientMinBrightness
-            prefs.ambientMinBrightness = v
-            logSetting("ambient_min_brightness", "氛围灯最低亮度", from, v)
-            // 亮度滑杆走**绝对亮度**（用户拖到哪就是哪），并立刻重算颜色
-            com.cardesk.launcher.core.ambient.AmbientLightController.setBrightness(context, v)
+        // 亮度上下限是**旧版链路**的参数（旧版是「下限 + (上限−下限)×电平^γ」
+        // 的线性映射）。新版用「基础亮度 + 感知明度区间映射」，压根不读这两个值
+        // —— 放在这儿拖了没反应，只能藏起来。
+        if (prefs.ambientEngine == Prefs.ENGINE_LEGACY) {
+            sliderRow("最低亮度", prefs.ambientMinBrightness, 0, 100, "%") { v ->
+                val from = prefs.ambientMinBrightness
+                prefs.ambientMinBrightness = v
+                logSetting("ambient_min_brightness", "氛围灯最低亮度", from, v)
+                // 亮度滑杆走**绝对亮度**（用户拖到哪就是哪），并立刻重算颜色
+                com.cardesk.launcher.core.ambient.AmbientLightController.setBrightness(context, v)
+            }
+            sliderRow("最高亮度", prefs.ambientMaxBrightness, 0, 100, "%") { v ->
+                val from = prefs.ambientMaxBrightness
+                prefs.ambientMaxBrightness = v
+                logSetting("ambient_max_brightness", "氛围灯最高亮度", from, v)
+                // 亮度滑杆走**绝对亮度**（用户拖到哪就是哪），并立刻重算颜色
+                com.cardesk.launcher.core.ambient.AmbientLightController.setBrightness(context, v)
+            }
+            note(
+                "灵敏度越高，弱音也越亮（灯更跟手）；亮度上下限决定灯的动态范围。\n\n" +
+                    "亮度滑杆是**绝对亮度**：拖到多少，车机那边就是多少（厂商只有高/低/关三档）。",
+            )
+        } else {
+            note(
+                "灵敏度越高，弱音也越亮（灯更跟手）。\n\n" +
+                    "新版的明暗区间在下面的「动感引擎」里调（基础亮度 + 感知明度映射），" +
+                    "这里的亮度上下限只对旧版链路有效，已经按引擎分开显示了。",
+            )
         }
-        sliderRow("最高亮度", prefs.ambientMaxBrightness, 0, 100, "%") { v ->
-            val from = prefs.ambientMaxBrightness
-            prefs.ambientMaxBrightness = v
-            logSetting("ambient_max_brightness", "氛围灯最高亮度", from, v)
-            // 亮度滑杆走**绝对亮度**（用户拖到哪就是哪），并立刻重算颜色
-            com.cardesk.launcher.core.ambient.AmbientLightController.setBrightness(context, v)
+
+        // ————————————————————————————————————————————————
+        // 第八十八轮 V2：动感引擎
+        // ————————————————————————————————————————————————
+        section("动感引擎")
+        chipRow(
+            "引擎",
+            listOf("新版（流畅）", "旧版（现网观感）"),
+            prefs.ambientEngine,
+        ) { index ->
+            val from = prefs.ambientEngine
+            prefs.ambientEngine = index
+            logSetting("ambient_engine", "氛围灯引擎", from, index)
+            // 立刻生效：换引擎要把运动状态一起重置（别把旧引擎的色相带过来）
+            com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "引擎")
+            onApply?.invoke()
+            // 参数区随引擎显隐 → 重建这一页
+            select(selectedKey)
+        }
+        if (prefs.ambientEngine == Prefs.ENGINE_V2) {
+            val presetIndex = com.cardesk.launcher.core.ambient.AmbientPresets.match(
+                prefs.ambientAttackMs,
+                prefs.ambientDecayMs,
+                prefs.ambientHueTauMs,
+                prefs.ambientHueMaxDeg,
+                prefs.ambientHueMaxAccel,
+                prefs.ambientMaxDeltaETenths,
+                prefs.ambientFloor,
+                prefs.ambientBreathHundredths,
+                prefs.ambientSaturationHundredths,
+                prefs.ambientHueSpanDeg,
+                prefs.ambientCentroidWindowLowHundredths,
+                prefs.ambientCentroidWindowSpanHundredths,
+                prefs.ambientHueRotateDegPerSec,
+                prefs.ambientMaxChromaHundredths,
+                prefs.ambientHueJumpDeg,
+                prefs.ambientPulseGainHundredths,
+                prefs.ambientBeatMinGapMs,
+                prefs.ambientJumpHoldMs,
+            )
+            chipRow("预设", com.cardesk.launcher.core.ambient.AmbientPresets.NAMES, presetIndex) { index ->
+                val p = com.cardesk.launcher.core.ambient.AmbientPresets.ALL[index]
+                prefs.ambientAttackMs = p.attackMs
+                prefs.ambientDecayMs = p.decayMs
+                prefs.ambientHueTauMs = p.hueTauMs
+                prefs.ambientHueMaxDeg = p.hueMaxDeg
+                prefs.ambientHueMaxAccel = p.hueMaxAccel
+                prefs.ambientMaxDeltaETenths = p.maxDeltaETenths
+                prefs.ambientFloor = p.floor
+                prefs.ambientBreathHundredths = p.breathHundredths
+                prefs.ambientSaturationHundredths = p.saturationHundredths
+                // 五彩三件套：跨度 / 质心展开窗口 / 彩度上限，外加色相自转
+                prefs.ambientHueSpanDeg = p.hueSpanDeg
+                prefs.ambientCentroidWindowLowHundredths = p.centroidWindowLowHundredths
+                prefs.ambientCentroidWindowSpanHundredths = p.centroidWindowSpanHundredths
+                prefs.ambientHueRotateDegPerSec = p.hueRotateDegPerSec
+                prefs.ambientMaxChromaHundredths = p.maxChromaHundredths
+                // 跳跃三件套：色相跳变档位 / 起拍闪光 / 起拍最短间隔
+                prefs.ambientHueJumpDeg = p.hueJumpDeg
+                prefs.ambientPulseGainHundredths = p.pulseGainHundredths
+                prefs.ambientBeatMinGapMs = p.beatMinGapMs
+                prefs.ambientJumpHoldMs = p.jumpHoldMs
+                logSetting("ambient_preset", "氛围灯预设", presetIndex, p.name)
+                com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "预设")
+                onApply?.invoke()
+                // 滑杆读数变了 → 重建这一页
+                select(selectedKey)
+            }
+            sliderRow("亮度起 attack", prefs.ambientAttackMs, 10, 300, "ms", step = 5) { v ->
+                val from = prefs.ambientAttackMs
+                prefs.ambientAttackMs = v
+                logSettingDebug("ambient_attack_ms", "氛围灯亮度起", from, v)
+                com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "亮度起")
+            }
+            sliderRow("亮度落 decay", prefs.ambientDecayMs, 60, 1200, "ms", step = 20) { v ->
+                val from = prefs.ambientDecayMs
+                prefs.ambientDecayMs = v
+                logSettingDebug("ambient_decay_ms", "氛围灯亮度落", from, v)
+                com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "亮度落")
+            }
+            sliderRow("色相平滑 τ", prefs.ambientHueTauMs, 60, 1200, "ms", step = 20) { v ->
+                val from = prefs.ambientHueTauMs
+                prefs.ambientHueTauMs = v
+                logSettingDebug("ambient_hue_tau_ms", "氛围灯色相平滑", from, v)
+                com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "色相平滑")
+            }
+            sliderRow("色相限速", prefs.ambientHueMaxDeg, 10, 180, "°/s") { v ->
+                val from = prefs.ambientHueMaxDeg
+                prefs.ambientHueMaxDeg = v
+                logSettingDebug("ambient_hue_max_deg", "氛围灯色相限速", from, v)
+                com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "色相限速")
+            }
+            sliderRow("色相限加速", prefs.ambientHueMaxAccel, 30, 800, "°/s²", step = 10) { v ->
+                val from = prefs.ambientHueMaxAccel
+                prefs.ambientHueMaxAccel = v
+                logSettingDebug("ambient_hue_max_accel", "氛围灯色相限加速", from, v)
+                com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "色相限加速")
+            }
+            sliderRow(
+                "每帧色差上限",
+                prefs.ambientMaxDeltaETenths,
+                2,
+                60,
+                "",
+                format = { "%.1f".format(prefs.ambientMaxDeltaE()) },
+            ) { v ->
+                val from = prefs.ambientMaxDeltaETenths
+                prefs.ambientMaxDeltaETenths = v
+                logSettingDebug("ambient_max_delta_e", "氛围灯每帧色差上限", from, v)
+                com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "色差上限")
+            }
+            sliderRow("基础亮度", prefs.ambientFloor, 0, 30, "%") { v ->
+                val from = prefs.ambientFloor
+                prefs.ambientFloor = v
+                logSettingDebug("ambient_floor", "氛围灯基础亮度", from, v)
+                com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "基础亮度")
+            }
+            sliderRow(
+                "饱和度上限",
+                prefs.ambientSaturationHundredths,
+                0,
+                100,
+                "%",
+            ) { v ->
+                val from = prefs.ambientSaturationHundredths
+                prefs.ambientSaturationHundredths = v
+                logSettingDebug("ambient_saturation", "氛围灯饱和度", from, v)
+                com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "饱和度")
+            }
+            sliderRow(
+                "色相跨度",
+                prefs.ambientHueSpanDeg,
+                150,
+                360,
+                "°",
+                step = 10,
+            ) { v ->
+                val from = prefs.ambientHueSpanDeg
+                prefs.ambientHueSpanDeg = v
+                logSettingDebug("ambient_hue_span_deg", "氛围灯色相跨度", from, v)
+                com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "色相跨度")
+            }
+            sliderRow(
+                "色相自转",
+                prefs.ambientHueRotateDegPerSec,
+                0,
+                30,
+                "°/s",
+            ) { v ->
+                val from = prefs.ambientHueRotateDegPerSec
+                prefs.ambientHueRotateDegPerSec = v
+                logSettingDebug("ambient_hue_rotate", "氛围灯色相自转", from, v)
+                com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "色相自转")
+            }
+            sliderRow(
+                "彩度上限",
+                prefs.ambientMaxChromaHundredths,
+                10,
+                40,
+                "",
+                format = { "%.2f".format(prefs.ambientMaxChromaValue()) },
+            ) { v ->
+                val from = prefs.ambientMaxChromaHundredths
+                prefs.ambientMaxChromaHundredths = v
+                logSettingDebug("ambient_max_chroma", "氛围灯彩度上限", from, v)
+                com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "彩度上限")
+            }
+            note(
+                "想要「五彩」：把「色相跨度」拉到 360°，或者直接选预设 **彩虹**" +
+                    "（跨度 360° + 质心展开 + 彩度上限 0.32 + 18°/s 自转）。\n\n" +
+                    "只拉跨度不展开质心的话，色相仍只走 100° 出头 —— " +
+                    "真实音乐的谱质心只在 0.3~0.6 之间移动，必须把这段拉伸开。",
+            )
+            sliderRow(
+                "色相跳变",
+                prefs.ambientHueJumpDeg,
+                0,
+                180,
+                "°",
+                step = 15,
+                format = { v -> if (v == 0) "关（连续）" else "${v}° 档" },
+            ) { v ->
+                val from = prefs.ambientHueJumpDeg
+                prefs.ambientHueJumpDeg = v
+                logSettingDebug("ambient_hue_jump_deg", "氛围灯色相跳变", from, v)
+                com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "色相跳变")
+            }
+            sliderRow(
+                "起拍闪光",
+                prefs.ambientPulseGainHundredths,
+                0,
+                200,
+                "",
+                step = 5,
+                format = { "%.2f×".format(prefs.ambientPulseGainValue()) },
+            ) { v ->
+                val from = prefs.ambientPulseGainHundredths
+                prefs.ambientPulseGainHundredths = v
+                logSettingDebug("ambient_pulse_gain", "氛围灯起拍闪光", from, v)
+                com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "起拍闪光")
+            }
+            sliderRow(
+                "起拍间隔",
+                prefs.ambientBeatMinGapMs,
+                80,
+                600,
+                "ms",
+                step = 20,
+            ) { v ->
+                val from = prefs.ambientBeatMinGapMs
+                prefs.ambientBeatMinGapMs = v
+                logSettingDebug("ambient_beat_gap_ms", "氛围灯起拍间隔", from, v)
+                com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "起拍间隔")
+            }
+            sliderRow(
+                "换色间隔",
+                prefs.ambientJumpHoldMs,
+                0,
+                1000,
+                "ms",
+                step = 20,
+                format = { v -> if (v == 0) "只跟拍子" else "${v} ms 强制换" },
+            ) { v ->
+                val from = prefs.ambientJumpHoldMs
+                prefs.ambientJumpHoldMs = v
+                logSettingDebug("ambient_jump_hold_ms", "氛围灯换色间隔", from, v)
+                com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "换色间隔")
+            }
+            note(
+                "想要「跳跃」：直接选预设 **跳跃** —— 色相跳变 120°（三段一组大跳）、" +
+                    "亮度起 10ms / 落 60ms、底光 0、起拍闪光 1.2 倍、起拍间隔 120ms、" +
+                    "换色间隔 380ms（没鼓点也保证隔一会儿闪一次）。\n\n" +
+                    "跳跃模式下**两层 ΔE 限速都会关掉**：限速器会把一次换色抹成十几帧的滑坡，" +
+                    "那就是「还是太平顺」的来源。关掉后换色在 1~2 个写入周期内直接到位。\n\n" +
+                    "「换色间隔」= 0 只跟拍子；否则即使没检测到鼓点，隔这么久也强制换一档。\n\n" +
+                    "⚠️ 这一组很晃眼，夜间跟车建议换回「均衡」或「夜驾柔和」。",
+            )
+            sliderRow(
+                "空闲呼吸",
+                prefs.ambientBreathHundredths,
+                0,
+                40,
+                "%",
+                format = { "%.2f".format(prefs.ambientBreathValue()) },
+            ) { v ->
+                val from = prefs.ambientBreathHundredths
+                prefs.ambientBreathHundredths = v
+                logSettingDebug("ambient_breath", "氛围灯空闲呼吸", from, v)
+                com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "空闲呼吸")
+            }
+            note(
+                "新版在 **60Hz 独立时钟**上逐帧积分（频谱仍是 10Hz），" +
+                    "颜色用 OKLCH 感知色空间，相邻帧的感知色差被硬限制在上面的上限内。\n\n" +
+                    "色相限加速消除「甩过去再顿一下」；亮度起快落慢；" +
+                    "空闲时色相缓慢漂移 + 呼吸底光，不是冻在最后一个颜色。",
+            )
+        } else {
+            note(
+                "旧版是**实车验证过的现网链路**：10Hz 步进、HSV 配色、亮度线性缩放。\n\n" +
+                    "它被评价为「灯在跳，不是灯在流动」。保留它是为了在**同一台车、同一首歌**上直接对比。",
+            )
+        }
+
+        section("分区编排")
+        switchRow(
+            "区域巡游",
+            prefs.ambientZoneChoreo,
+            "三个分区轮流点亮（仅建议驻车 / 展示时开启）",
+        ) { enabled ->
+            val from = prefs.ambientZoneChoreo
+            prefs.ambientZoneChoreo = enabled
+            logSetting("ambient_zone_choreo", "氛围灯分区编排", from, enabled)
+            com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "分区编排")
+            onApply?.invoke()
+        }
+        if (prefs.ambientZoneChoreo) {
+            sliderRow("分区驻留", prefs.ambientZoneDwellMs, 700, 2000, "ms", step = 50) { v ->
+                val from = prefs.ambientZoneDwellMs
+                prefs.ambientZoneDwellMs = v
+                logSettingDebug("ambient_zone_dwell_ms", "氛围灯分区驻留", from, v)
+                com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "分区驻留")
+            }
         }
         note(
-            "灵敏度越高，弱音也越亮（灯更跟手）；亮度上下限决定灯的动态范围。\n\n" +
-                "亮度滑杆是**绝对亮度**：拖到多少，车机那边就是多少（厂商只有高/低/关三档）。",
+            "这台车机只有分区**开关**，没有分区颜色 / 亮度，所以切换必然是硬边。\n\n" +
+                "驻留拉长到 800ms 以上、并在下发时**先开新的再关旧的**，读起来才像「呼吸」而不是「闪」。\n\n" +
+                "行车建议保持关闭（三区常亮最不干扰驾驶）。",
         )
 
         // 进这一页就把录音权限要到手（不打断首屏，这里才是自然的时机）

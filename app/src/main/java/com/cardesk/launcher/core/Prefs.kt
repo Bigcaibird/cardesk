@@ -158,6 +158,203 @@ class Prefs(context: Context) {
         get() = intValue("ambient_max_brightness", 100)
         set(value) = setIntValue("ambient_max_brightness", value.coerceIn(0, 100))
 
+    // ------------------------------------------------------------------ 氛围灯 V2 参数
+
+    /**
+     * 引擎选择：0 = **新版**（V2，感知色空间 + 二阶限速），1 = **旧版**（观感回退）。
+     *
+     * ## 为什么要在车上留一个开关
+     *
+     * 旧版链路是**实车验证过**的（灯确实会随音乐变色），
+     * 但被评价为「太僵硬」。新版是照着方案与演示台重写的，
+     * 两版的观感差别很大 —— 用户需要能在**同一台车、同一首歌**上直接对比，
+     * 而不是靠回忆。
+     *
+     * 切换后立刻重建运动层并重置状态（不然会把旧版的色相状态带过来）。
+     */
+    var ambientEngine: Int
+        get() = intValue("ambient_engine", ENGINE_V2)
+        set(value) = setIntValue("ambient_engine", value.coerceIn(ENGINE_V2, ENGINE_LEGACY))
+
+    /** 明度**上升**时间常数（毫秒）—— 鼓点来了多快跟上。 */
+    var ambientAttackMs: Int
+        get() = intValue("ambient_attack_ms", 45).coerceIn(10, 300)
+        set(value) = setIntValue("ambient_attack_ms", value.coerceIn(10, 300))
+
+    /** 明度**下降**时间常数（毫秒）—— 音乐停了多快暗下去。 */
+    var ambientDecayMs: Int
+        get() = intValue("ambient_decay_ms", 260).coerceIn(60, 1200)
+        set(value) = setIntValue("ambient_decay_ms", value.coerceIn(60, 1200))
+
+    /** 色相平滑的时间常数（毫秒）—— 越大越「黏」。 */
+    var ambientHueTauMs: Int
+        get() = intValue("ambient_hue_tau_ms", 260).coerceIn(60, 1200)
+        set(value) = setIntValue("ambient_hue_tau_ms", value.coerceIn(60, 1200))
+
+    /** 色相角速度上限（度/秒）—— 防大跨度变化时灯「甩」过去。 */
+    var ambientHueMaxDeg: Int
+        get() = intValue("ambient_hue_max_deg", 60).coerceIn(10, 180)
+        set(value) = setIntValue("ambient_hue_max_deg", value.coerceIn(10, 180))
+
+    /** 色相角加速度上限（度/秒²）—— 消除「一顿一顿」。 */
+    var ambientHueMaxAccel: Int
+        get() = intValue("ambient_hue_max_accel", 240).coerceIn(30, 800)
+        set(value) = setIntValue("ambient_hue_max_accel", value.coerceIn(30, 800))
+
+    /**
+     * 每帧感知色差上限（ΔE00）—— **存的是 ×10 的整数**。
+     *
+     * 存整数而不是小数：`SharedPreferences` 存浮点要走 `putFloat`，
+     * 而这个文件里的读值是**容错**的（`intValue` 会把各种类型都转成 int），
+     * 存成整数更稳。取值 = 本字段 ÷ 10。
+     */
+    var ambientMaxDeltaETenths: Int
+        get() = intValue("ambient_max_delta_e", 18).coerceIn(2, 60)
+        set(value) = setIntValue("ambient_max_delta_e", value.coerceIn(2, 60))
+
+    /** 每帧感知色差上限（ΔE00，0.2 ~ 6.0）。 */
+    fun ambientMaxDeltaE(): Float = ambientMaxDeltaETenths / 10f
+
+    /** 基础亮度（%）—— 呼吸底光，**不能是 0**（灯不能真灭）。 */
+    var ambientFloor: Int
+        get() = intValue("ambient_floor", 8).coerceIn(0, 30)
+        set(value) = setIntValue("ambient_floor", value.coerceIn(0, 30))
+
+    /**
+     * 空闲呼吸幅度 —— **存的是 ×100 的整数**（0 ~ 0.40）。
+     */
+    var ambientBreathHundredths: Int
+        get() = intValue("ambient_breath", 10).coerceIn(0, 40)
+        set(value) = setIntValue("ambient_breath", value.coerceIn(0, 40))
+
+    /** 空闲呼吸幅度（0 ~ 0.40）。 */
+    fun ambientBreathValue(): Float = ambientBreathHundredths / 100f
+
+    /**
+     * 饱和度上限 —— **存的是 ×100 的整数**（0 ~ 1.00）。
+     */
+    var ambientSaturationHundredths: Int
+        get() = intValue("ambient_saturation", 80).coerceIn(0, 100)
+        set(value) = setIntValue("ambient_saturation", value.coerceIn(0, 100))
+
+    /** 饱和度上限（0 ~ 1.00）。 */
+    fun ambientSaturationValue(): Float = ambientSaturationHundredths / 100f
+
+    // ------------------------------------------------------------------ 五彩（V2 色相覆盖）
+
+    /**
+     * 色相跨度（度，150..360）。
+     *
+     * 150° = 原窄带（青→蓝→紫→品红，第八十八轮的默认观感）；
+     * 360° = 整圈彩虹。**默认 150**，所以不选彩虹预设时行为逐位不变。
+     */
+    var ambientHueSpanDeg: Int
+        get() = intValue("ambient_hue_span_deg", 150).coerceIn(150, 360)
+        set(value) = setIntValue("ambient_hue_span_deg", value.coerceIn(150, 360))
+
+    /**
+     * 谱质心展开窗口下沿 —— **存的是 ×100 的整数**（0 ~ 0.70）。
+     *
+     * 0 = 不展开（恒等映射）。感知层把每段归一化到自己的参考值附近后，
+     * 真实音乐的谱质心其实只在 0.3~0.6 之间移动，不展开的话
+     * 即使跨度拉到 360° 色相也只走 110°。
+     */
+    var ambientCentroidWindowLowHundredths: Int
+        get() = intValue("ambient_centroid_low", 0).coerceIn(0, 70)
+        set(value) = setIntValue("ambient_centroid_low", value.coerceIn(0, 70))
+
+    /** 谱质心展开窗口下沿（0 ~ 0.70）。 */
+    fun ambientCentroidWindowLow(): Float = ambientCentroidWindowLowHundredths / 100f
+
+    /** 谱质心展开窗口跨度 —— **存的是 ×100 的整数**（0.10 ~ 1.00，100 = 不展开）。 */
+    var ambientCentroidWindowSpanHundredths: Int
+        get() = intValue("ambient_centroid_span", 100).coerceIn(10, 100)
+        set(value) = setIntValue("ambient_centroid_span", value.coerceIn(10, 100))
+
+    /** 谱质心展开窗口跨度（0.10 ~ 1.00）。 */
+    fun ambientCentroidWindowSpan(): Float = ambientCentroidWindowSpanHundredths / 100f
+
+    /** 彩度上限 —— **存的是 ×100 的整数**（0.10 ~ 0.40，默认 0.22）。 */
+    var ambientMaxChromaHundredths: Int
+        get() = intValue("ambient_max_chroma", 22).coerceIn(10, 40)
+        set(value) = setIntValue("ambient_max_chroma", value.coerceIn(10, 40))
+
+    /** 彩度上限（0.10 ~ 0.40）。 */
+    fun ambientMaxChromaValue(): Float = ambientMaxChromaHundredths / 100f
+
+    /**
+     * 色相自转（度/秒，0 ~ 30）。
+     *
+     * 0 = 不转（默认）。非 0 时目标色相每帧叠一个连续相位 ——
+     * 歌与歌之间质心几乎不动时，靠它保证颜色仍在缓慢流过整圈。
+     */
+    var ambientHueRotateDegPerSec: Int
+        get() = intValue("ambient_hue_rotate", 0).coerceIn(0, 30)
+        set(value) = setIntValue("ambient_hue_rotate", value.coerceIn(0, 30))
+
+    /**
+     * 色相**跳变**步长（度，0 ~ 180）。
+     *
+     * 0 = 连续平滑（默认）；>0 时目标色相直接吸到最近的档位 ——
+     * 「跳跃」模式用它把颜色从「流过去」变成「跳过去」。
+     * 60° = 六档（红/黄/绿/青/蓝/品红）。
+     */
+    var ambientHueJumpDeg: Int
+        get() = intValue("ambient_hue_jump_deg", 0).coerceIn(0, 180)
+        set(value) = setIntValue("ambient_hue_jump_deg", value.coerceIn(0, 180))
+
+    /**
+     * 起拍闪光强度 —— **存的是 ×100 的整数**（0 ~ 200）。
+     *
+     * 经典值是 35（明度在起拍瞬间 +35%）；「跳跃」拉到 120 就是闪到接近满亮。
+     */
+    var ambientPulseGainHundredths: Int
+        get() = intValue("ambient_pulse_gain", 35).coerceIn(0, 200)
+        set(value) = setIntValue("ambient_pulse_gain", value.coerceIn(0, 200))
+
+    /** 起拍闪光强度（0 ~ 2.00）。 */
+    fun ambientPulseGainValue(): Float = ambientPulseGainHundredths / 100f
+
+    /**
+     * 起拍最短间隔（毫秒，80 ~ 600）。
+     *
+     * 越小闪得越密：240 = 最多约 4 次/秒（默认，防八分音符被当成两次起拍）；
+     * 120 = 约 8 次/秒，「跳跃」的闪法。
+     */
+    var ambientBeatMinGapMs: Int
+        get() = intValue("ambient_beat_gap_ms", 240).coerceIn(80, 600)
+        set(value) = setIntValue("ambient_beat_gap_ms", value.coerceIn(80, 600))
+
+    /**
+     * 跳变模式的**强制换色间隔**（毫秒，0 ~ 1000，0 = 只跟起拍）。
+     *
+     * 起拍检测是内容驱动的：音乐没鼓点、或者低音一直很响被自适应阈值
+     * 当成常态时就不会换色。给个上限，保证「隔这么久至少闪一次」。
+     */
+    var ambientJumpHoldMs: Int
+        get() = intValue("ambient_jump_hold_ms", 0).coerceIn(0, 1000)
+        set(value) = setIntValue("ambient_jump_hold_ms", value.coerceIn(0, 1000))
+
+    /**
+     * 分区编排（区域巡游）。
+     *
+     * **行车默认关闭** —— 分区切换容易分散注意力，
+     * 只在驻车 / 展示场景开启。
+     */
+    var ambientZoneChoreo: Boolean
+        get() = sp.getBoolean("ambient_zone_choreo", false)
+        set(value) { sp.edit().putBoolean("ambient_zone_choreo", value).apply() }
+
+    /** 分区驻留时间（毫秒）—— 低于 700ms 会看出硬边。 */
+    var ambientZoneDwellMs: Int
+        get() = intValue("ambient_zone_dwell_ms", 800).coerceIn(700, 2000)
+        set(value) = setIntValue("ambient_zone_dwell_ms", value.coerceIn(700, 2000))
+
+    /** 感知层每段参考电平的时间常数（毫秒）。 */
+    var ambientBandRefTauMs: Int
+        get() = intValue("ambient_band_ref_tau_ms", 2000).coerceIn(1000, 5000)
+        set(value) = setIntValue("ambient_band_ref_tau_ms", value.coerceIn(1000, 5000))
+
     // ------------------------------------------------------------------ 卡片风格（第五十八轮）
 
     /**
@@ -765,6 +962,12 @@ class Prefs(context: Context) {
     }
 
     companion object {
+        /** 引擎 = 新版（V2，感知色空间 + 二阶限速）。 */
+        const val ENGINE_V2 = 0
+
+        /** 引擎 = 旧版（观感回退，实车验证过的现网链路）。 */
+        const val ENGINE_LEGACY = 1
+
         /**
          * 全局 Dock 开关（第八十七轮）。
          *

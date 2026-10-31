@@ -63,10 +63,21 @@ import com.cardesk.launcher.vehicle.VehicleGateway
  */
 class AdaptapiAmbientLightApi(
     /**
+     * 每帧**感知色差**上限（ΔE00）。
+     *
+     * 见 [limitByDeltaE]：这是「不生硬」最硬的量化保证。
+     */
+    private val maxDeltaE: Float = DEFAULT_MAX_DELTA_E,
+    /**
      * 取当前车辆通道。
      *
      * 默认走 [VehicleController]；留这个接缝是为了**单测**能塞一个假通道进来
      * （真机上通道是异步选出来的，用的时候才取）。
+     *
+     * ## 它必须是**最后一个**参数
+     *
+     * 单测里用的是尾随 lambda 写法（`AdaptapiAmbientLightApi { gw }`），
+     * 尾随 lambda 只能绑到最后一个参数上。
      */
     private val gatewayProvider: () -> VehicleGateway? = {
         if (!VehicleController.initialized) null
@@ -86,6 +97,13 @@ class AdaptapiAmbientLightApi(
     private var lastStationaryBrightnessValue: Int? = null
 
     /**
+     * 上一个分区状态（三区各自的开 / 关）。
+     *
+     * null = 还没写过（开灯时统一写一次「全开」）。
+     */
+    private val lastZoneState = BooleanArray(AmbientLightApi.ZONE_COUNT) { false }
+
+    /**
      * 上一次写颜色**是不是失败了**（第七十九轮 P0）。
      *
      * 失败后要多等一会儿再试（[FAIL_BACKOFF_MS]）——
@@ -101,6 +119,46 @@ class AdaptapiAmbientLightApi(
      * 每帧再写一遍体验模式是白费车机 IO。
      */
     private var experienceCustomWritten = false
+
+    /**
+     * 限速器介入次数（诊断用：看 ΔE00 限速到底拦了多少次）。
+     *
+     * 拦得越多说明**渲染帧率跟不上写入节流**，或者音乐本身变化太猛。
+     */
+    @Volatile
+    var deltaELimitedCount: Int = 0
+        private set
+
+    /** 最近一次被限速前的原始 ΔE00（诊断用）。 */
+    @Volatile
+    var lastRawDeltaE: Float = 0f
+        private set
+
+    /**
+     * 写入层的 ΔE00 限速开关。
+     *
+     * ## 为什么旧版链路要把它关掉
+     *
+     * 旧版是**现网验证过**的链路：10Hz 的硬跳变（单步 ΔE00 ≈ 9.8~32.5）。
+     * 限速是 V2 才有的东西 —— 套到旧版上，它会被压成一条几乎不动的慢坡，
+     * 「旧版 vs 新版」就比不出东西了。
+     *
+     * 控制器在切引擎时调 [setDeltaELimitEnabled]。
+     */
+    @Volatile
+    private var deltaELimitEnabled = true
+
+    /**
+     * 打开 / 关闭写入层的 ΔE00 限速（见 [deltaELimitEnabled]）。
+     */
+    override fun setDeltaELimitEnabled(enabled: Boolean) {
+        deltaELimitEnabled = enabled
+        if (!enabled) {
+            // 基准也要清掉 —— 旧版的颜色跟 V2 的不是一个量纲，
+            // 拿旧基准去限新颜色会莫名其妙地拉回。
+            lastColor = null
+        }
+    }
 
     override fun isAvailable(): Boolean = gatewayProvider() != null
 
@@ -160,9 +218,7 @@ class AdaptapiAmbientLightApi(
         //
         // 现在先把节流与 backoff 判掉，写不出去就直接返回，后面的解析一次都不做。
         val now = System.currentTimeMillis()
-        val prev = lastColor
-        if (prev != null && now - lastWriteAt < minIntervalMs) return true
-        if (prev != null && AmbientPalette.colorDistance(prev, color) < MIN_COLOR_DELTA) return true
+        if (now - lastWriteAt < minIntervalMs) return true
         // 第七十九轮 P0：**写失败也要推进节流时间**。
         //
         // 以前 `lastWriteAt` 只在写成功时推进 —— 车机那边不认这个功能号时，
@@ -171,8 +227,19 @@ class AdaptapiAmbientLightApi(
         // 主线程被拖死 → 窗口只剩背景色（黑）→ 看门狗杀进程。
         //
         // 现在无论成败都推进；失败了再多等一会儿（FAIL_BACKOFF_MS）。
-        val failedRecently = lastWriteFailed && now - lastWriteAt < FAIL_BACKOFF_MS
-        if (failedRecently) return false
+        if (lastWriteFailed && now - lastWriteAt < FAIL_BACKOFF_MS) return false
+        // —— ΔE00 限速：把这一帧拉到「与上一个**已写**颜色」相差 ≤ maxDeltaE ——
+        //
+        // ## 为什么比较的是「上一个已写颜色」而不是「上一个渲染帧」
+        //
+        // 渲染跑 60Hz、写入节流 50ms（20Hz），中间有 2~3 帧被丢掉。
+        // 若拿「上一渲染帧」当基准，被丢掉的那几帧的变化会**攒到下一次写入**，
+        // 于是真正落在车上的两帧色差可能是好几倍 —— 验收第 2 条（ΔE00 ≤ 2.0）就废了。
+        //
+        // 拿「上一个已写颜色」当基准，才能保证**车上的每一帧**都满足上限。
+        val target = limitByDeltaE(color)
+        val prev = lastColor
+        if (prev != null && AmbientPalette.colorDistance(prev, target) < MIN_COLOR_DELTA) return true
         lastWriteAt = now
         val gw = gateway("写颜色") ?: return false
         val func = AdaptapiConstants.resolve(AdaptapiConstants.FUNC_AMBIENT_COLOR_SET) ?: run {
@@ -182,19 +249,68 @@ class AdaptapiAmbientLightApi(
         }
         // 体验模式 = CUSTOM —— **必须在写自定义色之前**
         ensureExperienceCustom(gw)
-        val rgb = (color.r.coerceIn(0, 255) shl 16) or
-            (color.g.coerceIn(0, 255) shl 8) or
-            color.b.coerceIn(0, 255)
+        val rgb = (target.r.coerceIn(0, 255) shl 16) or
+            (target.g.coerceIn(0, 255) shl 8) or
+            target.b.coerceIn(0, 255)
         val ok = gw.setHvac(func, ZONE, rgb)
         if (ok) {
             lastWriteFailed = false
-            lastColor = color
-            Logx.d(LogTags.AMBIENT, "氛围灯颜色已下发", "hex" to color.toHex(), "rgb" to rgb)
+            lastColor = target
+            Logx.d(LogTags.AMBIENT, "氛围灯颜色已下发", "hex" to target.toHex(), "rgb" to rgb)
         } else {
             lastWriteFailed = true
-            Logx.d(LogTags.AMBIENT, "氛围灯颜色下发失败", "hex" to color.toHex(), "rgb" to rgb)
+            Logx.d(LogTags.AMBIENT, "氛围灯颜色下发失败", "hex" to target.toHex(), "rgb" to rgb)
         }
         return ok
+    }
+
+    /**
+     * ΔE00 限速：把候选颜色拉回到与「上一个已写颜色」相差 ≤ [maxDeltaE]。
+     *
+     * ## 怎么做
+     *
+     * 1. 候选色与上一个已写色都转到 CIELAB；
+     * 2. 算 ΔE00；
+     * 3. 超过上限就把候选色**按比例往回拉**：
+     *    `k = 1 − (maxDeltaE / ΔE) × 0.5`，
+     *    在 **OKLab** 里插值（感知均匀，不会因为插值而偏色），
+     *    再转回 8 bit sRGB。
+     *
+     * ## 为什么要乘 0.5
+     *
+     * 线性拉回会刚好落在上限上（ΔE 恰好 = maxDeltaE），
+     * 但那是**数学上限** —— 实车上每帧都顶在上限上看着仍然偏跳。
+     * 乘 0.5 是留一半余量：实际每帧的色差大约是上限的一半，
+     * 观感上就是「连续流动」。
+     *
+     * ## 为什么在 OKLab 里插值而不是 RGB
+     *
+     * RGB 直插会在两端之间**穿过灰轴**（尤其两端色相差别大时），
+     * 中间那一帧会「淡一下」—— 这恰恰是要消除的生硬。
+     * OKLab 是感知均匀的，插值路径在感知上就是一条直线。
+     */
+    private fun limitByDeltaE(color: AmbientColor): AmbientColor {
+        // 旧版链路不限速（现网观感要原样保留，见 [deltaELimitEnabled]）。
+        if (!deltaELimitEnabled) return color
+        val prev = lastColor ?: return color
+        if (maxDeltaE <= 0f) return color
+        val prevLab = AmbientColorSpace.rgbToLab(prev.r, prev.g, prev.b)
+        val curLab = AmbientColorSpace.rgbToLab(color.r, color.g, color.b)
+        val de = AmbientColorSpace.deltaE00(prevLab, curLab)
+        lastRawDeltaE = de
+        if (de <= maxDeltaE) return color
+        val rgb = AmbientColorSpace.limitByDeltaE(
+            prev.r, prev.g, prev.b,
+            color.r, color.g, color.b,
+            maxDeltaE,
+        )
+        deltaELimitedCount++
+        Logx.d(
+            LogTags.AMBIENT, "氛围灯颜色被 ΔE00 限速",
+            "rawDeltaE" to de, "max" to maxDeltaE,
+            "from" to color.toHex(), "to" to prev.toHex(),
+        )
+        return AmbientColor(rgb.first, rgb.second, rgb.third, color.brightness)
     }
 
     /**
@@ -294,6 +410,8 @@ class AdaptapiAmbientLightApi(
         for (i in funcs.indices) {
             val func = funcs[i] ?: continue
             val ok = gw.setHvac(func, ZONE, ON)
+            // 记下状态：分区编排要靠它判断「要不要重写」
+            lastZoneState[i] = ok
             val label = AdaptapiConstants.AMBIENT_ZONE_FUNC_NAMES[i]
             if (ok) {
                 Logx.d(LogTags.AMBIENT, "氛围灯分区点亮", "name" to label, "func" to func)
@@ -301,6 +419,40 @@ class AdaptapiAmbientLightApi(
                 Logx.w(LogTags.AMBIENT, "氛围灯分区点亮失败", "name" to label, "func" to func)
             }
         }
+    }
+
+    /**
+     * 开关**某一个分区**（分区编排用）。
+     *
+     * 三个分区是**三个独立功能号**（`0x200A0500` / `0x200A0400` / `0x200A0300`），
+     * 写值只认 `0` / `1`。
+     *
+     * ## 状态去重
+     *
+     * 同一个状态不重写 —— 分区编排是低频动作（驻留 ≥ 800ms），
+     * 但状态抖动（比如「刚好重写」与「编排切换」撞在一起）不能变成车控 IO 风暴。
+     */
+    override fun setZoneEnabled(zone: Int, enabled: Boolean): Boolean {
+        if (zone < 0 || zone >= AmbientLightApi.ZONE_COUNT) return false
+        val gw = gateway("分区开关") ?: return false
+        if (lastZoneState[zone] == enabled) return true
+        val func = AdaptapiConstants.ambientZoneFuncs().getOrNull(zone) ?: run {
+            Logx.d(LogTags.AMBIENT, "氛围灯分区功能号按名解析不到", "zone" to zone)
+            return false
+        }
+        val ok = gw.setHvac(func, ZONE, if (enabled) ON else OFF)
+        if (ok) {
+            lastZoneState[zone] = enabled
+            Logx.d(
+                LogTags.AMBIENT, "氛围灯分区开关已下发",
+                "zone" to zone,
+                "name" to AdaptapiConstants.AMBIENT_ZONE_FUNC_NAMES[zone],
+                "enabled" to enabled,
+            )
+        } else {
+            Logx.w(LogTags.AMBIENT, "氛围灯分区开关下发失败", "zone" to zone, "enabled" to enabled)
+        }
+        return ok
     }
 
     /**
@@ -411,11 +563,33 @@ class AdaptapiAmbientLightApi(
         /**
          * 最小写入间隔（毫秒）。
          *
-         * 取 **100ms = 10Hz**，与频谱帧率一致 ——
-         * 动感层算出来的颜色就是 10Hz 的连续变化，
-         * 写入再慢就会把平滑重新切成台阶（灯又「跳」起来了）。
+         * ## 从 100 改成 50：写入频率 10Hz → 20Hz
+         *
+         * 旧版渲染跑在 10Hz（频谱帧率），所以 100ms 的节流正好对齐。
+         * V2 的渲染跑在 **60Hz 独立时钟**上，平滑是在渲染层做的；
+         * 写入再慢就会把平滑重新切成台阶 —— 灯又「跳」起来了。
+         *
+         * 50ms = 20Hz，是「车控 IO 压力」与「观感连续性」的折中。
+         *
+         * ## ⚠️ 提高写入频率必须守住第七十九轮 P0
+         *
+         * 20Hz 的**同步 binder** 比 10Hz 更容易把主线程拖死。
+         * 本类所有写入都在后台线程上（见 [AmbientLightController] 的写线程），
+         * 且：只取最新一帧、不排队、写失败退避 1s。
+         * 这三条是**不能动**的。
+         *
+         * 若实车观察发现车控 IO 或主线程负载不稳，
+         * 先退到 60ms（≈16.7Hz），观感仍然远好于 10Hz。
          */
-        const val MIN_INTERVAL_MS = 100L
+        const val MIN_INTERVAL_MS = 50L
+
+        /**
+         * 每帧感知色差上限（ΔE00）的默认值。
+         *
+         * 演示台实测：旧版单步跳变 ΔE00 ≈ 9.8~32.5，
+         * V2 限速后每帧 ≤ 1.2（限速器留了一半余量）。
+         */
+        const val DEFAULT_MAX_DELTA_E = 1.8f
 
         /**
          * 写失败后的退避（毫秒）。

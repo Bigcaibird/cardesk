@@ -7,7 +7,7 @@
 #   2) rsync 到一个**全新的临时目录**（干净全量构建，避免增量构建在 APK 里
 #      留下对齐填充空隙）
 #   3) 跑全量单测 + 出 system 版 APK
-#   4) 校验包名 / versionCode / versionName，算 SHA-256，落到 dist/
+#   4) 校验包名 / versionCode / versionName / **平台证书指纹**，算 SHA-256，落到 dist/
 #   5) 重写 dist/README.md（当前版本 + 目录里其它 APK 是旧包）
 #
 # 用法：
@@ -126,6 +126,32 @@ case "$BADGING" in
     *) echo "versionCode 对不上（期望 $CODE）" >&2; exit 1 ;;
 esac
 
+# ---------------------------------------------------------------- 3.5) 平台证书校验
+#
+# `platform-key/` 不在的时候，`assembleSystem` 会**静默退回 debug 签名**
+# （见 app/build.gradle.kts 的条件判断：密钥文件不存在就不设 signingConfig）。
+# 那种包装到车机上会因为签名不符拿不到 `CAR_VENDOR_EXTENSION` ——
+# 现象是「氛围灯不亮、车控句柄拿不到」，跟「没接氛围灯」一模一样，
+# 很难一眼看出是签名的问题。
+#
+# 所以这里**验指纹**：不是车机那张平台证书就直接失败，不让它流到 dist/。
+# （uni-launcher/tools/sign_car_apk.py 校验的是同一个值 —— 两个 app 同一张证书。）
+PLATFORM_SHA256="c8a2e9bccf597c2fb6dc66bee293fc13f2fc47ec77bc6b2b0d52c11f51192ab8"
+APKSIGNER_JAR="$(ls -1 "$TOOLCHAIN"/sdk/build-tools/*/lib/apksigner.jar 2>/dev/null | tail -1)"
+if [ -z "$APKSIGNER_JAR" ] || [ ! -f "$APKSIGNER_JAR" ]; then
+    echo "找不到 apksigner.jar（$TOOLCHAIN/sdk/build-tools）" >&2
+    exit 1
+fi
+GOT_CERT="$("$JAVA_HOME/bin/java" -cp "$APKSIGNER_JAR" com.android.apksigner.ApkSignerTool \
+    verify --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
+if [ "$GOT_CERT" != "$PLATFORM_SHA256" ]; then
+    echo "证书不对：期望 $PLATFORM_SHA256，实际 '$GOT_CERT'" >&2
+    echo "（这个包装到车机上会因为签名不符拿不到车控权限）" >&2
+    echo "检查 $REPO/platform-key/ 是否存在（平台私钥不入库）" >&2
+    exit 1
+fi
+echo "== 平台证书 SHA-256：$GOT_CERT"
+
 sha256() {
     if command -v shasum >/dev/null 2>&1; then
         shasum -a 256 "$1" | awk '{print $1}'
@@ -138,8 +164,11 @@ DIST="$REPO/dist"
 mkdir -p "$DIST"
 # 命名沿用既有约定：CarDesk-<包名去掉 com.>-<versionCode>.apk
 #   com.ecarx.cardesk → CarDesk-ecarx-cardesk-4124.apk
+# 名字里加 "-platform"：**这是平台签名的实车包**，
+# 与开发包（debug 签名）、以及 uni-launcher 的实车包（UNI-Launcher-*.apk）
+# 一眼能分开 —— 两个 app 同一张证书、不同应用与包名。
 SHORT_PKG="$(echo "${PACKAGE#com.}" | tr '.' '-')"
-OUT_NAME="CarDesk-${SHORT_PKG}-${CODE}.apk"
+OUT_NAME="CarDesk-platform-${SHORT_PKG}-${CODE}.apk"
 OUT="$DIST/$OUT_NAME"
 cp "$APK" "$OUT"
 SHA="$(sha256 "$OUT")"
@@ -199,6 +228,7 @@ echo "文件        : $OUT_NAME"
 echo "包名        : $PACKAGE"
 echo "versionCode : $CODE"
 echo "versionName : $NAME-system"
+echo "签名        : AOSP platform（SHA-256 $GOT_CERT）"
 echo "SHA-256     : $SHA"
 echo "R2 清单     : $MANIFEST"
 echo "R2 对象 key : cardesk/$OUT_NAME"

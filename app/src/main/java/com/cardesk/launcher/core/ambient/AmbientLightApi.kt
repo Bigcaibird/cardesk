@@ -61,6 +61,58 @@ interface AmbientLightApi {
      * 调用方据此保持原状即可，不必每个实现都写一遍。
      */
     fun setStationaryBrightness(brightness: Int): Boolean = false
+
+    /**
+     * 开关**某一个分区**（分区编排用）。
+     *
+     * ## 分区编号
+     *
+     * | 值 | 分区 | 功能号 |
+     * | --- | --- | --- |
+     * | [ZONE_MAIN] 0 | 主区（门板一圈） | `SETTING_FUNC_AMBIENCE_LIGHT_MAINZONES` |
+     * | [ZONE_TOP] 1 | 上区（顶棚 / 仪表台） | `SETTING_FUNC_AMBIENCE_LIGHT_TOPZONES` |
+     * | [ZONE_BOTTOM] 2 | 下区（脚部 / 门槛） | `SETTING_FUNC_AMBIENCE_LIGHT_BOTZONES` |
+     *
+     * ## 边界：只有分区**开关**，没有分区颜色
+     *
+     * `0x2A` 段（分区颜色 / 分区亮度）在本车机固件上**没有实现**
+     * （`set` 恒 false），所以分区编排只能是「硬边」：
+     * 一个分区开、其余关，颜色是**全局**的一色。
+     *
+     * 默认实现返回 false（不支持）——
+     * 调用方据此退回「整舱统一」，不会因为分区功能失效而灯不亮。
+     */
+    fun setZoneEnabled(zone: Int, enabled: Boolean): Boolean = false
+
+    /**
+     * 打开 / 关闭**写入层**的 ΔE00 限速。
+     *
+     * ## 为什么是运行期可切
+     *
+     * ΔE00 限速是 V2 才加的东西。旧版链路是**现网验证过**的观感：
+     * 10Hz 的硬跳变（单步 ΔE00 ≈ 9.8~32.5）。
+     * 给旧版也套上限速，它会被压成一条几乎不动的慢坡 ——
+     * 「旧版 vs 新版」的 A/B 对比就失去意义了。
+     *
+     * 所以限速是**跟着引擎走**的：控制器在切引擎时调这个方法。
+     *
+     * 默认实现是什么都不做（没实装的通道本来也不写颜色）。
+     */
+    fun setDeltaELimitEnabled(enabled: Boolean) {}
+
+    companion object {
+        /** 主区。 */
+        const val ZONE_MAIN = 0
+
+        /** 上区。 */
+        const val ZONE_TOP = 1
+
+        /** 下区。 */
+        const val ZONE_BOTTOM = 2
+
+        /** 分区总数。 */
+        const val ZONE_COUNT = 3
+    }
 }
 
 /**
