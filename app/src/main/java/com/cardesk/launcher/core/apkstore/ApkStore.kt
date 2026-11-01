@@ -109,7 +109,12 @@ object ApkStore {
      * 走 [FileDownload]：下载完校验**长度**和 **SHA-256**（清单给了才校验），
      * 对不上就删掉半成品、判失败 —— 车机装一个残缺的 APK 比不装更糟。
      */
-    fun download(context: Context, entry: ApkEntry, onProgress: (Int) -> Unit = {}): File? {
+    fun download(
+        context: Context,
+        entry: ApkEntry,
+        onProgress: (Int) -> Unit = {},
+        onDetail: (Long, Long, Long) -> Unit = { _, _, _ -> },
+    ): File? {
         // 文件名来自清单（外部数据）—— 只取最后一段，别让它带路径
         val fileName = entry.file.substringAfterLast('/').ifBlank { "app.apk" }
         val target = File(File(context.cacheDir, "apkstore"), fileName)
@@ -119,6 +124,7 @@ object ApkStore {
             expectSize = entry.size,
             expectSha256 = entry.sha256,
             onProgress = onProgress,
+            onDetail = onDetail,
         )
         return when (result) {
             is FileDownload.Result.Ok -> {

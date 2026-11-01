@@ -32,6 +32,7 @@ import com.cardesk.launcher.core.Palette
 import com.cardesk.launcher.core.Prefs
 import com.cardesk.launcher.core.media.MusicController
 import com.cardesk.launcher.core.ScheduledTasks
+import com.cardesk.launcher.core.Shape
 import com.cardesk.launcher.core.Skin
 import com.cardesk.launcher.core.apkstore.ApkEntry
 import com.cardesk.launcher.core.apkstore.ApkStore
@@ -45,6 +46,7 @@ import com.cardesk.launcher.ui.widget.QrCodeView
 import com.cardesk.launcher.ui.widget.SpectrumView
 import com.cardesk.launcher.ui.widget.WallpaperThumbView
 import com.cardesk.launcher.vehicle.DriveMode
+import com.cardesk.launcher.vehicle.VinReader
 
 /**
  * 设置浮层，沿用 App 的
@@ -398,11 +400,18 @@ class SettingsOverlay(
             bottomRow,
             abs(36, TREE_TOP + TREE_VIEW_H + 4, leftWidth - 72, VIN_ROW_H),
         )
-        val vin = Ui.text(context, "VIN：（空）", 13f, pal.textFaint).apply {
+        val vin = Ui.text(context, "VIN：读取中", 13f, pal.textFaint).apply {
             typeface = Typeface.MONOSPACE
             maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.END
         }
         bottomRow.addView(vin, LinearLayout.LayoutParams(0, -1, 1f))
+        // 车机 VIN 读一次就够（进程内缓存）：先在后台读，读完再回主线程改字，
+        // 不阻塞设置浮层的构造 —— 这里以前写死「（空）」，用户以为车机没 VIN。
+        VinReader.refresh(context) { value ->
+            val text = if (value != null) "VIN：$value" else "VIN：读不到"
+            vin.post { vin.text = text }
+        }
         val activate = Ui.text(context, "开源与声明", 16f, pal.accent, bold = true).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(12, 0, 0, 0)
@@ -946,17 +955,6 @@ class SettingsOverlay(
         val segScroll = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false }
         segScroll.addView(seg)
         body.addView(segScroll, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 11 })
-        // 说明文字：18px 弱文字、宽 900、行高 1.6（设计板 (48, y+140)）
-        body.addView(
-            Ui.text(
-                context,
-                "「启动切换」只包含导航投屏与驾驶模式两项；桌面自启在「桌面自启」页，" +
-                    "开机自动打开 ADB 在「车控 → ADB 调试」页。",
-                18f,
-                pal.textFaint,
-            ).apply { setLineSpacing(11f, 1f) },
-            LinearLayout.LayoutParams(900, -2).also { it.topMargin = 48 },
-        )
     }
 
     /** 方控仪表（case "cluster"）。 */
@@ -968,10 +966,6 @@ class SettingsOverlay(
             // 第八十七轮：桥不跟着开关即时启停的话，用户会以为「开了没反应」
             MusicController.get().syncBridgePreference()
         }
-        note(
-            "已接入仪表/方控媒体桥（需车机 MediaCenter SDK 与平台权限）；无 SDK 时自动降级。" +
-                "开关即时生效，不用重启桌面。",
-        )
     }
 
     /** 按键增强。 */
@@ -982,7 +976,6 @@ class SettingsOverlay(
             logSetting("custom_keys_enabled", "启用按键增强", from, it, LogTags.KEYS)
         }
         if (!prefs.keysEnhanced) {
-            note("开启后可为语音键与媒体长按绑定动作。")
             return
         }
         section("语音助手 / * 键")
@@ -1114,7 +1107,6 @@ class SettingsOverlay(
         // 排障场景：设置页里的任务列表为空 / 数量不对
         Logx.i(LogTags.TASK, "计划任务页加载", "count" to tasks.size)
         if (tasks.isEmpty()) {
-            note("开机或进桌面后自动打开某个 App\n例如：开机 8 秒后打开导航")
         }
         for (task in tasks) {
             row(
@@ -1143,7 +1135,6 @@ class SettingsOverlay(
                 ScheduledTasks.conditionLabel(task),
             )
         }
-        note("延迟上限 ${ScheduledTasks.DELAY_MAX} 秒；「进入桌面后」的任务在桌面进程内延迟执行，不走闹钟。")
     }
 
     private fun cancelTask(taskId: String) {
@@ -1169,7 +1160,6 @@ class SettingsOverlay(
             prefs.bootAutostart = it
             logSetting("desktop_boot_autostart", "桌面开机启动", from, it)
         }
-        note("对应 BootReceiver（BOOT_COMPLETED / LOCKED_BOOT_COMPLETED）；正式系统应用还会把自身写进 priv-app 并停用原生 launcher。")
     }
 
     /** 日夜模式。 */
@@ -1440,12 +1430,6 @@ class SettingsOverlay(
         }
 
         section("说明")
-        note(
-            "共 ${com.cardesk.launcher.core.Wallpapers.COUNT} 张预置壁纸，全部是风景类，" +
-                "默认「${com.cardesk.launcher.core.Wallpapers.name(com.cardesk.launcher.core.Wallpapers.DEFAULT_INDEX)}」。",
-        )
-        note("所有壁纸都是程序化绘制的（不占用额外资源），日夜模式各有一套配色。")
-        note("桌面下方提示条上的圆点也能直接切换壁纸。")
     }
 
     /**
@@ -1472,11 +1456,11 @@ class SettingsOverlay(
             store.load() ?: com.cardesk.launcher.core.CardLayout.DEFAULT,
         )
         section("桌面卡片")
-        note("长按桌面底部卡片即可拖动排序；这里调整每张卡的宽度档位和显隐。")
+        note("长按底部卡片可拖动排序。")
         val hidden = layout.filter { !it.visible }
         if (hidden.isNotEmpty()) {
             section("卡片库")
-            note("还没放到桌面上的卡，点一下添加：")
+            note("未上桌的卡，点一下添加：")
             for (slot in hidden) {
                 actionButton("添加「${com.cardesk.launcher.core.CardLayout.title(slot.id)}」卡") {
                     val next = com.cardesk.launcher.core.CardLayout.withVisible(layout, slot.id, true)
@@ -1539,7 +1523,6 @@ class SettingsOverlay(
         }
         push()
 
-        note("下面是当前壁纸上的样例卡片：卡片越透明，壁纸透得越多。")
 
         sliderRow(
             "卡片透明度",
@@ -1554,7 +1537,6 @@ class SettingsOverlay(
             logSetting("card_opacity", "卡片透明度", from, v)
             push()
         }
-        note("卡内两块（选中槽 / 内嵌块）会跟着一起透明。")
 
         pickerRow("卡片颜色", cardColorLabel()) { onShowCardColor?.invoke() }
         actionButton("恢复跟随主题颜色") {
@@ -1563,7 +1545,6 @@ class SettingsOverlay(
             logSetting("card_color", "卡片颜色", from, 0)
             push()
         }
-        note("自选颜色后，卡内两层会按主题的明度差重新派生，保证层级关系还在。")
 
         sliderRow(
             "卡片圆角",
@@ -1578,10 +1559,8 @@ class SettingsOverlay(
             logSetting("card_radius", "卡片圆角", from, v)
             push()
         }
-        note("内嵌块与图标底会按 28/18/16 的比例等比缩放，层级关系不变。")
 
         section("说明")
-        note("卡片风格只影响卡片面（首页卡片、抽屉、弹层、设置面板），不影响强调色与文字颜色。")
     }
 
     /** 卡片颜色的当前取值文案。 */
@@ -1620,10 +1599,6 @@ class SettingsOverlay(
             Logx.event(LogTags.SETTING, "打开画中画应用选择器", "current" to prefs.pip2App, "secondary" to true)
             onShowPipPicker?.invoke(true)
         }
-        note(
-            "双画中画 = 导航页左侧主画、右侧副画，各跑一个应用（主画 pip_app / 副画 pip2_app）。\n" +
-                "副画承载需要系统权限（ActivityView 是系统 API），非系统签名时副画会显示为应用卡片。",
-        )
     }
 
     /**
@@ -1647,7 +1622,7 @@ class SettingsOverlay(
             if (assigned.isEmpty()) "未配置" else "${assigned.size} / ${com.cardesk.launcher.core.DockQuickApps.SLOTS} 个",
             assigned.isNotEmpty(),
         )
-        note("选中的应用会固定在 Dock 最右侧；没配的槽位显示「+」，点它就能挑应用。")
+        note("点「+」挑应用，最多两个槽位。")
         actionButton("配置 Dock 快捷应用…", primary = true) {
             Logx.event(
                 LogTags.SETTING,
@@ -1666,7 +1641,6 @@ class SettingsOverlay(
             logSetting("camera360_enabled_v2", "启用 360 环影增强", from, it)
         }
         if (!prefs.camera360Enabled) {
-            note("开启后可配置按键与档位对应视角。")
             return
         }
         chipRow("视角延迟", CAMERA360_DELAY_LABELS, CAMERA360_DELAY_MS.indexOf(prefs.camera360DelayMs)) { idx ->
@@ -1711,14 +1685,6 @@ class SettingsOverlay(
             prefs.camera360NpClose = to
             logSetting("camera360_np_close_v2", "N/P 关闭环影", from, to)
         }
-        section("通道")
-        note(
-            "环影走三条通道（按优先级回退）：\n" +
-                "1) AdaptAPI 0x23030100（setFunctionValue）\n" +
-                "2) 反射 EcarxAVMManager.CB_PAC_Activation / CB_PAC_ViewSelection\n" +
-                "3) 反射 ECarXCar → ParkassiManager\n" +
-                "三条通道「非短路 |」双写并回读校验；820A 与 E03 平台视角编码顺序相反。"
-        )
     }
 
     /** 启停控制（case "autostop"）。 */
@@ -1728,7 +1694,6 @@ class SettingsOverlay(
             prefs.issKeepEnabled = it
             logSetting("iss_keep_enabled", "开机后自动关闭启停", from, it)
         }
-        note("开机后自动关闭启停的状态会保存到 iss_keep_enabled 配置项。")
     }
 
     /** 自动热点（case "hotspot"）。 */
@@ -1738,7 +1703,6 @@ class SettingsOverlay(
             ScheduledTasks.setHotspotAutoEnabled(prefs, it)
             logSetting(ScheduledTasks.KEY_HOTSPOT_AUTO, "自动热点", from, it)
         }
-        note("自动热点的开关状态保存在 hotspot_boot_auto 配置项。")
     }
 
     /**
@@ -1823,7 +1787,6 @@ class SettingsOverlay(
                 runAdbAction("无线 ADB 自启") { controller.enableWirelessSession() }
             }
         }
-        note("没有系统签名 / 没有 WRITE_SECURE_SETTINGS 时，这两个开关只会记录状态，不会改动车机。")
 
         section("操作")
         actionButton("开启 USB 调试", primary = true) {
@@ -1852,7 +1815,7 @@ class SettingsOverlay(
                 Toast.makeText(context, "打不开原生开发者选项页", Toast.LENGTH_SHORT).show()
             }
         }
-        note("无线 ADB 开着的时候，同网段的设备都能连上车机。调试完请点「恢复全部设置」。")
+        note("调试完请点「恢复全部设置」。")
 
         section("诊断")
         val resultView = Ui.text(context, adbLastAction, 21f, pal.text).apply {
@@ -1935,7 +1898,6 @@ class SettingsOverlay(
             select("wallpaper")
         }
         section("桌面歌词字号")
-        note("第二页音乐卡收起 / 展开；单位为设计像素。")
         sliderRow("收起·主歌词", prefs.deskCompactMainSp, 14, 64, " px") {
             val from = prefs.deskCompactMainSp
             prefs.deskCompactMainSp = it
@@ -1959,10 +1921,6 @@ class SettingsOverlay(
         // 第三十二轮起桌面只有两页，`desk_desk_page3_main_sp` / `desk_desk_page3_sub_sp`
         // 这两个「第三页全屏歌词」字号已经没有对应的画面了，设置项随之移除；
         // 落盘键 `desk_desk_page3_main_sp` / `desk_desk_page3_sub_sp` 保留，将来恢复独立播放器页可直接用。
-        note(
-            "本页暂未实现「仪表 Overlay 歌词」（目标屏幕 / 模块宽度 / 背景透明度 / 位置 / 歌词颜色）——" +
-                "它依赖车机的第二屏通道。"
-        )
         section("胎压")
         sliderRow("胎压数字字号", prefs.deskTpmsValueSp, 10, 48, " px") {
             val from = prefs.deskTpmsValueSp
@@ -1982,7 +1940,7 @@ class SettingsOverlay(
             logSetting("vehicle_source", "车辆数据源", from, idx)
             onVehicleSource?.invoke()
         }
-        note("车模按车型自绘，不联网下载；切换「车模编号」后立即生效。")
+        note("切换后立即生效。")
         actionButton("打开布局参数对话框…") { onShowLayoutDialog?.invoke() }
     }
 
@@ -2045,7 +2003,6 @@ class SettingsOverlay(
             )
             onShowStatusApps?.invoke()
         }
-        note("勾选后立即生效；清空表示不对任何应用生效。Dock 与状态栏名单互不影响。")
         // ---------------- 全局 Dock（第八十七轮） ----------------
         // 模型：Dock 不再只活在桌面窗口里，而是起一个前台服务，
         // 在**其它应用**底部常驻一个 Dock 窗口，把原车导航栏 / 原车 Dock 遮住。
@@ -2066,27 +2023,6 @@ class SettingsOverlay(
             com.cardesk.launcher.core.dock.GlobalDockService.ensureStarted(context.applicationContext)
             // 开关会导致下面的 note 与 policy 分支变化，重画本页。
             select("dock")
-        }
-        if (prefs.globalDockEnabled) {
-            val navInsetsApplied = runCatching {
-                com.cardesk.launcher.core.dock.NavInsets.applied(context)
-            }.getOrDefault(false)
-            if (navInsetsApplied) {
-                note(
-                    "原车导航栏高度已由系统预留（RRO 生效）：Dock 只占那 112px，" +
-                        "不会盖住其它应用内容。主页键短按回桌面，长按 = 系统返回。",
-                )
-            } else {
-                note(
-                    "原车导航栏高度未接管：Dock 会盖住其它应用底部 112px，" +
-                        "原车导航键也不再显示；需要平台签名 / 系统应用才能接管（RRO）。" +
-                        "长按主页键 = 返回 —— 关掉原车导航栏后这是唯一的返回入口。",
-                )
-            }
-            note(
-                "全局 Dock 与「增强导航栏」「下移 Dock」互斥，开启时会自动关掉它们；" +
-                    "关闭全局 Dock 后原车 Dock 会自动恢复。",
-            )
         }
         section("增强导航栏")
         switchRow("增强导航栏（贴底 pill）", prefs.enhancedNav, "与隐藏 Dock / 下移 Dock 互斥") {
@@ -2128,11 +2064,6 @@ class SettingsOverlay(
             onApply?.invoke()
         }
         section("槽位规则")
-        note(
-            "槽位规则：顺序即视觉顺序；空槽是 3px 半透明细条、不计入 24 个上限；" +
-                "只在「普通槽之后、第一个空调槽前」插一根分隔线；媒体槽最小 200dp、歌词槽最小 150dp、温度槽最小 112dp。\n" +
-                "默认 15 槽：返回 / 主页 / 应用列表 / 分屏 / 360 / 媒体 / 空调电源 / 主驾温度 / 风扇 / 副驾温度 / AC / AUTO / 内外循环 / 前除霜 / 后除霜。"
-        )
     }
 
     /**
@@ -2222,10 +2153,7 @@ class SettingsOverlay(
      * 所以用 [com.cardesk.launcher.core.SystemSettingsCatalog] 按 action/组件名实时解析。
      */
     private fun pageOemSettings() {
-        note(
-            "车机原厂设置页的真实入口。列表由系统实时解析：这台车有哪个设置页，这里就列哪个；" +
-                "系统版本不同可能少几项，解析不到的入口不会出现在列表里。",
-        )
+        note("列表由系统实时解析。")
         com.cardesk.launcher.core.SystemSettingsCatalog.warmAsync(context)
         val catalog = com.cardesk.launcher.core.SystemSettingsCatalog.entries()
         if (catalog.isEmpty()) {
@@ -2324,7 +2252,6 @@ class SettingsOverlay(
             }
             Toast.makeText(context, "本机没有可打开的系统设置页", Toast.LENGTH_SHORT).show()
         }
-        note("按 Home 键 / 开机后进入的桌面由系统选择")
         actionButton("打开系统设置") {
             Logx.event(LogTags.SETTING, "打开系统设置")
             try {
@@ -2335,7 +2262,6 @@ class SettingsOverlay(
                 Toast.makeText(context, "打不开系统设置", Toast.LENGTH_SHORT).show()
             }
         }
-        note("进入 Android 系统设置")
     }
 
     /** 系统诊断+ 平台与兼容 + 媒体来源。 */
@@ -2355,7 +2281,6 @@ class SettingsOverlay(
             com.cardesk.launcher.vehicle.VehicleController.reconnect(context, prefs)
             select(selectedKey)
         }
-        note("判定规则：densityDpi<=160 且屏幕长边>=1800 → 820A；其余按 E03 处理。")
         section("车控通道状态")
         val vc = com.cardesk.launcher.vehicle.VehicleController
         val gw = if (vc.initialized) runCatching { vc.gateway }.getOrNull() else null
@@ -2426,18 +2351,10 @@ class SettingsOverlay(
      */
     private fun pageLogs() {
         section("通知使用权")
-        note(
-            com.cardesk.launcher.core.media.NotificationAccess.describeEnumeration(context) +
-                "\n会话枚举需要「通知使用权」或「MEDIA_CONTENT_CONTROL」二者之一；" +
-                "两条都不通时系统会拒绝枚举（音乐区一直显示占位），" +
-                "桌面启动时会自动跳到系统的「通知使用权」设置页。",
-        )
+        note(com.cardesk.launcher.core.media.NotificationAccess.describeEnumeration(context))
 
         section("日志级别")
-        note(
-            "调试级别会显著增加日志量与写盘频率。默认「信息」；" +
-                "排查问题时调到「调试」，复现后请调回来。",
-        )
+        note("排查问题时调到「调试」，结束后调回「信息」。")
         val levels = listOf(
             LogLevel.ERROR to "仅错误",
             LogLevel.WARN to "错误+警告",
@@ -2454,15 +2371,7 @@ class SettingsOverlay(
         }
 
         section("收集")
-        note(
-            "导出内容 = 全部日志文件 + 运行快照（版本、系统、权限、车控通道状态、设置全量键值）。\n" +
-                "导出目录：Download/CarDesk/（Android 10 及以上）；" +
-                "Android 9 及以下需要存储写入权限。\n" +
-                "日志占用上限：单文件 ${com.cardesk.launcher.core.log.FileLogSink.MAX_FILE_BYTES / 1024} KB × " +
-                "${com.cardesk.launcher.core.log.FileLogSink.MAX_FILES} 份 = " +
-                "${com.cardesk.launcher.core.log.FileLogSink.MAX_TOTAL_BYTES / 1024} KB（超了自动删最老的）。" +
-                "当前占用 ${com.cardesk.launcher.core.log.Logx.totalBytes() / 1024} KB。",
-        )
+        note("导出目录：Download/CarDesk/；当前占用 ${com.cardesk.launcher.core.log.Logx.totalBytes() / 1024} KB。")
         actionButton("导出诊断包", primary = true) {
             com.cardesk.launcher.core.log.LogTools.export(context) { msg ->
                 com.cardesk.launcher.core.log.LogTools.toast(context, msg)
@@ -2608,11 +2517,6 @@ class SettingsOverlay(
     private fun pageApkStore() {
         section("云端应用库")
         kvRow("应用源", "Cloudflare R2 · file.chuxi.bid", true)
-        note(
-            "手机上把 APK 传到云端，这里就能看到并直接安装 —— 出门前传好，到车上不用插 U 盘，" +
-                "也不用和车机连同一个局域网。\n\n" +
-                "下载完会校验文件长度和 SHA-256，对不上就当没下成功。",
-        )
 
         val main = android.os.Handler(android.os.Looper.getMainLooper())
         // 离开这一页就别再往已经不存在的视图上贴东西了（和氛围灯页同一个道理）
@@ -2621,6 +2525,10 @@ class SettingsOverlay(
 
         val status = Ui.text(context, "状态：正在拉清单…", 22f, pal.textDim)
         val listBox = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        var currentItems: List<ApkEntry> = emptyList()
+        var openDialog: View? = null
+        // 列表重画函数（先声明后赋值：openDownload 要回调它，而它要先建行）
+        var rerender: (() -> Unit)? = null
 
         fun fmtSize(bytes: Long): String = when {
             bytes >= 1 shl 20 -> String.format("%.1f MB", bytes / 1048576f)
@@ -2628,88 +2536,50 @@ class SettingsOverlay(
             else -> "$bytes B"
         }
 
-        /** 下载一个包并装上（阻塞部分在后台线程，界面更新回主线程）。 */
-        fun downloadAndInstall(entry: ApkEntry, btn: TextView, bar: SeekBar) {
-            btn.isEnabled = false
-            btn.text = "下载中…"
-            bar.visibility = View.VISIBLE
-            bar.progress = 0
-            status.text = "状态：正在下载 ${entry.name}…"
-            Thread {
-                val file = ApkStore.download(context, entry) { p ->
-                    main.post { if (alive) bar.progress = p }
-                }
-                if (file == null) {
-                    main.post {
-                        if (!alive) return@post
-                        btn.isEnabled = true
-                        btn.text = "重新下载"
-                        bar.visibility = View.GONE
-                        status.text = "状态：${entry.name} 下载失败（请检查车机网络）"
-                    }
-                    return@Thread
-                }
-                main.post {
-                    if (!alive) return@post
-                    btn.text = "安装中…"
-                    status.text = "状态：${entry.name} 已下载，正在安装…"
-                }
-                val result = ApkStore.install(context, file)
-                main.post {
-                    if (!alive) return@post
-                    when (result) {
-                        AppUpdate.InstallResult.Silent -> {
-                            btn.text = "已提交安装"
-                            status.text = "状态：${entry.name} 已提交静默安装，装完重启车机生效"
-                        }
-                        is AppUpdate.InstallResult.Installer -> {
-                            btn.text = "已转系统安装器"
-                            status.text = "状态：${entry.name} 已转交系统安装器（${result.location}）"
-                        }
-                        is AppUpdate.InstallResult.Fail -> {
-                            btn.isEnabled = true
-                            btn.text = "重新下载"
-                            status.text = "状态：${entry.name} 安装失败：${result.reason}"
-                        }
-                    }
-                }
-            }.start()
+        fun dismissDialog() {
+            openDialog?.let { removeView(it) }
+            openDialog = null
         }
 
-        /** 一个包一行：名字 + 文件信息 + 进度条 + 「下载安装」按钮。 */
-        fun apkRow(entry: ApkEntry): View {
-            val holder = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-            holder.addView(Ui.text(context, entry.name, 28f, pal.text, bold = true), LinearLayout.LayoutParams(-1, -2))
-            val meta = buildString {
-                append(entry.file)
-                if (entry.size > 0) append(" · ${fmtSize(entry.size)}")
-                if (entry.addedAt.isNotEmpty()) append(" · ${entry.addedAt.take(10)}")
-            }
-            holder.addView(
-                Ui.text(context, meta, 19f, pal.textDim),
-                LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 6 },
+        /** 打开下载进度弹窗（弹窗自己负责下载、安装和结果提示）。 */
+        fun openDownload(entry: ApkEntry) {
+            dismissDialog()
+            val dialog = com.cardesk.launcher.ui.dialogs.CloudDownloadDialog(
+                context, pal, entry,
+                onInstalled = {
+                    prefs.markCloudInstalled(entry.sha256, entry.file)
+                    if (alive) rerender?.invoke()
+                },
             )
-            val bar = SeekBar(context).apply {
-                isEnabled = false
-                max = 100
-                visibility = View.GONE
-            }
-            holder.addView(bar, LinearLayout.LayoutParams(-1, 56).also { it.topMargin = 4 })
-            val btnRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
-            holder.addView(btnRow, LinearLayout.LayoutParams(-1, -2))
-            val btn = pillButton(btnRow, "下载安装", primary = true) { }
-            btn.setOnClickListener { downloadAndInstall(entry, btn, bar) }
-            return holder
+            dialog.onClose = { dismissDialog() }
+            openDialog = dialog
+            addView(dialog, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         }
+
+        /**
+         * 一个应用一张卡：序号 + 名称/文件名/大小/日期/SHA + 状态 + 按钮。
+         *
+         * 第八十四轮那版只有「文件名 + 一行 meta」，几个包都是 `.apk` 结尾时
+         * 很难分辨谁是谁（用户反馈「不清晰」）—— 这里把能区分的字段都摊开，
+         * 序号和状态也让「下载中/已安装」一眼可见。
+         */
+        fun apkRow(entry: ApkEntry, index: Int): View =
+            com.cardesk.launcher.ui.widget.CloudAppRowView.build(
+                context, pal, entry, index,
+                installed = prefs.isCloudInstalled(entry.sha256, entry.file),
+                onDownload = { openDownload(it) },
+            )
 
         /** 重新画列表。 */
         fun render(items: List<ApkEntry>) {
+            rerender = { render(currentItems) }
+            currentItems = items
             listBox.removeAllViews()
             if (items.isEmpty()) {
                 listBox.addView(
                     Ui.text(
                         context,
-                        "云端还没有应用。在手机上打开上传页传一个 APK，回来点「刷新列表」就能看到。",
+                        "云端还没有应用。",
                         22f,
                         pal.textDim,
                     ),
@@ -2717,8 +2587,11 @@ class SettingsOverlay(
                 )
                 return
             }
-            for (entry in items) {
-                listBox.addView(apkRow(entry), LinearLayout.LayoutParams(-1, -2).also { it.bottomMargin = 24 })
+            for ((index, entry) in items.withIndex()) {
+                listBox.addView(
+                    apkRow(entry, index),
+                    LinearLayout.LayoutParams(-1, -2).also { it.bottomMargin = 16 },
+                )
             }
         }
 
@@ -2755,6 +2628,10 @@ class SettingsOverlay(
         body.addView(status, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 12 })
         body.addView(listBox, LinearLayout.LayoutParams(-1, -2))
 
+        pageTeardown = {
+            alive = false
+            dismissDialog()
+        }
         refresh()
     }
 
@@ -2774,12 +2651,7 @@ class SettingsOverlay(
         section("更新通道")
         kvRow("更新源", "Cloudflare R2 · file.chuxi.bid", true)
         kvRow("当前版本", com.cardesk.launcher.core.update.AppUpdate.versionLabel(context), true)
-        note(
-            "检测手动触发：只有点下面的「检查更新」才会联网拉一次更新清单；" +
-                "桌面不会在后台自动检查，也不会自动下载。\n\n" +
-                "查到新版本后可以一键下载并安装（system 版静默安装，普通安装包转系统安装器）。" +
-                "下载完会校验文件长度和 SHA-256，对不上就当没下成功。",
-        )
+        note("桌面启动 3 秒后自动检测一次；也可以在这里手动检查。")
         actionButton("检查更新", primary = true) {
             // 排障场景：点了检查更新没反应 —— 记下打开更新对话框
             Logx.event(LogTags.SETTING, "打开在线更新对话框")
@@ -2844,7 +2716,6 @@ class SettingsOverlay(
         section("频谱预览")
         val spectrum = SpectrumView(context)
         bodyField(spectrum, height = 150)
-        note("左低右高：左边是鼓点（低频），右边是镲片（高频）。")
 
         section("颜色与亮度")
         chipRow("颜色模式", com.cardesk.launcher.core.ambient.AmbientPalette.MODE_LABELS.toList(), prefs.ambientMode) { index ->
@@ -2896,16 +2767,7 @@ class SettingsOverlay(
                 // 亮度滑杆走**绝对亮度**（用户拖到哪就是哪），并立刻重算颜色
                 com.cardesk.launcher.core.ambient.AmbientLightController.setBrightness(context, v)
             }
-            note(
-                "灵敏度越高，弱音也越亮（灯更跟手）；亮度上下限决定灯的动态范围。\n\n" +
-                    "亮度滑杆是**绝对亮度**：拖到多少，车机那边就是多少（厂商只有高/低/关三档）。",
-            )
         } else {
-            note(
-                "灵敏度越高，弱音也越亮（灯更跟手）。\n\n" +
-                    "新版的明暗区间在下面的「动感引擎」里调（基础亮度 + 感知明度映射），" +
-                    "这里的亮度上下限只对旧版链路有效，已经按引擎分开显示了。",
-            )
         }
 
         // ————————————————————————————————————————————————
@@ -3074,12 +2936,6 @@ class SettingsOverlay(
                 logSettingDebug("ambient_max_chroma", "氛围灯彩度上限", from, v)
                 com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "彩度上限")
             }
-            note(
-                "想要「五彩」：把「色相跨度」拉到 360°，或者直接选预设 **彩虹**" +
-                    "（跨度 360° + 质心展开 + 彩度上限 0.32 + 18°/s 自转）。\n\n" +
-                    "只拉跨度不展开质心的话，色相仍只走 100° 出头 —— " +
-                    "真实音乐的谱质心只在 0.3~0.6 之间移动，必须把这段拉伸开。",
-            )
             sliderRow(
                 "色相跳变",
                 prefs.ambientHueJumpDeg,
@@ -3135,15 +2991,6 @@ class SettingsOverlay(
                 logSettingDebug("ambient_jump_hold_ms", "氛围灯换色间隔", from, v)
                 com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "换色间隔")
             }
-            note(
-                "想要「跳跃」：直接选预设 **跳跃** —— 色相跳变 120°（三段一组大跳）、" +
-                    "亮度起 10ms / 落 60ms、底光 0、起拍闪光 1.2 倍、起拍间隔 120ms、" +
-                    "换色间隔 380ms（没鼓点也保证隔一会儿闪一次）。\n\n" +
-                    "跳跃模式下**两层 ΔE 限速都会关掉**：限速器会把一次换色抹成十几帧的滑坡，" +
-                    "那就是「还是太平顺」的来源。关掉后换色在 1~2 个写入周期内直接到位。\n\n" +
-                    "「换色间隔」= 0 只跟拍子；否则即使没检测到鼓点，隔这么久也强制换一档。\n\n" +
-                    "⚠️ 这一组很晃眼，夜间跟车建议换回「均衡」或「夜驾柔和」。",
-            )
             sliderRow(
                 "空闲呼吸",
                 prefs.ambientBreathHundredths,
@@ -3157,17 +3004,7 @@ class SettingsOverlay(
                 logSettingDebug("ambient_breath", "氛围灯空闲呼吸", from, v)
                 com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "空闲呼吸")
             }
-            note(
-                "新版在 **60Hz 独立时钟**上逐帧积分（频谱仍是 10Hz），" +
-                    "颜色用 OKLCH 感知色空间，相邻帧的感知色差被硬限制在上面的上限内。\n\n" +
-                    "色相限加速消除「甩过去再顿一下」；亮度起快落慢；" +
-                    "空闲时色相缓慢漂移 + 呼吸底光，不是冻在最后一个颜色。",
-            )
         } else {
-            note(
-                "旧版是**实车验证过的现网链路**：10Hz 步进、HSV 配色、亮度线性缩放。\n\n" +
-                    "它被评价为「灯在跳，不是灯在流动」。保留它是为了在**同一台车、同一首歌**上直接对比。",
-            )
         }
 
         section("分区编排")
@@ -3190,11 +3027,6 @@ class SettingsOverlay(
                 com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "分区驻留")
             }
         }
-        note(
-            "这台车机只有分区**开关**，没有分区颜色 / 亮度，所以切换必然是硬边。\n\n" +
-                "驻留拉长到 800ms 以上、并在下发时**先开新的再关旧的**，读起来才像「呼吸」而不是「闪」。\n\n" +
-                "行车建议保持关闭（三区常亮最不干扰驾驶）。",
-        )
 
         // 进这一页就把录音权限要到手（不打断首屏，这里才是自然的时机）
         ensureAmbientAudioPermission()
@@ -3289,8 +3121,12 @@ class SettingsOverlay(
         paragraphs(DISCLAIMER_ITEMS)
 
         section("车辆信息")
-        kvRow("车辆 VIN", "（空）", false)
-        note("本版本不设激活码，所有功能直接可用；车辆信息仅用于在界面上显示当前车辆。")
+        val vinRow = kvRow("车辆 VIN", "读取中", false)
+        // 进这一页时再读（缓存命中是瞬时的）；读不到如实写「读不到」，不编。
+        VinReader.refresh(context) { value ->
+            val text = value ?: "读不到"
+            vinRow.post { vinRow.text = text }
+        }
     }
 
     /** 一组段落：每条单独一段，行距比 [note] 松一点，长文本读起来不挤。 */

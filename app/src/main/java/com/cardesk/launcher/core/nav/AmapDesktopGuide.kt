@@ -54,6 +54,21 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
         val lanes: String,
     )
 
+    /**
+     * 巡航卡数据（不是导航）。
+     *
+     * @param road 当前道路名（来自最近一次有效引导帧；可能为空）
+     * @param lanes 最近一次车道线原文（可能为空）
+     * @param icon 最近一次转向图标原始编码（0 = 未知）
+     * @param lights 多方向红绿灯（左/直/右，可能为空）
+     */
+    data class Cruise(
+        val road: String?,
+        val lanes: String?,
+        val icon: Int,
+        val lights: List<AmapTrafficLight.DirectionLight>,
+    )
+
     /** 数据回调。 */
     interface Listener {
         /** 有一条新的引导数据。 */
@@ -68,6 +83,14 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
          * null = 这次没有有效信号（协议不匹配 / 字段不全 / 巡航数组多方向无法取舍）。
          */
         fun onTrafficLight(signal: AmapTrafficLight.Signal?)
+
+        /**
+         * 巡航态数据更新（巡航红绿灯帧 / 车道线 / 道路名）。
+         *
+         * 与 [onGuide] 的区别：巡航不是导航，没有分段距离和 ETA，
+         * 但要在首页显示「当前道路 + 车道线 + 多方向红绿灯」。
+         */
+        fun onCruise() {}
 
         /** 导航结束 / 超时，卡片要收起。 */
         fun onStopped()
@@ -124,6 +147,27 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
      * 我们用它挑出「我们正要走的那条方向」—— 挑不出就不画（不猜）。
      */
     private var lastGuideIcon = 0
+
+    /** 最近一次有效引导帧里的**当前道路名**（巡航卡展示用）。 */
+    private var lastRoadName: String? = null
+
+    /** 巡航态多方向红绿灯（左/直/右各一枚）与到达时刻。 */
+    private var cruiseLights: List<AmapTrafficLight.DirectionLight> = emptyList()
+    private var cruiseAt = 0L
+
+    /** 最近一次收到的「高德导航状态」原始值（8/10=导航，其它=空闲/巡航）。 */
+    private var lastState: Int? = null
+
+    /** 最近一次「巡航态引导帧」到达时刻（单调时钟）。 */
+    private var cruiseGuideAt = 0L
+
+    /**
+     * 官方协议（60073）按方向累积的红绿灯。
+     *
+     * 官方协议**一帧只带一个方向**，巡航时要显示多个方向就得按 `dir` 累积；
+     * 每条各自按 [TRAFFIC_LIGHT_TTL_MS] 过期（key = 官方 dir：1 左 / 4 直 / 2 右）。
+     */
+    private val standardByDir = HashMap<Int, Pair<AmapTrafficLight.DirectionLight, Long>>()
 
     /**
      * 上一次记过 INFO 的「导航状态」值。
@@ -194,6 +238,11 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
         registered = false
         navigating = false
         lastLanes = null
+        lastRoadName = null
+        cruiseLights = emptyList()
+        cruiseAt = 0L
+        cruiseGuideAt = 0L
+        standardByDir.clear()
         lightStandard = null
         lightCruise = null
         lightStandardAt = 0L
@@ -264,6 +313,7 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
      * - 2 / 9 / 12 / 19 → 收起卡片
      */
     private fun handleState(state: Int) {
+        lastState = state
         // 高德空闲时每 10 秒推一次同样的状态；只在**变化**时记 INFO，重复的降 DEBUG。
         // （是打进 logcat 不落盘；我们 Logx.i 落盘，照抄会把车机存储吃满。）
         if (lastLoggedState == state) {
@@ -342,8 +392,32 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
             }
             return
         }
+        // 第九十九轮：state 明确不是导航（空闲/巡航 40/50/51 等）时，引导帧按**巡航帧**处理：
+        // 只更新道路/车道/图标，不出导航卡（没有分段距离和 ETA）。
+        // state 还没到过（lastState == null）仍按老行为当导航帧，避免启动早期丢卡。
+        val navMode = lastState == null ||
+            lastState == STATE_NAVIGATING || lastState == STATE_SIMULATING
+        if (!navMode) {
+            val cruiseRoad = guide.currentRoad.ifBlank { guide.nextRoad }
+            if (cruiseRoad.isNotBlank()) lastRoadName = cruiseRoad
+            if (guide.lanes.isNotEmpty()) lastLanes = guide.lanes
+            if (guide.icon > 0) lastGuideIcon = guide.icon
+            cruiseGuideAt = SystemClock.elapsedRealtime()
+            Logx.d(
+                LogTags.NAV_UI,
+                "收到巡航引导数据",
+                "icon" to guide.icon,
+                "road" to cruiseRoad,
+                "lanesLen" to guide.lanes.length,
+            )
+            listener.onCruise()
+            return
+        }
         navigating = true
         lastGuideAt = System.currentTimeMillis()
+        // 巡航卡展示「当前道路」：优先当前道路，其次下一条路（转弯进入的路）。
+        val roadName = guide.currentRoad.ifBlank { guide.nextRoad }
+        if (roadName.isNotBlank()) lastRoadName = roadName
         // 记下转向图标 —— 巡航协议一次带多个方向时，用它挑出我们该看的那条。
         if (guide.icon > 0) lastGuideIcon = guide.icon
         main.removeCallbacks(staleCheck)
@@ -410,6 +484,25 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
             // 方向带中文，真车日志里能直接看出是哪个方向。
             "dir" to AmapTrafficLight.standardDirectionLabel(signal.rawDirection),
         )
+        // 第九十九轮：非导航时官方协议也按方向累积，巡航卡并排展示多个方向。
+        if (!navigating) {
+            val cruiseDir = when (signal.rawDirection) {
+                1 -> AmapTrafficLight.DIR_LEFT
+                4 -> AmapTrafficLight.DIR_STRAIGHT
+                2 -> AmapTrafficLight.DIR_RIGHT
+                else -> null
+            }
+            if (cruiseDir != null) {
+                standardByDir[signal.rawDirection!!] =
+                    AmapTrafficLight.DirectionLight(
+                        direction = cruiseDir,
+                        lamp = signal.lamp,
+                        countdownSeconds = signal.countdownSeconds,
+                        rawStatus = signal.rawStatus,
+                    ) to now
+                listener.onCruise()
+            }
+        }
         listener.onTrafficLight(signal)
     }
 
@@ -424,6 +517,19 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
         if (json.isNullOrEmpty()) {
             Logx.d(LogTags.NAV_UI, "红绿灯巡航广播没有 data")
             return
+        }
+        // 多方向：巡航卡要并排展示（左/直/右），先整帧存下来。
+        val multi = AmapTrafficLight.cruiseAll(json)
+        if (multi.isNotEmpty()) {
+            cruiseLights = multi
+            cruiseAt = SystemClock.elapsedRealtime()
+            Logx.i(
+                LogTags.NAV_UI,
+                "收到巡航多方向红绿灯",
+                "count" to multi.size,
+                "dirs" to multi.joinToString(",") { it.direction.toString() },
+            )
+            listener.onCruise()
         }
         val signal = AmapTrafficLight.cruise(json, preferredDirection())
         if (signal == null) {
@@ -602,6 +708,46 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
     /** 当前是否处于「导航中」。 */
     fun isNavigating(): Boolean = navigating
 
+    /**
+     * 当前巡航卡数据；null = 没有可展示的巡航信息（没收到巡航帧 / 超时）。
+     *
+     * 巡航帧只在高德巡航时发，TTL 比导航长一点（[CRUISE_TTL_MS]）；
+     * 用车机单调钟，避免用户改系统时间后卡死。
+     */
+    fun cruise(): Cruise? {
+        val now = SystemClock.elapsedRealtime()
+        val guideFresh = cruiseGuideAt > 0L && now - cruiseGuideAt <= CRUISE_TTL_MS
+
+        // 多方向来源 1：YH 巡航 JSON（一帧带全部方向）。
+        val merged = LinkedHashMap<Int, AmapTrafficLight.DirectionLight>()
+        if (cruiseAt > 0L && now - cruiseAt <= CRUISE_TTL_MS) {
+            for (light in cruiseLights) {
+                merged[light.direction ?: UNKNOWN_CRUISE_DIR] = light
+            }
+        }
+        // 多方向来源 2：官方协议按 dir 累积（一帧一个方向，各自 TTL）。
+        standardByDir.entries.removeAll { now - it.value.second > TRAFFIC_LIGHT_TTL_MS }
+        for (pair in standardByDir.values) {
+            val key = pair.first.direction ?: UNKNOWN_CRUISE_DIR
+            if (!merged.containsKey(key)) merged[key] = pair.first
+        }
+        val lights = merged.values.sortedBy {
+            when (it.direction) {
+                AmapTrafficLight.DIR_LEFT -> 0
+                AmapTrafficLight.DIR_STRAIGHT -> 1
+                AmapTrafficLight.DIR_RIGHT -> 2
+                else -> 3
+            }
+        }
+        if (!guideFresh && lights.isEmpty()) return null
+        return Cruise(
+            road = lastRoadName,
+            lanes = lastLanes,
+            icon = lastGuideIcon,
+            lights = lights,
+        )
+    }
+
     private fun sample(text: String): String {
         val flat = text.replace('\n', ' ')
         return if (flat.length <= 160) flat else flat.substring(0, 160) + "…"
@@ -720,6 +866,12 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
          * 这里取一个保守值：超过 5 秒没收到新帧就当信号失效（不再显示）。
          */
         const val TRAFFIC_LIGHT_TTL_MS = 5000L
+
+        /** 巡航红绿灯帧的有效期：高德巡航时约 1-2 秒一帧，给 20 秒余量。 */
+        const val CRUISE_TTL_MS = 20_000L
+
+        /** 方向识别不出时的合并槽位。 */
+        private const val UNKNOWN_CRUISE_DIR = -1
 
         /** 索要引导数据（`AmapDesktopGuide.KEY_REQUEST_HUD`）。 */
         const val KEY_REQUEST_HUD = 10031

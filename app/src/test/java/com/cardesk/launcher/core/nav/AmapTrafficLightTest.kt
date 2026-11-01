@@ -369,3 +369,84 @@ class AmapTrafficLightTest {
         assertEquals(signal, guide.trafficLight)
     }
 }
+
+/** 第九十九轮：巡航多方向红绿灯（巡航卡用）。 */
+class AmapTrafficLightCruiseAllTest {
+
+    private fun frame(vararg lights: String): String =
+        """{"ts":1712345678901,"lights":[${lights.joinToString(",")}]}"""
+
+    private fun light(dir: Int?, status: Int, cd: Int?): String {
+        val dirPart = if (dir == null) "" else "\"direction\":$dir,"
+        val cdPart = if (cd == null) "" else ",\"countdown\":$cd"
+        return """{$dirPart"status":$status$cdPart}"""
+    }
+
+    @Test
+    fun `多方向全部解析并按左直右排序`() {
+        val json = frame(
+            light(3, 0, 45),   // 右转 红
+            light(1, 1, 20),   // 左转 绿
+            light(2, 0, 12),   // 直行 红
+        )
+        val list = AmapTrafficLight.cruiseAll(json)
+        assertEquals(3, list.size)
+        assertEquals(AmapTrafficLight.DIR_LEFT, list[0].direction)
+        assertEquals(AmapTrafficLight.DIR_STRAIGHT, list[1].direction)
+        assertEquals(AmapTrafficLight.DIR_RIGHT, list[2].direction)
+        assertEquals(AmapTrafficLight.Lamp.GREEN, list[0].lamp)
+        assertEquals(AmapTrafficLight.Lamp.RED, list[1].lamp)
+        assertEquals(12, list[1].countdownSeconds)
+    }
+
+    @Test
+    fun `单条坏数据只跳过自己`() {
+        val json = frame(
+            light(1, 1, 20),
+            """{"status":0}""",              // 没方向 → 仍保留（方向未知），排在最后
+            """{"direction":2}""",           // 没 status → 跳过
+            light(null, 0, 5),               // 没方向
+        )
+        val list = AmapTrafficLight.cruiseAll(json)
+        assertEquals(2, list.size)
+        assertEquals(AmapTrafficLight.DIR_LEFT, list[0].direction)
+        assertNull(list[1].direction)
+        assertEquals(AmapTrafficLight.Lamp.RED, list[1].lamp)
+    }
+
+    @Test
+    fun `同方向重复只留第一条`() {
+        val json = frame(light(2, 1, 30), light(2, 0, 9))
+        val list = AmapTrafficLight.cruiseAll(json)
+        assertEquals(1, list.size)
+        assertEquals(AmapTrafficLight.Lamp.GREEN, list[0].lamp)
+        assertEquals(30, list[0].countdownSeconds)
+    }
+
+    @Test
+    fun `没有 data 或坏 JSON 返回空列表`() {
+        assertTrue(AmapTrafficLight.cruiseAll(null).isEmpty())
+        assertTrue(AmapTrafficLight.cruiseAll("").isEmpty())
+        assertTrue(AmapTrafficLight.cruiseAll("not-json").isEmpty())
+        assertTrue(AmapTrafficLight.cruiseAll("""{"lights":[]}""").isEmpty())
+    }
+
+    @Test
+    fun `巡航卡模型 道路为空时用巡航中兜底`() {
+        val lights = AmapTrafficLight.cruiseAll(frame(light(2, 0, 15)))
+        val guide = NavGuideModel.buildCruise(icon = 0, road = "  ", lanesRaw = "15,1,3", lights = lights)
+        assertTrue(guide.cruise)
+        assertEquals("巡航中", guide.road)
+        assertEquals(3, guide.lanes.size)
+        assertEquals(1, guide.cruiseLights.size)
+        assertEquals(15, guide.cruiseLights[0].countdownSeconds)
+        assertNull(guide.trafficLight)
+    }
+
+    @Test
+    fun `巡航卡模型 道路名保留并裁剪空白`() {
+        val guide = NavGuideModel.buildCruise(icon = 2, road = " 人民路 ", lanesRaw = null, lights = emptyList())
+        assertEquals("人民路", guide.road)
+        assertTrue(guide.lanes.isEmpty())
+    }
+}

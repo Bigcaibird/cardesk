@@ -79,6 +79,9 @@ class MusicSessionTracker private constructor() {
      */
     private val connectedServices = LinkedHashSet<String>()
 
+    /** 系统绑定过的通知监听组件（同类服务被绑定多次时保持稳定，避免来回换组件重注册）。 */
+    private val connectedComponents = LinkedHashSet<ComponentName>()
+
     /** 是否已经向 MediaSessionManager 注册过会话变化监听（避免重复注册抛异常）。 */
     private var attached = false
 
@@ -424,6 +427,7 @@ class MusicSessionTracker private constructor() {
         attachedComponent = null
         connectedComponent = null
         connectedServices.clear()
+        connectedComponents.clear()
         Logx.i(LogTags.MEDIA, "媒体会话追踪停止", "rescanCount" to rescanCount)
         main.removeCallbacksAndMessages(null)
         runCatching {
@@ -493,10 +497,17 @@ class MusicSessionTracker private constructor() {
         connectedServices.add(service.javaClass.name)
         // 系统绑定了哪个服务，就说明那个组件是被系统启用的监听器 ——
         // 枚举会话时必须传它（见 componentName() 的说明）
-        connectedComponent = ComponentName(service.packageName, service.javaClass.name)
+        val component = ComponentName(service.packageName, service.javaClass.name)
+        connectedComponents.add(component)
+        connectedComponent = component
         NotificationAccess.markListenerConnected(true)
-        // 监听重新接上 = 新的唤醒机会，重试计数归零。
-        wakeRetryCount = 0
+        // 第九十七轮：**不再**在每次连接时把唤醒重试计数清零。
+        //
+        // 诊断包（4183）里两个通知监听组件（自己的 MediaNotificationListener +
+        // 旧包名别名 MusicBridgeService）交替连接，每次连接都把 wakeRetryCount 归零，
+        // 于是「唤醒上次音乐应用」的 PLAY 键被无休止地重发（16:38~16:39 每 2s 一次），
+        // 音乐 App 被反复叫醒/暂停，界面播放态跟着跳。
+        // 重试计数只在真的绑定到会话时清零（见 pushProgress 里 lastReportedPlaying 分支）。
         Logx.i(
             LogTags.MEDIA, "通知监听服务已连接（系统已授予通知使用权）",
             "service" to service.javaClass.name,
@@ -583,6 +594,11 @@ class MusicSessionTracker private constructor() {
     fun onListenerDisconnected(service: NotificationListenerService?) {
         val name = service?.javaClass?.name
         if (name != null) connectedServices.remove(name) else connectedServices.clear()
+        if (name != null) {
+            service?.let { connectedComponents.remove(ComponentName(it.packageName, it.javaClass.name)) }
+        } else {
+            connectedComponents.clear()
+        }
         NotificationAccess.markListenerConnected(connectedServices.isNotEmpty())
         if (connectedServices.isEmpty()) {
             // 全部断开：那个组件不再算「被启用」，枚举要换回白名单里命中的组件
@@ -593,11 +609,12 @@ class MusicSessionTracker private constructor() {
             "service" to (name ?: ""),
             "remaining" to connectedServices.size,
         )
-        // —— 监听断开后允许重新唤醒
-        if (connectedServices.isEmpty()) {
-            defaultWakeDone = false
-            wakeRetryCount = 0
-        }
+        // 第九十七轮：**不再**在监听断开时重置「唤醒上次音乐应用」。
+        //
+        // 4183 诊断包：两个通知监听组件交替连接/断开，每次断开都把 defaultWakeDone
+        // 置 false，下一次连接又发一轮 PLAY（还带 3 次重试），音乐 App 被反复
+        // 叫醒/暂停 —— 界面播放态跟着来回跳。唤醒是「开机叫醒一次」的行为，
+        // 整进程只该做一轮；真要再来一轮由下一次 process 启动负责。
         // 还有别的服务连着就不清空当前会话
         if (connectedServices.isEmpty()) releaseController()
     }
@@ -658,9 +675,20 @@ class MusicSessionTracker private constructor() {
      */
     private fun componentName(): ComponentName? {
         val ctx = appContext ?: return null
+        // 第九十七轮：组件选择要**稳定**。
+        //
+        // 真机上两个监听组件交替连接时，原来会把「最近连接的那个」当组件，
+        // 每 2.5s 换一次 → remove/add 监听 → 触发一轮 rescan 与唤醒。
+        // 现在：已注册组件只要还在线就继续用；否则优先自己的监听服务。
+        val attachedNow = attachedComponent
+        if (attachedNow != null && connectedComponents.contains(attachedNow)) return attachedNow
+        val own = ComponentName(ctx, MediaNotificationListener::class.java)
+        if (connectedComponents.contains(own)) return own
+        // 其它组件（旧包名别名）在线也用，但只在没有自己的组件时
+        connectedComponents.firstOrNull()?.let { return it }
         connectedComponent?.let { return it }
         NotificationAccess.grantedComponent(ctx)?.let { return it }
-        return ComponentName(ctx, MediaNotificationListener::class.java)
+        return own
     }
 
     private fun rescanNow() {
@@ -1302,8 +1330,13 @@ class MusicSessionTracker private constructor() {
             )
         }
         // —— 状态说在放、但进度不前进 = 停滞
+        //
+        // 第九十七轮：短暂卡顿（缓冲/切码率）不再直接把界面改判成「暂停」——
+        // 真机诊断包里 wecarflow 缓冲时 PLAYING + position 卡 2.5s，
+        // 老逻辑会让播放键在播放/暂停之间来回跳。
         val stalled = isStalled(observedPlaying, observed, now)
-        val playing = resolvePlaying(observedPlaying && !stalled, observedPaused)
+        val stalledMs = if (stalled) now - lastObservedMediaPosAt else 0L
+        val playing = resolvePlaying(PlaybackUiPolicy.uiPlaying(observedPlaying, stalledMs), observedPaused)
         // 播放 / 暂停切换：只在切换时落盘（200ms 一次 tick 不打 INFO）
         if (lastReportedPlaying != playing) {
             lastReportedPlaying = playing
@@ -1522,6 +1555,9 @@ class MusicSessionTracker private constructor() {
 
     private fun applyPlayingUi(playing: Boolean) {
         val cur = current ?: return
+        // 第九十七轮：状态没变就别再推 —— 没有会话时每次 reconcile（2.5s）
+        // 都会走「保留暂停态」分支，重复推 false 会让界面反复重绘播放键。
+        if (cur.playing == playing) return
         current = cur.copy(playing = playing)
         listeners.forEach { it.onPlaybackChanged(playing, cur.positionMs) }
     }

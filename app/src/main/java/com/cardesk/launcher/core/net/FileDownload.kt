@@ -39,6 +39,8 @@ object FileDownload {
      * @param expectSha256 期望的 SHA-256（空 = 不校验摘要）。
      * @param minBytes 「至少要有多少字节」才算下成功（APK 不会小于 1KB）。
      * @param onProgress 0..100 的进度（主线程回调）。
+     * @param onDetail 详细进度：`(已下载字节, 总字节(0=未知), 已用毫秒)`。
+     *   第九十八轮新增 —— 云端应用下载弹窗要显示速度，只靠百分比反推不出来。
      */
     fun download(
         url: String,
@@ -49,6 +51,7 @@ object FileDownload {
         connectTimeoutMs: Int = 10_000,
         readTimeoutMs: Int = 30_000,
         onProgress: (Int) -> Unit = {},
+        onDetail: (Long, Long, Long) -> Unit = { _, _, _ -> },
     ): Result {
         val started = System.currentTimeMillis()
         target.parentFile?.mkdirs()
@@ -74,6 +77,7 @@ object FileDownload {
                         out.write(buf, 0, n)
                         read += n
                         if (total > 0) onProgress(((read * 100) / total).toInt().coerceIn(0, 100))
+                        onDetail(read, if (total > 0) total.toLong() else 0L, System.currentTimeMillis() - started)
                     }
                 }
             }

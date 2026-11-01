@@ -418,10 +418,6 @@ class TaskEditorDialog(
             }
 
             else -> {
-                content.addView(
-                    note("热点开关在免系统签名版本里只保留入口，执行时会提示不可用。"),
-                    Ui.linear(960, -2),
-                )
             }
         }
 

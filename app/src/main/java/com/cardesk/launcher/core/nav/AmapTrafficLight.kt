@@ -328,6 +328,67 @@ object AmapTrafficLight {
     // ------------------------------------------------------------ 巡航协议
 
     /**
+     * 巡航协议里**一个方向**的红绿灯（多方向并列展示用）。
+     *
+     * @param direction 巡航方向码（[DIR_LEFT]/[DIR_STRAIGHT]/[DIR_RIGHT]），识别不出为 null。
+     * @param lamp 灯态（枚举已核对）。
+     * @param countdownSeconds 变灯读秒；null = 这一帧没带。
+     * @param rawStatus 原始灯态值（诊断用）。
+     */
+    data class DirectionLight(
+        val direction: Int?,
+        val lamp: Lamp,
+        val countdownSeconds: Int?,
+        val rawStatus: Int?,
+    )
+
+    /**
+     * 解析巡航协议的**全部方向**（最多 [MAX_CRUISE_LIGHTS] 条），用于巡航卡并列展示。
+     *
+     * 与 [cruise] 的区别：
+     * - [cruise] 是「导航卡右上角那一个灯」，要按当前转向挑一条，挑不出就不画；
+     * - 本方法是「巡航卡那一排灯」，**有多少方向就展示多少**（左/直/右各一枚），
+     *   单条坏数据只跳过那一条，不影响其它灯；同方向重复只保留第一条。
+     *
+     * 排序固定为 左 → 直 → 右 → 其它，避免每帧顺序抖动。
+     */
+    fun cruiseAll(json: String?): List<DirectionLight> {
+        if (json.isNullOrEmpty() || json.length > MAX_CRUISE_JSON_LENGTH) return emptyList()
+        val root = JsonLite.parseObject(json) ?: return emptyList()
+        val lights = root["lights"] as? List<*> ?: return emptyList()
+        if (lights.isEmpty()) return emptyList()
+        val out = LinkedHashMap<Int, DirectionLight>()
+        for (item in lights) {
+            if (out.size >= MAX_CRUISE_LIGHTS) break
+            val map = item as? Map<*, *> ?: continue
+            val direction = strictInt(map["direction"])
+            val status = strictInt(map["status"]) ?: continue
+            val lamp = when (status) {
+                0 -> Lamp.RED
+                1 -> Lamp.GREEN
+                else -> Lamp.UNKNOWN
+            }
+            // 方向识别不出的帧统一归到一个「未知方向」槽位，避免同一帧里重复占位。
+            val key = direction ?: UNKNOWN_DIRECTION_KEY
+            if (!out.containsKey(key)) {
+                out[key] = DirectionLight(direction, lamp, seconds(map["countdown"]), status)
+            }
+        }
+        return out.values.sortedBy { directionOrder(it.direction) }
+    }
+
+    /** 方向识别不出时用的槽位键（只保留第一条）。 */
+    private const val UNKNOWN_DIRECTION_KEY = -1
+
+    /** 巡航方向的展示顺序：左、直、右、其它。 */
+    private fun directionOrder(direction: Int?): Int = when (direction) {
+        DIR_LEFT -> 0
+        DIR_STRAIGHT -> 1
+        DIR_RIGHT -> 2
+        else -> 3
+    }
+
+    /**
      * 解析修改版（YH）巡航协议的一帧，**只取一个方向**。
      *
      * ## 为什么只取一个

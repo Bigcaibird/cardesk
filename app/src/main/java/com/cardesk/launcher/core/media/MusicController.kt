@@ -457,6 +457,12 @@ class MusicController private constructor() {
      *
      */
     private fun clearToIdle() {
+        // 第九十七轮：已经空过了就别再空一次。
+        //
+        // 诊断包里「清空媒体状态」出现 164 次、每 2.5s 一次：没有可用会话时
+        // 每次 reconcile 都会发一次 null，界面被反复通知「暂无播放」，
+        // 和刚恢复的歌名叠在一起就是「播放/暂停状态不断跳动」。
+        if (track == null && lyric == null) return
         // 排障场景：界面变成「暂无播放 / 等待播放」时，这里能看到清空时机
         Logx.i(LogTags.MEDIA, "清空媒体状态（回到暂无播放）")
         track = null
@@ -1001,7 +1007,9 @@ class MusicController private constructor() {
         private val instance = MusicController()
         fun get(): MusicController = instance
 
-        const val NULL_SESSION_CLEAR_MS = 600L
+        // 第九十七轮：会话短暂消失（音乐 App 暂停/缓冲时会把会话销毁几秒）不再 600ms 就清屏，
+        // 否则界面会在「暂无播放」和歌名之间来回跳；3s 覆盖 2.5s 周扫的空窗。
+        const val NULL_SESSION_CLEAR_MS = 3_000L
 
         const val LYRIC_IDLE = "等待播放"
 

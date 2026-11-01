@@ -62,11 +62,6 @@ class DriveModeDialog(
             row?.addView(chip, LinearLayout.LayoutParams(0, 62, 1f).apply { marginEnd = 12 })
         }
 
-        column.addView(
-            note("部分车型只允许在 P 挡 / 静止时切换；切换后没生效会提示失败。"),
-            Ui.linear(-1, 40),
-        )
-
         val actions = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL

@@ -248,7 +248,12 @@ private fun hsvOf(color: Int): FloatArray {
  * （system 变体有 `INSTALL_PACKAGES`）；静默不行就退到系统安装器
  * （普通安装包唯一能走的路）。
  */
-class UpdateDialog(context: Context, pal: Palette) :
+class UpdateDialog(
+    context: Context,
+    pal: Palette,
+    /** 非空 = 打开就自动下载这个版本（启动检测到新版、用户点「立即更新」时用）。 */
+    private val autoDownload: R2Release? = null,
+) :
     DialogSheet(context, pal, 860, 720, "在线更新") {
 
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -283,6 +288,13 @@ class UpdateDialog(context: Context, pal: Palette) :
         content.addView(bar, Ui.linear(-1, 60, 0f, 0, 12))
         content.addView(footer, Ui.linear(-1, 66, 0f, 0, 18))
         footer.addView(primaryButton("检查更新") { check() }, Ui.linear(-2, 62))
+        // 启动检测弹窗点「立即更新」进来的：直接把版本信息摆好并开始下载
+        autoDownload?.let { release ->
+            handler.post {
+                onChecked(AppUpdate.CheckResult.Available(release, AppUpdate.versionLabel(context)))
+                download(release)
+            }
+        }
     }
 
     /** 一行弱文字（可换行）。 */
@@ -386,10 +398,6 @@ class RestartDialog(context: Context, pal: Palette) : DialogSheet(context, pal, 
             Ui.text(context, "重启会让桌面与所有应用退出，确认现在重启吗？", 24f, pal.text),
             Ui.linear(-1, 80),
         )
-        content.addView(
-            note("重启优先走系统权限的 PowerManager.reboot(null)，失败回退 `su -c reboot`，最后才是 root。"),
-            Ui.linear(-1, 90),
-        )
         val footer = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -473,7 +481,6 @@ class DesktopLayoutDialog(
 
         // —— 歌词颜色 ——
         inner.addView(section("歌词颜色"))
-        inner.addView(note("仅作用于仪表盘歌词与进度环，不影响桌面歌词与进度条。"))
         inner.addView(colorRow("主歌词颜色", prefs.clusterLyricMainColor) {
             val from = prefs.clusterLyricMainColor
             prefs.clusterLyricMainColor = it
@@ -487,7 +494,6 @@ class DesktopLayoutDialog(
 
         // —— 桌面歌词字号 ——
         inner.addView(section("桌面歌词字号"))
-        inner.addView(note("第二页音乐卡收起/展开；单位为设计像素。"))
         inner.addView(sliderRow("收起·主歌词", 14, 64, prefs.deskCompactMainSp, "") {
             val from = prefs.deskCompactMainSp
             prefs.deskCompactMainSp = it

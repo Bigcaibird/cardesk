@@ -32,13 +32,6 @@ class TripResetDialog(context: Context, pal: Palette) :
             Ui.text(context, "行程2 从上次复位开始累计，确认现在清零重新开始吗？", 24f, pal.text),
             Ui.linear(-1, 76),
         )
-        content.addView(
-            note(
-                "复位后里程 / 时长 / 平均油耗从 0 开始累计；行程1（总）不受影响。\n" +
-                    "这台车机的复位入口文档里没有可直接调用的实现，桌面会依次尝试文档里出现的几种方式，并回读确认是否生效。",
-            ),
-            Ui.linear(-1, 170),
-        )
         status = Ui.text(context, "", 20f, pal.textDim).also {
             content.addView(it, Ui.linear(-1, 44))
         }

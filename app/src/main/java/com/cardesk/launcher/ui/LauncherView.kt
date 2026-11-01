@@ -406,7 +406,11 @@ class LauncherView(context: Context) : FrameLayout(context) {
                     override fun onLanes(raw: String) {
                         navLanesRaw = raw
                         // 只有引导卡已经显示才重画
-                        if (navGuideRaw != null) applyNavGuide()
+                        applyNavGuide()
+                    }
+
+                    override fun onCruise() {
+                        applyNavGuide()
                     }
 
                     override fun onTrafficLight(signal: com.cardesk.launcher.core.nav.AmapTrafficLight.Signal?) {
@@ -416,7 +420,8 @@ class LauncherView(context: Context) : FrameLayout(context) {
                         //
                         // 真正的信号状态放在 `AmapDesktopGuide` 里（那里判有效期、减读秒），
                         // 这里不另存一份，免得两处状态打架。
-                        if (navGuideRaw != null) applyNavGuide()
+                        // 第九十九轮：巡航态没有 navGuideRaw，但巡航卡也要跟着红绿灯帧刷新。
+                        applyNavGuide()
                     }
 
                     override fun onStopped() {
@@ -461,6 +466,45 @@ class LauncherView(context: Context) : FrameLayout(context) {
         handler.post(ticker)
         refresh()
         com.cardesk.launcher.core.StartupTrace.mark("servicesDone")
+
+        // 第九十八轮：桌面起来后检测一次在线更新。
+        // 失败静默；查到新版弹「立即更新 / 稍后」的询问框（同一版本点过稍后不再问）。
+        handler.removeCallbacks(updateCheckRunnable)
+        handler.postDelayed(
+            updateCheckRunnable,
+            com.cardesk.launcher.core.update.UpdateStartupCheck.CHECK_DELAY_MS,
+        )
+    }
+
+    // ------------------------------------------------------------------ 启动更新检测（第九十八轮）
+
+    private val updateCheckRunnable = Runnable { checkUpdateOnStartup() }
+
+    private fun checkUpdateOnStartup() {
+        // 用户手上已经有别的弹窗（设置/空调/驾驶模式…）时先不打扰，等下次
+        if (overlayDialog != null) return
+        com.cardesk.launcher.core.update.UpdateStartupCheck.maybeCheck(
+            context.applicationContext,
+            prefs,
+        ) { release -> showUpdateAvailable(release) }
+    }
+
+    private fun showUpdateAvailable(release: com.cardesk.launcher.core.update.R2Release) {
+        if (overlayDialog != null) return
+        val dialog = com.cardesk.launcher.ui.dialogs.UpdateAvailableDialog(context, pal, release)
+        dialog.onUpdate = {
+            closeOverlayDialog(dialog)
+            Logx.event(LogTags.SETTING, "启动更新：用户选择立即更新", "version" to release.version)
+            val update = com.cardesk.launcher.ui.dialogs.UpdateDialog(context, pal, autoDownload = release)
+            update.onClose = { closeOverlayDialog(update) }
+            showOverlayDialog(update)
+        }
+        dialog.onLater = {
+            prefs.updateSkippedVersionCode = release.versionCode
+            Logx.event(LogTags.SETTING, "启动更新：用户选择稍后", "versionCode" to release.versionCode)
+            closeOverlayDialog(dialog)
+        }
+        showOverlayDialog(dialog)
     }
 
     /**
@@ -470,22 +514,40 @@ class LauncherView(context: Context) : FrameLayout(context) {
      * —— 与 `paintGuideLanes(guide.lanes.isNotEmpty() ? guide.lanes: lastGuideLanes)` 一致。
      */
     private fun applyNavGuide() {
-        val guide = navGuideRaw ?: return
-        val lanes = guide.lanes.ifEmpty { navLanesRaw.orEmpty() }
-        // 红绿灯读秒按本机单调时钟往下走，所以**每次重画都要重新取一次**。
-        // `AmapDesktopGuide.trafficLight()` 内部会按已过去的秒数把读秒减掉。
-        val light = navGuideSource?.trafficLight()
+        val guide = navGuideRaw
+        if (guide != null) {
+            val lanes = guide.lanes.ifEmpty { navLanesRaw.orEmpty() }
+            // 红绿灯读秒按本机单调时钟往下走，所以**每次重画都要重新取一次**。
+            // `AmapDesktopGuide.trafficLight()` 内部会按已过去的秒数把读秒减掉。
+            val light = navGuideSource?.trafficLight()
+            scenePage.setGuide(
+                com.cardesk.launcher.core.nav.NavGuideModel.build(
+                    icon = guide.icon,
+                    segmentMeters = guide.segmentMeters,
+                    currentRoad = guide.currentRoad,
+                    nextRoad = guide.nextRoad,
+                    remainSeconds = guide.remainSeconds,
+                    remainMeters = guide.remainMeters,
+                    lanesRaw = lanes,
+                    trafficLight = light,
+                ),
+            )
+            return
+        }
+        // 第九十九轮：没有导航时，如果高德在巡航（收到了巡航红绿灯帧），
+        // 首页也显示一张「巡航卡」：当前道路 + 车道线 + 多方向红绿灯。
+        val cruise = navGuideSource?.cruise()
         scenePage.setGuide(
-            com.cardesk.launcher.core.nav.NavGuideModel.build(
-                icon = guide.icon,
-                segmentMeters = guide.segmentMeters,
-                currentRoad = guide.currentRoad,
-                nextRoad = guide.nextRoad,
-                remainSeconds = guide.remainSeconds,
-                remainMeters = guide.remainMeters,
-                lanesRaw = lanes,
-                trafficLight = light,
-            ),
+            if (cruise == null) {
+                null
+            } else {
+                com.cardesk.launcher.core.nav.NavGuideModel.buildCruise(
+                    icon = cruise.icon,
+                    road = cruise.road,
+                    lanesRaw = cruise.lanes,
+                    lights = cruise.lights,
+                )
+            },
         )
     }
 

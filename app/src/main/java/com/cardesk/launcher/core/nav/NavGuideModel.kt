@@ -32,6 +32,19 @@ data class DesktopGuide(
      * 这种情况下引导卡**不画**红绿灯那一块（不占位）。
      */
     val trafficLight: AmapTrafficLight.Signal? = null,
+    /**
+     * 是否是**巡航卡**（不是导航卡）。
+     *
+     * 巡航态没有「分段距离 / 剩余里程 / ETA」这些导航专属信息，
+     * 只展示当前道路 + 车道线 + 多方向红绿灯。
+     */
+    val cruise: Boolean = false,
+    /**
+     * 巡航态的多方向红绿灯（左/直/右各一枚，可能为空）。
+     *
+     * 导航卡不使用这个字段（导航卡用 [trafficLight] 的单枚信号）。
+     */
+    val cruiseLights: List<AmapTrafficLight.DirectionLight> = emptyList(),
 )
 
 /**
@@ -67,4 +80,34 @@ object NavGuideModel {
         lanes = DriveWay.parse(lanesRaw).orEmpty(),
         trafficLight = trafficLight,
     )
+
+    /**
+     * 构建**巡航卡**模型。
+     *
+     * @param icon 最近一次转向图标原始编码（0 = 没有，画直行）
+     * @param road 当前道路名（可为空）
+     * @param lanesRaw 最近一次车道线原文（可为空）
+     * @param lights 多方向红绿灯（可为空）
+     */
+    fun buildCruise(
+        icon: Int,
+        road: String?,
+        lanesRaw: String?,
+        lights: List<AmapTrafficLight.DirectionLight>,
+    ): DesktopGuide = DesktopGuide(
+        segmentText = "",
+        segmentUnit = "",
+        road = road?.trim().orEmpty().ifEmpty { CRUISE_ROAD_FALLBACK },
+        remainKm = "",
+        remainTime = "",
+        etaTime = "",
+        icon = NavGuideText.guideIcon(icon),
+        lanes = DriveWay.parse(lanesRaw).orEmpty(),
+        trafficLight = null,
+        cruise = true,
+        cruiseLights = lights,
+    )
+
+    /** 巡航态拿不到道路名时的兜底文案。 */
+    private const val CRUISE_ROAD_FALLBACK = "巡航中"
 }

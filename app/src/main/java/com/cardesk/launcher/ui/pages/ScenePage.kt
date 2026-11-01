@@ -655,6 +655,11 @@ class ScenePage(context: Context) : View(context) {
      */
     private fun drawGuide(canvas: Canvas) {
         val guide = navGuide ?: return
+        // 第九十九轮：巡航态单独一张窄卡（当前道路 + 车道线 + 多方向红绿灯）。
+        if (guide.cruise) {
+            drawCruiseGuide(canvas, guide)
+            return
+        }
         val x = left
         // 第五十二轮：状态栏缩到 2/3，内容基线 110 → 73
         val y = 73f
@@ -760,6 +765,129 @@ class ScenePage(context: Context) : View(context) {
         }
 
         hits["nav"] = r
+    }
+
+    /**
+     * 巡航卡（第九十九轮）。
+     *
+     * 巡航不是导航：没有分段距离 / 剩余里程 / ETA，只需要三样东西：
+     *
+     * - 当前道路名（`巡航中` 兜底）
+     * - 车道线（最近一次 `EXTRA_DRIVE_WAY`，没有就不画）
+     * - 多方向红绿灯（巡航协议一次可能带左/直/右好几个方向，**并排**展示）
+     *
+     * 版式：与导航卡同宽 520、同起点 (44,73)；高度随「有没有车道线 / 有没有灯」自适应，
+     * 没有信息时不出卡（由 `NavGuideModel.buildCruise` + `AmapDesktopGuide.cruise()` 控制）。
+     */
+    private fun drawCruiseGuide(canvas: Canvas, guide: DesktopGuide) {
+        val x = left
+        val y = 73f
+        val w = 520f
+        val pad = 26f
+        val headerTop = y + pad
+        val headerH = 110f
+        val hasLanes = guide.lanes.isNotEmpty()
+        val lights = guide.cruiseLights.take(3)
+        val hasLights = lights.isNotEmpty()
+
+        var bottom = headerTop + headerH
+        val lanesTop = if (hasLanes) bottom + 22f else bottom
+        if (hasLanes) bottom = lanesTop + 70f
+        val lightsTop = if (hasLights) bottom + 16f else bottom
+        if (hasLights) bottom = lightsTop + 76f
+        val h = bottom - y + pad
+
+        val r = RectF(x, y, x + w, y + h)
+        canvas.drawRoundRect(r, GLASS_RADIUS, GLASS_RADIUS, Paint(fill).apply { color = Skin.GLASS_STRONG_FILL })
+        canvas.drawRoundRect(r, GLASS_RADIUS, GLASS_RADIUS, Paint(stroke).apply {
+            color = Skin.GLASS_STROKE
+            strokeWidth = 1.4f
+        })
+
+        // —— 行1：转向图标（88×88） + 当前道路 + 「巡航」——
+        val iconCx = x + pad + 44f
+        val iconCy = headerTop + headerH / 2f
+        canvas.drawRoundRect(
+            RectF(iconCx - 44f, iconCy - 44f, iconCx + 44f, iconCy + 44f), 26f, 26f,
+            Paint(fill).apply { color = Skin.ACCENT_SOFT },
+        )
+        drawGuideIcon(canvas, guide.icon, iconCx, iconCy)
+
+        val tx = x + pad + 88f + 22f
+        text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        text.textSize = 34f
+        text.color = Skin.TEXT
+        text.textAlign = Paint.Align.LEFT
+        canvas.drawText(fitCruiseText(guide.road, x + w - pad - tx), tx, headerTop + 52f, text)
+        text.typeface = Typeface.DEFAULT
+        text.textSize = 20f
+        text.color = Skin.TEXT_DIM
+        canvas.drawText("巡航", tx, headerTop + 84f, text)
+
+        // —— 行2：车道线 ——
+        if (hasLanes) {
+            drawGuideLanes(canvas, guide, x + pad, lanesTop, w - pad * 2f, 70f)
+        }
+
+        // —— 行3：多方向红绿灯（左/直/右并排，最多 3 枚）——
+        if (hasLights) {
+            val gap = 9f
+            val chipW = (w - pad * 2f - gap * (lights.size - 1)) / lights.size
+            lights.forEachIndexed { i, light ->
+                val chipLeft = x + pad + i * (chipW + gap)
+                val chip = RectF(chipLeft, lightsTop, chipLeft + chipW, lightsTop + 76f)
+                canvas.drawRoundRect(chip, 18f, 18f, Paint(fill).apply { color = Skin.CHIP_FILL })
+                canvas.drawRoundRect(chip, 18f, 18f, Paint(stroke).apply {
+                    color = Skin.CHIP_STROKE
+                    strokeWidth = 1.2f
+                })
+                // 方向箭头（左/直/右）
+                val shape = cruiseDirectionShape(light.direction)
+                if (shape != null) {
+                    drawLaneGlyph(canvas, shape, chipLeft + 16f, lightsTop + 23f, 30f, Skin.TEXT_SOFT)
+                }
+                // 灯态圆点
+                val lampColor = when (light.lamp) {
+                    AmapTrafficLight.Lamp.RED -> Skin.DANGER
+                    AmapTrafficLight.Lamp.GREEN -> Skin.OK
+                    AmapTrafficLight.Lamp.AMBER -> Skin.WARN
+                    AmapTrafficLight.Lamp.UNKNOWN -> Skin.TEXT_DIM
+                }
+                val circleCx = chipLeft + 74f
+                val circleCy = lightsTop + 38f
+                canvas.drawCircle(circleCx, circleCy, 19f, Paint(fill).apply { color = lampColor })
+                // 读秒
+                text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                text.textSize = 26f
+                text.color = lampColor
+                text.textAlign = Paint.Align.LEFT
+                canvas.drawText(
+                    NavGuideText.trafficCountdownText(light.countdownSeconds),
+                    circleCx + 28f,
+                    lightsTop + 48f,
+                    text,
+                )
+                text.typeface = Typeface.DEFAULT
+            }
+        }
+        text.textAlign = Paint.Align.LEFT
+        hits["nav"] = r
+    }
+
+    /** 巡航方向码 → 车道箭头图形（识别不出返回 null，不画方向箭头）。 */
+    private fun cruiseDirectionShape(direction: Int?): LaneShape? = when (direction) {
+        AmapTrafficLight.DIR_LEFT -> LaneShape.LEFT
+        AmapTrafficLight.DIR_STRAIGHT -> LaneShape.STRAIGHT
+        AmapTrafficLight.DIR_RIGHT -> LaneShape.RIGHT
+        else -> null
+    }
+
+    /** 巡航卡道路名按可用宽度裁剪（超宽加「…」）。 */
+    private fun fitCruiseText(raw: String, maxWidth: Float): String {
+        if (text.measureText(raw) <= maxWidth) return raw
+        var end = raw.length
+        while (end > 1 && text.measureText(raw.substring(0, end) + "…") > maxWidth) end--
+        return raw.substring(0, end) + "…"
     }
 
     /**
@@ -1081,6 +1209,27 @@ class ScenePage(context: Context) : View(context) {
             )
         }
 
+        // 组合车道里的转弯箭头：独立的小「L」形箭头，和直行箭头不连线，保证两者之间有可见空隙。
+        fun turnArrow(left: Boolean, shaftX: Float, armTo: Float) {
+            canvas.drawPath(
+                Path().apply {
+                    moveTo(px(shaftX), py(21f))
+                    lineTo(px(shaftX), py(15.5f))
+                    lineTo(px(armTo), py(15.5f))
+                },
+                p,
+            )
+            val tip = if (left) armTo - 2.4f else armTo + 2.4f
+            canvas.drawPath(
+                Path().apply {
+                    moveTo(px(armTo), py(13f))
+                    lineTo(px(tip), py(15.5f))
+                    lineTo(px(armTo), py(18f))
+                },
+                p,
+            )
+        }
+
         when (shape) {
             LaneShape.STRAIGHT -> arrowUp(12f, 5f, 20f)
             LaneShape.LEFT -> {
@@ -1139,75 +1288,18 @@ class ScenePage(context: Context) : View(context) {
                 )
             }
             LaneShape.STRAIGHT_LEFT -> {
-                arrowUp(14f, 5f, 20f)
-                canvas.drawPath(
-                    Path().apply {
-                        moveTo(px(14f), py(11f))
-                        lineTo(px(14f), py(9f))
-                        cubicTo(px(14f), py(6f), px(12f), py(5f), px(9f), py(5f))
-                    },
-                    p,
-                )
-                canvas.drawPath(
-                    Path().apply {
-                        moveTo(px(11f), py(2f))
-                        lineTo(px(6f), py(5f))
-                        lineTo(px(11f), py(8f))
-                    },
-                    p,
-                )
+                // 直行箭头靠右；左转箭头独立画在左下，两者之间留出明显空隙（不再连一根分叉线）。
+                arrowUp(17f, 3.5f, 20.5f)
+                turnArrow(left = true, shaftX = 8.5f, armTo = 4.5f)
             }
             LaneShape.STRAIGHT_RIGHT -> {
-                arrowUp(10f, 5f, 20f)
-                canvas.drawPath(
-                    Path().apply {
-                        moveTo(px(10f), py(11f))
-                        lineTo(px(10f), py(9f))
-                        cubicTo(px(10f), py(6f), px(12f), py(5f), px(15f), py(5f))
-                    },
-                    p,
-                )
-                canvas.drawPath(
-                    Path().apply {
-                        moveTo(px(13f), py(2f))
-                        lineTo(px(18f), py(5f))
-                        lineTo(px(13f), py(8f))
-                    },
-                    p,
-                )
+                arrowUp(7f, 3.5f, 20.5f)
+                turnArrow(left = false, shaftX = 15.5f, armTo = 19.5f)
             }
             LaneShape.STRAIGHT_BOTH -> {
-                arrowUp(12f, 5f, 20f)
-                canvas.drawPath(
-                    Path().apply {
-                        moveTo(px(12f), py(10f))
-                        cubicTo(px(12f), py(6f), px(9f), py(5f), px(6f), py(5f))
-                    },
-                    p,
-                )
-                canvas.drawPath(
-                    Path().apply {
-                        moveTo(px(8f), py(2f))
-                        lineTo(px(3f), py(5f))
-                        lineTo(px(8f), py(8f))
-                    },
-                    p,
-                )
-                canvas.drawPath(
-                    Path().apply {
-                        moveTo(px(12f), py(10f))
-                        cubicTo(px(12f), py(6f), px(15f), py(5f), px(18f), py(5f))
-                    },
-                    p,
-                )
-                canvas.drawPath(
-                    Path().apply {
-                        moveTo(px(16f), py(2f))
-                        lineTo(px(21f), py(5f))
-                        lineTo(px(16f), py(8f))
-                    },
-                    p,
-                )
+                arrowUp(12f, 3.5f, 20.5f)
+                turnArrow(left = true, shaftX = 6f, armTo = 2.6f)
+                turnArrow(left = false, shaftX = 18f, armTo = 21.4f)
             }
             LaneShape.BUS -> {
                 // 公交专属道（图形是「公交」车头剪影）

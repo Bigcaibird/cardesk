@@ -500,6 +500,44 @@ class Prefs(context: Context) {
         set(value) = setStringValue("recent_locked", value.filter { it.isNotBlank() }.joinToString(","))
 
     /**
+     * 启动更新检测里用户点过「稍后」的版本号（第九十八轮，`update_skipped_code`）。
+     *
+     * 同一个版本不再重复弹窗；发新版（versionCode 变了）会重新询问。
+     */
+    var updateSkippedVersionCode: Long
+        get() = sp.getLong("update_skipped_code", 0L)
+        set(value) = sp.edit().putLong("update_skipped_code", value).apply()
+
+    /**
+     * 云端应用库已安装过的条目（第九十八轮，`cloud_installed_apks`）。
+     *
+     * key = 条目的 sha256（清单没给就用文件名）；只用于列表上打「已安装」标记。
+     */
+    var cloudInstalled: Set<String>
+        get() = stringValue("cloud_installed_apks", "")
+            .split(',')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .toSet()
+        set(value) = setStringValue(
+            "cloud_installed_apks",
+            value.filter { it.isNotBlank() }.joinToString(","),
+        )
+
+    /** 云端应用条目的安装标记 key。 */
+    fun cloudInstalledKey(sha256: String, file: String): String =
+        sha256.ifBlank { file }
+
+    fun markCloudInstalled(sha256: String, file: String) {
+        val key = cloudInstalledKey(sha256, file)
+        if (key.isBlank()) return
+        cloudInstalled = cloudInstalled + key
+    }
+
+    fun isCloudInstalled(sha256: String, file: String): Boolean =
+        cloudInstalledKey(sha256, file) in cloudInstalled
+
+    /**
      * 选中的媒体来源 id（`design_music_source_v1`，存的是来源文案）。
      * 这里存 id，文案可由 [com.cardesk.launcher.core.media.MediaSources] 还原。
      */
