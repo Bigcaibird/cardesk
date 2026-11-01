@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1093",
-  "versionCode": 4189,
-  "tag": "v1.0.1093",
-  "name": "CarDesk 4189 / 1.0.1093-system",
-  "notes": "第九十九轮补丁：直行+转弯组合车道箭头改成两枚独立箭头，拉开间距",
-  "publishedAt": "2026-11-01T15:15:18Z",
+  "version": "1.0.1094",
+  "versionCode": 4190,
+  "tag": "v1.0.1094",
+  "name": "CarDesk 4190 / 1.0.1094-system",
+  "notes": "第九十九轮补丁2：在线更新对话框删除过期的「检测需手动触发」说明；启动自动检测一次（只查清单不自动下载）",
+  "publishedAt": "2026-11-01T15:22:16Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4189.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4189.apk",
-    "size": 2173862,
-    "sha256": "670371f1ed2c30009c2ef821bab8c0b840235b69c1a7358e92393d9fd1ce562c"
+    "name": "CarDesk-platform-ecarx-cardesk-4190.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4190.apk",
+    "size": 2173758,
+    "sha256": "638df65f79e496a0c781c7ed490c06f1f8d6057aa5b2415ed3048f289c41785d"
   }
 }

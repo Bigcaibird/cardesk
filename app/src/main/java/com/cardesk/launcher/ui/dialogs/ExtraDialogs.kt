@@ -237,10 +237,10 @@ private fun hsvOf(color: Int): FloatArray {
  * 车机在国内访问 `api.github.com` 又慢又不稳，R2 走 Cloudflare 自己的 CDN。
  * 清单格式见 `core/update/R2Release.kt`。
  *
- * ## 检测时机：**手动触发**
+ * ## 检测时机：启动自动检测一次 + 手动
  *
- * 对话框打开后**不**自己发请求；只有用户点了「检查更新」才联网查一次。
- * 车机常年挂在后台，自动检查既费流量又会在用户没想更新的时候弹窗。
+ * 桌面启动 3 秒后自动检测一次（只查清单，不自动下载）；用户也可以在对话框里
+ * 点「检查更新」手动再查。下载始终要用户点按钮才会开始。
  *
  * ## 下载与安装
  *
@@ -279,7 +279,6 @@ class UpdateDialog(
         // 这几行都用可换行高度 —— `note()` 是给单行标签用的，长了会被裁掉
         content.addView(line("当前版本：${AppUpdate.versionLabel(context)}"), Ui.linear(-1, -2))
         content.addView(line("更新源：Cloudflare R2 · ${AppUpdate.R2_HOST}"), Ui.linear(-1, -2))
-        content.addView(line("检测需手动触发：不查后台、也不会自动下载。"), Ui.linear(-1, -2))
         content.addView(status, Ui.linear(-1, 36))
         // 详情放滚动区里 —— release 说明可能很长，不能把按钮顶出面板
         val detailScroll = ScrollView(context)
