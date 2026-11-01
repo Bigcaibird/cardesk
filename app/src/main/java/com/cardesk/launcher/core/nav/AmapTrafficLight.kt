@@ -43,17 +43,19 @@ import com.cardesk.launcher.core.JsonLite
  * |---|---|
  * | `dir` | 方向原始值 |
  * | `trafficLightStatus` | **灯态**（枚举见 [STATUS_STANDARD_RED] / [STATUS_STANDARD_GREEN]） |
- * | `redLightCountDownSeconds` | **红灯**倒计时秒数 |
+ * | `redLightCountDownSeconds` | **变灯**倒计时秒数（**所有灯态都适用**，不是「红灯」专用） |
  * | `waitRound` | 等待轮次 |
- * | `greenLightLastSecond` | **绿灯**剩余秒数（高德 8.1.0 起每次都带） |
+ * | `greenLightLastSecond` | **灯态伴随标志**（红=`0` / 绿=`3`），不是读秒（高德 8.1.0 起每次都带） |
  *
  * 关键取舍：
  * - **灯态看 `trafficLightStatus`，不靠读秒反推**。
  *   以前这里是「红灯倒计时 > 0 就判红」——
  *   而那个字段在**绿灯期间照样可能是正数**，
  *   于是绿灯被画成红灯（真车实测到的就是这个问题）。
- * - **读秒跟着灯态走**：红灯读秒取 `redLightCountDownSeconds`，
- *   绿灯读秒取 `greenLightLastSecond`。
+ * - **读秒对所有灯态都取 `redLightCountDownSeconds`**（它是「距离下次变灯还有几秒」）。
+ *   绿灯期间不能拿 `greenLightLastSecond` 当读秒 —— 它恒为 `3`，
+ *   照字段名当剩余秒数用，绿灯倒计时就会在 3/2 之间来回跳。
+ *   依据见 [EXTRA_GREEN_LAST_SECOND] 的 KDoc。
  *
  * ### 修改版巡航协议
  *
@@ -93,7 +95,8 @@ object AmapTrafficLight {
      * 一条红绿灯信号（**最近路口**）。
      *
      * @param lamp 灯态；[Lamp.UNKNOWN] 表示**不猜**。
-     * @param countdownSeconds 读秒（秒）；null = 这一帧没带读秒，或已经走完。
+     * @param countdownSeconds 距离**下次变灯**的读秒（秒，所有灯态同一口径）；
+     *   `0` = 马上变灯（显示层按「没有数字」处理）；null = 这一帧没带读秒，或已经走完。
      * @param rawStatus 原始灯态值（只做诊断，不参与显示）。
      * @param rawDirection 原始方向值（只做诊断，不参与显示）。
      * @param enumVerified 灯态枚举是否**已核对过**（两套协议都是 true ——
@@ -127,34 +130,53 @@ object AmapTrafficLight {
     /** 灯态原始值。 */
     const val EXTRA_STATUS = "trafficLightStatus"
 
-    /** 红灯倒计时秒数。 */
+    /**
+     * **变灯**倒计时秒数（`redLightCountDownSeconds`）。
+     *
+     * 字段名带 `red`，但它**不是红灯专用** —— 它是「距离下次变灯还有几秒」，
+     * 绿灯期间照样有效。所以 [Signal.countdownSeconds] 对所有灯态都取它，
+     * 不能按字段名拆成「红灯读秒 / 绿灯读秒」两路。
+     *
+     * `0` 是合法值（马上变灯），按约定照常下发；显示层对 `0` 不画数字。
+     */
     const val EXTRA_RED_COUNTDOWN = "redLightCountDownSeconds"
 
     /** 等待轮次。 */
     const val EXTRA_WAIT_ROUND = "waitRound"
 
     /**
-     * 绿灯剩余秒数（**语义至今未验证**）。
+     * 绿灯帧的**灯态伴随标志**（`greenLightLastSecond`）—— **不是**绿灯剩余秒数。
      *
-     * ## 第八十六轮补充
+     * ## 语义定论（第三方桌面「嘟嘟」生产代码 + UNI 参考实现）
      *
-     * 上一轮照字段名把它当绿灯倒计时用了 —— 真车实测发现**绿灯读秒一直在 3 与 2 之间跳**，
-     * 说明「它是剩余秒数」这个推断**站不住**。
+     * 高德 60073 协议里它的取值只有两种：**红=`0`、绿=`3`**。
+     * 它跟着灯态走，用来**佐证灯态**，不随时间递减，
+     * 所以「绿灯剩余秒数」这个望文生义的解读是错的：
+     * 真车实测绿灯读秒一直在 `3 ↔ 2` 之间跳，正是因为它恒为 `3`。
      *
-     * 取证结论（本轮重新反编译高德包确认）：
-     * - 这个字段是**服务端透传**的（模型 `RspTrafficLightsCountdownInfoModel`，
-     *   `wh0.c()` 只做 `putExtra`，本地不算）；
-     * - 高德**自己没有任何消费端**（全仓只有序列化/反序列化调用）——
-     *   也就是说高德车机版自己都不拿它画读秒，语义只存在于服务端。
+     * 逐行证据：
+     * - `work/dudu/jadx_out/sources/com/dudu/autoui/manage/p194s/p195j/C3691g.java`
+     *   的 60073 分支（`onReceive`）：
+     *   - 灯态是**成对**判定的：`greenLast == 0 && status == 1` 判红、
+     *     `greenLast == 3 && status == 4` 判绿；
+     *   - 去重 key 是 `greenLast-status-dir`（只有灯态变了才重新起一轮）；
+     *   - 两个灯态分支用的是**同一个**变灯时刻 `j2`（由
+     *     `redLightCountDownSeconds` 算出），也就是说读秒**根本不分红绿**。
+     * - `uni-launcher/app/android/app/src/main/java/xyz/i4o/uni/launcher/integration/AmapTrafficLightProtocol.java`
+     *   的 `standard()` 恒取 `redLightCountDownSeconds` 作 `countdownSeconds`，
+     *   这个字段只存成 `rawGreenLightLastSecond` 诊断字段，
+     *   注释写明 *never turn it into a green countdown*。
      *
-     * 所以现在的口径是：
-     * - **灯态**仍然看 `trafficLightStatus`（已由高德语音模块确认）；
-     * - **读秒**交给 [TrafficCountdown] 显示层保证「同一灯态只减不增」，
-     *   不再出现锯齿；
-     * - 到底是哪个字段在动（`redLightCountDownSeconds` 还是 `greenLightLastSecond`），
-     *   靠真车日志里的 `rawRed` / `rawGreen` 定论，**不猜**。
+     * 因此这里的口径是：**保留它做灯态佐证/诊断，永不当读秒**。
+     * 帧里的原始值仍然由 `AmapDesktopGuide` 以 `rawGreen` 打进日志，供真车复核。
      */
     const val EXTRA_GREEN_LAST_SECOND = "greenLightLastSecond"
+
+    /** [EXTRA_GREEN_LAST_SECOND] 在**绿灯**帧里的取值（红=`0`，见 [EXTRA_GREEN_LAST_SECOND]）。 */
+    const val GREEN_LAST_WHEN_GREEN = 3
+
+    /** [EXTRA_GREEN_LAST_SECOND] 在**红灯**帧里的取值。 */
+    const val GREEN_LAST_WHEN_RED = 0
 
     /** 官方协议里需要取的那几个 extra（其余忽略）。 */
     val STANDARD_EXTRAS = arrayOf(
@@ -254,16 +276,16 @@ object AmapTrafficLight {
         val dir = strictInt(extras[EXTRA_DIR]) ?: return null
         val status = strictInt(extras[EXTRA_STATUS]) ?: return null
         val lamp = lampFromStandardStatus(status, extras)
-        // 读秒**跟着灯态走**：
-        // 红灯读秒取 `redLightCountDownSeconds`，绿灯读秒取 `greenLightLastSecond`。
+        // 读秒**所有灯态都取同一个字段** `redLightCountDownSeconds`
+        // （它是「距离下次变灯还有几秒」，不是「红灯专用」；见 [EXTRA_RED_COUNTDOWN]）。
         //
-        // 以前不看灯态、只要红灯倒计时是正数就判红 —— 那个字段在绿灯期间照样可能是正数，
-        // 于是绿灯被画成红灯（真车实测到的现象）。
-        val countdown = when (lamp) {
-            Lamp.RED -> seconds(extras[EXTRA_RED_COUNTDOWN])
-            Lamp.GREEN -> seconds(extras[EXTRA_GREEN_LAST_SECOND])
-            else -> null
-        }
+        // ⚠️ 绿灯时**绝不**改取 `greenLightLastSecond`：
+        // 那个字段是灯态伴随标志（绿恒为 3），当读秒用就会显示成
+        // `3 → 2 → 3 → 2 …` 的锯齿 —— 正是用户报的「绿灯倒计时不正确」。
+        //
+        // 字段缺失/negative 时干脆不给读秒（显示层画「—」），
+        // **不拿别的字段顶替**；这与 dudu 的 `red >= 0` 门限一致。
+        val countdown = seconds(extras[EXTRA_RED_COUNTDOWN])
         return Signal(
             lamp = lamp,
             countdownSeconds = countdown,
@@ -276,17 +298,20 @@ object AmapTrafficLight {
     /**
      * 官方协议的灯态。
      *
-     * `trafficLightStatus` 认得的就直接用（`1` = 红，`4` = 绿）。
+     * `trafficLightStatus` 认得的就直接用（`1` = 红，`4` = 绿）——
+     * 这是权威来源，不因为伴随标志对不上就丢帧（丢帧会让卡片整段不显示）。
      *
      * ## 认不出来时怎么兜底
      *
      * 高德要是改了枚举取值，我们**不猜**它是什么意思，
-     * 改用两个**自带字段名**的读秒兜底：
+     * 按 dudu 的成对条件退到「灯态伴随标志」：
      *
-     * - 绿灯剩余秒数 > 0 ⇒ 正在绿灯（`greenLightLastSecond`）；
-     * - 红灯倒计时 > 0 ⇒ 正在红灯（`redLightCountDownSeconds`）。
+     * - `greenLightLastSecond == 3` ⇒ 正在绿灯（dudu：`greenLast==3 && status==4` 判绿）；
+     * - 否则若变灯倒计时 > 0 ⇒ 正在等灯，按红灯画
+     *   （dudu 里 `greenLast==0 && status==1` 判红；绿灯那一侧已被上一行判掉）。
      *
      * 这样即使枚举变了，也不会退回到「永远画红灯」那个老毛病。
+     * `greenLast` 缺失（老版本高德不带这个字段）时上一行自然跳过，不影响判定。
      */
     private fun lampFromStandardStatus(status: Int, extras: Map<String, Any?>): Lamp {
         when (status) {
@@ -294,7 +319,7 @@ object AmapTrafficLight {
             STATUS_STANDARD_GREEN -> return Lamp.GREEN
         }
         val green = seconds(extras[EXTRA_GREEN_LAST_SECOND])
-        if (green != null && green > 0) return Lamp.GREEN
+        if (green == GREEN_LAST_WHEN_GREEN) return Lamp.GREEN
         val red = seconds(extras[EXTRA_RED_COUNTDOWN])
         if (red != null && red > 0) return Lamp.RED
         return Lamp.UNKNOWN

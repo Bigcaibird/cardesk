@@ -1065,6 +1065,85 @@ object CarProperties {
         readTypedA(propId, areaId, ByteArray::class.java) as? ByteArray
 
     /**
+     * 按 `byte[]` 读一个属性，并把 **HAL 状态**一起带出来（第八十轮新增）。
+     *
+     * ## 为什么不直接用 [readBytesViaClass]
+     *
+     * 那个方法内部**确实**检查了 `CarPropertyValue.getStatus()`
+     * （经 [readTypedVariants] → `isValueUsable`），但检查完就把状态丢了，
+     * 调用方只拿到「字节或 null」，分不清是
+     * **属性不存在 / 类型不符 / HAL 说当前无值**。
+     *
+     * 车门这条 Geely PA 消息的正确读法是
+     * 「先 `getStatus()` 必须为 0（`STATUS_AVAILABLE`），再 `getValue()` 转 `byte[]`」。
+     * 诊断日志也必须能看到 status，否则真机上「读不到」还是查不出原因。
+     *
+     * 所以这里把 status、回读区域号、字节、失败原因**一起**返回；
+     * 它只是新增的一条只读接口，**不改任何既有通道的行为**。
+     */
+    fun readBytesWithStatus(propId: Int, areaId: Int): BytesRead {
+        val m = managerA
+            ?: return BytesRead(propId, areaId, failure = "属性通道未就绪（路 A 未连上）")
+        val getter = mGetTypedA ?: run {
+            resolveMethodsA(m)
+            mGetTypedA
+        } ?: return BytesRead(propId, areaId, failure = "没有 getProperty(Class,int,int) 重载")
+
+        var failure: String? = null
+        val holder = runCatching { getter.invoke(m, ByteArray::class.java, propId, areaId) }
+            .onFailure { failure = describeFailure(it) }
+            .getOrNull()
+            ?: return BytesRead(propId, areaId, failure = failure ?: "getProperty 返回 null")
+
+        val halStatus = mGetStatus?.let { runCatching { it.invoke(holder) as? Int }.getOrNull() }
+        val returnedArea = mGetAreaId?.let { runCatching { it.invoke(holder) as? Int }.getOrNull() }
+        val bytes = mGetValue?.let { runCatching { it.invoke(holder) as? ByteArray }.getOrNull() }
+            ?: (holder as? ByteArray)
+        return BytesRead(propId, areaId, returnedArea, halStatus, bytes, failure)
+    }
+
+    /**
+     * [readBytesWithStatus] 的返回：一次按 `byte[]` 读取的**原始证据**。
+     *
+     * @param halStatus `CarPropertyValue.getStatus()`；null = 状态没读出来（不拦）
+     * @param bytes `getValue()` 的结果；null = 类型不符或读取失败
+     * @param failure 反射调用失败时的异常摘要；null = 调用本身没抛
+     */
+    class BytesRead(
+        val propertyId: Int,
+        val requestedArea: Int,
+        val returnedArea: Int? = null,
+        val halStatus: Int? = null,
+        val bytes: ByteArray? = null,
+        val failure: String? = null,
+    ) {
+        /**
+         * HAL 状态是否允许使用这个值。
+         *
+         * 状态读不出来（null）时**不拦** —— 跟既有的 `isValueUsable` 口径一致：
+         * 拿不到状态就按可用处理，不能因为读不到状态反而把正常值丢掉。
+         */
+        val usable: Boolean get() = halStatus == null || halStatus == STATUS_AVAILABLE
+
+        /** 一行诊断文本（给 probeRaw 用）。 */
+        fun describe(): String =
+            "prop=0x%08X area=%d returnedArea=%s halStatus=%s bytes=%s failure=%s".format(
+                propertyId,
+                requestedArea,
+                returnedArea?.toString() ?: "-",
+                when (halStatus) {
+                    null -> "未取到"
+                    STATUS_AVAILABLE -> "0 AVAILABLE"
+                    1 -> "1 UNAVAILABLE"
+                    2 -> "2 ERROR"
+                    else -> halStatus.toString()
+                },
+                bytes?.let { "${it.size}B" } ?: "-",
+                failure ?: "-",
+            )
+    }
+
+    /**
      * 按类型读一个整数属性（`getProperty(Integer.class, propId, area)`）。
      *
      * 数值属性也可以用 [readInt]（走 `getProperty(int, int)`）；这条是

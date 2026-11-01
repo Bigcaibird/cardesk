@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  系统 starting window 的背景（第九十三轮，对照 UNI 的 res/drawable/launch_background.xml）。
+
+  以前 AppTheme 的 windowBackground 是纯 #05080F（近黑）：
+  「黑屏一段时间」里的前半段其实是**系统**在画这个窗口，
+  我们的 Activity 还没画第一帧。改成同色系的渐变后，
+  即使 Activity 还没起来，看到的也是品牌底色，而不是一块死黑。
+
+  这里不放位图（仓库没有 logo 资源），只画渐变；
+  Activity 自己的启动页（ui/LaunchSplashView.kt）会在第一帧补上品牌字与转圈。
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:angle="270"
+                android:startColor="#071320"
+                android:endColor="#03060A" />
+        </shape>
+    </item>
+</layer-list>

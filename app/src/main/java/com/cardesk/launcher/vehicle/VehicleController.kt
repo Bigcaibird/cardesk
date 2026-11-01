@@ -237,6 +237,79 @@ object VehicleController {
     fun setBlowingMask(mask: Int) = act("吹风模式(掩码)") { setBlowingMask(mask) }
     fun cycleSeat(zone: Int, heat: Boolean) = act(if (heat) "座椅加热" else "座椅通风") { cycleSeat(zone, heat) }
 
+    /**
+     * 切驾驶模式（第九十五轮补丁）：给状态栏「驾驶模式 · xx」胶囊的快捷面板用。
+     *
+     * 厂商没有公开的「设置驾驶模式」封装，这里按 AdaptAPI 的 `setFunctionValue`
+     * 语义试两种写法，**写完回读确认**：
+     * 1. 主流写法：`setFunctionValue(570491136, 2, 模式号)`；
+     * 2. 旧固件写法：`setFunctionValue(模式号, 2, 1)`。
+     *
+     * 写车是同步 binder，放后台线程；结果回主线程。
+     * Mock 通道不做回读（它本来就没有真实模式值，回读校验必然失败）。
+     *
+     * @param value [DriveMode.SELECTION_*]
+     * @param onResult `(ok, message)`，message 可直接展示给用户
+     */
+    fun setDriveMode(value: Int, onResult: (Boolean, String) -> Unit) {
+        if (!initialized || !::gateway.isInitialized) {
+            Logx.w(LogTags.VEHICLE, "切换驾驶模式被忽略（车控未初始化）", "value" to value)
+            onResult(false, "车控还没连接好，稍后再试")
+            return
+        }
+        val gw = gateway
+        val mock = gw.id == "mock"
+        Thread {
+            val label = DriveMode.fullLabel(value)
+            // 文档口径（docs/ecarx-adapterapi/16-hud-dim-adas.md §4.3 +
+            // jimu 文档站 api-drive-mode）：驾驶模式只提供两参写
+            // `ICarFunction.setFunctionValue(0x22010100, 模式枚举)`，没有 zone。
+            // 找不到两参重载就如实失败，不拿三参重载猜 zone。
+            var written = runCatching {
+                gw.writeFunction(DriveMode.FUNCTION_DRIVE_MODE_SELECT, value)
+            }.getOrDefault(false)
+            var ok = written
+            if (!mock && written) ok = verifyDriveMode(gw, value)
+            val failureReason = runCatching { gw.lastError() }.getOrNull()
+            Logx.i(
+                LogTags.VEHICLE,
+                if (ok) "切换驾驶模式成功" else "切换驾驶模式失败",
+                "value" to value,
+                "label" to label,
+                "written" to written,
+                "channel" to runCatching { gw.id }.getOrDefault("?"),
+                "reason" to failureReason,
+            )
+            main.post {
+                if (ok) {
+                    notifyChanged()
+                    onResult(true, "已切换到 $label")
+                } else {
+                    onResult(false, "切换失败：这台车机不允许桌面直接写驾驶模式（${failureReason ?: "文档口径的写入接口不可用"}）")
+                }
+            }
+        }.start()
+    }
+
+    /**
+     * 写完后回读，最多等 1.2 秒确认模式真的变了。
+     *
+     * 读也按文档口径：先一参 `getFunctionValue(0x22010100)`，读不到再退两参
+     * （部分固件只实现带 zone 的读取；两者都在文档的方法族里）。
+     */
+    private fun verifyDriveMode(gw: VehicleGateway, want: Int): Boolean {
+        repeat(6) {
+            Thread.sleep(200)
+            val now = runCatching { gw.readFunction(DriveMode.FUNCTION_DRIVE_MODE_SELECT) }.getOrNull()
+                ?: runCatching { gw.readValue(DriveMode.FUNCTION_DRIVE_MODE_SELECT, 0) }.getOrNull()
+                ?: runCatching { gw.readValue(DriveMode.FUNCTION_DRIVE_MODE_SELECT, DriveMode.ZONE) }.getOrNull()
+            if (now != null && DriveMode.normalizeModeId(now) == DriveMode.normalizeModeId(want)) {
+                return true
+            }
+        }
+        return false
+    }
+
     private inline fun act(op: String, block: HvacLogic.() -> Unit) {
         if (!initialized) {
             Logx.w(LogTags.HVAC, "空调操作被忽略（车控未初始化）", "op" to op)

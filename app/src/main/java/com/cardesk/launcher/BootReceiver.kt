@@ -29,13 +29,24 @@ class BootReceiver : BroadcastReceiver() {
             return
         }
         Logx.init(context.applicationContext)
-        Logx.i(LogTags.APP, "收到开机广播", "action" to intent.action)
+        // bootMs = 开机以来毫秒。诊断包里跟「启动分段」的 bootMs 一对照，
+        // 就能分清「系统开机到广播用掉多久」和「广播到桌面首帧用掉多久」。
+        Logx.i(
+            LogTags.APP,
+            "收到开机广播",
+            "action" to intent.action,
+            "bootMs" to android.os.SystemClock.elapsedRealtime(),
+        )
         val launch = Intent(context, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
         try {
             context.startActivity(launch)
-            Logx.i(LogTags.APP, "开机广播已拉起桌面")
+            Logx.i(
+                LogTags.APP,
+                "开机广播已拉起桌面",
+                "bootMs" to android.os.SystemClock.elapsedRealtime(),
+            )
         } catch (e: Throwable) {
             // Android 10+ 后台启动 Activity 受限，作为 HOME 应用通常已被系统拉起，失败可忽略
             Logx.w(LogTags.APP, "开机广播拉起桌面失败（Android 10+ 后台启动受限）", e)

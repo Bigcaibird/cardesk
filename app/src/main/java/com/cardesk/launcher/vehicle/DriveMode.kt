@@ -23,8 +23,21 @@ package com.cardesk.launcher.vehicle
  */
 object DriveMode {
 
-    /** 驾驶模式选择功能号。 */
+    /**
+     * 驾驶模式选择功能号（**文档口径**）。
+     *
+     * 依据：`docs/ecarx-adapterapi/16-hud-dim-adas.md` §4.3
+     * （`IDriveMode.DM_FUNC_DRIVE_MODE_SELECT = 0x22010100`）
+     * 与 jimu 文档站 `api-drive-mode`（`setFunctionValue(0x22010100, 模式枚举)`）。
+     */
     const val FUNCTION_DRIVE_MODE_SELECT = 570491136
+
+    /**
+     * ECO 按钮功能号（文档口径：`IDriveMode.DM_FUNC_ECO_BUTTON = 0x22020100`）。
+     *
+     * 目前桌面没有单独做「ECO 快捷按钮」，先留常量，避免以后又写成魔法数。
+     */
+    const val FUNCTION_ECO_BUTTON = 570556672
 
     /** 驾驶模式读取的 zone（= 2）。 */
     const val ZONE = 2
@@ -95,18 +108,27 @@ object DriveMode {
      */
     const val READ_UNKNOWN = 255
 
-    /** 设置页里「目标驾驶模式」的完整名称。 */
-    val UI_MODE_LABELS = arrayOf(
-        "经济模式", "舒适模式", "运动模式", "赛道模式", "个性化模式", "电动模式",
-        "混动模式", "动力模式", "越野模式", "陡坡缓降模式", "经济模式PHEV",
-    )
+    /**
+     * 本车（753 / 领克 05）**实际支持**的驾驶模式。
+     *
+     * 文档里 `IDriveMode` 有 22 个取值常量，但 jimu 文档站 `api-drive-mode`
+     * 与本地 `16-hud-dim-adas.md` §4.3 都注明：get 侧可用集合是 12 路
+     * `PaDm*` 信号过滤后的结果，不是无条件全部返回；实车只出现
+     * 经济 / 舒适 / 运动 三项（`570491137 / 570491138 / 570491139`）。
+     *
+     * 面板与设置页都只列这三项——不再把文档里存在、但本车没有的模式
+     * 摆出来让用户点了失败。
+     */
+    val SUPPORTED_LABELS = arrayOf("经济模式", "舒适模式", "运动模式")
+
+    /** [SUPPORTED_LABELS] 对应的模式取值（`DRIVE_MODE_SELECTION_*`）。 */
+    val SUPPORTED_VALUES = intArrayOf(SELECTION_ECO, SELECTION_COMFORT, SELECTION_SPORT)
+
+    /** 设置页里「目标驾驶模式」的完整名称（= 本车实际支持的三个）。 */
+    val UI_MODE_LABELS = SUPPORTED_LABELS
 
     /** 设置页里「目标驾驶模式」对应的功能号。 */
-    val UI_MODE_VALUES = intArrayOf(
-        SELECTION_ECO, SELECTION_COMFORT, SELECTION_SPORT, SELECTION_TRACK, SELECTION_CUSTOM,
-        SELECTION_PURE, SELECTION_HYBRID, SELECTION_POWER, SELECTION_XC, SELECTION_HDC,
-        SELECTION_ECO_PHEV,
-    )
+    val UI_MODE_VALUES = SUPPORTED_VALUES
 
     /**
      * 把功能号归一到标准模式号。
@@ -188,7 +210,29 @@ object DriveMode {
 
     /** 设置页下拉里的完整名称。 */
     fun fullLabel(value: Int): String {
-        val idx = UI_MODE_VALUES.indexOf(normalizeModeId(value))
-        return if (idx >= 0) UI_MODE_LABELS[idx] else UI_MODE_LABELS[0]
+        val normalized = normalizeModeId(value)
+        val idx = LABEL_CATALOG_VALUES.indexOf(normalized)
+        return when {
+            idx >= 0 -> LABEL_CATALOG[idx]
+            // 车端报了一个文档里没列的值：不要谎报成「经济模式」。
+            normalized == SELECTION_NONE -> "未知模式"
+            else -> "模式 $normalized"
+        }
     }
+
+    /**
+     * 全量显示名目录（文档 `IDriveMode` 的取值常量，含本车没有的档位）。
+     *
+     * 用途有两个：状态栏把**车端真的报回来**的值翻成中文（哪怕是本车没列出的档位），
+     * 以及设置页/面板以外的地方显示「当前模式」；面板可选项只取 [SUPPORTED_LABELS]。
+     */
+    private val LABEL_CATALOG = arrayOf(
+        "经济模式", "舒适模式", "运动模式", "赛道模式", "个性化模式", "电动模式",
+        "混动模式", "动力模式", "越野模式", "陡坡缓降模式", "经济模式PHEV",
+    )
+    private val LABEL_CATALOG_VALUES = intArrayOf(
+        SELECTION_ECO, SELECTION_COMFORT, SELECTION_SPORT, SELECTION_TRACK, SELECTION_CUSTOM,
+        SELECTION_PURE, SELECTION_HYBRID, SELECTION_POWER, SELECTION_XC, SELECTION_HDC,
+        SELECTION_ECO_PHEV,
+    )
 }

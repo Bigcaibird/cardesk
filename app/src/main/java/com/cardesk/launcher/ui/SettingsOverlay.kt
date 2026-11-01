@@ -77,6 +77,9 @@ class SettingsOverlay(
     var onEditNavSlots: (() -> Unit)? = null
     var onShowTasks: (() -> Unit)? = null
     var onShowLayoutDialog: (() -> Unit)? = null
+
+    /** 桌面卡片布局（顺序/尺寸/显隐）变了：让场景页立刻重排。 */
+    var onCardLayoutChanged: (() -> Unit)? = null
     var onShowUpdate: (() -> Unit)? = null
     var onShowRestart: (() -> Unit)? = null
     var onShowAccent: (() -> Unit)? = null
@@ -184,6 +187,7 @@ class SettingsOverlay(
         NavGroup(
             "系统控制",
             listOf(
+                NavItem("oemsettings", "原厂设置"),
                 NavItem("native", "默认设置"),
                 NavItem("diagnostics", "系统诊断"),
                 NavItem("restart", "重启车机"),
@@ -232,6 +236,7 @@ class SettingsOverlay(
                 NavItem("daynight", "日夜模式"),
                 NavItem("wallpaper", "壁纸"),
                 NavItem("cardstyle", "卡片风格"),
+                NavItem("cards", "桌面卡片"),
                 NavItem("dualpip", "双画中画"),
                 NavItem("layout", "仪表歌词"),
                 NavItem("dock", "Dock 状态栏"),
@@ -259,6 +264,7 @@ class SettingsOverlay(
         NavGroup(
             "系统",
             listOf(
+                NavItem("oemsettings", "原厂设置"),
                 NavItem("native", "默认设置"),
                 NavItem("diagnostics", "系统诊断"),
                 NavItem("restart", "重启车机"),
@@ -549,6 +555,7 @@ class SettingsOverlay(
             "daynight" -> pageDayNight()
             "wallpaper" -> pageWallpaper()
             "cardstyle" -> pageCardStyle()
+            "cards" -> pageCards()
             "dualpip" -> pageDualPip()
             "lan" -> pageLan()
             "apkstore" -> pageApkStore()
@@ -560,6 +567,7 @@ class SettingsOverlay(
             "layout" -> pageLayout()
             "dock" -> pageDock()
             "quickapps" -> pageDockQuickApps()
+            "oemsettings" -> pageOemSettings()
             "native" -> pageNativeSettings()
             "diagnostics" -> pageDiagnostics()
             "restart" -> pageRestart()
@@ -934,7 +942,7 @@ class SettingsOverlay(
             prefs.startSwitchMode = to
             logSetting("start_switch_mode", "目标驾驶模式", from, to)
         }
-        // 驾驶模式有 11 档（设计板只画了前 5 档），放横向滚动里，别把内容撑破。
+        // 文档口径下本车只有 3 档（经济/舒适/运动），仍放横向滚动里兼容未来档位变多。
         val segScroll = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false }
         segScroll.addView(seg)
         body.addView(segScroll, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 11 })
@@ -1450,6 +1458,66 @@ class SettingsOverlay(
      *
      * 改动**即时生效**：设置页自己刷新预览，同时通知桌面重算 token 并刷新画面。
      */
+
+    // ------------------------------------------------------------- 桌面卡片（C2）
+
+    /**
+     * 桌面卡片布局（第九十五轮 C2）：每张卡的宽度档位与显隐。
+     *
+     * 顺序拖拽仍在桌面上长按拖动；这里只调整宽度和显隐，改完立即落盘并重排。
+     */
+    private fun pageCards() {
+        val store = com.cardesk.launcher.core.CardLayout.PrefsStore(prefs)
+        val layout = com.cardesk.launcher.core.CardLayout.normalize(
+            store.load() ?: com.cardesk.launcher.core.CardLayout.DEFAULT,
+        )
+        section("桌面卡片")
+        note("长按桌面底部卡片即可拖动排序；这里调整每张卡的宽度档位和显隐。")
+        val hidden = layout.filter { !it.visible }
+        if (hidden.isNotEmpty()) {
+            section("卡片库")
+            note("还没放到桌面上的卡，点一下添加：")
+            for (slot in hidden) {
+                actionButton("添加「${com.cardesk.launcher.core.CardLayout.title(slot.id)}」卡") {
+                    val next = com.cardesk.launcher.core.CardLayout.withVisible(layout, slot.id, true)
+                    store.save(next)
+                    onCardLayoutChanged?.invoke()
+                    select(selectedKey)
+                }
+            }
+        }
+        val sizeLabels = com.cardesk.launcher.core.CardLayout.Size.entries.map { it.label }
+        for (slot in layout) {
+            val title = com.cardesk.launcher.core.CardLayout.title(slot.id)
+            section(title)
+            chipRow("宽度", sizeLabels, slot.size.label) { label ->
+                val size = com.cardesk.launcher.core.CardLayout.Size.entries.first { it.label == label }
+                val next = com.cardesk.launcher.core.CardLayout.withSize(layout, slot.id, size)
+                store.save(next)
+                onCardLayoutChanged?.invoke()
+                select(selectedKey)
+            }
+            val subtitle = if (slot.id == com.cardesk.launcher.core.CardLayout.CAR) {
+                "车况卡自适应时会吃掉行尾剩余宽度；小/中/大是固定宽度"
+            } else {
+                null
+            }
+            switchRow("显示这张卡", slot.visible, subtitle) { on ->
+                val next = com.cardesk.launcher.core.CardLayout.withVisible(layout, slot.id, on)
+                if (next != layout) {
+                    store.save(next)
+                    onCardLayoutChanged?.invoke()
+                }
+                select(selectedKey)
+            }
+        }
+        actionButton("恢复默认布局") {
+            store.save(com.cardesk.launcher.core.CardLayout.DEFAULT)
+            onCardLayoutChanged?.invoke()
+            select(selectedKey)
+        }
+    }
+
     private fun pageCardStyle() {
         section("预览")
         val preview = CardStylePreviewView(context)
@@ -2037,7 +2105,7 @@ class SettingsOverlay(
             com.cardesk.launcher.core.dock.GlobalDockService.ensureStarted(context.applicationContext)
         }
         // 导航栏样式（两种形态）
-        // - 「设计 Dock」：pill 里装我们那套 1864×104 的设计版 Dock；
+        // - 「设计 Dock」：pill 里装设计版 Dock；
         // - 「槽位条」：pill 里装**可配置槽位**（一族）
         //   槽位里可以放媒体槽 / **歌词槽**。
         //
@@ -2145,6 +2213,93 @@ class SettingsOverlay(
      * 标题区分 Dock / 状态栏
      * 预勾选规则同、「全选 / 清空」按钮 + 「已选择 N/M」、勾选后立即生效。
      */
+
+    /**
+     * 原厂设置目录（case "oemsettings"，第九十五轮 C4）。
+     *
+     * 「默认设置」只打开 Android 系统设置；这一页把**车机原厂的设置页**也列出来：
+     * 驾驶模式、蓝牙、热点、显示/声音等都在 `com.ecarx.settings` 里，没有统一 action，
+     * 所以用 [com.cardesk.launcher.core.SystemSettingsCatalog] 按 action/组件名实时解析。
+     */
+    private fun pageOemSettings() {
+        note(
+            "车机原厂设置页的真实入口。列表由系统实时解析：这台车有哪个设置页，这里就列哪个；" +
+                "系统版本不同可能少几项，解析不到的入口不会出现在列表里。",
+        )
+        com.cardesk.launcher.core.SystemSettingsCatalog.warmAsync(context)
+        val catalog = com.cardesk.launcher.core.SystemSettingsCatalog.entries()
+        if (catalog.isEmpty()) {
+            if (com.cardesk.launcher.core.SystemSettingsCatalog.isWarmed()) {
+                note("这台车机没有解析到原厂设置入口（原厂设置包可能未安装或被禁用）。")
+            } else {
+                note("正在扫描原厂设置入口…")
+                // 后台扫描完成后重画这一页（每次扫描最多重画一次，见 warmAsync 的 TTL）
+                postDelayed({
+                    if (selectedKey == "oemsettings") select(selectedKey)
+                }, 600L)
+            }
+        } else {
+            section("原厂设置入口")
+            for (entry in catalog) {
+                oemSettingRow(entry)
+            }
+        }
+        section("兜底入口")
+        actionButton("打开 Android 系统设置", primary = true) {
+            // 排障场景：原厂目录为空时至少还能进 Android 设置
+            Logx.event(LogTags.SETTING, "打开 Android 系统设置（原厂设置页兜底）")
+            val intents = listOf(
+                Intent(Settings.ACTION_SETTINGS),
+                Intent(Settings.ACTION_SETTINGS).setPackage("com.android.settings"),
+            )
+            for (intent in intents) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                try {
+                    context.startActivity(intent)
+                    return@actionButton
+                } catch (e: Exception) {
+                    Logx.w(LogTags.SETTING, "打开 Android 系统设置失败", e,"action" to intent.action)
+                }
+            }
+            Toast.makeText(context, "打不开系统设置", Toast.LENGTH_SHORT).show()
+        }
+        actionButton("重新扫描原厂设置") {
+            com.cardesk.launcher.core.SystemSettingsCatalog.invalidate()
+            com.cardesk.launcher.core.SystemSettingsCatalog.warmAsync(context)
+            Logx.event(LogTags.SETTING, "重新扫描原厂设置目录")
+            select(selectedKey)
+        }
+    }
+
+    /** 一行原厂设置入口：主标题 + 来源副标题 + 可点打开。 */
+    private fun oemSettingRow(entry: com.cardesk.launcher.core.SystemSettingsCatalog.Entry) {
+        val holder = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(18, 0, 18, 0)
+            isClickable = true
+            pressFeedback()
+            setOnClickListener {
+                Logx.event(LogTags.SETTING, "打开原厂设置入口", "id" to entry.id, "label" to entry.label)
+                if (!com.cardesk.launcher.core.SystemSettingsCatalog.open(context, entry)) {
+                    Toast.makeText(context, "打不开：${entry.label}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        holder.addView(
+            Ui.text(context, entry.label, 26f, pal.text, bold = true),
+            LinearLayout.LayoutParams(-1, -2),
+        )
+        holder.addView(
+            Ui.text(context, entry.source, 19f, pal.textDim),
+            LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 4 },
+        )
+        body.addView(holder, LinearLayout.LayoutParams(-1, 96))
+        body.addView(
+            View(context).apply { setBackgroundColor(Skin.NAV_STROKE) },
+            LinearLayout.LayoutParams(-1, 1),
+        )
+    }
 
     /** 默认设置（case "native"）。 */
     private fun pageNativeSettings() {

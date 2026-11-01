@@ -79,7 +79,7 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
      *
      * 画中画承载面在导航页里是 `MATCH_PARENT` 高度
      *  都是 `match_parent`，
-     * 而底部 Dock 栏（1864×104，距底 8）是**浮在导航页之上**的
+     * 而底部 Dock 栏（铺满屏宽×104，距底 8）是**浮在导航页之上**的
      * （里 排在 之后）。
      *
      * 于是承载应用的画面底部约 **112px 被 Dock 压住** ——

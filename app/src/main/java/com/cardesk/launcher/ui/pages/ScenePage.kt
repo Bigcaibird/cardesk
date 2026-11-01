@@ -70,8 +70,8 @@ class ScenePage(context: Context) : View(context) {
     /** 点快捷入口里的真实应用。 */
     var onOpenApp: ((pkg: String, label: String) -> Unit)? = null
 
-    /** 底部卡片顺序变化（`scene_bottom_card_order_v1`）。 */
-    var onBottomCardOrderChanged: ((List<String>) -> Unit)? = null
+    /** 底部卡片布局变化（`scene_card_layout_v2`）。 */
+    var onCardLayoutChanged: ((List<com.cardesk.launcher.core.CardLayout.Slot>) -> Unit)? = null
 
     // 媒体（MusicController 推送）
     var mediaTitle: String = "暂无播放"
@@ -387,23 +387,94 @@ class ScenePage(context: Context) : View(context) {
         invalidate()
     }
 
+    /**
+     * 卡片库新增的「行程」卡（第九十五轮 C2 迭代 2）：2×2 紧凑版行程数据。
+     *
+     * 与右上角行程卡同一份数据，只是塞进 150 高的底部卡。
+     */
+    private fun drawTripBottomCard(canvas: Canvas, rect: RectF) {
+        card(canvas, rect)
+        val i = info
+        text.textAlign = Paint.Align.LEFT
+        text.typeface = Typeface.DEFAULT
+        text.textSize = 22f
+        text.color = Skin.TEXT_DIM
+        canvas.drawText("行程", rect.left + 20f, rect.top + 34f, text)
+
+        val pad = 20f
+        val cw = (rect.width() - pad * 2f) / 2f
+        val colX = floatArrayOf(rect.left + pad, rect.left + pad + cw)
+        val rowTop = floatArrayOf(rect.top + 48f, rect.top + 100f)
+        val cellW = cw - 6f
+        drawTripCell(canvas, colX[0], rowTop[0], "总里程", VehicleStats.formatOdometer(i?.odometerKm?.takeIf { it > 0 }), cellW)
+        drawTripCell(canvas, colX[1], rowTop[0], "平均油耗", VehicleStats.formatFuelConsumption(i?.avgFuelConsumption), cellW)
+        drawTripCell(canvas, colX[0], rowTop[1], "行程里程", VehicleStats.formatTripDistanceKm(i?.tripKm), cellW)
+        drawTripCell(canvas, colX[1], rowTop[1], "行程时长", VehicleStats.formatTripDuration(i?.tripDurationMs), cellW)
+    }
+
+    /**
+     * 卡片库新增的「车门车窗」卡（第九十五轮 C2 迭代 2）：四门/车窗/后备箱/引擎盖汇总。
+     */
+    private fun drawStatusBottomCard(canvas: Canvas, rect: RectF) {
+        card(canvas, rect)
+        val i = info
+        text.textAlign = Paint.Align.LEFT
+        text.typeface = Typeface.DEFAULT
+        text.textSize = 22f
+        text.color = Skin.TEXT_DIM
+        canvas.drawText("车门车窗", rect.left + 20f, rect.top + 34f, text)
+
+        val doors = i?.doorsClosed
+        val doorText = when {
+            doors == null -> "—"
+            doors.any { it == null } -> "部分不可读"
+            doors.all { it == true } -> "全关"
+            else -> "${doors.count { it == false }} 扇未关"
+        }
+        val windows = i?.windowsOpen
+        val windowText = when {
+            windows == null -> "—"
+            windows.isEmpty() -> "—"
+            windows.none { it } -> "全关"
+            else -> "${windows.count { it }} 扇开"
+        }
+        val trunkText = when (i?.trunkClosed) {
+            null -> "—"
+            true -> "关"
+            false -> "开"
+        }
+        val hoodText = when (i?.hoodClosed) {
+            null -> "—"
+            true -> "关"
+            false -> "开"
+        }
+        val pad = 20f
+        val cw = (rect.width() - pad * 2f) / 2f
+        val colX = floatArrayOf(rect.left + pad, rect.left + pad + cw)
+        val rowTop = floatArrayOf(rect.top + 48f, rect.top + 100f)
+        val cellW = cw - 6f
+        drawTripCell(canvas, colX[0], rowTop[0], "车门", doorText, cellW)
+        drawTripCell(canvas, colX[1], rowTop[0], "车窗", windowText, cellW)
+        drawTripCell(canvas, colX[0], rowTop[1], "后备箱", trunkText, cellW)
+        drawTripCell(canvas, colX[1], rowTop[1], "引擎盖", hoodText, cellW)
+    }
+
     // ---------------------------------------------------------------- 底部卡片顺序
 
-    /** 底部卡片顺序（`scene_bottom_card_order_v1`）。 */
-    var bottomCardOrder: List<String> = BottomCardOrder.DEFAULT
+    /** 底部卡片布局：顺序 + 尺寸档位 + 显隐（`scene_card_layout_v2`）。 */
+    var cardLayout: List<com.cardesk.launcher.core.CardLayout.Slot> =
+        com.cardesk.launcher.core.CardLayout.DEFAULT
         set(value) {
-            val next = BottomCardOrder.normalize(value)
-            val changed = next != field
+            val next = com.cardesk.launcher.core.CardLayout.normalize(value)
+            if (next == field) return
             field = next
-            // 排障场景：「拖拽排序没生效」——顺序变化点用 DEBUG（拖动过程中每帧都会变）。
-            if (changed) {
-                Logx.d(LogTags.SCENE, "底部卡片顺序变化", "order" to next.joinToString(","))
-            }
+            // 排障场景：「拖拽/改尺寸没生效」——布局变化点用 DEBUG（拖动过程中每帧都会变）。
+            Logx.d(LogTags.SCENE, "桌面卡片布局变化", "layout" to com.cardesk.launcher.core.CardLayout.encode(next))
             invalidate()
         }
 
-    /** 顺序持久化通道（由宿主注入，例如 `BottomCardOrder.PrefsStore(prefs)`）。 */
-    var orderStore: BottomCardOrder.Store? = null
+    /** 布局持久化通道（由宿主注入，例如 `CardLayout.PrefsStore(prefs)`）。 */
+    var layoutStore: com.cardesk.launcher.core.CardLayout.Store? = null
 
     // ---------------------------------------------------------------- 壁纸提示
 
@@ -437,9 +508,9 @@ class ScenePage(context: Context) : View(context) {
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        orderStore?.load()?.let { bottomCardOrder = it }
-        // 排障场景：「开机后卡片顺序和上次不一样」——把实际读到的顺序落盘。
-        Logx.i(LogTags.SCENE, "底部卡片顺序加载", "order" to bottomCardOrder.joinToString(","))
+        layoutStore?.load()?.let { cardLayout = it }
+        // 排障场景：「开机后卡片顺序/尺寸和上次不一样」——把实际读到的布局落盘。
+        Logx.i(LogTags.SCENE, "桌面卡片布局加载", "layout" to com.cardesk.launcher.core.CardLayout.encode(cardLayout))
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -1244,32 +1315,41 @@ class ScenePage(context: Context) : View(context) {
      * 设计板版式：标签 19px 次文字，数值 24px 粗体，两行之间由 `.kv b` 的
      *  隔开 —— 标签基线 = 行顶 + 15，数值基线 = 行顶 + 44。
      */
-    private fun drawTripCell(canvas: Canvas, x: Float, top: Float, label: String, value: String) {
+    private fun drawTripCell(
+        canvas: Canvas,
+        x: Float,
+        top: Float,
+        label: String,
+        value: String,
+        maxWidth: Float = 300f,
+    ) {
         text.textAlign = Paint.Align.LEFT
         text.typeface = Typeface.DEFAULT
         text.textSize = 19f
         text.color = Skin.TEXT_SOFT
-        canvas.drawText(label, x, top + 15f, text)
+        canvas.drawText(fitText(label, maxWidth), x, top + 15f, text)
 
         text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        text.textSize = 24f
+        // 卡被压窄时（卡片库加卡 / 小档）数值跟着缩，避免压到相邻单元格。
+        text.textSize = if (maxWidth < 150f) 20f else 24f
         text.color = Skin.TEXT
-        canvas.drawText(value, x, top + 44f, text)
+        canvas.drawText(fitText(value, maxWidth), x, top + 44f, text)
     }
 
     // ---------------------------------------------------------------- 底部卡片
 
-    /** 底部 5 张卡的布局（顺序由 [bottomCardOrder] 决定）。 */
+    /** 底部卡片的布局（顺序/尺寸/显隐由 [cardLayout] 决定）。 */
     private fun layoutBottomCards(): LinkedHashMap<String, RectF> {
         val out = LinkedHashMap<String, RectF>()
-        val order = bottomCardOrder
-        var fixed = 0f
-        for (id in order) if (id != BottomCardOrder.CAR) fixed += cardWidth(id)
-        val gaps = CARD_GAP * (order.size - 1).coerceAtLeast(0)
-        val carW = (rightEnd - left - fixed - gaps).coerceAtLeast(160f)
+        val widths = com.cardesk.launcher.core.CardLayout.widths(
+            cardLayout,
+            rightEnd - left,
+            CARD_GAP,
+            naturalWidth = { id -> cardWidth(id) },
+            minWidth = 160f,
+        )
         var x = left
-        for (id in order) {
-            val w = if (id == BottomCardOrder.CAR) carW else cardWidth(id)
+        for ((id, w) in widths) {
             out[id] = RectF(x, cardTop, x + w, cardTop + cardH)
             x += w + CARD_GAP
         }
@@ -1277,10 +1357,13 @@ class ScenePage(context: Context) : View(context) {
     }
 
     private fun cardWidth(id: String): Float = when (id) {
-        BottomCardOrder.QUICK -> QUICK_CARD_W
-        BottomCardOrder.MUSIC -> MUSIC_CARD_W
-        BottomCardOrder.CLIMATE -> CLIMATE_CARD_W
-        BottomCardOrder.TIRE -> TIRE_CARD_W
+        com.cardesk.launcher.core.CardLayout.QUICK -> QUICK_CARD_W
+        com.cardesk.launcher.core.CardLayout.MUSIC -> MUSIC_CARD_W
+        com.cardesk.launcher.core.CardLayout.CLIMATE -> CLIMATE_CARD_W
+        com.cardesk.launcher.core.CardLayout.TIRE -> TIRE_CARD_W
+        com.cardesk.launcher.core.CardLayout.CAR -> CAR_PRESET_W
+        com.cardesk.launcher.core.CardLayout.TRIP -> TRIP_BOTTOM_CARD_W
+        com.cardesk.launcher.core.CardLayout.STATUS -> STATUS_BOTTOM_CARD_W
         else -> 0f
     }
 
@@ -1295,11 +1378,13 @@ class ScenePage(context: Context) : View(context) {
                 rect
             }
             when (id) {
-                BottomCardOrder.QUICK -> drawQuick(canvas, drawRect)
-                BottomCardOrder.MUSIC -> drawMusicCard(canvas, drawRect)
-                BottomCardOrder.CLIMATE -> drawClimateCard(canvas, drawRect)
-                BottomCardOrder.TIRE -> drawTireCard(canvas, drawRect)
-                BottomCardOrder.CAR -> drawCarCard(canvas, drawRect)
+                com.cardesk.launcher.core.CardLayout.QUICK -> drawQuick(canvas, drawRect)
+                com.cardesk.launcher.core.CardLayout.MUSIC -> drawMusicCard(canvas, drawRect)
+                com.cardesk.launcher.core.CardLayout.CLIMATE -> drawClimateCard(canvas, drawRect)
+                com.cardesk.launcher.core.CardLayout.TIRE -> drawTireCard(canvas, drawRect)
+                com.cardesk.launcher.core.CardLayout.CAR -> drawCarCard(canvas, drawRect)
+                com.cardesk.launcher.core.CardLayout.TRIP -> drawTripBottomCard(canvas, drawRect)
+                com.cardesk.launcher.core.CardLayout.STATUS -> drawStatusBottomCard(canvas, drawRect)
             }
         }
     }
@@ -1461,6 +1546,8 @@ class ScenePage(context: Context) : View(context) {
         val w = rect.width()
         val h = rect.height()
         card(canvas, rect)
+        // 卡被压窄时（卡片库加卡 / 小档）整体按比例缩，避免控件跑出卡片。
+        val k = (w / 338f).coerceIn(0.62f, 1.15f)
         // 封面光晕。
         // 里它是音乐卡的**背景层**（marginStart/End = -24 → 铺满整张卡）
         // 画在封面 / 文字 / 进度环**之下**。
@@ -1469,25 +1556,26 @@ class ScenePage(context: Context) : View(context) {
         // ① 来源行（dot + 名称 + 箭头）—— 设计板放在卡片**左上角**
         text.textAlign = Paint.Align.LEFT
         text.typeface = Typeface.DEFAULT
-        text.textSize = 21f
+        text.textSize = (21f * k).coerceAtLeast(12f)
         text.color = Skin.TEXT_DIM
         val srcY = top + 10f
         fill.color = MediaSources.brandColor(mediaSource)
-        canvas.drawCircle(x + 22f, srcY + 12f, 4f, fill)
+        canvas.drawCircle(x + 22f * k, srcY + 12f, 4f * k, fill)
         text.color = Skin.TEXT_DIM
-        canvas.drawText(mediaSource, x + 34f, srcY + 20f, text)
+        canvas.drawText(mediaSource, x + 34f * k, srcY + 20f, text)
         val srcNameW = text.measureText(mediaSource)
         stroke.color = Skin.TEXT_DIM
         stroke.strokeWidth = 1.6f
-        val chx = x + 34f + srcNameW + 6f
+        val chx = x + 34f * k + srcNameW + 6f * k
         val chy = srcY + 12f
         canvas.drawLine(chx, chy, chx + 5f, chy + 5f, stroke)
-        canvas.drawLine(chx + 5f, chy + 5f, chx + 10f, chy, stroke)
+        canvas.drawLine(chx + 5f, chy + 5f, chx + 10f * k, chy, stroke)
         // 来源行可点（sceneSource 的独立点击区）
-        hits["source"] = RectF(x + 14f, srcY, chx + 14f, srcY + 30f)
+        hits["source"] = RectF(x + 14f * k, srcY, chx + 14f * k, srcY + 30f)
 
         // ② 封面 68×68 圆角 18（设计板 `.appicon`）
-        val cover = RectF(x + 18f, top + 42f, x + 18f + 68f, top + 42f + 68f)
+        val coverSize = 68f * k
+        val cover = RectF(x + 18f * k, top + 42f, x + 18f * k + coverSize, top + 42f + coverSize)
         val art = mediaArtwork
         if (art != null) {
             val path = Path().apply { addRoundRect(cover, 18f, 18f, Path.Direction.CW) }
@@ -1509,41 +1597,43 @@ class ScenePage(context: Context) : View(context) {
         canvas.drawLine(cover.centerX() + 4f, cover.centerY() - 14f, cover.centerX() + 13f, cover.centerY() - 10f, stroke)
 
         // ③ 文本列（封面右边距 14 → x = 18 + 68 + 14 = 100）
-        val tx = cover.right + 14f
+        val tx = cover.right + 14f * k
+        val ringR = MusicCardVisuals.ringRadius(MUSIC_RING_SIZE, MUSIC_RING_STROKE) * k
+        val textColW = (x + w - 18f * k - ringR * 2f - 10f * k - tx).coerceAtLeast(24f)
         // 标题 26px 粗体
         text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        text.textSize = 26f
+        text.textSize = (26f * k).coerceAtLeast(16f)
         text.color = Skin.TEXT
-        canvas.drawText(clipLabel(mediaTitle, MUSIC_TEXT_COL_W), tx, top + 70f, text)
+        canvas.drawText(clipLabel(mediaTitle, textColW), tx, top + 70f, text)
 
         // ④ 艺术家 18px（没有就留空，默认空串）
         text.typeface = Typeface.DEFAULT
-        text.textSize = 18f
+        text.textSize = (18f * k).coerceAtLeast(12f)
         text.color = Skin.TEXT_SOFT
-        canvas.drawText(clipLabel(mediaArtist, MUSIC_TEXT_COL_W), tx, top + 98f, text)
+        canvas.drawText(clipLabel(mediaArtist, textColW), tx, top + 98f, text)
 
         // 进度环 + 播放按钮
         // 两者同心，都在一个 64×64 的 FrameLayout 里，播放按钮 `layout_gravity="center"`。
         // 64×64 容器的右边缘 = 卡片右 − paddingEnd 18。
-        val bx = x + w - 18f - MUSIC_RING_SIZE / 2f
+        val bx = x + w - 18f * k - (MUSIC_RING_SIZE / 2f) * k
         val by = top + h / 2f
         // 进度环在播放按钮**之下**（里 是 sceneMusicPlay 的前一个兄弟节点）。
-        drawMusicRing(canvas, bx, by)
-        canvas.drawCircle(bx, by, 28f, Paint(fill).apply { color = Skin.surfaceStrong })
+        drawMusicRing(canvas, bx, by, k)
+        canvas.drawCircle(bx, by, 28f * k, Paint(fill).apply { color = Skin.surfaceStrong })
         fill.color = Skin.TEXT
         if (mediaPlaying) {
-            canvas.drawRoundRect(RectF(bx - 9f, by - 9f, bx - 3f, by + 9f), 2f, 2f, fill)
-            canvas.drawRoundRect(RectF(bx + 3f, by - 9f, bx + 9f, by + 9f), 2f, 2f, fill)
+            canvas.drawRoundRect(RectF(bx - 9f * k, by - 9f * k, bx - 3f * k, by + 9f * k), 2f, 2f, fill)
+            canvas.drawRoundRect(RectF(bx + 3f * k, by - 9f * k, bx + 9f * k, by + 9f * k), 2f, 2f, fill)
         } else {
             val tri = Path().apply {
-                moveTo(bx - 6f, by - 10f)
-                lineTo(bx + 10f, by)
-                lineTo(bx - 6f, by + 10f)
+                moveTo(bx - 6f * k, by - 10f * k)
+                lineTo(bx + 10f * k, by)
+                lineTo(bx - 6f * k, by + 10f * k)
                 close()
             }
             canvas.drawPath(tri, fill)
         }
-        hits["play"] = RectF(bx - 28f, by - 28f, bx + 28f, by + 28f)
+        hits["play"] = RectF(bx - 28f * k, by - 28f * k, bx + 28f * k, by + 28f * k)
         // 封面可点：打开音乐页
         hits["musicCover"] = cover
     }
@@ -1623,10 +1713,10 @@ class ScenePage(context: Context) : View(context) {
      * fraction = 播放位置 / 总时长
      * 总时长不可用（≤0）时置 0 —— 只画轨道。
      */
-    private fun drawMusicRing(canvas: Canvas, cx: Float, cy: Float) {
-        val r = MusicCardVisuals.ringRadius(MUSIC_RING_SIZE, MUSIC_RING_STROKE)
+    private fun drawMusicRing(canvas: Canvas, cx: Float, cy: Float, scale: Float = 1f) {
+        val r = MusicCardVisuals.ringRadius(MUSIC_RING_SIZE, MUSIC_RING_STROKE) * scale
         if (r <= 0f) return
-        stroke.strokeWidth = MUSIC_RING_STROKE
+        stroke.strokeWidth = MUSIC_RING_STROKE * scale
         stroke.strokeCap = Paint.Cap.BUTT
         stroke.color = MUSIC_RING_TRACK
         canvas.drawCircle(cx, cy, r, stroke)
@@ -1645,92 +1735,121 @@ class ScenePage(context: Context) : View(context) {
     /**
      * 快捷车控卡（设计板 s01 左下第 3 张，338×150）。
      *
-     * 版式：标题「快捷车控」21px 弱文字（左 18 / 上 10），
-     * 下面三个位（主驾加热 / 主驾通风 / 最大风挡）各占 100 宽。
+     * 版式：标题「快捷车控」21px 弱文字（左 18 / 上 10），下面三个位（主驾加热 / 主驾通风 / 最大风挡）。
+     *
+     * 第九十五轮 C2 修复：卡片宽度不再固定 338——卡片库/尺寸档位/加满 7 张卡时会被压窄，
+     * 所以这里按 `rect.width()` 等比缩放内边距、三个位的宽度、图标与文字，
+     * 再窄也不会画到卡片外面（[k] 是相对 338 的缩放系数）。
      */
     private fun drawClimateCard(canvas: Canvas, rect: RectF) {
         val x = rect.left
         val top = rect.top
         card(canvas, rect)
         cardTitle(canvas, rect, "快捷车控")
+        val k = (rect.width() / CLIMATE_CARD_W).coerceIn(0.55f, 1.25f)
+        val pad = CLIMATE_CARD_PAD * k
+        val gap = CLIMATE_SEAT_GAP * k
+        val seatW = ((rect.width() - pad * 2f - gap * 2f) / 3f).coerceAtLeast(24f)
         val s = state
-        val seatTop = top + 34f
-        val seatH = 104f
+        val seatTop = top + 34f * k
+        val seatH = (cardH - 34f * k - 8f).coerceAtLeast(50f)
         seat(
-            canvas, x + CLIMATE_CARD_PAD, seatTop, CLIMATE_SEAT_W, seatH,
-            "主驾加热", s?.seatHeatDriver ?: 0, Skin.WARN,
+            canvas, x + pad, seatTop, seatW, seatH,
+            "主驾加热", s?.seatHeatDriver ?: 0, Skin.WARN, k,
         )
         seat(
-            canvas, x + CLIMATE_CARD_PAD + CLIMATE_SEAT_W + CLIMATE_SEAT_GAP, seatTop, CLIMATE_SEAT_W, seatH,
-            "主驾通风", s?.seatVentDriver ?: 0, Skin.ACCENT_LIGHT,
+            canvas, x + pad + seatW + gap, seatTop, seatW, seatH,
+            "主驾通风", s?.seatVentDriver ?: 0, Skin.ACCENT_LIGHT, k,
         )
         // MAX 风量：`HvacController.isPower() && getFanSpeed() >= 7`
-        val mx = x + CLIMATE_CARD_PAD + (CLIMATE_SEAT_W + CLIMATE_SEAT_GAP) * 2
-        val mxR = RectF(mx, seatTop, mx + CLIMATE_SEAT_W, seatTop + seatH)
+        val mx = x + pad + (seatW + gap) * 2f
+        val mxR = RectF(mx, seatTop, mx + seatW, seatTop + seatH)
         val maxOn = s?.power == true && (s.fanLevel ?: 0) >= 7
-        canvas.drawRoundRect(mxR, 18f, 18f, Paint(fill).apply { color = Skin.surfaceSoft })
+        canvas.drawRoundRect(mxR, 18f * k, 18f * k, Paint(fill).apply { color = Skin.surfaceSoft })
         val mxColor = if (maxOn) Skin.ACCENT else Skin.TEXT_SOFT
         stroke.color = mxColor
-        stroke.strokeWidth = 3f
+        stroke.strokeWidth = (3f * k).coerceAtLeast(1.5f)
         val fcx = mxR.centerX()
-        val fcy = seatTop + SEAT_CONTENT_TOP + 15f
-        canvas.drawCircle(fcx, fcy, 4f, Paint(fill).apply { color = mxColor })
+        val fcy = seatTop + SEAT_CONTENT_TOP * k + 15f * k
+        canvas.drawCircle(fcx, fcy, 4f * k, Paint(fill).apply { color = mxColor })
         for (i in 0..2) {
             val a = Math.toRadians((i * 120).toDouble())
             canvas.drawCircle(
-                fcx + (Math.cos(a) * 15f).toFloat(),
-                fcy + (Math.sin(a) * 15f).toFloat(),
-                10f, stroke,
+                fcx + (Math.cos(a) * 15f * k).toFloat(),
+                fcy + (Math.sin(a) * 15f * k).toFloat(),
+                10f * k, stroke,
             )
         }
         text.textAlign = Paint.Align.CENTER
         text.typeface = Typeface.DEFAULT
-        text.textSize = 15f
+        text.textSize = (15f * k).coerceAtLeast(10f)
         text.color = mxColor
-        canvas.drawText("最大风挡", mxR.centerX(), seatTop + SEAT_CONTENT_TOP + 30f + 4f + 15f, text)
+        val fanLabelY = seatTop + SEAT_CONTENT_TOP * k + 30f * k + 4f * k + 15f * k
+        canvas.drawText(fitText("最大风挡", seatW - 8f * k), mxR.centerX(), fanLabelY, text)
         // 进度条（22×4）
         fill.color = if (maxOn) Skin.ACCENT else Skin.surfaceStrong
-        val maxBarY = seatTop + SEAT_CONTENT_TOP + 30f + 4f + 15f + 6f
-        canvas.drawRoundRect(RectF(mxR.centerX() - 11f, maxBarY, mxR.centerX() + 11f, maxBarY + 4f), 2f, 2f, fill)
-        hits["seatHeat"] = RectF(x + CLIMATE_CARD_PAD, seatTop, x + CLIMATE_CARD_PAD + CLIMATE_SEAT_W, seatTop + seatH)
-        hits["seatVent"] = RectF(
-            x + CLIMATE_CARD_PAD + CLIMATE_SEAT_W + CLIMATE_SEAT_GAP, seatTop,
-            x + CLIMATE_CARD_PAD + (CLIMATE_SEAT_W + CLIMATE_SEAT_GAP) * 2, seatTop + seatH,
+        val maxBarY = fanLabelY + 6f * k
+        canvas.drawRoundRect(
+            RectF(mxR.centerX() - 11f * k, maxBarY, mxR.centerX() + 11f * k, maxBarY + 4f * k),
+            2f * k, 2f * k, fill,
         )
+        hits["seatHeat"] = RectF(x + pad, seatTop, x + pad + seatW, seatTop + seatH)
+        hits["seatVent"] = RectF(x + pad + seatW + gap, seatTop, x + pad + seatW * 2f + gap, seatTop + seatH)
         hits["maxFan"] = mxR
     }
 
-    /** 座椅位：图标 + 文案 + 3 段进度。 */
-    private fun seat(canvas: Canvas, x: Float, top: Float, w: Float, h: Float, label: String, level: Int, tint: Int) {
+    /** 座椅位：图标 + 文案 + 3 段进度；[k] 是卡片宽度不足时的等比缩放。 */
+    private fun seat(
+        canvas: Canvas,
+        x: Float,
+        top: Float,
+        w: Float,
+        h: Float,
+        label: String,
+        level: Int,
+        tint: Int,
+        k: Float = 1f,
+    ) {
         val r = RectF(x, top, x + w, top + h)
-        canvas.drawRoundRect(r, 18f, 18f, Paint(fill).apply { this.color = Skin.GLASS_FILL })
+        canvas.drawRoundRect(r, 18f * k, 18f * k, Paint(fill).apply { this.color = Skin.GLASS_FILL })
         // 座椅轮廓（图标区 30px）
         stroke.color = if (level > 0) tint else Skin.TEXT_SOFT
-        stroke.strokeWidth = 3f
-        val sw = 30f
-        val sh = 34f
+        stroke.strokeWidth = (3f * k).coerceAtLeast(1.5f)
+        val sw = 30f * k
+        val sh = 34f * k
         val cx = r.centerX()
-        val sy = top + SEAT_CONTENT_TOP
-        canvas.drawRoundRect(RectF(cx - sw / 2f, sy, cx + sw / 2f, sy + sh), 9f, 9f, stroke)
-        canvas.drawLine(cx - sw / 2f - 7f, sy + 7f, cx - sw / 2f, sy + sh - 5f, stroke)
-        canvas.drawLine(cx + sw / 2f + 7f, sy + 7f, cx + sw / 2f, sy + sh - 5f, stroke)
+        val sy = top + SEAT_CONTENT_TOP * k
+        canvas.drawRoundRect(RectF(cx - sw / 2f, sy, cx + sw / 2f, sy + sh), 9f * k, 9f * k, stroke)
+        canvas.drawLine(cx - sw / 2f - 7f * k, sy + 7f * k, cx - sw / 2f, sy + sh - 5f * k, stroke)
+        canvas.drawLine(cx + sw / 2f + 7f * k, sy + 7f * k, cx + sw / 2f, sy + sh - 5f * k, stroke)
         // 文案（15px，marginTop 4）
         text.textAlign = Paint.Align.CENTER
         text.typeface = Typeface.DEFAULT
-        text.textSize = 15f
+        text.textSize = (15f * k).coerceAtLeast(10f)
         text.color = if (level > 0) tint else Skin.TEXT_SOFT
-        canvas.drawText(label, cx, sy + 30f + 4f + 15f, text)
+        val labelY = sy + sh + 4f * k + 15f * k
+        // 卡片被压得很窄时，长标签按卡宽裁剪，避免文字跑出卡外。
+        canvas.drawText(fitText(label, w - 8f * k), cx, labelY, text)
         // 3 段进度（14×4，间距 4）
-        val segTop = sy + 30f + 4f + 15f + 6f
-        val segW = 14f
-        val segGap = 4f
+        val segTop = labelY + 6f * k
+        val segW = 14f * k
+        val segGap = 4f * k
         val totalW = 3 * segW + 2 * segGap
         var sx = cx - totalW / 2f
         for (i in 0..2) {
             fill.color = if (i < level) tint else Skin.surfaceStrong
-            canvas.drawRoundRect(RectF(sx, segTop, sx + segW, segTop + 4f), 2f, 2f, fill)
+            canvas.drawRoundRect(RectF(sx, segTop, sx + segW, segTop + 4f * k), 2f * k, 2f * k, fill)
             sx += segW + segGap
         }
+    }
+
+    /** 按给定最大宽度裁剪文字（超出时加省略号）。 */
+    private fun fitText(s: String, maxWidth: Float): String {
+        if (s.isEmpty()) return s
+        if (text.measureText(s) <= maxWidth) return s
+        var out = s
+        while (out.isNotEmpty() && text.measureText("$out…") > maxWidth) out = out.dropLast(1)
+        return if (out.isEmpty()) "" else "$out…"
     }
 
     private fun drawTireCard(canvas: Canvas, rect: RectF) {
@@ -2062,23 +2181,24 @@ class ScenePage(context: Context) : View(context) {
         text.color = Skin.TEXT_SOFT
         canvas.drawText("续航", x + 22f, top + 31f, text)
 
-        // 数值 + 单位
+        // 数值 + 单位（卡被压窄时整体缩小，避免数字压到右边缘）
+        val k = (w / 338f).coerceIn(0.7f, 1.1f)
         val range = info?.rangeKm?.takeIf { it >= 0 }
         val shown = range?.toString() ?: "--"
         text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        text.textSize = 50f
+        text.textSize = 50f * k
         text.color = Skin.TEXT
         val shownW = text.measureText(shown)
-        canvas.drawText(shown, x + 22f, top + 80f, text)
+        canvas.drawText(shown, x + 22f * k, top + 80f, text)
         text.typeface = Typeface.DEFAULT
-        text.textSize = 20f
+        text.textSize = 20f * k
         text.color = Skin.TEXT_DIM
-        canvas.drawText("km", x + 22f + shownW + 8f, top + 80f, text)
+        canvas.drawText("km", x + 22f * k + shownW + 8f, top + 80f, text)
 
         // 油量条 12px
         val barY = top + 100f
-        val barX = x + 22f
-        val barW = w - 44f
+        val barX = x + 22f * k
+        val barW = w - 44f * k
         fill.color = Skin.surfaceStrong
         canvas.drawRoundRect(RectF(barX, barY, barX + barW, barY + 12f), 6f, 6f, fill)
         val fuel = fuelPercent
@@ -2093,7 +2213,10 @@ class ScenePage(context: Context) : View(context) {
         text.textSize = 17f
         text.color = Skin.TEXT_DIM
         text.textAlign = Paint.Align.LEFT
-        canvas.drawText("燃料剩余 · ${VehicleStats.formatFuelPercent(fuel)}", x + 22f, top + 131f, text)
+        canvas.drawText(
+            fitText("燃料剩余 · ${VehicleStats.formatFuelPercent(fuel)}", w - 44f * k),
+            x + 22f * k, top + 131f, text,
+        )
 
         // `SceneDesktop.disableShortClick(sceneCarCard)`（:703）：续航卡不可点
     }
@@ -2406,6 +2529,39 @@ class ScenePage(context: Context) : View(context) {
     //
     // 保留的只是「不抢手势」：空白处的按下不再做轴向判定，直接走点击命中。
 
+    /** 命中测试：按卡片矩形找离 x 最近的卡（拖拽排序用）。 */
+    private fun cardIndexAt(x: Float, bounds: List<Pair<Float, Float>>): Int {
+        for (i in bounds.indices) {
+            val (l, r) = bounds[i]
+            if (x in l..r) return i
+        }
+        if (bounds.isEmpty()) return -1
+        var best = 0
+        var bestDist = Float.MAX_VALUE
+        for (i in bounds.indices) {
+            val (l, r) = bounds[i]
+            val c = (l + r) / 2f
+            val d = kotlin.math.abs(x - c)
+            if (d < bestDist) {
+                bestDist = d
+                best = i
+            }
+        }
+        return best
+    }
+
+    /** 把可见卡的顺序 [visibleOrder] 写回完整布局；隐藏卡按原相对顺序追加到末尾。 */
+    private fun reorderVisible(
+        layout: List<com.cardesk.launcher.core.CardLayout.Slot>,
+        visibleOrder: List<String>,
+    ): List<com.cardesk.launcher.core.CardLayout.Slot> {
+        val byId = layout.associateBy { it.id }
+        val out = ArrayList<com.cardesk.launcher.core.CardLayout.Slot>(layout.size)
+        for (id in visibleOrder) byId[id]?.let { out.add(it) }
+        for (slot in layout) if (!slot.visible) out.add(slot)
+        return com.cardesk.launcher.core.CardLayout.normalize(out)
+    }
+
     private val longPressRunnable = Runnable {
         val id = downCardId ?: return@Runnable
         longPressFired = true
@@ -2454,12 +2610,14 @@ class ScenePage(context: Context) : View(context) {
                 if (id != null) {
                     dragDx = x - dragGrabX
                     val bounds = cardRects.entries.map { it.value.left to it.value.right }
-                    val hover = BottomCardOrder.indexAt(x, bounds)
+                    val hover = cardIndexAt(x, bounds)
                     if (hover >= 0) {
-                        val current = bottomCardOrder.indexOf(id)
-                        val target = hover
-                        if (target != current) {
-                            bottomCardOrder = BottomCardOrder.move(bottomCardOrder, current, target)
+                        val visibleIds = cardRects.keys.toList()
+                        val current = visibleIds.indexOf(id)
+                        if (current >= 0 && hover != current) {
+                            val reordered = visibleIds.toMutableList()
+                            reordered.add(hover.coerceIn(0, reordered.size - 1), reordered.removeAt(current))
+                            cardLayout = reorderVisible(cardLayout, reordered)
                             dragMoved = true
                             // 排障场景：「拖到某个位置没插进去」——记录每次经过的位置。
                             Logx.d(
@@ -2467,7 +2625,7 @@ class ScenePage(context: Context) : View(context) {
                                 "底部卡片拖拽经过位置",
                                 "card" to id,
                                 "from" to current,
-                                "to" to target,
+                                "to" to hover,
                             )
                             invalidate()
                         }
@@ -2485,8 +2643,8 @@ class ScenePage(context: Context) : View(context) {
                     parent?.requestDisallowInterceptTouchEvent(false)
                     // 只有真的挪动了才落盘
                     if (dragMoved) {
-                        orderStore?.save(bottomCardOrder)
-                        onBottomCardOrderChanged?.invoke(bottomCardOrder)
+                        layoutStore?.save(cardLayout)
+                        onCardLayoutChanged?.invoke(cardLayout)
                     }
                     // 排障场景：「排序没保存」——松手时记录最终顺序与是否真的挪动过。
                     Logx.event(
@@ -2494,7 +2652,7 @@ class ScenePage(context: Context) : View(context) {
                         "底部卡片拖拽结束",
                         "card" to id,
                         "moved" to dragMoved,
-                        "order" to bottomCardOrder.joinToString(","),
+                        "layout" to com.cardesk.launcher.core.CardLayout.encode(cardLayout),
                     )
                     dragMoved = false
                     invalidate()
@@ -3063,6 +3221,12 @@ class ScenePage(context: Context) : View(context) {
         const val QUICK_PAD = 24f
 
         /** 快捷入口卡宽（第五十轮对齐设计板 s01：与通用音乐 / 快捷车控同宽 338）。 */
+        /** 车况卡在「小/中/大」固定档位下的自然宽度（自适应时吃剩余宽度）。 */
+        const val CAR_PRESET_W = 460f
+
+        /** 卡片库新增：行程卡 / 车门车窗卡的自然宽度。 */
+        const val TRIP_BOTTOM_CARD_W = 340f
+        const val STATUS_BOTTOM_CARD_W = 380f
         const val QUICK_CARD_W = 338f
 
         /** 媒体卡宽。第四十九轮「浮屿」从 400 收到 338，与快捷卡 / 车控卡同宽。 */

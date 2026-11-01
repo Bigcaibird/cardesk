@@ -555,6 +555,52 @@ class AdaptapiGateway(private val context: Context) : VehicleGateway {
         return out
     }
 
+    /**
+     * 文档口径写：`ICarFunction.setFunctionValue(func, value)`（两参，无 zone）。
+     *
+     * 驾驶模式等选择型功能在 ADAPTAPI 里只有这一个重载（见
+     * `docs/ecarx-adapterapi/16-hud-dim-adas.md` §4.3 与 jimu `api-drive-mode`）。
+     * 找不到两参重载时**直接失败**，不拿三参重载猜 zone——那会把
+     * 「文档里没有的写法」当成能力，写入结果不可信。
+     */
+    override fun writeFunction(func: Int, value: Int): Boolean {
+        val f = ensureFunction() ?: run {
+            lastError = "拿不到 ICarFunction 句柄（车机服务未连接或当前应用无权限）"
+            Logx.w(LogTags.VEHICLE, "写入功能失败（拿不到句柄）", "func" to VehicleLog.hex(func), "value" to value)
+            return false
+        }
+        val m = findMethod(f, "setFunctionValue", INT, INT) ?: run {
+            lastError = "固件不支持 setFunctionValue(func, value) 两参重载"
+            Logx.w(LogTags.VEHICLE, "写入功能失败（无两参重载）", "func" to VehicleLog.hex(func), "value" to value)
+            return false
+        }
+        return runCatching { m.invoke(f, func, value) != false }
+            .onFailure {
+                lastError = "setFunctionValue 抛异常：${it.javaClass.simpleName}"
+                Logx.w(LogTags.VEHICLE, "写入功能失败", "func" to VehicleLog.hex(func), "value" to value, "reason" to lastError)
+            }
+            .getOrDefault(false)
+            .also { ok -> if (ok) Logx.d(LogTags.VEHICLE, "写入功能", "func" to VehicleLog.hex(func), "name" to VehicleLog.funcName(func), "value" to value) }
+    }
+
+    /**
+     * 文档口径读：`ICarFunction.getFunctionValue(func)`（一参，无 zone）。
+     *
+     * 与 [readValue] 分开：`readValue` 走的是带 zone 的路径，驾驶模式是全局选择项。
+     */
+    override fun readFunction(func: Int): Int? {
+        val f = ensureFunction() ?: return null
+        val m = findMethod(f, "getFunctionValue", INT) ?: return null
+        val v = runCatching { m.invoke(f, func) }.getOrNull() ?: return null
+        return when (v) {
+            is Int -> v
+            is Float -> v.toInt()
+            is Double -> v.toInt()
+            is Boolean -> if (v) 1 else 0
+            else -> null
+        }
+    }
+
     /** 按区域读单个属性。 */
     override fun readValue(func: Int, zone: Int): Int? {
         val f = ensureFunction() ?: run {

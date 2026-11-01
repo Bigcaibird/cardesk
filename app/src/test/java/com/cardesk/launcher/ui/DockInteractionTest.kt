@@ -6,6 +6,7 @@ import android.view.ViewGroup
 import com.cardesk.launcher.MainActivity
 import com.cardesk.launcher.core.Prefs
 import com.cardesk.launcher.ui.shell.DockBarView
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -138,5 +139,29 @@ class DockInteractionTest {
         val prefs = Prefs(activity.applicationContext)
         assertTrue("「沉浸系统导航栏」默认开（系统 Dock 只在底部上滑时唤起）", prefs.oemNavImmersive)
         assertFalse("「隐藏桌面 Dock」默认关", prefs.hideHomeDock)
+    }
+
+    /**
+     * 第九十四轮：全局 Dock 默认开（默认用桌面 Dock 顶替原车 Dock）。
+     */
+    @Test
+    fun globalDockDefaultsOn() {
+        val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        val prefs = Prefs(activity.applicationContext)
+        assertTrue("「全局 Dock 栏」默认开：其它应用底部也显示桌面 Dock", prefs.globalDockEnabled)
+    }
+
+    /**
+     * 第九十四轮：Dock 按父布局给的宽度铺满（以前钉死 1864，两侧各留一条缝）。
+     */
+    @Test
+    fun dockMeasuresFullWidth() {
+        val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        val dock = DockBarView(activity)
+        dock.measure(
+            View.MeasureSpec.makeMeasureSpec(1920, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(104, View.MeasureSpec.EXACTLY),
+        )
+        assertEquals("Dock 应该按给定宽度铺满 1920 设计宽", 1920, dock.measuredWidth)
     }
 }

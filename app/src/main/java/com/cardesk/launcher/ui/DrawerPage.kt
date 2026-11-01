@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ResolveInfo
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.view.DragEvent
@@ -164,7 +165,7 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
         panel.addView(scroll, abs(PANEL_PAD, GRID_TOP, GRID_W, GRID_H))
 
         // —— 底部提示（长按拖动排序是 App 侧能力，也有）——
-        val foot = Ui.text(context, "点按图标启动应用，长按可拖动排序", 16f, Skin.TEXT_DIM).apply {
+        val foot = Ui.text(context, "点按图标启动，长按拖动排序；格子右上角 ⋮ 可重命名 / 应用信息 / 卸载", 16f, Skin.TEXT_DIM).apply {
             gravity = Gravity.CENTER
         }
         panel.addView(foot, abs(PANEL_PAD, FOOT_TOP, PANEL_W - PANEL_PAD * 2, 26))
@@ -220,7 +221,7 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
         val sorted = apps.sortedWith(
             compareBy(
                 { rank[it.activityInfo.packageName] ?: Int.MAX_VALUE },
-                { it.loadLabel(pm).toString() },
+                { displayLabel(it, pm) },
             )
         )
         currentPackages = sorted.map { it.activityInfo.packageName }
@@ -234,7 +235,11 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
             "ordered" to prefs.appOrder.size,
         )
         for (info in sorted) {
-            val cell = LinearLayout(context).apply {
+            val pkg = info.activityInfo.packageName
+            val display = displayLabel(info, pm)
+            // 第九十五轮 C5：格子 = 图标列（点按启动 / 长按拖动排序）+ 右上角「⋮」菜单。
+            val cell = FrameLayout(context)
+            val body = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 // 第五十一轮：设计板 s03 的格子是 的**定宽块**，
                 // 图标（`.appicon` 76×96）用 **贴格子左沿**，
@@ -242,38 +247,9 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
                 // 整排图标右移了 112px，跟设计板对不上。
                 gravity = Gravity.TOP or Gravity.START
                 isClickable = true
-                setOnClickListener {
-                    val pkg = info.activityInfo.packageName
-                    val name = info.loadLabel(pm).toString()
-                    // 排障场景：「抽屉里点图标没启动 / 启动成了小窗」——选中项与启动方式落盘。
-                    Logx.event(
-                        LogTags.DRAWER,
-                        "抽屉选中应用",
-                        "pkg" to pkg,
-                        "name" to name,
-                        "mode" to if (miniMode) "mini" else "fullscreen",
-                    )
-                    if (miniMode) {
-                        onOpenApp?.invoke(pkg, name, true)
-                    } else if (onOpenApp != null) {
-                        onOpenApp?.invoke(pkg, name, false)
-                    } else {
-                        try {
-                            val i = Intent(Intent.ACTION_MAIN).apply {
-                                addCategory(Intent.CATEGORY_LAUNCHER)
-                                setClassName(pkg, info.activityInfo.name)
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            context.startActivity(i)
-                        } catch (e: Exception) {
-                            // 启动失败静默
-                            Logx.w(LogTags.DRAWER, "抽屉应用启动失败", e, "pkg" to pkg, "name" to name)
-                        }
-                    }
-                }
+                setOnClickListener { openApp(info, display) }
                 // 长按 = 拖动排序（Drawer 的 startDragAndDrop +）
                 setOnLongClickListener {
-                    val pkg = info.activityInfo.packageName
                     val clip = ClipData.newPlainText("package", pkg)
                     val shadow = View.DragShadowBuilder(this).apply {
                         // 拖起时放大 1.03 并抬升 translationZ 8dp
@@ -302,18 +278,247 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
                 gravity = Gravity.CENTER_HORIZONTAL
             }
             column.addView(iv, LinearLayout.LayoutParams(ICON, ICON))
-            val label = Ui.text(context, info.loadLabel(pm).toString(), 18f, Skin.TEXT_SOFT).apply {
+            val label = Ui.text(context, display, 18f, Skin.TEXT_SOFT).apply {
                 gravity = Gravity.CENTER
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
             }
             column.addView(label, LinearLayout.LayoutParams(-1, 26).apply { topMargin = 12 })
-            cell.addView(column, LinearLayout.LayoutParams(ICON, LayoutParams.WRAP_CONTENT))
+            body.addView(column, LinearLayout.LayoutParams(ICON, LayoutParams.WRAP_CONTENT))
+            cell.addView(body, FrameLayout.LayoutParams(-1, -1))
+
+            // 右上角「⋮」：重命名 / 应用信息 / 卸载（第九十五轮 C5）。
+            val more = Ui.text(context, "\u22EE", 24f, pal.textDim, bold = true).apply {
+                gravity = Gravity.CENTER
+                background = Ui.round(Skin.CHIP_FILL, Shape.PILL, 1f, Skin.CHIP_STROKE)
+                isClickable = true
+                pressFeedback()
+                setOnClickListener { showItemMenu(info, display) }
+            }
+            cell.addView(
+                more,
+                FrameLayout.LayoutParams(52, 52, Gravity.TOP or Gravity.END).apply {
+                    topMargin = 6
+                    rightMargin = 6
+                },
+            )
             grid.addView(cell, GridLayout.LayoutParams().apply {
                 width = CELL_W
                 height = CELL_H
             })
         }
+    }
+
+    /** 显示名：有别名用别名，否则用系统应用名（第九十五轮 C5）。 */
+    private fun displayLabel(info: ResolveInfo, pm: PackageManager): String =
+        prefs.appAliasOf(info.activityInfo.packageName) ?: info.loadLabel(pm).toString()
+
+    /** 启动一个抽屉应用（沿用原来的「全屏 / 小窗」两态逻辑）。 */
+    private fun openApp(info: ResolveInfo, display: String) {
+        val pm = context.packageManager
+        val pkg = info.activityInfo.packageName
+        // 排障场景：「抽屉里点图标没启动 / 启动成了小窗」——选中项与启动方式落盘。
+        Logx.event(
+            LogTags.DRAWER,
+            "抽屉选中应用",
+            "pkg" to pkg,
+            "name" to display,
+            "mode" to if (miniMode) "mini" else "fullscreen",
+        )
+        if (miniMode) {
+            onOpenApp?.invoke(pkg, display, true)
+        } else if (onOpenApp != null) {
+            onOpenApp?.invoke(pkg, display, false)
+        } else {
+            try {
+                val i = Intent(Intent.ACTION_MAIN).apply {
+                    addCategory(Intent.CATEGORY_LAUNCHER)
+                    setClassName(pkg, info.activityInfo.name)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(i)
+            } catch (e: Exception) {
+                Logx.w(LogTags.DRAWER, "抽屉应用启动失败", e, "pkg" to pkg, "name" to display)
+            }
+        }
+    }
+
+    // ---------------------------------------------------------- 应用菜单（第九十五轮 C5）
+
+    private var itemMenu: View? = null
+    private var renameDialog: View? = null
+
+    /** 格子右上角「⋮」菜单：重命名 / 应用信息 / 卸载。 */
+    private fun showItemMenu(info: ResolveInfo, display: String) {
+        if (itemMenu != null) return
+        val pkg = info.activityInfo.packageName
+        val menu = FrameLayout(context).apply {
+            setBackgroundColor(0xB3000000.toInt())
+            isClickable = true
+            setOnClickListener { dismissItemMenu() }
+        }
+        val card = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            background = Skin.flat(Shape.CARD)
+            setPadding(30, 26, 30, 22)
+        }
+        card.addView(Ui.text(context, display, 30f, pal.text, bold = true), LinearLayout.LayoutParams(-1, -2))
+        card.addView(
+            Ui.text(context, pkg, 17f, pal.textFaint),
+            LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 6 },
+        )
+        fun row(text: String, color: Int, onClick: () -> Unit) {
+            val tv = Ui.text(context, text, 25f, color, bold = true).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(8, 0, 8, 0)
+                isClickable = true
+                pressFeedback()
+                setOnClickListener { onClick() }
+            }
+            card.addView(tv, LinearLayout.LayoutParams(-1, 92).also { it.topMargin = 12 })
+        }
+        row("重命名", pal.text) {
+            dismissItemMenu()
+            showRenameDialog(pkg, display)
+        }
+        row("应用信息", pal.text) {
+            dismissItemMenu()
+            openAppInfo(pkg)
+        }
+        val systemApp = (info.activityInfo.applicationInfo.flags and
+            android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0
+        if (systemApp) {
+            card.addView(
+                Ui.text(context, "系统应用不支持卸载", 18f, pal.textFaint),
+                LinearLayout.LayoutParams(-1, 64).also { it.topMargin = 8 },
+            )
+        } else {
+            row("卸载", pal.danger) {
+                dismissItemMenu()
+                uninstallApp(pkg)
+            }
+        }
+        row("取消", pal.textDim) { dismissItemMenu() }
+        menu.addView(
+            card,
+            FrameLayout.LayoutParams(680, LayoutParams.WRAP_CONTENT, Gravity.CENTER),
+        )
+        itemMenu = menu
+        addView(menu, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        Logx.event(LogTags.DRAWER, "打开应用菜单", "pkg" to pkg)
+    }
+
+    private fun dismissItemMenu() {
+        val menu = itemMenu ?: return
+        itemMenu = null
+        removeView(menu)
+    }
+
+    /** 重命名：本地别名写入 Prefs（`launcher_app_alias`），空串 = 恢复系统名称。 */
+    private fun showRenameDialog(pkg: String, current: String) {
+        if (renameDialog != null) return
+        val overlay = FrameLayout(context).apply {
+            setBackgroundColor(0xB3000000.toInt())
+            isClickable = true
+            setOnClickListener { dismissRenameDialog() }
+        }
+        val card = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            background = Skin.flat(Shape.CARD)
+            setPadding(34, 28, 34, 26)
+            isClickable = true
+        }
+        card.addView(Ui.text(context, "重命名应用", 30f, pal.text, bold = true), LinearLayout.LayoutParams(-1, -2))
+        card.addView(
+            Ui.text(context, "只改桌面显示名，不影响系统里的应用名。留空恢复原名。", 18f, pal.textDim),
+            LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 8 },
+        )
+        val input = android.widget.EditText(context).apply {
+            setText(prefs.appAliasOf(pkg) ?: current)
+            setTextColor(pal.text)
+            setHintTextColor(pal.textFaint)
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, 26f)
+            background = Ui.round(Skin.surfaceSoft, 18f, 1f, Skin.NAV_STROKE)
+            setPadding(22, 0, 22, 0)
+            isSingleLine = true
+            setSelection(text.length)
+        }
+        card.addView(input, LinearLayout.LayoutParams(-1, 78).also { it.topMargin = 18 })
+        val actions = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+        }
+        fun button(text: String, primary: Boolean, onClick: () -> Unit) {
+            val tv = Ui.text(context, text, 22f, if (primary) Skin.ACCENT_INK else pal.text, bold = true).apply {
+                gravity = Gravity.CENTER
+                setPadding(28, 12, 28, 12)
+                background = Ui.round(
+                    if (primary) Skin.ACCENT else Skin.CHIP_FILL,
+                    Shape.PILL,
+                    if (primary) 0f else 1f,
+                    Skin.CHIP_STROKE,
+                )
+                isClickable = true
+                pressFeedback()
+                setOnClickListener { onClick() }
+            }
+            actions.addView(tv, LinearLayout.LayoutParams(-2, 64).also { it.leftMargin = 16 })
+        }
+        button("取消", false) { dismissRenameDialog() }
+        button("保存", true) {
+            val alias = input.text.toString().trim()
+            prefs.setAppAlias(pkg, alias)
+            Logx.event(LogTags.DRAWER, "应用重命名", "pkg" to pkg, "alias" to alias)
+            dismissRenameDialog()
+            reload()
+        }
+        card.addView(actions, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 22 })
+        overlay.addView(card, FrameLayout.LayoutParams(820, LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+        renameDialog = overlay
+        addView(overlay, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+    }
+
+    private fun dismissRenameDialog() {
+        val dialog = renameDialog ?: return
+        renameDialog = null
+        removeView(dialog)
+    }
+
+    private fun openAppInfo(pkg: String) {
+        val intents = listOf(
+            Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                .setData(android.net.Uri.parse("package:" + pkg)),
+            Intent(android.provider.Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS),
+        )
+        for (intent in intents) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            try {
+                context.startActivity(intent)
+                Logx.event(LogTags.DRAWER, "打开应用信息", "pkg" to pkg)
+                return
+            } catch (e: Exception) {
+                Logx.w(LogTags.DRAWER, "打开应用信息失败", e, "pkg" to pkg)
+            }
+        }
+        android.widget.Toast.makeText(context, "没有可打开的应用信息页", android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    private fun uninstallApp(pkg: String) {
+        val intents = listOf(
+            Intent(Intent.ACTION_DELETE).setData(android.net.Uri.parse("package:" + pkg)),
+            Intent(Intent.ACTION_UNINSTALL_PACKAGE).setData(android.net.Uri.parse("package:" + pkg)),
+        )
+        for (intent in intents) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            try {
+                context.startActivity(intent)
+                Logx.event(LogTags.DRAWER, "请求卸载应用", "pkg" to pkg, "action" to intent.action)
+                return
+            } catch (e: Exception) {
+                Logx.w(LogTags.DRAWER, "卸载请求失败", e, "pkg" to pkg)
+            }
+        }
+        android.widget.Toast.makeText(context, "本机没有卸载界面，无法卸载", android.widget.Toast.LENGTH_SHORT).show()
     }
 
     /**

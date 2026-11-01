@@ -98,6 +98,20 @@ base64 → `krc1` 头 → 16 字节循环异或 → zlib 解压），
     一次拿到 `status`、回读区域号、值的真实类名、字节长度与前 16 字节的 hex / 十进制；
   - 试读候选里的向量类型从 `int[]` 改成 **`Integer[]`**
     （厂商自己的向量属性就是 `Integer[]`，`int[]` 永远匹配不上）；
+- **第九十三轮找到最后一条根因：解析器只认「一个 varint」。**
+  这几个门属性的值是 Geely `PublicAttrValue` 的**消息字节**，
+  而 `core/ProtoLite.singleVarint()` 的规则是「顶层有且仅有一个 varint 才返回值」；
+  `PublicAttrValue` 真机消息通常同时带 `availability`（field 1）、`status`（field 3）、
+  `int32_data`（field 4，**sint32 / ZigZag**）三个 varint ⇒ `singleVarint` **恒返回 null**
+  ⇒ 车门恒「读不到」，和通道/权限都无关。
+  现在新增 `vehicle/PublicAttrValue.kt`（纯 Kotlin、可 JVM 单测）按完整线格式解析
+  （field 1/2/3/4/8 varint、field 4 ZigZag、field 5 double、field 6/7 跳过、8192 上限），
+  `McDoorSignals` 走 `CarProperties.readBytesWithStatus()` 拿到 HAL status 后解析，
+  **`availability == 1` 才算有效**；
+  取值口径按「合并口径」解释：`0 → 关`、`1 → 开`、`2 → 关`、其它**不猜**（null）。
+  UNI 实车只在主驾门验证过 `1 = 开 / 2 = 关`，`0 = 关` 是 IBcm 口径 ⇒
+  **这台车上的真实取值仍要一次实车日志定论**（诊断日志已把
+  `raw / halStatus / availability / format / status / data / int32Wire / level / active` 全打出来）；
 - **引擎盖**是**彻底没有**，不是「还没找到」：
   厂商 jar 的 931 个属性与 1,346 个功能号里，hood / frunk / bonnet **零命中**。
   不用再花时间查了，界面上按「不支持」处理；
@@ -146,9 +160,9 @@ pull 下来用 `jadx` 反编译，结论有两处互相印证：
   `== 4` 播成「即将红灯」，而高德语音设置项写死了
   「只播报**红灯状态下的即将绿灯**」⇒ 「即将绿灯」发生在当前是红灯的时候。
 - ⚠️ **两套协议的灯态正好相反**，取值不能互相套用。
-- 现在是**灯态看枚举、读秒跟着灯态走**（红读 `redLightCountDownSeconds`，
-  绿读 `greenLightLastSecond`）；万一高德改了枚举，**不猜**，
-  改用**自带字段名**的读秒兜底（绿秒优先），绝不退回「永远画红灯」。
+- 现在是**灯态看枚举、读秒统一取 `redLightCountDownSeconds`**（第九十三轮修正，见 §4.1 末尾）。
+  高德改枚举时**不猜**，灯态退回按 `greenLightLastSecond` 的伴随值（红=0/绿=3）判断，
+  绝不退回「永远画红灯」。
 - **这一档还没在真机上验证过**：官方协议到底发不发、真车上的 `greenLightLastSecond`
   带不带、巡航协议一次带几个方向、推送间隔多久、断网时还有没有 ——
   都要装到车上开一次导航看日志才能定
@@ -187,6 +201,26 @@ pull 下来用 `jadx` 反编译，结论有两处互相印证：
 `rawRed`（`redLightCountDownSeconds`）与 `rawGreen`（`greenLightLastSecond`），
 一次真车导航就能看出**哪个字段在动、往哪个方向动**。
 显示层已经与这个选择解耦（换字段不用动状态机）。
+
+#### 第九十三轮：绿灯读秒取错字段的**真凶找到了**
+
+上一轮「只装探针」等来的不是新证据，而是一个更硬的结论 ——
+**`greenLightLastSecond` 根本不是剩余秒数**：
+
+- 第三方桌面「嘟嘟」的反编译生产代码（`com.dudu.autoui...C3691g`，处理同一个
+  `KEY_TYPE = 60073`）里，**所有灯态的读秒都取 `redLightCountDownSeconds`**，
+  `greenLightLastSecond` 只参与两个判断：
+  **红灯 = `greenLast == 0 && status == 1`、绿灯 = `greenLast == 3 && status == 4`**
+  —— 它是**灯态伴随标志**（红=0、绿=3），不是倒计时；
+- UNI 的 `AmapTrafficLightProtocol.java` 同样恒取 `redLightCountDownSeconds`，
+  注释明写「never turn it into a green countdown」；
+- 所以 cardesk 以前绿灯读 `greenLightLastSecond`（恒为 3）⇒
+  **绿灯倒计时一直从 3 开始、且每帧被压回 3** —— 这就是「绿灯读秒不正确」。
+
+现在 `AmapTrafficLight.standard()` 的 `countdownSeconds` 对**所有灯态**
+统一取 `redLightCountDownSeconds`（`red` 缺失时**不给读秒**，显示「—」，
+绝不拿 `greenLightLastSecond` 顶上）。单测补了 4 条回归（绿 12→12、红 8→8、
+`red=0`→「—」、缺 `red`→「—」）。
 
 ### 5. 氛围灯：链路是通的，**真车上的观感还没验**
 
@@ -277,6 +311,210 @@ pull 下来用 `jadx` 反编译，结论有两处互相印证：
   恢复成「没有全局 Dock 时该有的样子」，不会留下「既无原车 Dock 也无 CarDesk Dock」的空白底边。
 - 取舍：全局模式下 `hideDock`（原车 Dock 名单）对其它应用不再单独生效——统一由全局 Dock 接管；
   `oemNavImmersive` 保持原语义不动。
+- **第九十四轮起**：开关默认打开（默认就用桌面 Dock 顶替原车 Dock），并加了能力守卫
+  （RRO 或悬浮窗权限至少有一项才接管，否则自动退回普通策略）；Dock 条从 1864 宽改为
+  **铺满整屏宽**，详见下一节。
+
+## Dock 铺满 + 全局 Dock 默认开（第九十四轮）
+
+真车反馈两点：①其它应用里底部 Dock 栏「不铺满」，两侧各露出一小条硬色底；
+②希望**默认**就把系统自带 Dock 藏掉、统一用桌面 Dock。
+
+### 1. Dock 为什么「不铺满」
+
+Dock 的设计板宽是 1864（1920 板上左右各留 28），`DockBarView.onMeasure` 又把宽度
+**钉死成 1864**，而宿主给的宽度是 1872（桌面）/1920（全局 Dock 窗口）——
+差出来的部分露出的是全局窗口的硬色底 `#162E2C`，在别的应用里看就是「Dock 没铺满」。
+
+改法（三处一起才有效）：
+
+- `ui/shell/DockBarView.kt`：`onMeasure` 按父布局给的宽度测量（EXACTLY/AT_MOST 取 size，
+  UNSPECIFIED 退回设计宽 1920），高度仍 104；
+- `ui/LauncherView.kt`：桌面内嵌 Dock 的 LayoutParams 改为整屏宽 1920、`Gravity.BOTTOM`；
+- `core/dock/GlobalDockService.kt`：`DESIGN_DOCK_WIDTH = 1920`、`DOCK_LEFT_MARGIN = 0`。
+
+Dock 内部布局本来就是左右两端锚定的（`DockLayout.sections(dockWidth, …)`：左侧 4 键、
+右侧快捷应用贴右、媒体卡吃中间弹性空间），所以变宽只会让媒体卡/间隙变大，不会挤坏。
+**增强导航栏（pill 1864×124）那套设计没动**——它本来就是按 1864 等比缩放进 pill 的。
+
+### 2. 默认全局隐藏系统 Dock
+
+- `Prefs.globalDockEnabled` 默认值改为 **true**：新装/未设置过的车机开机就起
+  `GlobalDockService`，在其它应用底部显示桌面 Dock，同时 `policy_control` 把原车
+  导航栏摘掉（RRO 生效走预留 112px；否则 `immersive.navigation=*`，第八十七轮那套）。
+  老用户之前手动关过的话仍是关（prefs 已存值优先）。
+- 加了**能力守卫**：`GlobalDockPolicyGate.apply()` 里先判断 `navInsets || canDrawOverlays`，
+  两项都没有就退回「普通桌面策略」——否则会出现「原车 Dock 被摘掉、CarDesk 窗口起不来」
+  的空白底边。用户在系统设置里补授权限后回桌面会自动重写 policy
+  （`syncGlobalDockPolicy()` 的签名里带上了 overlay 状态）。
+
+### 3. 验证
+
+- `:app:testDebugUnitTest` 226 tests 全绿（新增 2 条：`globalDockDefaultsOn`、
+  `dockMeasuresFullWidth`）；`:app:assembleSystem` 通过。
+- `PreviewRenderTest` 渲染截图 `preview/01-home.png` 目视：Dock 贴满整屏宽，
+  左右按键位置正常、无溢出。
+- 真车验证点：盖到其它应用（如高德/音乐）后底部 Dock 是否铺满、原车 Dock 是否消失、
+  设置页「全局 Dock 栏」开关是否默认开。
+
+## UNI 能力移植（第九十五轮）：C4 原厂设置 → C5 应用菜单 → C3 最近任务 → C2 桌面卡片
+
+按 `analysis/compare/uni-vs-cardesk-porting.md` 的评分顺序，在 cardesk 里用 Kotlin/Canvas 重写了 UNI 的四个能力。
+参考的是 UNI 的交互与数据模型，**没有拷 UNI 的 Flutter 代码**。
+
+### C4 原厂设置目录（`core/SystemSettingsCatalog.kt` + 设置 → 系统 → 原厂设置）
+
+- 不再写死「系统设置」一个入口，而是扫描本机真实存在的设置 Activity：
+  先试显式 component（`com.ecarx.settings.Settings`、`DriveModeActivity`），再按 `ACTION_SETTINGS` /
+  `WIFI_SETTINGS` / `BLUETOOTH_SETTINGS` / `TETHER_SETTINGS` / `INTERNAL_STORAGE_SETTINGS` 等 action 查；
+  只收 `exported && enabled` 的 Activity，按包名+类名去重。
+- 页面逐条列出「原厂设置入口」（驾驶模式 / 系统设置 / WLAN …），点一下直接 `startActivity` 打开；
+  另留「打开 Android 系统设置」「重新扫描原厂设置」两个兜底按钮。
+- 扫描结果是 10 分钟 TTL 缓存 + 首次进页异步预扫，**车机系统版本不同、少了哪几项都不会崩**。
+- 验证：`OemSettingsPageTest`（Robolectric 注入 Settings/WifiSettings/DriveMode 三个 Activity，断言 3 条入口、
+  点击能发出 startActivity）＋ 效果图 `preview/y01-settings-oem.png`。
+
+### C5 应用管理增强（抽屉格子右上角「⋮」）
+
+- 抽屉里每个应用格子右上角多一个「⋮」，点开是三个动作：
+  **重命名**（只改桌面显示名，落 `launcher_app_alias`，留空恢复原名）、
+  **应用信息**（`ACTION_APPLICATION_DETAILS_SETTINGS`，失败退 `ACTION_MANAGE_APPLICATIONS_SETTINGS`）、
+  **卸载**（`ACTION_DELETE` → `ACTION_UNINSTALL_PACKAGE` 兜底；系统应用不显示卸载，改为提示）。
+- 长按拖动排序保持原样；重命名后排序/显示都按别名走。
+- 验证：`DrawerAppMenuTest`（菜单四动作 / 重命名立刻生效 / 留空恢复）+ `DrawerMenuPreviewTest`
+  效果图 `preview/y02-drawer-menu.png`、`preview/y03-drawer-rename.png`。
+
+### C3 原车最近任务面板（`core/RecentTasks.kt` + `ui/RecentTasksPage.kt`）
+
+- 替换了旧「回 HOME」的假最近任务：`ActivityManager.getRecentTasks`（平台签名 + `REAL_GET_TASKS`）取列表，
+  去重、排除自己、最多 12 条；点卡片先 `moveTaskToFront`，失败回落启动 Intent；支持单条「关闭任务」、
+  「清空」（保留锁定与桌面自己）、「锁定」。
+- `ActivityManager.removeTask` 是 @SystemApi、公开 SDK 里没有 → 用反射调用（直接调用会编译不过）。
+- 入口：Dock 主页键长按、增强导航栏「最近任务」动作、全局 Dock 主页键长按（发 `ACTION_RECENTS` 回桌面）。
+- 权限不足/不支持时整页降级成一句提示，不会崩。
+- 验证：`RecentTasksTest` 6 条（去重/清空保留锁定/权限降级/打开优先挪前台/回落启动/锁定持久化）
+  ＋ `RecentTasksPageTest` 效果图 `preview/y04-recent-tasks.png`。
+
+### C2 桌面卡片布局（`core/CardLayout.kt` + 设置 → 布局与显示 → 桌面卡片）
+
+第九十五轮先做**布局模型的最小闭环**（卡片库/跨页拖动留到下一轮）：
+
+- 布局从「只有顺序」升级为「顺序 + 尺寸档位 + 显隐」，落 `scene_card_layout_v2`：
+  每张卡可选 自适应 / 小 / 中 / 大；车况卡自适应时吃掉行尾剩余宽度，小/中/大是固定宽度；
+  隐藏的卡不参与排布与绘制，剩余宽度由自适应卡均摊（固定档位太宽时按比例收窄，整行不溢出）。
+- 设置页「桌面卡片」：每张卡一个显隐开关 + 宽度档位，改完立刻重排；「恢复默认布局」一键回滚。
+- 顺序拖拽仍是桌面上长按拖动（拖拽后写回完整布局，隐藏卡保持在末尾）。
+- 验证：`CardLayoutTest` 10 条（编码/解码往返、非法输入、补缺、移动、尺寸、显隐下限、宽度分配/溢出收窄）
+  ＋ `SceneCardLayoutRenderTest` 效果图 `preview/y05-scene-cards.png`（隐藏胎压卡 + 音乐卡放大）。
+
+### C2 迭代 2：卡片库（行程 / 车门车窗两张新卡）
+
+- 卡片库新增两张**默认隐藏**的卡：**行程**（总里程/平均油耗/行程里程/行程时长）与
+  **车门车窗**（车门/车窗/后备箱/引擎盖汇总），都在 150 高的底部卡里画 2×2 单元格；
+- 设置 → 桌面卡片顶部出现「卡片库」，点「添加」即上桌面；每张卡另有显隐开关与宽度档位；
+- 七张卡同时显示时，宽度算法会先给车况卡保底宽度，再把其它自适应卡按比例收窄，**整行不溢出**；
+  隐藏卡不参与拖拽排序，拖拽后写回完整布局（隐藏卡保持在末尾）；
+- 效果图 `preview/y06-scene-cards-library.png`（6 张卡同时在场）。
+
+### 底部卡片自适应（第九十五轮补丁）
+
+- 卡片被压窄时（卡片库加到 6–7 张 / 选了「小」档）不再溢出：**快捷车控**按卡宽等比缩放
+  三个控制位（座椅图标、文案、三段进度、最大风挡圈都跟着缩，超长文案自动截断加「…」）；
+  **音乐卡**封面/标题/进度环/播放键按比例缩，标题按可用列宽裁剪；**行程/车门车窗**的
+  单元格数值按格宽缩放并截断；**续航卡**的数值、油量条、燃料文案按卡宽缩放；
+- 窄卡效果图：`preview/y07-scene-cards-seven.png`（7 张卡同时在场，控件全部留在卡内）。
+
+### 模拟器全面验证（第九十五轮补丁）
+
+- 启动页/启动分段、Dock 铺满、全局 Dock 跨应用、C4 原厂设置目录、C5 应用菜单与重命名、
+  C3 最近任务、C2 卡片库/尺寸档位/拖拽排序与持久化，全部在 AVD `cardesk-aosp` 上逐项验证；
+  截图与清单见 `cardesk/emu-verify/REPORT-y08.md` 和 `cardesk/emu-verify/y08/`。
+- 验证中修掉一个真 bug：最近任务面板按 BACK 不关闭（会一直叠在桌面/设置下方）。
+
+### 状态栏驾驶模式胶囊（第九十五轮补丁）
+
+- 修复错绑：点「驾驶模式 · xx」胶囊以前弹出的是**空调页**，现在优先打开车机原厂
+  `com.ecarx.settings/.drivemode.DriveModeActivity`；这台车没有独立驾驶模式页时，
+  兜底打开桌面设置 →「原厂设置」（并 toast 提示），不再误开空调。
+- 空调页入口不受影响：仍可从 Dock 空调区 / 状态栏「助手」按钮进入。
+
+### 驾驶模式快捷面板（第九十五轮补丁，已按文档对齐）
+
+- 状态栏点「驾驶模式 · xx」在桌面弹快捷面板（不再跳原厂页）；
+- **本车实际只有 3 档：经济 / 舒适 / 运动**（`570491137 / 570491138 / 570491139`）。
+  文档 `IDriveMode` 里有 22 个取值常量，但 `16-hud-dim-adas.md` §4.3 与
+  jimu 文档站 `api-drive-mode` 都注明：可用集合是 `PaDm*` 信号过滤后的结果，
+  不是全部模式都有——所以面板只列这三项，不拿文档里存在、本车没有的档位让用户点；
+- 写车严格按文档：`ICarFunction.setFunctionValue(0x22010100, 模式号)`（**两参、无 zone**），
+  写完用 `getFunctionValue(0x22010100)` 回读确认（1.2 秒内没变就算失败）；
+  切成功提示「已切换到 xx」并 0.7 秒后自动关面板；失败红字提示，面板留着可重试；
+- 面板底部保留「打开原厂驾驶模式页」兜底（找不到原厂页时回落到桌面设置 → 原厂设置）；
+- 真车限制：部分车型只允许 P 挡 / 静止时切换，写失败会如实提示，不会假装成功。
+
+### 还没做的（下一轮）
+
+- C2 的**跨页拖动**（场景页 ↔ 导航页互换卡片）与 UNI 的 16 类卡还差一层；
+- 原厂设置目录里的图标/分组仍按扫描顺序，没有做语义排序；
+- C4/C5/C3/C2 都还没上真车验证，最近任务与卸载界面依赖车机是否开放对应系统 Activity。
+
+## 冷启动：先出画面，再建桌面（第九十三轮）
+
+真车反馈「车机开机时会黑屏一段时间才加载到桌面」。原因不是某个功能慢，而是
+**整个桌面的构造都压在 `onCreate` 的主线程上**：
+
+- `MainActivity.onCreate` 里直接 `LauncherView(this)`；
+- `LauncherView.init` 同步做：`VehicleController.init`（车控 binder/反射）、`build()`（整棵 UI 树：
+  场景页 / 导航页 / 抽屉 / 状态栏 / Dock / 浮窗层 / 桌面卡片（`WeatherDesk.start`，联网+定位）、
+  `handler.post(ticker)`（**立刻**开始每秒一次的车控/媒体刷新）、`AmapDesktopGuide`
+  （注册广播 + 向高德索要区域信息）；
+- 这段时间屏幕上是系统 starting window —— 而旧 `AppTheme.windowBackground` 是 **`#05080F`（近黑）**
+  ⇒ 用户看到的就是「一块黑屏，过一会儿桌面才出来」。
+
+现在改成**三段式**，并给每一段打启动分段日志（`core/StartupTrace.kt`，对照 UNI 的 `StartupTrace.java`）：
+
+| 段 | 做什么 |
+|---|---|
+| 1. `onCreate` | 只初始化日志 / 崩溃兜底 / 全屏，然后 `setContentView` **一个纯 Canvas 启动页**（`ui/LaunchSplashView.kt`：品牌渐变 + 转圈 + 「正在启动桌面…」）⇒ **毫秒级出第一帧** |
+| 2. 启动页第一帧后 | 才构造 `LauncherView`（启动页盖在上面，用户看到的是「启动中」而不是黑屏） |
+| 3. 桌面第一帧后 | `LauncherView.startServices()` 拉天气 / 每秒刷新 / 导航引导；再启动媒体、氛围灯、任务调度、权限延迟检查；最后启动页 **220ms 淡出** |
+
+配套改动：
+
+- theme 的 `windowBackground` 从纯 `#05080F` 换成同色系渐变 `res/drawable/launch_background.xml` ——
+  **连系统 starting window 那段也不再是死黑**；
+- `MainActivity` 里所有 `launcher` 调用改为可空 + `whenLauncherReady` 排队
+  （`onResume` / `onNewIntent` / 返回键 / 权限回调都可能早于桌面就绪）；
+- `LauncherView` 新增幂等 `startServices()`（`onDetachedFromWindow` 清掉的 ticker 会在
+  `onAttachedToWindow` 里补挂）；
+- 「向高德索要区域信息」从 `onAttachedToWindow` 挪到 `startServices()` ——
+  那是跨进程广播，不该排在首帧前。
+
+**怎么验证启动耗时**（车机连不上 adb 也能看）：
+
+1. **不需要 adb**：车机上「设置 → 系统 → 诊断日志 → 导出诊断包」，
+   打开 zip 里的 `summary.txt`，看「---- 冷启动 ----」段 ——
+   里面同时有**本次启动**和**上次冷启动**（上次的数字持久化在
+   `cardesk_startup.xml`，**日志被轮转掉也不会丢**）：
+
+   ```
+   本次启动: total=…ms boot=…ms 起点=process fromCreate onCreate=0 window=12 splashFirstFrame=40 …
+   上次启动: 2026-10-31 23:40:12  total=…ms boot=…ms 起点=process fromCreate …
+   ```
+
+   - `total`：进程启动 → 导出时（冷启动完整走完时 = 进程启动 → 启动页 220ms 淡出完成）；
+   - `fromCreate` 各段：`splashFirstFrame`（第一张图 = 黑屏结束）、`launcherFirstFrame`（桌面画出来）、
+     `servicesDone`（车控/天气/媒体这些重活干完）；
+   - `bootMs`：开机以来的毫秒数 —— 用来区分**系统开机慢**（`bootMs` 很大）
+     还是**桌面启动慢**（`processMs` 大）；诊断包里「收到开机广播」那两行也带 `bootMs`，
+     两者一减就是「广播到桌面首帧」的耗时。
+2. 日志文件里也能搜「启动分段」/「启动完成」（`logs/` 目录）。
+3. 有 adb 时同样可以 `adb logcat -s CarDesk-Startup`。
+
+`total` 与 `am start -W` 的 `TotalTime` 同一时钟（都是 `uptimeMillis`），可直接对照。
+
+> 取舍：桌面数据（天气、车况、导航卡）不再可能早于首帧 —— 它们本来就要依赖车控/网络，
+> 现在只是**晚几百毫秒**补上；换来的是「开机立刻有画面」。
+> 真机上 0/1/2 车门枚举、绿灯读秒仍需一次实车日志定论，见上面「已知限制」。
 
 ## 媒体播放/暂停（第八十七轮）
 

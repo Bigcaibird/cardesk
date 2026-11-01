@@ -286,6 +286,13 @@ object Diagnostics {
         sb.append("分辨率: ").append(display(app)).append('\n')
         sb.append("日志级别: ").append(Logx.level().label).append('\n')
 
+        // 冷启动（第九十三轮）：车机经常连不上 adb，「开机黑屏」到底慢在哪只能靠诊断包看。
+        // 这里读 StartupTrace：本次进程的分段 + 上一次冷启动的持久化汇总
+        //（持久化是因为日志会被轮转，开机最早那几行最容易丢）。
+        sb.append("\n---- 冷启动 ----\n")
+        runCatching { sb.append(com.cardesk.launcher.core.StartupTrace.describe()) }
+            .onFailure { sb.append("启动信息读取失败: ").append(it.message).append('\n') }
+
         sb.append("\n---- 权限 ----\n")
         for (perm in PERMISSIONS) {
             sb.append(perm.substringAfterLast('.'))

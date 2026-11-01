@@ -21,6 +21,9 @@ data class VehicleInfo(
     val gear: String = "P",
     /** 驾驶模式短标签；读不到时为 null。 */
     val driveModeLabel: String? = null,
+
+    /** 驾驶模式原始值（`DriveMode.SELECTION_*`）；读不到时为 null。快捷面板靠它高亮当前项。 */
+    val driveModeRaw: Int? = null,
     /** 四轮胎压（**kPa**，顺序 FL/FR/RL/RR）。第三十七轮起单位确认为 kPa。 */
     val tires: FloatArray = floatArrayOf(240f, 240f, 238f, 235f),
     /** 油量百分比（0..100）；读不到时为 null。。 */
@@ -107,6 +110,10 @@ fun currentVehicleInfo(): VehicleInfo {
     }
     // 驾驶模式原始值：日志里要同时给出「模式值」和「短标签」。
     var driveModeRaw: Int? = null
+    // 模拟通道：读回自己刚写进去的模式，模拟器上也能看到「切完状态栏跟着变」。
+    if (gw is MockVehicleGateway) {
+        driveModeRaw = runCatching { gw.readFunction(DriveMode.FUNCTION_DRIVE_MODE_SELECT) }.getOrNull()
+    }
     val info = when (gw) {
         is MockVehicleGateway -> VehicleInfo(
             ambientTemp = gw.ambientTempC() ?: 26.5f,
@@ -127,6 +134,8 @@ fun currentVehicleInfo(): VehicleInfo {
             windowsAllClosed = true,
             hoodClosed = gw.simHoodClosed,
             trunkClosed = gw.simTrunkClosed,
+            driveModeLabel = driveModeRaw?.let { DriveMode.currentShortLabel(it) },
+            driveModeRaw = driveModeRaw,
         )
         else -> {
             val ctx = VehicleController.appContext()
@@ -138,9 +147,12 @@ fun currentVehicleInfo(): VehicleInfo {
             // 读不到再退回 ECarXCar 的 SignalManager（老路）。
             val sensorRange = gw.rangeKm()
             val range = sensorRange ?: (if (signalsReady) EcarxSignals.rangeKm() ?: -1 else -1)
-            // 驾驶模式：从功能号 570491136（zone 2）读
+            // 驾驶模式：文档口径先读一参 `getFunctionValue(0x22010100)`，
+            // 读不到再退带 zone 的两参（部分固件只实现后者）。
             driveModeRaw = try {
-                gw.readValue(DriveMode.FUNCTION_DRIVE_MODE_SELECT, DriveMode.ZONE)
+                gw.readFunction(DriveMode.FUNCTION_DRIVE_MODE_SELECT)
+                    ?: gw.readValue(DriveMode.FUNCTION_DRIVE_MODE_SELECT, 0)
+                    ?: gw.readValue(DriveMode.FUNCTION_DRIVE_MODE_SELECT, DriveMode.ZONE)
             } catch (e: Throwable) {
                 null
             }
@@ -173,6 +185,7 @@ fun currentVehicleInfo(): VehicleInfo {
                 odometerKm = odometer,
                 ambientTemp = gw.ambientTempC() ?: Float.NaN,
                 driveModeLabel = driveMode,
+                driveModeRaw = driveModeRaw,
                 tires = tires ?: floatArrayOf(Float.NaN, Float.NaN, Float.NaN, Float.NaN),
                 fuelPercent = gw.fuelPercent(),
                 source = if (range >= 0) "${gw.displayName} + ISensor" else gw.displayName,

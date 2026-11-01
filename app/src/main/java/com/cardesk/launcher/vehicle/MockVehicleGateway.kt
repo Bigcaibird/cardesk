@@ -13,6 +13,8 @@ import java.util.concurrent.CopyOnWriteArrayList
 class MockVehicleGateway(
     private val main: Handler = Handler(Looper.getMainLooper()),
 ) : VehicleGateway {
+    private var driveModeValue: Int? = null
+
 
     override val id: String = "mock"
     override val displayName: String = "模拟车辆"
@@ -120,6 +122,27 @@ class MockVehicleGateway(
         // 模拟总线延迟后回显给订阅方
         main.postDelayed({ listeners.forEach { it(func, zone, value) } }, 120L)
         return true
+    }
+
+    /**
+     * 文档口径写（两参 `setFunctionValue(func, value)`）。
+     *
+     * 模拟通道只对「驾驶模式选择」做状态回显，其余功能号照常记日志并返回成功，
+     * 这样面板能拿到可回读的当前模式。
+     */
+    override fun writeFunction(func: Int, value: Int): Boolean {
+        if (!connected) {
+            Logx.w(LogTags.VEHICLE, "模拟车辆未连接，写入被拒绝", "func" to VehicleLog.hex(func), "value" to value)
+            return false
+        }
+        Logx.d(LogTags.VEHICLE, "模拟车辆写入功能", "func" to VehicleLog.hex(func), "name" to VehicleLog.funcName(func), "value" to value)
+        if (func == DriveMode.FUNCTION_DRIVE_MODE_SELECT) driveModeValue = value
+        return true
+    }
+
+    override fun readFunction(func: Int): Int? = when (func) {
+        DriveMode.FUNCTION_DRIVE_MODE_SELECT -> driveModeValue
+        else -> null
     }
 
     override fun setTemp(zone: Int, celsius: Float): Boolean {

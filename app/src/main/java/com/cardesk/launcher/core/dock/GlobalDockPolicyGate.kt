@@ -53,7 +53,14 @@ object GlobalDockPolicyGate {
         val prefs = Prefs(app)
         val globalDock = prefs.globalDockEnabled
         val navInsets = runCatching { NavInsets.applied(app) }.getOrDefault(false)
-        val applied = if (globalDock) {
+        // 第九十四轮：全局 Dock 默认开启后，必须确认这台车**真的能显示**全局窗口
+        // （RRO 预留区或悬浮窗权限），否则原车导航栏被 `immersive.navigation=*`
+        // 摘掉、CarDesk 窗口又起不来 —— 用户会既没有原车 Dock 也没有我们的 Dock。
+        val overlay = runCatching {
+            android.provider.Settings.canDrawOverlays(app)
+        }.getOrDefault(false)
+        val canRunGlobalDock = navInsets || overlay
+        val applied = if (globalDock && canRunGlobalDock) {
             applyGlobalDock(app, prefs, navInsets)
         } else {
             restoreNormal(app, prefs)
@@ -63,13 +70,19 @@ object GlobalDockPolicyGate {
             "全局 Dock policy 闸口",
             "globalDock" to globalDock,
             "navInsets" to navInsets,
+            "overlay" to overlay,
+            "canRunGlobalDock" to canRunGlobalDock,
             "applied" to applied,
         )
         // 给 insets teammate 的排障快照：合并两条路径的实际状态。
         Logx.d(
             LogTags.SYS,
             "全局 Dock 策略快照",
-            "gate" to mapOf("globalDock" to globalDock, "navInsets" to navInsets),
+            "gate" to mapOf(
+                "globalDock" to globalDock,
+                "navInsets" to navInsets,
+                "overlay" to overlay,
+            ),
             "systemPolicy" to runCatching { SystemNavigationPolicy.snapshot(app) }.getOrDefault(emptyMap<String, Any?>()),
             "navInsetsSnapshot" to runCatching { NavInsets.snapshot(app) }.getOrDefault(emptyMap<String, Any?>()),
         )

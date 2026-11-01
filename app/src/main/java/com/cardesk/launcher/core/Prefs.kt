@@ -449,6 +449,57 @@ class Prefs(context: Context) {
         set(value) = setStringValue(DockQuickApps.KEY, DockQuickApps.toCsv(value))
 
     /**
+     * 应用重命名别名（第九十五轮 C5，`launcher_app_alias`）。
+     *
+     * 存成一行一个 `包名=别名`，别名做 URL 编码（允许中文/空格/等号）。
+     * 抽屉里显示时优先用别名；别名为空表示恢复系统名称。
+     */
+    var appAlias: Map<String, String>
+        get() = stringValue("launcher_app_alias", "")
+            .lineSequence()
+            .mapNotNull { line ->
+                val cut = line.indexOf('=')
+                if (cut <= 0) return@mapNotNull null
+                val pkg = line.substring(0, cut).trim()
+                if (pkg.isEmpty()) return@mapNotNull null
+                val alias = runCatching {
+                    java.net.URLDecoder.decode(line.substring(cut + 1), "UTF-8")
+                }.getOrDefault("")
+                if (alias.isBlank()) null else pkg to alias
+            }
+            .toMap()
+        set(value) = setStringValue(
+            "launcher_app_alias",
+            value.entries
+                .filter { it.key.isNotBlank() && it.value.isNotBlank() }
+                .joinToString("\n") { (pkg, alias) ->
+                    "$pkg=" + java.net.URLEncoder.encode(alias, "UTF-8")
+                },
+        )
+
+    /** 某个包名的显示名：有别名用别名，否则返回 null（由调用方回落到系统名）。 */
+    fun appAliasOf(pkg: String): String? = appAlias[pkg]
+
+    /** 写入/清除一个别名（空别名 = 恢复系统名称）。 */
+    fun setAppAlias(pkg: String, alias: String) {
+        val next = appAlias.toMutableMap()
+        if (alias.isBlank()) next.remove(pkg) else next[pkg] = alias.trim()
+        appAlias = next
+    }
+
+    /**
+     * 最近任务里「锁定」的包（第九十五轮 C3，`recent_locked`）。
+     * 清空最近任务时保留这些包的任务；逗号分隔（包名不含逗号）。
+     */
+    var recentLocked: Set<String>
+        get() = stringValue("recent_locked", "")
+            .split(',')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .toSet()
+        set(value) = setStringValue("recent_locked", value.filter { it.isNotBlank() }.joinToString(","))
+
+    /**
      * 选中的媒体来源 id（`design_music_source_v1`，存的是来源文案）。
      * 这里存 id，文案可由 [com.cardesk.launcher.core.media.MediaSources] 还原。
      */
@@ -823,9 +874,17 @@ class Prefs(context: Context) {
      *
      * 互斥写法照搬 [hideDock]：**本项打开时关掉对方**；反向互斥写在
      * [enhancedNav] / [lowerDock] 的 setter 里（它们打开时关本项）。
+     *
+     * ## 第九十四轮：默认开
+     *
+     * 用户要求「默认全局隐藏系统自带的 Dock 栏，用桌面 Dock 栏」：
+     * 原车导航栏在其它应用里不再显示，统一由 CarDesk 的全局 Dock 窗口顶替。
+     * 前提是这台车能起全局窗口（RRO 预留区或悬浮窗权限），能力不足时
+     * [com.cardesk.launcher.core.dock.GlobalDockPolicyGate] 会退回普通桌面策略，
+     * 不会出现「原车 Dock 没了、CarDesk Dock 也没有」的空白底边。
      */
     var globalDockEnabled: Boolean
-        get() = flag(KEY_GLOBAL_DOCK, false)
+        get() = flag(KEY_GLOBAL_DOCK, true)
         set(v) {
             setFlag(KEY_GLOBAL_DOCK, v)
             if (v) {

@@ -489,7 +489,7 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
      *
      * **与组合卡完全对齐**（根布局
      * `paddingTop="8.0px" paddingBottom="126.0px"`——
-     * 组合卡底部那 126px 就是给浮在导航页之上的 Dock 栏（1864×104 + 距底 8）让位的。
+     * 组合卡底部那 126px 就是给浮在导航页之上的 Dock 栏（铺满屏宽×104 + 距底 8）让位的。
      *
      * 画中画那张卡**没有**对应的留白
      * 于是承载应用的画面底部被 Dock 压住 —— 我们补上，
@@ -1218,7 +1218,7 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
          * 画中画内容区底部留白（设计 px）。
          *
          * 与组合卡 `paddingBottom=126` 对齐——
-         * 这 126px 是给浮在导航页之上的 Dock 栏（1864×104 + 距底 8）让位的。
+         * 这 126px 是给浮在导航页之上的 Dock 栏（铺满屏宽×104 + 距底 8）让位的。
          */
         const val PIP_CONTENT_INSET_BOTTOM = 0
     }

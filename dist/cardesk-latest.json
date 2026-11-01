@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1067",
-  "versionCode": 4163,
-  "tag": "v1.0.1067",
-  "name": "CarDesk 4163 / 1.0.1067-system",
-  "notes": "氛围灯「跳跃」改为硬切闪光：色相 120° 吸档 + 每拍换档 + 换色间隔 380ms（没鼓点也强制换），跳跃模式下渲染/写入两层 ΔE 限速都关闭；文档同步",
-  "publishedAt": "2026-10-31T15:17:55Z",
+  "version": "1.0.1078",
+  "versionCode": 4174,
+  "tag": "v1.0.1078",
+  "name": "CarDesk 4174 / 1.0.1078-system",
+  "notes": "第九十五轮补丁5：驾驶模式按文档对齐（两参 setFunctionValue + 只留经济/舒适/运动）",
+  "publishedAt": "2026-11-01T03:47:38Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4163.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4163.apk",
-    "size": 2070382,
-    "sha256": "455dc0adb9ef333a978d5a29ce2d1ad46a9eefa4319a987888e4f8e86b126954"
+    "name": "CarDesk-platform-ecarx-cardesk-4174.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4174.apk",
+    "size": 2138218,
+    "sha256": "f8e6b40d20852f28804489697a2047da62073d250f6f87fbe8b3190c3d5a897d"
   }
 }

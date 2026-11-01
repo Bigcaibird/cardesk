@@ -58,7 +58,7 @@ import kotlin.math.min
  *  ├── pageHost 首页场景 / 车辆 / 应用（满屏 1920×1080）
  *  ├── PageDotsView 右侧页面指示器（三个点）
  *  ├── ShellStatusBar 顶部状态栏（左头像+状态胶囊，右图标+时间）
- *  ├── DockBarView 底部一体化控制栏 1864×104（入口/媒体/空调）
+ *  ├── DockBarView 底部一体化控制栏 1920×104（铺满屏宽，入口/媒体/空调）
  *  └── overlayHost 空调浮层 / 360 / 设置面板
  * `
  */
@@ -93,6 +93,9 @@ class LauncherView(context: Context) : FrameLayout(context) {
          * 车端一次开门会连着回调好几条（每个区域一条），不节流会连刷好几次。
          */
         const val BODY_REFRESH_MIN_INTERVAL_MS = 400L
+
+        /** 驾驶模式切换成功后，快捷面板停留一下再自动关闭。 */
+        const val DRIVE_MODE_CLOSE_DELAY_MS = 700L
 
         /** 右缘竖滑命中区宽度。 */
         private const val EDGE_WIDTH = 120f
@@ -187,6 +190,9 @@ class LauncherView(context: Context) : FrameLayout(context) {
     private lateinit var navPage: NavPage
     private lateinit var drawerPage: DrawerPage
 
+    /** 最近任务页（第九十五轮 C3）；null = 没打开。 */
+    private var recentTasksPage: RecentTasksPage? = null
+
     private var climate: ClimatePage? = null
     private var hvac: HvacPanelView? = null
     private var settings: SettingsOverlay? = null
@@ -255,6 +261,14 @@ class LauncherView(context: Context) : FrameLayout(context) {
 
     private val handler = Handler(Looper.getMainLooper())
 
+    /**
+     * 「重活」是否已经启动（天气 / 定时刷新 / 导航引导，见 [startServices]）。
+     *
+     * 第九十三轮冷启动修复：这些以前都在构造函数里同步做，把首帧堵住了；
+     * 现在由 `MainActivity` 在桌面**画出第一帧之后**再调 [startServices]。
+     */
+    private var servicesStarted = false
+
     /** 上一次「车身状态变化」触发的立即刷新时刻（`SystemClock.uptimeMillis()`）。 */
     private var lastBodyRefreshAt = 0L
 
@@ -320,70 +334,131 @@ class LauncherView(context: Context) : FrameLayout(context) {
         page = prefs.lastPage.coerceIn(PAGE_SCENE, PAGE_NAV)
         build()
 
-        // 天气：—— 桌面起来就拉一次
-        Logx.i(LogTags.WEATHER, "启动天气子系统")
-        weatherDesk = com.cardesk.launcher.core.WeatherDesk(
-            context.applicationContext,
-            object : com.cardesk.launcher.core.WeatherDesk.Listener {
-                override fun onWeather(city: String, sky: String, temp: Int?) {
-                    weatherCity = city
-                    weatherSky = sky
-                    weatherTemp = temp
-                    Logx.i(LogTags.WEATHER, "天气更新", "city" to city, "sky" to sky, "temp" to temp)
-                    refresh()
-                }
-            },
-        ).also { it.start() }
-        // 天气定时刷新（`postDelayed(runnable, 1800000)`）
-        handler.removeCallbacks(weatherRefresh)
-        handler.postDelayed(weatherRefresh, WEATHER_REFRESH_MS)
+        // 第九十三轮冷启动修复：**天气 / 定时刷新 / 导航引导这些「重活」不在构造函数里做**。
+        //
+        // 以前它们都塞在 init 里同步跑：WeatherDesk.start() 要联网+定位、
+        // handler.post(ticker) 立刻开始每秒一次的车控/媒体刷新、
+        // AmapDesktopGuide 要注册广播并向高德索要数据 ——
+        // 主线程被串起来占住，MainActivity.onCreate 迟迟返回不了，首帧自然出不来，
+        // 车机上表现为「开机黑屏一段时间才加载到桌面」。
+        //
+        // 现在改为：构造只建 UI 骨架（build()），重活由 MainActivity 在桌面
+        // **画出第一帧之后**调用 startServices() 再做 —— 先出画面，数据随后补齐。
 
+        // 导航引导数据源同样延迟到 startServices()（见上）。
+    }
+
+    /**
+     * 启动桌面「重活」（第九十三轮冷启动修复）。
+     *
+     * ## 为什么拆出来
+     *
+     * 这些以前全在 [init] 里同步做：`build()` 建完页面立刻 `WeatherDesk.start()`
+     * （联网 + 定位）、`handler.post(ticker)`（马上开始每秒一次的车控/媒体刷新）、
+     * `AmapDesktopGuide`（注册广播 + 向高德索要数据）。主线程被串起来占住，
+     * `MainActivity.onCreate` 迟迟返回不了，首帧出不来 —— 车机开机时就是
+     * 「黑屏一段时间才加载到桌面」。
+     *
+     * 现在 `MainActivity` 先 `setContentView` 一个轻量启动页抢到第一帧，
+     * 再构造 `LauncherView`；等它画出自己的第一帧后，才调这个方法把服务拉起来：
+     * **画面先出，数据随后补齐**。
+     *
+     * 幂等：重复调用直接返回（`onResume`、窗口重建都可能再叫一次）。
+     */
+    fun startServices() {
+        if (servicesStarted) return
+        servicesStarted = true
+        com.cardesk.launcher.core.StartupTrace.mark("servicesBegin")
+
+        // 天气：桌面起来就拉一次
+        runCatching {
+            Logx.i(LogTags.WEATHER, "启动天气子系统")
+            weatherDesk = com.cardesk.launcher.core.WeatherDesk(
+                context.applicationContext,
+                object : com.cardesk.launcher.core.WeatherDesk.Listener {
+                    override fun onWeather(city: String, sky: String, temp: Int?) {
+                        weatherCity = city
+                        weatherSky = sky
+                        weatherTemp = temp
+                        Logx.i(LogTags.WEATHER, "天气更新", "city" to city, "sky" to sky, "temp" to temp)
+                        refresh()
+                    }
+                },
+            ).also { it.start() }
+            // 天气定时刷新（`postDelayed(runnable, 1800000)`）
+            handler.removeCallbacks(weatherRefresh)
+            handler.postDelayed(weatherRefresh, WEATHER_REFRESH_MS)
+        }.onFailure { Logx.w(LogTags.WEATHER, "启动天气子系统失败", it) }
+
+        // 导航引导数据源：没有导航时不显示任何东西（`visibility="gone"`）。
+        runCatching {
+            navGuideSource = com.cardesk.launcher.core.nav.AmapDesktopGuide(
+                context.applicationContext,
+                object : com.cardesk.launcher.core.nav.AmapDesktopGuide.Listener {
+                    override fun onGuide(guide: com.cardesk.launcher.core.nav.AmapDesktopGuide.Guide) {
+                        navGuideRaw = guide
+                        if (guide.lanes.isNotEmpty()) navLanesRaw = guide.lanes
+                        applyNavGuide()
+                    }
+
+                    override fun onLanes(raw: String) {
+                        navLanesRaw = raw
+                        // 只有引导卡已经显示才重画
+                        if (navGuideRaw != null) applyNavGuide()
+                    }
+
+                    override fun onTrafficLight(signal: com.cardesk.launcher.core.nav.AmapTrafficLight.Signal?) {
+                        // 红绿灯是「最近路口」的瞬时信号：
+                        // 有就画，没有就不画（不占位）。
+                        // 收到新帧后立刻重画一次 —— 读秒要马上从车机给的值开始。
+                        //
+                        // 真正的信号状态放在 `AmapDesktopGuide` 里（那里判有效期、减读秒），
+                        // 这里不另存一份，免得两处状态打架。
+                        if (navGuideRaw != null) applyNavGuide()
+                    }
+
+                    override fun onStopped() {
+                        navGuideRaw = null
+                        navLanesRaw = null
+                        scenePage.setGuide(null)
+                    }
+
+                    override fun onCityChanged(city: String) {
+                        // 高德换了城市 → 重跑一轮天气。
+                        //
+                        // 真机上系统定位常常拿不到位置（provider 只有 passive,gps 且都没 fix），
+                        // 高德广播的城市是我们唯一的坐标来源（见 `core/AmapCitySource`）——
+                        // 城市一变就得立刻用新城市再取一次天气，不能等 30 分钟的定时刷新。
+                        Logx.i(LogTags.WEATHER, "高德城市变化，重跑天气", "city" to city)
+                        weatherDesk?.requestFresh()
+                    }
+                },
+            )
+            // 窗口已经挂上（MainActivity 是先 addView 再等首帧）才需要主动 start；
+            // 否则交给 onAttachedToWindow()。
+            if (isAttachedToWindow) navGuideSource?.start()
+        }.onFailure { Logx.w(LogTags.NAV_UI, "启动导航引导数据源失败", it) }
+
+        // 接收器注册好之后，再向高德**索要区域信息**（第三十一轮新增；第九十三轮挪到这里）。
+        //
+        // 高德收到广播后会去向车机（ecarx.naviservice）要区域信息，
+        // 车机回包后高德把城市**全局广播**出来 ——
+        // 真机上系统定位长期没有位置时，这是我们唯一的坐标来源入口。
+        // 已经有城市（本次进程拿到过 / 上次落盘过）就不再重复要。
+        runCatching {
+            if (com.cardesk.launcher.core.AmapCitySource.broadcastCity.isNullOrBlank() &&
+                prefs.weatherCity.isBlank()
+            ) {
+                Logx.i(LogTags.WEATHER, "启动时向高德索要区域信息")
+                com.cardesk.launcher.core.AmapCitySource.requestAreaInfo(context.applicationContext)
+            }
+        }.onFailure { Logx.w(LogTags.WEATHER, "向高德索要区域信息失败", it) }
+
+        // 每秒刷新：首帧已经画出来了，现在开始跑定时刷新。
+        handler.removeCallbacks(ticker)
         handler.post(ticker)
-        // 导航引导数据源
-        // 场景页建好就 new 一个 `AmapDesktopGuide` 并 start()。
-        // 没有导航时不显示任何东西（`visibility="gone"`）。
-        navGuideSource = com.cardesk.launcher.core.nav.AmapDesktopGuide(
-            context.applicationContext,
-            object : com.cardesk.launcher.core.nav.AmapDesktopGuide.Listener {
-                override fun onGuide(guide: com.cardesk.launcher.core.nav.AmapDesktopGuide.Guide) {
-                    navGuideRaw = guide
-                    if (guide.lanes.isNotEmpty()) navLanesRaw = guide.lanes
-                    applyNavGuide()
-                }
-
-                override fun onLanes(raw: String) {
-                    navLanesRaw = raw
-                    // 只有引导卡已经显示才重画
-                    if (navGuideRaw != null) applyNavGuide()
-                }
-
-                override fun onTrafficLight(signal: com.cardesk.launcher.core.nav.AmapTrafficLight.Signal?) {
-                    // 红绿灯是「最近路口」的瞬时信号：
-                    // 有就画，没有就不画（不占位）。
-                    // 收到新帧后立刻重画一次 —— 读秒要马上从车机给的值开始。
-                    //
-                    // 真正的信号状态放在 `AmapDesktopGuide` 里（那里判有效期、减读秒），
-                    // 这里不另存一份，免得两处状态打架。
-                    if (navGuideRaw != null) applyNavGuide()
-                }
-
-                override fun onStopped() {
-                    navGuideRaw = null
-                    navLanesRaw = null
-                    scenePage.setGuide(null)
-                }
-
-                override fun onCityChanged(city: String) {
-                    // 高德换了城市 → 重跑一轮天气。
-                    //
-                    // 真机上系统定位常常拿不到位置（provider 只有 passive,gps 且都没 fix），
-                    // 高德广播的城市是我们唯一的坐标来源（见 `core/AmapCitySource`）——
-                    // 城市一变就得立刻用新城市再取一次天气，不能等 30 分钟的定时刷新。
-                    Logx.i(LogTags.WEATHER, "高德城市变化，重跑天气", "city" to city)
-                    weatherDesk?.requestFresh()
-                }
-            },
-        )
+        refresh()
+        com.cardesk.launcher.core.StartupTrace.mark("servicesDone")
     }
 
     /**
@@ -466,8 +541,8 @@ class LauncherView(context: Context) : FrameLayout(context) {
             onOpen360 = { showCam() }
             onWallpaperDot = wallpaper
             onOpenSourceMenu = { openSourceMenu(scenePage.sourceAnchorRect) }
-            // 底部卡片长按拖拽排序的持久化（键 scene_bottom_card_order_v1）
-            orderStore = com.cardesk.launcher.core.BottomCardOrder.PrefsStore(prefs)
+            // 底部卡片布局（顺序 + 尺寸 + 显隐）的持久化（键 scene_card_layout_v2）
+            layoutStore = com.cardesk.launcher.core.CardLayout.PrefsStore(prefs)
             onToggleWindow = { closed ->
                 // 模拟通道自己消化车窗开闭（这样桌面上的状态会跟着变）；
                 // 真车通道走原厂的 VfmiscManager，车窗只有下发、没有车况回读。
@@ -556,11 +631,12 @@ class LauncherView(context: Context) : FrameLayout(context) {
         // 顶部状态栏
         statusBar = ShellStatusBar(context).apply {
             onAvatar = { showSettings() }
-            onAssist = { showHvac() }
+            // 第九十五轮补丁：「驾驶模式 · xx」胶囊 → 驾驶模式页（以前误绑到空调页）。
+            onAssist = { showDriveMode() }
         }
         content.addView(statusBar, Ui.frame(Design.W.toInt(), Design.H.toInt()))
 
-        // 底部一体化控制栏：1864×104，距底 8，水平居中
+        // 底部一体化控制栏：铺满屏宽×104，距底 8
         dock = DockBarView(context).apply {
             // 单击回首页（dockHome「单击返回首页」）
             // 第五十六轮：**先把盖在上面的浮层收掉** —— 抽屉开着的时候点 home，
@@ -613,6 +689,8 @@ class LauncherView(context: Context) : FrameLayout(context) {
         // 第五十六轮：启动就把「沉浸系统导航栏」写进 `policy_control` ——
         // 否则系统自带 Dock 平时还是那个状态，点桌面 Dock 就会把它唤出来。
         applyOemPolicy()
+        // 第九十三轮：UI 骨架构建完成（启动分段计时，见 core/StartupTrace）。
+        com.cardesk.launcher.core.StartupTrace.mark("uiBuilt")
     }
 
     /** 全屏启动一个应用（画中画降级卡片的「全屏打开」）。 */
@@ -813,6 +891,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
             com.cardesk.launcher.MainActivity.ACTION_SPLIT -> showPage(nextPage(page))
             com.cardesk.launcher.MainActivity.ACTION_SPLIT_LONG -> toggleDualPip()
             com.cardesk.launcher.MainActivity.ACTION_CAMERA360 -> showCam()
+            com.cardesk.launcher.MainActivity.ACTION_RECENTS -> showRecents()
             else -> Logx.w(LogTags.DOCK, "未知的全局 Dock 动作", "action" to action)
         }
     }
@@ -832,7 +911,12 @@ class LauncherView(context: Context) : FrameLayout(context) {
         val navInsets = runCatching {
             com.cardesk.launcher.core.dock.NavInsets.applied(context)
         }.getOrDefault(false)
-        val signature = policySignature(globalDock, navInsets)
+        // 第九十四轮：全局 Dock 默认开启后，悬浮窗权限的有无也会改变 policy 分支，
+        // 用户可能在系统设置里补授权限 —— 签名里必须带上它，否则桌面回前台不会重写。
+        val overlay = runCatching {
+            android.provider.Settings.canDrawOverlays(context)
+        }.getOrDefault(false)
+        val signature = policySignature(globalDock, navInsets, overlay)
         if (signature == lastPolicySignature) return
         Logx.i(
             LogTags.SYS,
@@ -843,8 +927,8 @@ class LauncherView(context: Context) : FrameLayout(context) {
         applyOemPolicy()
     }
 
-    private fun policySignature(globalDock: Boolean, navInsets: Boolean): String =
-        "global=$globalDock/navInsets=$navInsets"
+    private fun policySignature(globalDock: Boolean, navInsets: Boolean, overlay: Boolean): String =
+        "global=$globalDock/navInsets=$navInsets/overlay=$overlay"
 
     /** 下一个页面（：取模循环）。 */
     private fun nextPage(from: Int): Int = PageGesture.wrapIndex(from, 1, PAGE_COUNT)
@@ -954,7 +1038,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
 
     /**
      * 底部导航栏：有两套承载（06-F01/F02/F03）——
-     * 普通模式直接放设计版 Dock（1864×104，距底 8）；
+     * 普通模式直接放设计版 Dock（第九十四轮起铺满整屏宽 1920×104，距底 8）；
      * 增强导航栏模式把同一个 Dock 塞进贴底子窗的 pill（FitStrip 缩放），或换成槽位条（NavSlotBarView）。
      */
     private fun buildBottomBar() {
@@ -1012,8 +1096,9 @@ class LauncherView(context: Context) : FrameLayout(context) {
         } else {
             content.addView(
                 dock,
-                // 第五十轮对齐设计板 s01：Dock 1872 宽（左右各留 24），顶边 968。
-                FrameLayout.LayoutParams(1872, 104, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+                // 第九十四轮：Dock 铺满整屏宽（以前 1872、左右各留 24，
+                // 全局 Dock 窗口里会和底色的不透明条对不齐，其它应用里看就是两条缝）。
+                FrameLayout.LayoutParams(Design.W.toInt(), 104, Gravity.BOTTOM).apply {
                     bottomMargin = DOCK_BOTTOM_MARGIN
                 },
             )
@@ -1039,20 +1124,35 @@ class LauncherView(context: Context) : FrameLayout(context) {
     )
 
     /**
-     * 「最近任务」——增强导航栏的「应用列表槽走最近任务」。
-     * 本应用没有独立的最近任务页，用系统最近任务兜底。
+     * 「最近任务」——Dock 主页键长按、增强导航栏的主页槽双击/长按、应用列表槽长按。
+     *
+     * 第九十五轮 C3：不再退回 HOME（HOME 就是本桌面，等于「点了没反应」），
+     * 改成打开本应用自己的最近任务页；平台签名不可用时给明确提示。
      */
     private fun showRecents() {
         Logx.event(LogTags.APP, "打开最近任务")
-        val ok = runCatching {
-            context.startActivity(
-                android.content.Intent("android.intent.action.MAIN")
-                    .addCategory("android.intent.category.HOME")
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            )
-            true
-        }.getOrDefault(false)
-        if (!ok) toast("无法打开最近任务")
+        if (recentTasksPage != null) return
+        val page = RecentTasksPage(context, pal).apply {
+            onClose = { closeRecents() }
+            onOpenApp = { app ->
+                if (com.cardesk.launcher.core.RecentTasks(context).open(app)) {
+                    closeRecents()
+                } else {
+                    toast("无法打开 " + app.label)
+                }
+            }
+        }
+        recentTasksPage = page
+        // 与抽屉同一层：插在状态栏之前，状态栏和 Dock 仍然可见。
+        val index = if (::statusBar.isInitialized) content.indexOfChild(statusBar) else content.childCount
+        content.addView(page, index, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        page.playOpen()
+    }
+
+    private fun closeRecents() {
+        val page = recentTasksPage ?: return
+        recentTasksPage = null
+        page.playClose { content.removeView(page) }
     }
 
     /** 槽位条点击：动作按 ACTION_* 语义分发。 */
@@ -1410,6 +1510,46 @@ class LauncherView(context: Context) : FrameLayout(context) {
         page.playClose { content.removeView(page) }
     }
 
+    /**
+     * 状态栏「驾驶模式 · xx」胶囊点击（第九十五轮补丁）：弹出**驾驶模式快捷面板**。
+     *
+     * 面板里直接切模式（写车 + 回读校验）；切不动就提示失败，
+     * 并在面板底部保留「打开原厂驾驶模式页」兜底。
+     */
+    private fun showDriveMode() {
+        val info = runCatching { currentVehicleInfo() }.getOrNull()
+        val label = info?.driveModeLabel ?: com.cardesk.launcher.vehicle.DriveMode.UNKNOWN_LABEL
+        Logx.event(LogTags.DOCK, "状态栏驾驶模式胶囊点击", "mode" to label, "raw" to (info?.driveModeRaw ?: -1))
+        if (overlayDialog is com.cardesk.launcher.ui.dialogs.DriveModeDialog) return
+        lateinit var dialog: com.cardesk.launcher.ui.dialogs.DriveModeDialog
+        dialog = com.cardesk.launcher.ui.dialogs.DriveModeDialog(
+            context,
+            pal,
+            info?.driveModeRaw,
+            onSwitch = { value ->
+                com.cardesk.launcher.vehicle.VehicleController.setDriveMode(value) { ok, message ->
+                    dialog.showResult(ok, message)
+                    if (ok) {
+                        refresh()
+                        handler.postDelayed({
+                            if (overlayDialog === dialog) closeOverlayDialog(dialog)
+                        }, DRIVE_MODE_CLOSE_DELAY_MS)
+                    }
+                }
+            },
+            onMoreSettings = {
+                closeOverlayDialog(dialog)
+                if (!com.cardesk.launcher.core.SystemSettingsCatalog.openDriveMode(context)) {
+                    showSettings()
+                    settings?.showPageKey("oemsettings")
+                    toast("这台车机没有独立的驾驶模式页，已打开原厂设置")
+                }
+            },
+        )
+        dialog.onClose = { closeOverlayDialog(dialog) }
+        showOverlayDialog(dialog)
+    }
+
     private fun showHvac() {
         if (hvac != null) return
         Logx.event(LogTags.HVAC, "打开空调面板")
@@ -1761,12 +1901,16 @@ private fun showCam() {
         val navInsets = runCatching {
             com.cardesk.launcher.core.dock.NavInsets.applied(context)
         }.getOrDefault(false)
-        lastPolicySignature = policySignature(globalDock, navInsets)
+        val overlay = runCatching {
+            android.provider.Settings.canDrawOverlays(context)
+        }.getOrDefault(false)
+        lastPolicySignature = policySignature(globalDock, navInsets, overlay)
         Logx.i(
             LogTags.SYS,
             "应用原车 Dock/状态栏策略",
             "globalDock" to globalDock,
             "navInsets" to navInsets,
+            "overlay" to overlay,
             "hideDock" to prefs.hideDock,
             "hideStatus" to prefs.hideStatus,
             "oemNavImmersive" to prefs.oemNavImmersive,
@@ -1830,12 +1974,19 @@ private fun showCam() {
         content.addView(dialog, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
+    /** 设置页改了桌面卡片布局后，让场景页立刻按新布局重排。 */
+    private fun reloadSceneCardLayout() {
+        val store = com.cardesk.launcher.core.CardLayout.PrefsStore(prefs)
+        scenePage.cardLayout = store.load() ?: com.cardesk.launcher.core.CardLayout.DEFAULT
+    }
+
     private fun showSettings() {
         if (settings != null) return
         Logx.event(LogTags.SETTING, "打开设置页")
         val overlay = SettingsOverlay(context, prefs, pal)
         overlay.onClose = { closeSettings() }
         overlay.onApply = { onSettingsApplied() }
+        overlay.onCardLayoutChanged = { reloadSceneCardLayout() }
         overlay.onEditNavSlots = {
             closeSettings()
             showNavSlots()
@@ -2511,6 +2662,11 @@ private fun showCam() {
             closeSettings()
             return true
         }
+        // 第九十五轮补丁：最近任务面板也是全屏浮层，BACK 要先收掉它（否则会一直叠在桌面/设置下面）。
+        if (recentTasksPage != null) {
+            closeRecents()
+            return true
+        }
         hvac?.let { it.dismiss(); return true }
         if (climate != null) {
             closeClimate()
@@ -2566,20 +2722,16 @@ private fun showCam() {
         MusicController.get().addListener(mediaListener)
         // 导航引导数据源跟着窗口生命周期起停
         navGuideSource?.start()
-        // 接收器注册好之后，再向高德**索要区域信息**（第三十一轮新增）。
-        //
-        // 高德收到 的广播后会去向车机（ecarx.naviservice）要区域信息，
-        // 车机回包后高德把城市**全局广播**出来——
-        // 真机上系统定位长期没有位置时，这是我们唯一的坐标来源入口。
-        //
-        // 已经有城市（本次进程拿到过 / 上次落盘过）就不再重复要。
-        val prefs = com.cardesk.launcher.core.Prefs(context)
-        if (com.cardesk.launcher.core.AmapCitySource.broadcastCity.isNullOrBlank() &&
-            prefs.weatherCity.isBlank()
-        ) {
-            Logx.i(LogTags.WEATHER, "启动时向高德索要区域信息")
-            com.cardesk.launcher.core.AmapCitySource.requestAreaInfo(context.applicationContext)
+        // 第九十三轮：窗口重建（后台回来 / 重新 addView）时把定时刷新重新挂上 ——
+        // onDetachedFromWindow() 里 removeCallbacksAndMessages(null) 会把它清掉。
+        if (servicesStarted) {
+            handler.removeCallbacks(ticker)
+            handler.post(ticker)
+            refresh()
         }
+        // 「向高德索要区域信息」也挪到 startServices()（第九十三轮冷启动修复）：
+        // 这是要发广播去问车机/高德的跨进程动作，挂在 onAttachedToWindow 里
+        // 就等于排在首帧前面。现在等桌面画出第一帧、服务启动时再要。
     }
 
     override fun onDetachedFromWindow() {

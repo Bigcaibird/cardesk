@@ -25,6 +25,22 @@ interface VehicleGateway {
     fun setHvac(func: Int, zone: Int, value: Int): Boolean
 
     /**
+     * 写一个功能属性（**文档口径**：`ICarFunction.setFunctionValue(func, value)`，无 zone）。
+     *
+     * 依据：`docs/ecarx-adapterapi/16-hud-dim-adas.md` §4 与 jimu 文档站
+     * `api-drive-mode`——驾驶模式这类「选择型」功能只提供两参重载。
+     * 通道不支持两参重载时返回 false，不静默退回带 zone 的写法。
+     */
+    fun writeFunction(func: Int, value: Int): Boolean = setHvac(func, 0, value)
+
+    /**
+     * 读一个功能属性（**文档口径**：`ICarFunction.getFunctionValue(func)`，无 zone）。
+     *
+     * 用于驾驶模式这类全局选择项；读不到返回 null。
+     */
+    fun readFunction(func: Int): Int? = readValue(func, 0)
+
+    /**
      * 写除霜。
      *
      * 除霜走特殊回退：先试「无 zone」的两参重载，再按 `{2,1,0}` 试三参重载

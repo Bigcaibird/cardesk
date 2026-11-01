@@ -24,7 +24,7 @@ import com.cardesk.launcher.vehicle.HvacState
 import kotlin.math.abs
 
 /**
- * 底部一体化控制栏（布局：1864×104，圆角 40，玻璃底 #6b162e2c）。
+ * 底部一体化控制栏（布局：铺满屏宽×104（1920 板上 1920 宽），圆角 40，玻璃底 #6b162e2c）。
  *
  * 从左到右：主页 / 应用抽屉 / 分屏 / 360 · 媒体卡(400×88) · 弹性留白 ·
  * 电源 · 主驾温度 −/+ · 风量 7 段 · 副驾温度 −/+ · A/C · AUTO · 内外循环 · 前除霜 · 后除霜。
@@ -1336,7 +1336,20 @@ private fun tempItem(canvas: Canvas, right: Float, passenger: Boolean): Float {
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        setMeasuredDimension(1864, 104)
+        // 第九十四轮：Dock 铺满屏宽。
+        //
+        // 以前这里把宽度钉死 1864，而宿主给的是 1872（桌面）/1920（全局 Dock），
+        // 于是 Dock 玻璃条两侧永远空一条缝 —— 在其它应用里尤其明显：
+        // 左边 24 + 右边 32 露出底层不透明条，看起来像「Dock 没铺满」。
+        // 现在按父布局给的实际宽度测量，只保留 104 的固定设计高。
+        val w = when (View.MeasureSpec.getMode(widthMeasureSpec)) {
+            View.MeasureSpec.EXACTLY,
+            View.MeasureSpec.AT_MOST,
+            -> View.MeasureSpec.getSize(widthMeasureSpec)
+
+            else -> com.cardesk.launcher.core.Design.W.toInt()
+        }
+        setMeasuredDimension(w, 104)
     }
 
     companion object {

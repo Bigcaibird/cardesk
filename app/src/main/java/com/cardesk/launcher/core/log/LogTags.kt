@@ -52,6 +52,7 @@ object LogTags {
     const val SCENE = "CarDesk/Scene"
     const val DOCK = "CarDesk/Dock"
     const val DRAWER = "CarDesk/Drawer"
+    const val RECENT = "CarDesk/Recent"
     const val SETTING = "CarDesk/Setting"
     const val TASK = "CarDesk/Task"
     const val LAN = "CarDesk/Lan"

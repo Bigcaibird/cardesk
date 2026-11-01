@@ -50,25 +50,29 @@ class AmapTrafficLightTest {
 
     @Test
     fun `官方协议 trafficLightStatus 为 4 时判绿灯`() {
-        val signal = AmapTrafficLight.standard(standard(status = 4, greenLastSecond = 12))
+        // 绿灯帧的读秒同样取 `redLightCountDownSeconds`（距离下次变灯的秒数）；
+        // `greenLightLastSecond` 只是灯态伴随标志（绿=3），不参与读秒。
+        val signal = AmapTrafficLight.standard(
+            standard(status = 4, redCountdown = 12, greenLastSecond = 3),
+        )
         assertNotNull(signal)
         assertEquals(AmapTrafficLight.Lamp.GREEN, signal!!.lamp)
-        // 绿灯读秒取的是绿灯自己的秒数
         assertEquals(12, signal.countdownSeconds)
         assertEquals(4, signal.rawStatus)
     }
 
     @Test
-    fun `官方协议 绿灯时不拿红灯倒计时当读秒`() {
-        // 这一条就是真车报的那个毛病：
-        // 以前只看「红灯倒计时 > 0」就判红，绿灯期间那个字段照样可能是正数 ⇒ 绿灯画成红灯。
-        // 现在灯态看 `trafficLightStatus`，读秒也跟着灯态走。
+    fun `官方协议 绿灯读秒取变灯倒计时 不是 greenLast`() {
+        // 这一条就是用户报的那个毛病：
+        // 旧实现绿灯时拿 `greenLightLastSecond` 当读秒，而它恒为 3（灯态伴随标志），
+        // 于是绿灯倒计时在 3/2 之间来回跳。
+        // 定论：60073 的 `redLightCountDownSeconds` 才是变灯倒计时，对所有灯态都适用。
         val signal = AmapTrafficLight.standard(
-            standard(status = 4, redCountdown = 23, greenLastSecond = 9),
+            standard(status = 4, redCountdown = 23, greenLastSecond = 3),
         )
         assertNotNull(signal)
         assertEquals(AmapTrafficLight.Lamp.GREEN, signal!!.lamp)
-        assertEquals(9, signal.countdownSeconds)
+        assertEquals(23, signal.countdownSeconds)
     }
 
     @Test
@@ -81,12 +85,14 @@ class AmapTrafficLightTest {
     }
 
     @Test
-    fun `官方协议 认不出的灯态按读秒字段兜底`() {
-        // 高德要是换了枚举取值，我们不猜它是什么意思，
-        // 改用自带字段名的读秒兜底 —— 不能退回到「永远画红灯」。
-        val green = AmapTrafficLight.standard(standard(status = 99, greenLastSecond = 9))
+    fun `官方协议 认不出的灯态按伴随标志和变灯倒计时兜底`() {
+        // 高德要是换了枚举取值，我们不猜它是什么意思：
+        // 按 dudu 的成对条件退到灯态伴随标志（绿=3），
+        // 再退到「变灯倒计时 > 0 ⇒ 正在等灯，按红灯画」。
+        val green = AmapTrafficLight.standard(standard(status = 99, greenLastSecond = 3))
         assertEquals(AmapTrafficLight.Lamp.GREEN, green!!.lamp)
-        assertEquals(9, green.countdownSeconds)
+        // 缺 `redLightCountDownSeconds` 就不给读秒 —— 绝不拿 greenLast(=3) 顶替。
+        assertNull(green.countdownSeconds)
 
         val red = AmapTrafficLight.standard(standard(status = 99, redCountdown = 7))
         assertEquals(AmapTrafficLight.Lamp.RED, red!!.lamp)
@@ -140,17 +146,54 @@ class AmapTrafficLightTest {
         assertEquals(AmapTrafficLight.Lamp.UNKNOWN, signal.lamp)
     }
 
-    @Test
-    fun `官方协议 绿灯剩余秒数只在绿灯时用`() {
-        // `greenLightLastSecond` 是「绿灯剩余秒数」——
-        // 灯态是绿的时候拿它当读秒，灯态不是绿的时候不碰它。
-        val green = AmapTrafficLight.standard(standard(status = 4, greenLastSecond = 18))
-        assertEquals(18, green!!.countdownSeconds)
+    // ------------------------------------------------ 绿灯倒计时回归（用户报障）
 
-        // 灯态是红的时候，绿灯的秒数不参与（读秒走红灯倒计时）
-        val red = AmapTrafficLight.standard(standard(status = 1, redCountdown = 6, greenLastSecond = 18))
-        assertEquals(AmapTrafficLight.Lamp.RED, red!!.lamp)
-        assertEquals(6, red.countdownSeconds)
+    @Test
+    fun `回归 绿灯帧 greenLast=3 status=4 red=12 时读秒是 12`() {
+        // 真车绿灯帧的典型形态：greenLightLastSecond 恒为 3，变灯倒计时在 redLightCountDownSeconds。
+        // 读秒必须取后者，而不是拿伴随标志的 3 当秒数。
+        val signal = AmapTrafficLight.standard(
+            standard(status = 4, redCountdown = 12, greenLastSecond = 3),
+        )
+        assertNotNull(signal)
+        assertEquals(AmapTrafficLight.Lamp.GREEN, signal!!.lamp)
+        assertEquals(12, signal.countdownSeconds)
+    }
+
+    @Test
+    fun `回归 绿灯帧 red=0 时不下发错误秒数`() {
+        // `0` 是合法的「马上变灯」，照常下发；显示层对 0 画「—」。
+        // 关键是不能把 greenLast 的 3 当读秒下发 —— 那正是用户看到的错误数字。
+        val signal = AmapTrafficLight.standard(
+            standard(status = 4, redCountdown = 0, greenLastSecond = 3),
+        )
+        assertNotNull(signal)
+        assertEquals(AmapTrafficLight.Lamp.GREEN, signal!!.lamp)
+        assertEquals(0, signal.countdownSeconds)
+        assertEquals("—", NavGuideText.trafficCountdownText(signal.countdownSeconds))
+    }
+
+    @Test
+    fun `回归 绿灯帧缺 red 字段时不给读秒 绝不回落到 greenLast`() {
+        // 宁可不显示读秒（画「—」），也不显示一个假的 3。
+        val signal = AmapTrafficLight.standard(
+            standard(status = 4, greenLastSecond = 3),
+        )
+        assertNotNull(signal)
+        assertEquals(AmapTrafficLight.Lamp.GREEN, signal!!.lamp)
+        assertNull(signal.countdownSeconds)
+        assertEquals("—", NavGuideText.trafficCountdownText(signal.countdownSeconds))
+    }
+
+    @Test
+    fun `回归 红灯帧 red=8 时读秒是 8`() {
+        // 红灯帧沿用同一口径，确认改动没有把红灯读秒改坏。
+        val signal = AmapTrafficLight.standard(
+            standard(status = 1, redCountdown = 8, greenLastSecond = 0),
+        )
+        assertNotNull(signal)
+        assertEquals(AmapTrafficLight.Lamp.RED, signal!!.lamp)
+        assertEquals(8, signal.countdownSeconds)
     }
 
     @Test

@@ -366,7 +366,8 @@ class GlobalDockService : Service() {
     private fun wireCallbacks(bar: DockBarView) {
         bar.activePage = 0
         bar.onHome = { goHome() }
-        bar.onHomeLongPress = { sendSystemBack() }
+        // 第九十五轮 C3：主页键长按 = 最近任务（回桌面打开我们自己的最近任务页）。
+        bar.onHomeLongPress = { toLauncher(MainActivity.ACTION_RECENTS) }
 
         bar.onApps = { toLauncher(MainActivity.ACTION_DRAWER) }
         bar.onAppsDrawer = { toLauncher(MainActivity.ACTION_DRAWER) }
@@ -665,12 +666,12 @@ class GlobalDockService : Service() {
         /** 底栏条设计高：Dock 104 + 底边距 8。 */
         private const val DESIGN_BAR_HEIGHT = 112
 
-        /** Dock 自身设计尺寸（与 `LauncherView.buildBottomBar` 一致）。 */
-        private const val DESIGN_DOCK_WIDTH = 1872
+        /** Dock 自身设计尺寸（与 `LauncherView.buildBottomBar` 一致，第九十四轮起铺满全宽）。 */
+        private const val DESIGN_DOCK_WIDTH = DESIGN_WIDTH
         private const val DESIGN_DOCK_HEIGHT = 104
 
-        /** Dock 设计坐标左内边距（1920 板宽下 Dock 居中： (1920-1872)/2 = 24）。 */
-        private const val DOCK_LEFT_MARGIN = 24
+        /** Dock 设计坐标左内边距（第九十四轮铺满整屏宽后不再留边）。 */
+        private const val DOCK_LEFT_MARGIN = 0
 
         /** 不透明底栏颜色：Dock 玻璃底 `#6b162e2c` 的同色系不透明值。 */
         private const val OPAQUE_BAR_COLOR = 0xFF162E2C.toInt()
