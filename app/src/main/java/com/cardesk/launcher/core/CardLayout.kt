@@ -18,15 +18,33 @@ object CardLayout {
     const val TIRE = "tire"
     const val CAR = "car"
 
-    /** 第九十五轮迭代 2 新增的可选卡片（默认不显示，从「卡片库」添加）。 */
-    const val TRIP = "trip"
+    /**
+     * 第九十五轮迭代 2 新增的可选卡片（默认不显示，从「卡片库」添加）。
+     *
+     * 第九十六轮：原来的单张 `trip` 卡拆成两张——
+     * [TRIP1] 行程1（总行程，只读）、[TRIP2] 行程2（自复位，可复位）。
+     * 旧偏好里的 `trip` 在 [normalize] 里迁移到 [TRIP1]，不会丢用户布局。
+     */
+    const val TRIP1 = "trip1"
+    const val TRIP2 = "trip2"
     const val STATUS = "status"
 
+    /** 旧 id（第九十五轮的单张行程卡）；只用于迁移，不再出现在 [ALL] 里。 */
+    const val LEGACY_TRIP = "trip"
+
     /** 全部可布局的卡片，顺序即默认顺序。 */
-    val ALL: List<String> = listOf(QUICK, MUSIC, CLIMATE, TIRE, CAR, TRIP, STATUS)
+    val ALL: List<String> = listOf(QUICK, MUSIC, CLIMATE, TIRE, CAR, TRIP1, TRIP2, STATUS)
 
     /** 默认就显示的卡（其余从卡片库添加）。 */
-    private val DEFAULT_VISIBLE = setOf(QUICK, MUSIC, CLIMATE, TIRE, CAR)
+    /**
+     * 默认可见的卡（第九十六轮起）：**快捷应用卡默认移除**，
+     * 原来在天气下面那张「行程数据」挪到底部卡片行（左起第一张）。
+     *
+     * 需求原文：「1.把快捷应用卡片默认移除，把天气下面的行程卡挪过来」——
+     * 后续第九十六轮补丁把续航与行程1 **位置互换**，所以现在默认布局是
+     * 续航 / 音乐 / 空调 / 胎压 / 行程1；快捷应用卡收进卡片库，需要时自己加。
+     */
+    private val DEFAULT_VISIBLE = setOf(TRIP1, MUSIC, CLIMATE, TIRE, CAR)
 
     /** 偏好键（第九十五轮起，替代旧的 `scene_bottom_card_order_v1`）。 */
     const val KEY = "scene_card_layout_v2"
@@ -38,10 +56,79 @@ object CardLayout {
         CLIMATE -> "空调"
         TIRE -> "胎压"
         CAR -> "车况"
-        TRIP -> "行程"
+        TRIP1 -> "行程1（总）"
+        TRIP2 -> "行程2（自复位）"
         STATUS -> "车门车窗"
+        LEGACY_TRIP -> "行程"
         else -> id
     }
+
+    /** 把历史 id 迁移到当前 id（目前只有 `trip` → `trip1`）。 */
+    fun migrate(id: String): String = if (id == LEGACY_TRIP) TRIP1 else id
+
+    /** 「快捷应用 → 行程1」一次性迁移的偏好标记（第九十六轮）。 */
+    const val MIGRATE_QUICK_KEY = "card_layout_quick_to_trip_v1"
+
+    /** 「行程/续航尺寸互换」一次性迁移的偏好标记（第九十六轮补丁 5）。 */
+    const val MIGRATE_SIZES_KEY = "card_layout_sizes_v1"
+
+    /**
+     * 一次性把行程1/续航卡固定成各自的互换后尺寸。
+     *
+     * 用户口径「行程和续航大小互换」：行程卡 ≈311、续航卡 ≈420。
+     * 之前两张都是「自适应」，遇到用户加过别的卡（剩余宽度不够）时续航会被挤小，
+     * 看起来就像没互换；这里把两张卡都固定成 MEDIUM 档，宽度就稳定了。
+     */
+    fun migrateSizes(layout: List<Slot>): List<Slot> = layout.map { slot ->
+        when (slot.id) {
+            TRIP1 -> slot.copy(size = Size.MEDIUM)
+            CAR -> slot.copy(size = Size.MEDIUM)
+            else -> slot
+        }
+    }
+
+    /** 「续航 ↔ 行程1 位置互换」一次性迁移的偏好标记（第九十六轮补丁 7）。 */
+    const val MIGRATE_SWAP_KEY = "card_layout_swap_car_trip_v1"
+
+    /**
+     * 一次性把续航卡与行程1卡的位置互换。
+     *
+     * 用户口径：让「续航」排到最左、「行程1」排到原来续航的位置；
+     * 只换位置，不动各自的尺寸/显隐。
+     */
+    fun migrateSwapCarTrip(layout: List<Slot>): List<Slot> {
+        val carIndex = layout.indexOfFirst { it.id == CAR }
+        val tripIndex = layout.indexOfFirst { it.id == TRIP1 }
+        if (carIndex < 0 || tripIndex < 0 || carIndex == tripIndex) return layout
+        val out = layout.toMutableList()
+        val car = layout[carIndex]
+        val trip = layout[tripIndex]
+        out[carIndex] = trip.copy(size = car.size, visible = car.visible)
+        out[tripIndex] = car.copy(size = trip.size, visible = trip.visible)
+        return out
+    }
+
+    /**
+     * 一次性迁移（第九十六轮）：把快捷应用卡收进卡片库，行程1 挪到最左并显示。
+     *
+     * 只在升级后的第一次读到布局时执行，之后用户怎么拖都不会再被动。
+     * 其它卡的位置 / 尺寸 / 显隐原样保留。
+     */
+    fun migrateQuickToTrip(layout: List<Slot>): List<Slot> {
+        val trip = layout.firstOrNull { it.id == TRIP1 } ?: Slot(TRIP1, Size.AUTO, true)
+        val rest = layout.filter { it.id != TRIP1 && it.id != QUICK }
+        val quick = layout.firstOrNull { it.id == QUICK } ?: Slot(QUICK, Size.AUTO, false)
+        return normalize(listOf(trip.copy(visible = true)) + rest + quick.copy(visible = false))
+    }
+
+    /**
+     * 旧「行程」卡迁移时**一律按隐藏处理**（第九十六轮修正）。
+     *
+     * 需求原文：「不要默认加上来，做到卡片库里就行」——
+     * 行程1/行程2 是卡片库能力，升级不替用户做决定：之前显示过旧行程卡的用户，
+     * 升级后行程1 也先收进卡片库，需要时自己点「添加」。
+     */
+    private fun legacySlot(slot: Slot): Slot = Slot(TRIP1, slot.size, visible = false)
 
     /**
      * 尺寸档位。
@@ -61,8 +148,20 @@ object CardLayout {
     /** 一张卡在默认布局里的样子（新增卡默认隐藏，等用户从卡片库添加）。 */
     fun defaultSlot(id: String): Slot = Slot(id, Size.AUTO, visible = id in DEFAULT_VISIBLE)
 
-    /** 默认布局：与第九十四轮之前一致的 5 张卡；行程/车门车窗卡默认隐藏。 */
-    val DEFAULT: List<Slot> = ALL.map { defaultSlot(it) }
+    /**
+     * 默认布局：行程1 在左起第一张（原来快捷应用卡的位置），
+     * 依次是 音乐 / 空调 / 胎压 / 续航；快捷应用、行程2、车门车窗只进卡片库。
+     */
+    val DEFAULT: List<Slot> = listOf(
+        defaultSlot(CAR).copy(size = Size.MEDIUM),
+        defaultSlot(QUICK),
+        defaultSlot(MUSIC),
+        defaultSlot(CLIMATE),
+        defaultSlot(TIRE),
+        defaultSlot(TRIP1).copy(size = Size.MEDIUM),
+        defaultSlot(TRIP2),
+        defaultSlot(STATUS),
+    )
 
     /** 编码成一行：`quick:AUTO:1,music:MEDIUM:1,...`。 */
     fun encode(layout: List<Slot>): String =
@@ -76,7 +175,8 @@ object CardLayout {
             if (part.isBlank()) continue
             val fields = part.split(':')
             if (fields.size != 3) return null
-            val id = fields[0]
+            val legacy = fields[0] == LEGACY_TRIP
+            val id = migrate(fields[0])
             if (id !in ALL) return null
             val size = Size.entries.firstOrNull { it.name == fields[1] } ?: return null
             val visible = when (fields[2]) {
@@ -85,7 +185,8 @@ object CardLayout {
                 else -> return null
             }
             if (parsed.any { it.id == id }) return null
-            parsed.add(Slot(id, size, visible))
+            // 旧行程卡即使存的是「可见」，也按卡片库能力处理：升级不自动上桌。
+            parsed.add(Slot(id, size, if (legacy) false else visible))
         }
         return if (parsed.isEmpty()) null else normalize(parsed)
     }
@@ -94,9 +195,10 @@ object CardLayout {
     fun normalize(layout: List<Slot>): List<Slot> {
         val out = ArrayList<Slot>(ALL.size)
         for (slot in layout) {
-            if (slot.id !in ALL) continue
-            if (out.any { it.id == slot.id }) continue
-            out.add(slot)
+            val id = migrate(slot.id)
+            if (id !in ALL) continue
+            if (out.any { it.id == id }) continue
+            out.add(if (id == slot.id) slot else legacySlot(slot))
         }
         for (id in ALL) {
             if (out.none { it.id == id }) out.add(defaultSlot(id))
@@ -199,7 +301,39 @@ object CardLayout {
     }
 
     class PrefsStore(private val prefs: Prefs) : Store {
-        override fun load(): List<Slot>? = decode(prefs.stringValue(KEY, ""))
+        override fun load(): List<Slot>? {
+            val saved = decode(prefs.stringValue(KEY, ""))
+            if (saved == null) {
+                // 全新安装：DEFAULT 本身就是迁移后的最终形态，直接落盘并把迁移标记置位，
+                // 避免「先迁移快捷应用、再互换位置」把默认顺序又挪一遍。
+                save(DEFAULT)
+                prefs.setFlag(MIGRATE_QUICK_KEY, true)
+                prefs.setFlag(MIGRATE_SIZES_KEY, true)
+                prefs.setFlag(MIGRATE_SWAP_KEY, true)
+                return DEFAULT
+            }
+            var current: List<Slot>? = saved
+            if (!prefs.flag(MIGRATE_QUICK_KEY, false)) {
+                // 第九十六轮一次性迁移：快捷应用收进卡片库、行程1 挪到最左。
+                current = migrateQuickToTrip(current ?: DEFAULT)
+                save(current)
+                prefs.setFlag(MIGRATE_QUICK_KEY, true)
+            }
+            if (!prefs.flag(MIGRATE_SIZES_KEY, false)) {
+                // 第九十六轮补丁 5：行程/续航互换后的尺寸固定下来，避免被剩余宽度挤变形。
+                current = migrateSizes(current ?: DEFAULT)
+                save(current)
+                prefs.setFlag(MIGRATE_SIZES_KEY, true)
+            }
+            if (!prefs.flag(MIGRATE_SWAP_KEY, false)) {
+                // 第九十六轮补丁 7：续航卡与行程1卡位置互换（续航排最左、行程1 收尾）。
+                current = migrateSwapCarTrip(current ?: DEFAULT)
+                save(current)
+                prefs.setFlag(MIGRATE_SWAP_KEY, true)
+            }
+            return current
+        }
+
         override fun save(layout: List<Slot>) {
             prefs.setStringValue(KEY, encode(normalize(layout)))
         }

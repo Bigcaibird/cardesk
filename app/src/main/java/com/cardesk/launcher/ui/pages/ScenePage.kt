@@ -287,13 +287,15 @@ class ScenePage(context: Context) : View(context) {
     private var windowPendingClosed = true
 
     /** 行程卡「四项都读不到」的状态是否已经记过日志（避免每秒刷屏）。 */
-    private var tripCardEmptyLogged = false
 
     /** 车况卡「全读不到」的状态是否已经记过日志（避免每秒刷屏）。 */
     private var carStatusEmptyLogged = false
 
     /** 点击车窗图标的回调（用于下发关窗指令 0/50）。 */
     var onToggleWindow: ((Boolean) -> Unit)? = null
+
+    /** 行程2 卡「复位」点击（确认弹窗由宿主弹出）。 */
+    var onTripReset: (() -> Unit)? = null
 
     fun bind(info: VehicleInfo, state: HvacState, wallpaper: Int) {
         this.info = info
@@ -388,28 +390,77 @@ class ScenePage(context: Context) : View(context) {
     }
 
     /**
-     * 卡片库新增的「行程」卡（第九十五轮 C2 迭代 2）：2×2 紧凑版行程数据。
+     * 行程1（总行程）卡（第九十六轮）：2×2 紧凑版。
      *
-     * 与右上角行程卡同一份数据，只是塞进 150 高的底部卡。
+     * 数据来源是 VHAL `TS_TripDistance / TS_TripTime / TS_TripAverageConsumption`
+     * （文档 `15-energy-trip-tpms.md` §5.1），见 [com.cardesk.launcher.vehicle.TripSignals]。
      */
-    private fun drawTripBottomCard(canvas: Canvas, rect: RectF) {
+    private fun drawTrip1Card(canvas: Canvas, rect: RectF) {
         card(canvas, rect)
         val i = info
         text.textAlign = Paint.Align.LEFT
         text.typeface = Typeface.DEFAULT
         text.textSize = 22f
         text.color = Skin.TEXT_DIM
-        canvas.drawText("行程", rect.left + 20f, rect.top + 34f, text)
+        canvas.drawText("行程1 · 总", rect.left + 20f, rect.top + 34f, text)
 
         val pad = 20f
         val cw = (rect.width() - pad * 2f) / 2f
         val colX = floatArrayOf(rect.left + pad, rect.left + pad + cw)
         val rowTop = floatArrayOf(rect.top + 48f, rect.top + 100f)
         val cellW = cw - 6f
-        drawTripCell(canvas, colX[0], rowTop[0], "总里程", VehicleStats.formatOdometer(i?.odometerKm?.takeIf { it > 0 }), cellW)
-        drawTripCell(canvas, colX[1], rowTop[0], "平均油耗", VehicleStats.formatFuelConsumption(i?.avgFuelConsumption), cellW)
-        drawTripCell(canvas, colX[0], rowTop[1], "行程里程", VehicleStats.formatTripDistanceKm(i?.tripKm), cellW)
-        drawTripCell(canvas, colX[1], rowTop[1], "行程时长", VehicleStats.formatTripDuration(i?.tripDurationMs), cellW)
+        drawTripCell(canvas, colX[0], rowTop[0], "里程", VehicleStats.formatTripDistanceKm(i?.trip1Km), cellW)
+        drawTripCell(
+            canvas, colX[1], rowTop[0], "时长",
+            i?.trip1DurationMin?.let { VehicleStats.formatTripDuration(it * 60_000.0) } ?: "—",
+            cellW,
+        )
+        drawTripCell(canvas, colX[0], rowTop[1], "平均油耗", VehicleStats.formatFuelConsumption(i?.trip1AvgFuel), cellW)
+        drawTripCell(canvas, colX[1], rowTop[1], "总里程", VehicleStats.formatOdometer(i?.odometerKm?.takeIf { it > 0 }), cellW)
+    }
+
+    /**
+     * 行程2（自复位行程）卡（第九十六轮）：2×2 + 复位胶囊。
+     *
+     * 读数优先走 `ITripData.getLatestDrivingInfo()`（文档里唯一可用的行程2 API），
+     * 读不到再由 [com.cardesk.launcher.vehicle.TripSignals] 的 TS 属性兜底。
+     * 复位没有文档化可写路径（jar 里只有常量），所以点「复位」走多路尝试 + 回读验证。
+     */
+    private fun drawTrip2Card(canvas: Canvas, rect: RectF) {
+        card(canvas, rect)
+        val i = info
+        text.textAlign = Paint.Align.LEFT
+        text.typeface = Typeface.DEFAULT
+        text.textSize = 22f
+        text.color = Skin.TEXT_DIM
+        canvas.drawText("行程2 · 复位后累计", rect.left + 20f, rect.top + 34f, text)
+
+        // 右上角「复位」胶囊
+        val k = (rect.width() / TRIP2_BOTTOM_CARD_W).coerceIn(0.6f, 1.2f)
+        val pillW = 74f * k
+        val pillH = 30f * k
+        val pill = RectF(rect.right - 16f * k - pillW, rect.top + 12f * k, rect.right - 16f * k, rect.top + 12f * k + pillH)
+        canvas.drawRoundRect(pill, pillH / 2f, pillH / 2f, Paint(fill).apply { color = Skin.CHIP_FILL })
+        canvas.drawRoundRect(pill, pillH / 2f, pillH / 2f, Paint(stroke).apply {
+            color = Skin.CHIP_STROKE
+            strokeWidth = 1f
+        })
+        text.textSize = 16f * k
+        text.textAlign = Paint.Align.CENTER
+        text.typeface = Typeface.DEFAULT
+        text.color = Skin.ACCENT
+        val baseline = pill.centerY() - (text.descent() + text.ascent()) / 2f
+        canvas.drawText("复位", pill.centerX(), baseline, text)
+        hits["tripReset"] = pill
+
+        val pad = 20f
+        val cw = (rect.width() - pad * 2f) / 2f
+        val colX = floatArrayOf(rect.left + pad, rect.left + pad + cw)
+        val rowTop = floatArrayOf(rect.top + 52f, rect.top + 104f)
+        val cellW = cw - 6f
+        drawTripCell(canvas, colX[0], rowTop[0], "里程", VehicleStats.formatTripDistanceKm(i?.tripKm), cellW)
+        drawTripCell(canvas, colX[1], rowTop[0], "时长", VehicleStats.formatTripDuration(i?.tripDurationMs), cellW)
+        drawTripCell(canvas, colX[0], rowTop[1], "平均油耗", VehicleStats.formatFuelConsumption(i?.avgFuelConsumption), cellW)
     }
 
     /**
@@ -518,7 +569,7 @@ class ScenePage(context: Context) : View(context) {
         hits.clear()
         drawGuide(canvas)
         drawWeather(canvas)
-        drawTripCard(canvas)
+        // 第九十六轮：天气下面那张「行程数据」卡挪到底部卡片行，这里不再画。
         drawCarStatusCard(canvas)
         drawCenterLyric(canvas)
         drawBottomCards(canvas)
@@ -1266,55 +1317,6 @@ class ScenePage(context: Context) : View(context) {
      *
      * **无数据不占位**：四项全读不到时整张卡不画（与「没有歌词不占位」同一口径）。
      */
-    private fun drawTripCard(canvas: Canvas) {
-        val i = info ?: return
-        val odo = i.odometerKm.takeIf { it > 0 }
-        val fuel = i.avgFuelConsumption
-        val tripKm = i.tripKm
-        val tripMs = i.tripDurationMs
-        if (odo == null && fuel == null && tripKm == null && tripMs == null) {
-            // 只在「从有值变成没值」时记一条，避免每秒刷屏。
-            if (tripCardEmptyLogged) return
-            tripCardEmptyLogged = true
-            Logx.w(LogTags.SIGNAL, "行程卡无数据（总里程/油耗/行程都读不到）")
-            return
-        }
-        tripCardEmptyLogged = false
-
-        val r = RectF(
-            rightEnd - TRIP_CARD_RIGHT_INSET - TRIP_CARD_W,
-            TRIP_CARD_TOP,
-            rightEnd - TRIP_CARD_RIGHT_INSET,
-            TRIP_CARD_TOP + TRIP_CARD_H,
-        )
-        card(canvas, r)
-
-        // —— 标题（设计板：22px 弱文字，距左 18 / 距上 14）——
-        text.textAlign = Paint.Align.LEFT
-        text.typeface = Typeface.DEFAULT
-        text.textSize = 22f
-        text.color = Skin.TEXT_DIM
-        canvas.drawText("行程数据", r.left + 18f, r.top + 32f, text)
-
-        // —— 2×2 KV：标签 19px 次文字 + 数值 24px 粗体（设计板 `.kv` / `.kv.sm b`）——
-        val pad = 18f
-        val cw = (TRIP_CARD_W - pad * 2) / 2f
-        val colX = floatArrayOf(r.left + pad, r.left + pad + cw)
-        val rowTop = floatArrayOf(r.top + 44f, r.top + 96f)
-
-        text.textAlign = Paint.Align.LEFT
-        drawTripCell(canvas, colX[0], rowTop[0], "总里程", VehicleStats.formatOdometer(odo))
-        drawTripCell(canvas, colX[1], rowTop[0], "平均油耗", VehicleStats.formatFuelConsumption(fuel))
-        drawTripCell(canvas, colX[0], rowTop[1], "行程里程", VehicleStats.formatTripDistanceKm(tripKm))
-        drawTripCell(canvas, colX[1], rowTop[1], "行程时长", VehicleStats.formatTripDuration(tripMs))
-    }
-
-    /**
-     * 行程卡里的一个「标签 + 数值」单元。
-     *
-     * 设计板版式：标签 19px 次文字，数值 24px 粗体，两行之间由 `.kv b` 的
-     *  隔开 —— 标签基线 = 行顶 + 15，数值基线 = 行顶 + 44。
-     */
     private fun drawTripCell(
         canvas: Canvas,
         x: Float,
@@ -1362,12 +1364,16 @@ class ScenePage(context: Context) : View(context) {
         com.cardesk.launcher.core.CardLayout.CLIMATE -> CLIMATE_CARD_W
         com.cardesk.launcher.core.CardLayout.TIRE -> TIRE_CARD_W
         com.cardesk.launcher.core.CardLayout.CAR -> CAR_PRESET_W
-        com.cardesk.launcher.core.CardLayout.TRIP -> TRIP_BOTTOM_CARD_W
+        com.cardesk.launcher.core.CardLayout.LEGACY_TRIP -> TRIP_BOTTOM_CARD_W
+        com.cardesk.launcher.core.CardLayout.TRIP1 -> TRIP_BOTTOM_CARD_W
+        com.cardesk.launcher.core.CardLayout.TRIP2 -> TRIP2_BOTTOM_CARD_W
         com.cardesk.launcher.core.CardLayout.STATUS -> STATUS_BOTTOM_CARD_W
         else -> 0f
     }
 
     private fun drawBottomCards(canvas: Canvas) {
+        // 隐藏卡不参与绘制，对应命中区也要清掉，避免点到上一帧留下的胶囊。
+        hits.remove("tripReset")
         val layout = layoutBottomCards()
         cardRects.clear()
         cardRects.putAll(layout)
@@ -1383,7 +1389,9 @@ class ScenePage(context: Context) : View(context) {
                 com.cardesk.launcher.core.CardLayout.CLIMATE -> drawClimateCard(canvas, drawRect)
                 com.cardesk.launcher.core.CardLayout.TIRE -> drawTireCard(canvas, drawRect)
                 com.cardesk.launcher.core.CardLayout.CAR -> drawCarCard(canvas, drawRect)
-                com.cardesk.launcher.core.CardLayout.TRIP -> drawTripBottomCard(canvas, drawRect)
+                com.cardesk.launcher.core.CardLayout.LEGACY_TRIP,
+                com.cardesk.launcher.core.CardLayout.TRIP1 -> drawTrip1Card(canvas, drawRect)
+                com.cardesk.launcher.core.CardLayout.TRIP2 -> drawTrip2Card(canvas, drawRect)
                 com.cardesk.launcher.core.CardLayout.STATUS -> drawStatusBottomCard(canvas, drawRect)
             }
         }
@@ -2734,6 +2742,15 @@ class ScenePage(context: Context) : View(context) {
                 }
             }
         }
+        // 行程2 卡的「复位」胶囊
+        hits["tripReset"]?.let { r ->
+            if (r.contains(x, y)) {
+                Logx.event(LogTags.SCENE, "行程2复位点击", "x" to x, "y" to y)
+                onTripReset?.invoke()
+                performClick()
+                return
+            }
+        }
         // 播放键
         hits["play"]?.let { r ->
             if (r.contains(x, y)) {
@@ -3057,20 +3074,6 @@ class ScenePage(context: Context) : View(context) {
          */
         val GLASS_RADIUS: Float get() = com.cardesk.launcher.core.Shape.CARD
 
-        // -------------------------------------------------- 行程卡（第三十六轮新增）
-
-        /** 行程卡宽。第四十九轮「浮屿」：与车况卡 / 续航卡**统一 388**，右边缘同一条 1876。 */
-        const val TRIP_CARD_W = 388f
-
-        /** 行程卡高（标题 + 两行 × 52）。 */
-        const val TRIP_CARD_H = 160f
-
-        /** 行程卡上沿（第四十九轮与设计板一致：292；第五十二轮内容上移 37 → 255）。 */
-        const val TRIP_CARD_TOP = 255f
-
-        /** 行程卡右缘相对 `rightEnd` 的内缩。0 = 贴右缘，与状态栏、底部卡片行同一条右边界。 */
-        const val TRIP_CARD_RIGHT_INSET = 0f
-
         // -------------------------------------------------- 车况卡（第三十六轮第三轮改造）
 
         /**
@@ -3088,7 +3091,7 @@ class ScenePage(context: Context) : View(context) {
          * 行程卡底边 452 → 留 14px 呼吸 → 466；
          * 第五十二轮内容基线上移 37 → 429。
          */
-        const val CAR_STATUS_CARD_TOP = 429f
+        const val CAR_STATUS_CARD_TOP = 490f
 
         /** 车况卡右缘相对 `rightEnd` 的内缩（0 = 与行程卡同一条右边界）。 */
         const val CAR_STATUS_CARD_RIGHT_INSET = 0f
@@ -3222,10 +3225,11 @@ class ScenePage(context: Context) : View(context) {
 
         /** 快捷入口卡宽（第五十轮对齐设计板 s01：与通用音乐 / 快捷车控同宽 338）。 */
         /** 车况卡在「小/中/大」固定档位下的自然宽度（自适应时吃剩余宽度）。 */
-        const val CAR_PRESET_W = 460f
+        const val CAR_PRESET_W = 311f
 
         /** 卡片库新增：行程卡 / 车门车窗卡的自然宽度。 */
-        const val TRIP_BOTTOM_CARD_W = 340f
+        const val TRIP_BOTTOM_CARD_W = 388f
+        const val TRIP2_BOTTOM_CARD_W = 380f
         const val STATUS_BOTTOM_CARD_W = 380f
         const val QUICK_CARD_W = 338f
 

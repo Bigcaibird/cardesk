@@ -69,7 +69,7 @@ class SceneCardLayoutRenderTest {
 
         // 卡片库：把行程 / 车门车窗两张新卡也放上桌面，再出一张效果图。
         val withLibrary = CardLayout.withVisible(
-            CardLayout.withVisible(custom, CardLayout.TRIP, true),
+            CardLayout.withVisible(custom, CardLayout.TRIP1, true),
             CardLayout.STATUS,
             true,
         )
@@ -90,6 +90,25 @@ class SceneCardLayoutRenderTest {
         decor.draw(Canvas(bmp3))
         FileOutputStream(File(dir, "y07-scene-cards-seven.png")).use {
             bmp3.compress(Bitmap.CompressFormat.PNG, 100, it)
+        }
+
+        // 第九十六轮：行程1（总）/ 行程2（自复位）两张卡，行程2 右上角带「复位」胶囊。
+        val trips = CardLayout.withVisible(
+            CardLayout.withVisible(
+                CardLayout.withVisible(CardLayout.DEFAULT, CardLayout.TRIP1, true),
+                CardLayout.TRIP2,
+                true,
+            ),
+            CardLayout.TIRE,
+            false,
+        )
+        scenePage.cardLayout = trips
+        shadowOf(Looper.getMainLooper()).idle()
+        decor.invalidate()
+        val bmp4 = Bitmap.createBitmap(1920, 1080, Bitmap.Config.ARGB_8888)
+        decor.draw(Canvas(bmp4))
+        FileOutputStream(File(dir, "y13-trip-cards.png")).use {
+            bmp4.compress(Bitmap.CompressFormat.PNG, 100, it)
         }
 
         // 布局落盘往返：下一个进程读回来还是这份布局。

@@ -23,8 +23,14 @@ package com.cardesk.launcher.core
  */
 object DockQuickApps {
 
-    /** 槽位数（第五十四轮用户定的 3 个）。 */
-    const val SLOTS = 3
+    /**
+     * 槽位数。
+     *
+     * 第五十四轮用户定的是 3 个；第九十六轮用户要求「dock 栏的快捷应用改成只支持两个，
+     * 图标放大」——槽位减到 2 个，图标尺寸在 [com.cardesk.launcher.core.DockLayout.QUICK_TILE]
+     * 里同步放大（56 → 76）。
+     */
+    const val SLOTS = 2
 
     /** 持久化键（逗号分隔的包名，按槽位顺序）。 */
     const val KEY = "dock_quick_apps"

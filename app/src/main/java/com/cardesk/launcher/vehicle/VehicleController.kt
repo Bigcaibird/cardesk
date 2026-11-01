@@ -310,6 +310,105 @@ object VehicleController {
         return false
     }
 
+    /**
+     * 复位行程2（自复位行程）。
+     *
+     * ## 文档依据与限制
+     *
+     * `docs/ecarx-adapterapi/15-energy-trip-tpms.md` 里 `ITripData` 只有复位**常量**
+     * （`TRIP_FUNC_RESET = 0x24800200` 等），jar 里**没有任何消费方**；
+     * 行程2 的复位入口只能按文档里出现的几种方式依次尝试：
+     *
+     * 1. `ICarFunction` 两参写 `0x24800200 = 1`（文档口径的复位功能号）；
+     * 2. 事件属性 `Trip2(0x21603022) = 1`（`GeelyProto.ManualResetTripValues`）；
+     * 3. DID 属性 `TS_Callback_manualResetTrip(0x21402057) = 1`；
+     *
+     * 每次写入后回读行程2（`TS_OdometerTripMeter2` / `TS_EDT_time2`），
+     * 里程或时长归零才算成功；全部失败就如实返回「不支持」。
+     */
+    fun resetTrip2(onResult: (Boolean, String) -> Unit) {
+        if (!initialized || !::gateway.isInitialized) {
+            Logx.w(LogTags.VEHICLE, "复位行程2被忽略（车控未初始化）")
+            onResult(false, "车控还没连接好，稍后再试")
+            return
+        }
+        val gw = gateway
+        val mock = gw.id == "mock"
+        Thread {
+            val before = runCatching { TripSignals.readTrip2() }.getOrNull()
+            val attempts = listOf<Pair<String, () -> Boolean>>(
+                "功能号 0x24800200=1" to {
+                    gw.writeFunction(TripSignals.FUNCTION_TRIP_RESET, 1)
+                },
+                "属性 Trip2(0x21603022)=1" to {
+                    CarProperties.writeInt(TripSignals.PROP_TRIP2_RESET, 0, 1)
+                },
+                "属性 手动复位回调(0x21402057)=1" to {
+                    CarProperties.writeInt(TripSignals.PROP_MANUAL_RESET_CALLBACK, 0, 1)
+                },
+            )
+            var written = false
+            var applied = false
+            var attempted = 0
+            for ((name, write) in attempts) {
+                attempted++
+                val ok = runCatching { write() }.getOrDefault(false)
+                Logx.i(
+                    LogTags.VEHICLE,
+                    "行程2复位尝试",
+                    "attempt" to name,
+                    "written" to ok,
+                    "channel" to runCatching { gw.id }.getOrDefault("?"),
+                )
+                if (!ok && !mock) continue
+                written = true
+                if (mock) {
+                    applied = true
+                    break
+                }
+                Thread.sleep(300)
+                val after = runCatching { TripSignals.readTrip2() }.getOrNull()
+                if (resetApplied(before, after)) {
+                    applied = true
+                    break
+                }
+            }
+            val ok = applied
+            Logx.i(
+                LogTags.VEHICLE,
+                if (ok) "复位行程2成功" else "复位行程2失败",
+                "attempts" to attempted,
+                "written" to written,
+                "channel" to runCatching { gw.id }.getOrDefault("?"),
+            )
+            main.post {
+                if (ok) {
+                    notifyChanged()
+                    onResult(true, "已复位行程2")
+                } else if (written) {
+                    onResult(false, "已下发复位指令，但这台车机回读不到行程2，无法确认是否生效")
+                } else {
+                    onResult(false, "这台车机不支持桌面复位行程2（文档里的 3 种复位入口都不可写）")
+                }
+            }
+        }.start()
+    }
+
+    /** 复位生效判定：里程或时长明显下降（归零）才算。 */
+    private fun resetApplied(before: TripSignals.Trip2?, after: TripSignals.Trip2?): Boolean {
+        if (after == null) return false
+        val afterKm = after.distanceKm
+        val afterMs = after.durationMs
+        if (afterKm == null && afterMs == null) return false
+        if (afterKm != null && before?.distanceKm != null) {
+            if (afterKm < before.distanceKm - 0.001) return true
+        }
+        if (afterMs != null && before?.durationMs != null) {
+            if (afterMs < before.durationMs - 1_000L) return true
+        }
+        return afterKm == 0.0 || afterMs == 0L
+    }
+
     private inline fun act(op: String, block: HvacLogic.() -> Unit) {
         if (!initialized) {
             Logx.w(LogTags.HVAC, "空调操作被忽略（车控未初始化）", "op" to op)

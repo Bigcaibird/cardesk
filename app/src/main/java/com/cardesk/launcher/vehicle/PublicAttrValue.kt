@@ -24,7 +24,7 @@ package com.cardesk.launcher.vehicle
  * | 3 | `status` | varint |
  * | 4 | `data`（**sint32，ZigZag 编码**） | varint |
  * | 5 | `data`（double） | 64-bit |
- * | 6 | `data`（string，本类不保存） | length-delimited |
+ * | 6 | `data`（string，存进 [stringData]） | length-delimited |
  * | 7 | 未知/扩展字段，按 wire type 跳过 | 任意 |
  * | 8 | `level` | varint |
  *
@@ -51,6 +51,8 @@ class PublicAttrValue private constructor(
     val data: Number?,
     /** field 4：`data` 在 wire 上的**无符号原值**（诊断 ZigZag 用）。 */
     val int32Wire: Long?,
+    /** field 6：字符串值（例如 `TS_EDT_time2` 的 "HH:mm"）；null = 消息没带字符串。 */
+    val stringData: String?,
     /** field 8：等级。 */
     val level: Int?,
 ) {
@@ -82,7 +84,7 @@ class PublicAttrValue private constructor(
 
     override fun toString(): String =
         "PublicAttrValue(availability=$availability, format=$format, status=$status, " +
-            "data=$data, int32Wire=$int32Wire, level=$level)"
+            "data=$data, stringData=$stringData, int32Wire=$int32Wire, level=$level)"
 
     companion object {
 
@@ -103,6 +105,7 @@ class PublicAttrValue private constructor(
             var status: Int? = null
             var data: Number? = null
             var int32Wire: Long? = null
+            var stringData: String? = null
             var level: Int? = null
 
             val c = Cursor(bytes)
@@ -146,20 +149,22 @@ class PublicAttrValue private constructor(
                         int32Wire = null
                     }
 
-                    // —— 其它字段（6 = string、7 = 扩展）：按 wire type 跳过 ——
+                    // —— 其它字段（6 = string、7 = 扩展）——
                     else -> {
                         if (field == 6) {
-                            // UNI 的 string 分支：只有 wire type 2 才合法；
-                            // 本类不保存字符串，但「data=null」这个语义要跟 UNI 一致。
+                            // 文档里 `TS_EDT_time2` 这类属性就是 string（wire type 2）。
+                            // 解析出字符串供行程等调用方使用；data 保持「非标量」语义。
                             if (wire != 2) return null
                             data = null
                             int32Wire = null
+                            stringData = c.lengthDelimitedString() ?: return null
+                        } else if (!c.skip(wire)) {
+                            return null
                         }
-                        if (!c.skip(wire)) return null
                     }
                 }
             }
-            return PublicAttrValue(availability, format, status, data, int32Wire, level)
+            return PublicAttrValue(availability, format, status, data, int32Wire, stringData, level)
         }
     }
 
@@ -188,6 +193,17 @@ class PublicAttrValue private constructor(
                 shift += 7
             }
             return null
+        }
+
+        /** 读 length-delimited 字符串（UTF-8）；越界返回 null。 */
+        fun lengthDelimitedString(): String? {
+            val len = varint() ?: return null
+            if (len < 0L || len > Int.MAX_VALUE.toLong()) return null
+            val n = len.toInt()
+            if (position + n > bytes.size) return null
+            val text = String(bytes, position, n, Charsets.UTF_8)
+            position += n
+            return text
         }
 
         /** 读 8 字节小端（protobuf 的 fixed64 / double 都是小端）。 */

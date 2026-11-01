@@ -15,6 +15,12 @@ class MockVehicleGateway(
 ) : VehicleGateway {
     private var driveModeValue: Int? = null
 
+    // 模拟行程：行程1 = 总行程（只读）；行程2 = 自复位行程（可被桌面复位）。
+    var simTrip1Km: Double = 3560.2
+    var simTrip1Minutes: Int = 4860
+    var simTrip2Km: Double = 128.4
+    var simTrip2Minutes: Int = 83
+
 
     override val id: String = "mock"
     override val displayName: String = "模拟车辆"
@@ -137,7 +143,18 @@ class MockVehicleGateway(
         }
         Logx.d(LogTags.VEHICLE, "模拟车辆写入功能", "func" to VehicleLog.hex(func), "name" to VehicleLog.funcName(func), "value" to value)
         if (func == DriveMode.FUNCTION_DRIVE_MODE_SELECT) driveModeValue = value
+        if (func == TripSignals.FUNCTION_TRIP_RESET && value == 1) {
+            resetMockTrip2()
+            return true
+        }
         return true
+    }
+
+    /** 模拟「复位行程2」：里程与时长清零，桌面下次刷新就归零。 */
+    fun resetMockTrip2() {
+        simTrip2Km = 0.0
+        simTrip2Minutes = 0
+        Logx.event(LogTags.VEHICLE, "模拟车辆复位行程2", "km" to simTrip2Km, "minutes" to simTrip2Minutes)
     }
 
     override fun readFunction(func: Int): Int? = when (func) {

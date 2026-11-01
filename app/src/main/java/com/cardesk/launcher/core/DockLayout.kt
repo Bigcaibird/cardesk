@@ -63,10 +63,10 @@ object DockLayout {
     const val SECTION_GAP = 10f
 
     /** 快捷应用槽位的边长（设计 px）。 */
-    const val QUICK_TILE = 56f
+    const val QUICK_TILE = 76f
 
     /** 快捷应用槽位之间的间隙（设计 px）。 */
-    const val QUICK_GAP = 8f
+    const val QUICK_GAP = 12f
 
     /**
      * 四段布局的结果。

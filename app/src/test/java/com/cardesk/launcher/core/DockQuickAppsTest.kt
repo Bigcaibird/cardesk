@@ -20,8 +20,11 @@ class DockQuickAppsTest {
 
     @Test
     fun parseKeepsSlotOrder() {
-        val slots = DockQuickApps.parse("com.b,com.a,com.c")
-        assertEquals(listOf("com.b", "com.a", "com.c"), slots)
+        // 第九十六轮起 Dock 只保留 2 个快捷应用槽位。
+        val slots = DockQuickApps.parse("com.b,com.a")
+        assertEquals(listOf("com.b", "com.a"), slots)
+        // 多出来的包名直接截断，不会溢出到第三格。
+        assertEquals(2, DockQuickApps.parse("com.b,com.a,com.c").size)
     }
 
     @Test
@@ -53,7 +56,6 @@ class DockQuickAppsTest {
         assertEquals(DockQuickApps.SLOTS, padded.size)
         assertEquals("com.a", padded[0])
         assertEquals("", padded[1])
-        assertEquals("", padded[2])
     }
 
     @Test
@@ -93,8 +95,8 @@ class DockQuickAppsTest {
     @Test
     fun storeRoundTrip() {
         val fake = FakeStore()
-        fake.save(listOf("com.x", "com.y", "com.z"))
-        assertEquals(listOf("com.x", "com.y", "com.z"), fake.load())
+        fake.save(listOf("com.x", "com.y"))
+        assertEquals(listOf("com.x", "com.y"), fake.load())
     }
 
     private class FakeStore : DockQuickApps.Store {

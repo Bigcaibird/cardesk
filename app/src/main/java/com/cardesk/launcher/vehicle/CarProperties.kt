@@ -1143,6 +1143,52 @@ object CarProperties {
             )
     }
 
+    // ------------------------------------------------------------ 写入
+
+    /**
+     * 写一个整数属性（`CarPropertyManager.setProperty(Class, int, int, T)`）。
+     *
+     * 厂商 jar 的 `setProperty` 返回 void，所以「invoke 没抛异常」即视为已提交；
+     * 是否真的生效由调用方回读验证（行程复位这类能力文档没给可写路径，
+     * 只能多路尝试 + 回读）。
+     */
+    fun writeInt(propId: Int, areaId: Int, value: Int): Boolean =
+        writeValue(propId, areaId, Integer.valueOf(value))
+
+    /** 写一个 byte[] 属性。 */
+    fun writeBytes(propId: Int, areaId: Int, value: ByteArray): Boolean =
+        writeValue(propId, areaId, value)
+
+    private fun writeValue(propId: Int, areaId: Int, value: Any): Boolean {
+        val m = manager() ?: run {
+            Logx.w(LogTags.SIGNAL, "属性写入失败：通道未就绪", "prop" to VehicleLog.hex(propId))
+            return false
+        }
+        for (method in m.javaClass.methods) {
+            if (method.name != "setProperty") continue
+            val params = method.parameterTypes
+            val args: Array<Any?> = when {
+                params.size == 4 && params[0] == Class::class.java ->
+                    arrayOf(value.javaClass, propId, areaId, value)
+                params.size == 3 && params[0] == Int::class.javaPrimitiveType ->
+                    arrayOf(propId, areaId, value)
+                params.size == 2 ->
+                    arrayOf(propId, value)
+                else -> continue
+            }
+            val failure = runCatching { method.invoke(m, *args) }.exceptionOrNull()
+            if (failure == null) return true
+            Logx.d(
+                LogTags.SIGNAL,
+                "属性写入尝试失败",
+                "prop" to VehicleLog.hex(propId),
+                "params" to params.joinToString(",") { it.simpleName },
+                "err" to (failure.message ?: failure.javaClass.simpleName),
+            )
+        }
+        return false
+    }
+
     /**
      * 按类型读一个整数属性（`getProperty(Integer.class, propId, area)`）。
      *

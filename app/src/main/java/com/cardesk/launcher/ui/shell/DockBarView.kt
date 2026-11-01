@@ -986,7 +986,7 @@ private fun tempItem(canvas: Canvas, right: Float, passenger: Boolean): Float {
         "tempP+" -> "副驾温度加"
         "quick0" -> "快捷应用 1"
         "quick1" -> "快捷应用 2"
-        "quick2" -> "快捷应用 3"
+        // 第九十六轮槽位从 3 减到 2：quick2 不再存在。
         else -> key
     }
 
@@ -1019,7 +1019,7 @@ private fun tempItem(canvas: Canvas, right: Float, passenger: Boolean): Float {
             "split" -> onSplitLongPress?.invoke()
             "media" -> onMediaLongPress?.invoke()
             // 快捷应用槽位（第五十四轮）：长按 = 配置这一格
-            "quick0", "quick1", "quick2" -> {
+            "quick0", "quick1" -> {
                 val index = key.removePrefix("quick").toIntOrNull() ?: 0
                 Logx.event(
                     LogTags.DOCK,
@@ -1281,8 +1281,8 @@ private fun tempItem(canvas: Canvas, right: Float, passenger: Boolean): Float {
                             )
                             onTemp?.invoke(4, 1)
                         }
-                        // 快捷应用（第五十四轮）：槽位下标在 key 里（quick0 / quick1 / quick2）
-                        "quick0", "quick1", "quick2" -> {
+                        // 快捷应用（第五十四轮；第九十六轮起 2 个）：槽位下标在 key 里（quick0 / quick1）
+                        "quick0", "quick1" -> {
                             val index = key.removePrefix("quick").toIntOrNull() ?: 0
                             val pkg = quickApps.getOrNull(index)?.pkg.orEmpty()
                             Logx.event(

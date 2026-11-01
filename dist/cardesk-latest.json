@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1078",
-  "versionCode": 4174,
-  "tag": "v1.0.1078",
-  "name": "CarDesk 4174 / 1.0.1078-system",
-  "notes": "第九十五轮补丁5：驾驶模式按文档对齐（两参 setFunctionValue + 只留经济/舒适/运动）",
-  "publishedAt": "2026-11-01T03:47:38Z",
+  "version": "1.0.1087",
+  "versionCode": 4183,
+  "tag": "v1.0.1087",
+  "name": "CarDesk 4183 / 1.0.1087-system",
+  "notes": "第九十六轮补丁8：行程1卡宽度对齐车况卡（388）",
+  "publishedAt": "2026-11-01T12:20:42Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4174.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4174.apk",
-    "size": 2138218,
-    "sha256": "f8e6b40d20852f28804489697a2047da62073d250f6f87fbe8b3190c3d5a897d"
+    "name": "CarDesk-platform-ecarx-cardesk-4183.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4183.apk",
+    "size": 2149906,
+    "sha256": "ceb08c7425bb091343f9cdfe224ce824045c9d93a2c8fdb6e5d39c450024e319"
   }
 }

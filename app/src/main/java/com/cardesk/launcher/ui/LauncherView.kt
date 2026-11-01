@@ -96,6 +96,8 @@ class LauncherView(context: Context) : FrameLayout(context) {
 
         /** 驾驶模式切换成功后，快捷面板停留一下再自动关闭。 */
         const val DRIVE_MODE_CLOSE_DELAY_MS = 700L
+        /** 复位行程2 成功后自动关确认弹窗的延迟。 */
+        const val TRIP_RESET_CLOSE_DELAY_MS = 900L
 
         /** 右缘竖滑命中区宽度。 */
         private const val EDGE_WIDTH = 120f
@@ -557,6 +559,8 @@ class LauncherView(context: Context) : FrameLayout(context) {
                     if (!ok) toast("车窗控制通道不可用")
                 }
             }
+            // 行程2 卡上的「复位」胶囊：先弹确认，再交 VehicleController 做多路尝试 + 回读验证。
+            onTripReset = { showTripResetDialog() }
         }
         // 导航页（navCanvas / desktopNavPage）：左地图卡（承载画中画）+ 右组合卡（胎压/音乐）
         navPage = NavPage(context, pal).apply {
@@ -1546,6 +1550,33 @@ class LauncherView(context: Context) : FrameLayout(context) {
                 }
             },
         )
+        dialog.onClose = { closeOverlayDialog(dialog) }
+        showOverlayDialog(dialog)
+    }
+
+    /**
+     * 行程2（自复位行程）复位确认（第九十六轮）。
+     *
+     * 复位入口文档里只有常量、没有实现，所以先让用户确认，再走
+     * [com.cardesk.launcher.vehicle.VehicleController.resetTrip2] 的多路尝试；
+     * 成功刷新桌面并自动关弹窗，失败保留弹窗把原因写清楚。
+     */
+    private fun showTripResetDialog() {
+        Logx.event(LogTags.SCENE, "打开行程2复位确认")
+        if (overlayDialog is com.cardesk.launcher.ui.dialogs.TripResetDialog) return
+        lateinit var dialog: com.cardesk.launcher.ui.dialogs.TripResetDialog
+        dialog = com.cardesk.launcher.ui.dialogs.TripResetDialog(context, pal)
+        dialog.onReset = {
+            com.cardesk.launcher.vehicle.VehicleController.resetTrip2 { ok, message ->
+                dialog.showResult(ok, message)
+                if (ok) {
+                    refresh()
+                    handler.postDelayed({
+                        if (overlayDialog === dialog) closeOverlayDialog(dialog)
+                    }, TRIP_RESET_CLOSE_DELAY_MS)
+                }
+            }
+        }
         dialog.onClose = { closeOverlayDialog(dialog) }
         showOverlayDialog(dialog)
     }

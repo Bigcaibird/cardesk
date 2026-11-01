@@ -76,6 +76,21 @@ data class VehicleInfo(
     val tripKm: Double? = null,
     /** 本次行程时长（毫秒）；读不到时为 null。 */
     val tripDurationMs: Double? = null,
+
+    // ------------------------------------------------------------ 行程1（总行程）
+    //
+    // 文档 `15-energy-trip-tpms.md` 里 ITripData 没有行程1 的 API（只有常量和
+    // 不可用的 getTripInfo），所以行程1 直接读 VHAL `TS_*` 属性（TS_TripDistance /
+    // TS_TripTime / TS_TripAverageConsumption），见 [TripSignals]。
+
+    /** 行程1 里程（公里）；读不到为 null。 */
+    val trip1Km: Double? = null,
+
+    /** 行程1 时长（分钟）；读不到为 null（`TS_TripTime` 文档未标单位，按分钟解释）。 */
+    val trip1DurationMin: Int? = null,
+
+    /** 行程1 平均油耗（L/100km）；读不到为 null。 */
+    val trip1AvgFuel: Double? = null,
 )
 
 /**
@@ -125,8 +140,11 @@ fun currentVehicleInfo(): VehicleInfo {
             fuelPercent = gw.fuelPercent(),
             source = gw.displayName,
             avgFuelConsumption = 6.8,
-            tripKm = 128.4,
-            tripDurationMs = 83 * 60_000L.toDouble(),
+            tripKm = gw.simTrip2Km,
+            tripDurationMs = gw.simTrip2Minutes * 60_000L.toDouble(),
+            trip1Km = gw.simTrip1Km,
+            trip1DurationMin = gw.simTrip1Minutes,
+            trip1AvgFuel = 6.8,
             // 模拟车辆：四门 / 四窗 / 两个盖默认全关
             doorsClosed = gw.simDoorsClosed.map { it },
             doorsAllClosed = true,
@@ -168,6 +186,14 @@ fun currentVehicleInfo(): VehicleInfo {
             val windows = WindowState.resolve(gw, ctx)
             // 行程与油耗：AdaptAPI 的 ITripData
             val trip = TripDataReader.stats()
+            // 行程1（总行程）只有 VHAL TS_* 属性一条路（ITripData 没有行程1 的 API）。
+            val trip1 = runCatching { TripSignals.readTrip1() }.getOrNull()
+            // 行程2 兜底：ITripData 读不到时用 TS_OdometerTripMeter2 / TS_EDT_time2。
+            val trip2Fallback = if (trip.tripKm == null) {
+                runCatching { TripSignals.readTrip2() }.getOrNull()
+            } else {
+                null
+            }
             // 第七十五轮：总里程改为**两条路都读，传感器优先**。
             //
             // 原来只有属性通道（`CarBodySignals.readOdometerKm` → `PERF_ODOMETER` / `ODOMETER`），
@@ -202,8 +228,11 @@ fun currentVehicleInfo(): VehicleInfo {
                 // 会把「本行程烧了 12.3 升」显示成「12.3 L/100km」，差 100 倍。
                 avgFuelConsumption = trip.avgFuelConsumption ?: trip.avgFuelConsumptionFromTrip,
                 tripFuelConsumption = trip.tripFuelConsumption,
-                tripKm = trip.tripKm,
-                tripDurationMs = trip.tripDurationMs,
+                tripKm = trip.tripKm ?: trip2Fallback?.distanceKm,
+                tripDurationMs = trip.tripDurationMs ?: trip2Fallback?.durationMs?.toDouble(),
+                trip1Km = trip1?.distanceKm,
+                trip1DurationMin = trip1?.durationMinutes,
+                trip1AvgFuel = trip1?.avgFuelL100 ?: trip.avgFuelConsumption,
             )
         }
     }
