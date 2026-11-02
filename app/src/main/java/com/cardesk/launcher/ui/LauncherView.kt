@@ -514,8 +514,12 @@ class LauncherView(context: Context) : FrameLayout(context) {
      * —— 与 `paintGuideLanes(guide.lanes.isNotEmpty() ? guide.lanes: lastGuideLanes)` 一致。
      */
     private fun applyNavGuide() {
+        // 第 100 轮：先看 AmapDesktopGuide 当前的导航/巡航判定。
+        // 导航卡只在「确实有导航帧」时显示；否则一律走巡航卡，
+        // 避免导航结束后 navGuideRaw 还留着旧数据、把手动巡航时该显示的巡航卡挡住。
+        val navigating = navGuideSource?.isNavigating() == true
         val guide = navGuideRaw
-        if (guide != null) {
+        if (navigating && guide != null) {
             val lanes = guide.lanes.ifEmpty { navLanesRaw.orEmpty() }
             // 红绿灯读秒按本机单调时钟往下走，所以**每次重画都要重新取一次**。
             // `AmapDesktopGuide.trafficLight()` 内部会按已过去的秒数把读秒减掉。
@@ -2411,7 +2415,8 @@ private fun showCam() {
         scenePage.bind(info, state, prefs.wallpaper)
         // 引导卡每秒重算一次 —— 红绿灯读秒要按秒往下走，
         // 信号超时（超过 TTL 没收到新帧）也要在这一轮里消失。
-        if (navGuideRaw != null) applyNavGuide()
+        // 第 100 轮：**每轮都刷**，巡航卡没有 navGuideRaw 也要能更新/过期。
+        applyNavGuide()
         // 车模编号跟着设置走（第三十三轮：**接到第一页胎压卡的自绘图模**上）。
         scenePage.carModel = prefs.carModel
         navPage.carModel = prefs.carModel

@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1094",
-  "versionCode": 4190,
-  "tag": "v1.0.1094",
-  "name": "CarDesk 4190 / 1.0.1094-system",
-  "notes": "第九十九轮补丁2：在线更新对话框删除过期的「检测需手动触发」说明；启动自动检测一次（只查清单不自动下载）",
-  "publishedAt": "2026-11-01T15:22:16Z",
+  "version": "1.0.1096",
+  "versionCode": 4192,
+  "tag": "v1.0.1096",
+  "name": "CarDesk 4192 / 1.0.1096-system",
+  "notes": "第100轮补丁：导航/巡航识别按引导帧内容判定 + 60021 巡航道路名 + 未处理广播诊断；4190 诊断包回归",
+  "publishedAt": "2026-11-02T04:16:54Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4190.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4190.apk",
-    "size": 2173758,
-    "sha256": "638df65f79e496a0c781c7ed490c06f1f8d6057aa5b2415ed3048f289c41785d"
+    "name": "CarDesk-platform-ecarx-cardesk-4192.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4192.apk",
+    "size": 2175066,
+    "sha256": "78c11affe51104d4029909768d0bbd4a21f5f2f72354f4958aafdab5e27d03a8"
   }
 }

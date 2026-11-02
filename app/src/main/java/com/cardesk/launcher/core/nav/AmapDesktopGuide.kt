@@ -148,6 +148,9 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
      */
     private var lastGuideIcon = 0
 
+    /** 最近一次 60021 广播过来的道路名（只在变化时打日志）。 */
+    private var lastCurRoadLogged: String? = null
+
     /** 最近一次有效引导帧里的**当前道路名**（巡航卡展示用）。 */
     private var lastRoadName: String? = null
 
@@ -157,6 +160,7 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
 
     /** 最近一次收到的「高德导航状态」原始值（8/10=导航，其它=空闲/巡航）。 */
     private var lastState: Int? = null
+    private val probeLogAt = HashMap<Int, Long>()
 
     /** 最近一次「巡航态引导帧」到达时刻（单调时钟）。 */
     private var cruiseGuideAt = 0L
@@ -248,6 +252,7 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
         lightStandardAt = 0L
         lightCruiseAt = 0L
         lastGuideIcon = 0
+        lastCurRoadLogged = null
         Logx.i(LogTags.NAV_UI, "停止导航引导数据源")
     }
 
@@ -276,7 +281,30 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
             //
             // 10077 是另一种回包形态（多带区县与国家），同样带城市名，两个都收。
             KEY_AREA_INFO, KEY_AREA_INFO_ALT -> handleAreaInfo(intent)
-            else -> Logx.d(LogTags.NAV_UI, "忽略高德广播", "keyType" to type)
+            // 60021：高德单独播的「当前道路名」（巡航时既没有引导距离也没有路线剩余）。
+            KEY_CUR_ROAD -> handleCurRoad(intent.getStringExtra(EXTRA_CUR_ROAD))
+            else -> {
+                Logx.d(LogTags.NAV_UI, "忽略高德广播", "keyType" to type)
+                // 诊断（临时）：60021/13011 等未处理类型把 extra 键打出来，定位真实协议字段。
+                if (type == 60021 || type == 13011) {
+                    val now = SystemClock.elapsedRealtime()
+                    val last = probeLogAt[type] ?: 0L
+                    if (now - last >= 10_000L) {
+                        probeLogAt[type] = now
+                        val keys = intent.extras?.keySet()?.sorted()?.joinToString(",").orEmpty()
+                        val preview = intent.extras?.let { b ->
+                            b.keySet().sorted().take(8).joinToString(",") { k ->
+                                "$k=" + when (val v = b.get(k)) {
+                                    is IntArray -> v.joinToString("/")
+                                    is ByteArray -> "bytes(${v.size})"
+                                    else -> v?.toString().orEmpty()
+                                }
+                            }
+                        }.orEmpty()
+                        Logx.i(LogTags.NAV_UI, "未处理广播内容", "keyType" to type, "keys" to keys, "preview" to preview)
+                    }
+                }
+            }
         }
     }
 
@@ -323,7 +351,8 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
             Logx.i(LogTags.NAV_UI, "高德导航状态", "state" to state)
         }
         if (state == STATE_NAVIGATING || state == STATE_SIMULATING) {
-            navigating = true
+            // 第 100 轮：导航标志由**引导帧内容**决定（见 handleGuide），
+            // 这里只顺手向高德要一次详细数据，避免 start 早期没有帧。
             requestGuideData()
         } else if (state == STATE_IDLE_1 || state == STATE_IDLE_2 || state == STATE_IDLE_3 || state == STATE_IDLE_4) {
             stopGuide()
@@ -355,6 +384,26 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
      *
      * 无效（`icon <= 0` / 分段距离 < 0 / 当前与下一条道路名都空）就丢弃。
      */
+    /**
+     * 60021：高德车机版单独播的「当前道路名」。
+     *
+     * 巡航时引导帧可能只有 icon/道路/车道（没有路线剩余），
+     * 这条广播可以补上更准确的当前道路名；它也算一次「巡航心跳」。
+     */
+    private fun handleCurRoad(road: String?) {
+        val name = road?.trim().orEmpty()
+        if (name.isEmpty()) return
+        val now = SystemClock.elapsedRealtime()
+        lastRoadName = name
+        cruiseGuideAt = now
+        if (navigating) return
+        listener.onCruise()
+        if (name != lastCurRoadLogged) {
+            lastCurRoadLogged = name
+            Logx.i(LogTags.NAV_UI, "收到巡航道路名", "road" to name)
+        }
+    }
+
     private fun handleGuide(intent: Intent, type: Int) {
         val guide = Guide(
             icon = intent.getIntExtra(EXTRA_ICON, -1),
@@ -392,12 +441,27 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
             }
             return
         }
-        // 第九十九轮：state 明确不是导航（空闲/巡航 40/50/51 等）时，引导帧按**巡航帧**处理：
-        // 只更新道路/车道/图标，不出导航卡（没有分段距离和 ETA）。
-        // state 还没到过（lastState == null）仍按老行为当导航帧，避免启动早期丢卡。
-        val navMode = lastState == null ||
-            lastState == STATE_NAVIGATING || lastState == STATE_SIMULATING
-        if (!navMode) {
+        // 第 100 轮修正：**不再用 KEY_STATE 枚举猜导航/巡航**。
+        // 本车高德版本导航时不会发 8/10（实测全是 13–16、40、50、51…），
+        // 只靠 state 会把导航帧判成巡航帧，导致「导航时过一会儿变成巡航卡」。
+        // 改用引导帧内容：只有导航帧才带路线级剩余里程 / 时间（ROUTE_REMAIN_*），
+        // 巡航帧只有「到下一路口的距离」（SEG_REMAIN_DIS）和当前道路。
+        val navFrame = guide.remainMeters > 0 || guide.remainSeconds > 0
+        if (!navFrame) {
+            // 导航刚有帧时，高德偶尔会夹一帧没有路线剩余信息的补充帧；
+            // 5 秒内不让它把导航卡降级，超过 5 秒说明导航确实结束了，先收掉导航卡。
+            val nowMs = System.currentTimeMillis()
+            if (navigating && nowMs - lastGuideAt < STALE_MS) {
+                Logx.d(
+                    LogTags.NAV_UI,
+                    "导航中收到无路线剩余的引导帧，忽略",
+                    "keyType" to type,
+                    "icon" to guide.icon,
+                    "seg" to guide.segmentMeters,
+                )
+                return
+            }
+            if (navigating) stopGuide()
             val cruiseRoad = guide.currentRoad.ifBlank { guide.nextRoad }
             if (cruiseRoad.isNotBlank()) lastRoadName = cruiseRoad
             if (guide.lanes.isNotEmpty()) lastLanes = guide.lanes
@@ -409,6 +473,9 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
                 "icon" to guide.icon,
                 "road" to cruiseRoad,
                 "lanesLen" to guide.lanes.length,
+                "seg" to guide.segmentMeters,
+                "remainM" to guide.remainMeters,
+                "remainS" to guide.remainSeconds,
             )
             listener.onCruise()
             return
@@ -822,6 +889,10 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
 
         /** 引导数据 YH 版（`AmapDesktopGuide.KEY_GUIDE_YH`）。 */
         const val KEY_GUIDE_YH = 12205
+
+        /** 当前道路名（高德巡航/导航都会发，字段名按高德原样）。 */
+        const val KEY_CUR_ROAD = 60021
+        const val EXTRA_CUR_ROAD = "curRoadName"
 
         /**
          * 区域信息（高德把自己的当前城市广播出来）。
