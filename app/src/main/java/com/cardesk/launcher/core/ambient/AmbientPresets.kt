@@ -213,6 +213,27 @@ object AmbientPresets {
     val NAMES: List<String> = ALL.map { it.name }
 
     /**
+     * 一句话描述这个预设开起来是**什么效果**。
+     *
+     * 只描述灯的行为（多快、多亮、色相怎么走），不写「适合什么时候用」
+     * —— 预设页要让人看懂「选了会看到什么」，不是给建议。
+     *
+     * @param name 预设名（[NAMES] 或 [CUSTOM_NAME]）
+     */
+    fun summaryOf(name: String): String = when (name) {
+        BALANCED.name -> "颜色跟着频谱缓慢换，亮度随音乐起伏，变化幅度小。"
+        NIGHT.name -> "颜色换得很慢，亮度起伏也小，相邻两帧的色差被压得更紧。"
+        CYBER.name -> "颜色换得快、饱和度高，亮度起伏大，色相在 120° 的窄带里来回。"
+        BREATHE.name -> "颜色基本停在原地，亮度像呼吸一样慢慢起伏。"
+        RAINBOW.name -> "色相在整圈上慢慢转，颜色沿着光谱一路换过去。"
+        JUMP.name -> "颜色一帧硬切到 120° 档位，每次起拍再前进一档，换色间隔 380 ms。"
+        else -> "所有参数都开放：亮度包络、色相、彩度、跳变、自转各调各的。"
+    }
+
+    /** 预设行末尾「自定义」chip 的文案。 */
+    const val CUSTOM_NAME = "自定义"
+
+    /**
      * 当前参数最接近哪个预设（-1 = 不匹配任何预设）。
      *
      * 设置页用它来决定 chip 上高亮哪一个 ——

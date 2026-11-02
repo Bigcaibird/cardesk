@@ -336,6 +336,17 @@ class Prefs(context: Context) {
         set(value) = setIntValue("ambient_jump_hold_ms", value.coerceIn(0, 1000))
 
     /**
+     * 是否停留在**自定义**模式。
+     *
+     * 预设是前门：页短、只读一个效果说明；`true` 才把全部参数滑杆放出来。
+     * 与 [AmbientPresets] 的落点一样是「观感参数」，不碰引擎 / 颜色模式 /
+     * 亮度 / 分区编排。
+     */
+    var ambientCustomMode: Boolean
+        get() = sp.getBoolean("ambient_custom_mode", false)
+        set(value) { sp.edit().putBoolean("ambient_custom_mode", value).apply() }
+
+    /**
      * 分区编排（区域巡游）。
      *
      * **行车默认关闭** —— 分区切换容易分散注意力，

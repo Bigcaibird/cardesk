@@ -1,6 +1,7 @@
 package com.cardesk.launcher.core.ambient
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -187,5 +188,21 @@ class AmbientPresetsTest {
                 0, g.pulseGainHundredths, g.beatMinGapMs, g.jumpHoldMs,
             ),
         )
+    }
+
+    @Test
+    fun `每个预设都有一句只描述效果的说明`() {
+        // 预设页只显示这一句：必须是「灯会怎么动」，不能是「什么时候用它」。
+        val advice = listOf("适合", "建议", "别开", "最稳", "最舒服", "推荐", "日常")
+        assertEquals(AmbientPresets.ALL.size, AmbientPresets.NAMES.size)
+        for (preset in AmbientPresets.ALL) {
+            val summary = AmbientPresets.summaryOf(preset.name)
+            assertTrue("${preset.name} 没有说明", summary.isNotBlank())
+            for (word in advice) {
+                assertFalse("${preset.name} 的说明里带了使用建议「$word」：$summary", summary.contains(word))
+            }
+        }
+        // 自定义也有自己的说明（所有参数都开放）
+        assertTrue(AmbientPresets.summaryOf(AmbientPresets.CUSTOM_NAME).contains("所有参数"))
     }
 }

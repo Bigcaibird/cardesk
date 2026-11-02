@@ -2742,12 +2742,14 @@ class SettingsOverlay(
                 onApply?.invoke()
             }
         }
+        if (prefs.ambientEngine != Prefs.ENGINE_V2 || prefs.ambientCustomMode) {
         sliderRow("灵敏度", prefs.ambientSensitivity, 0, 100, "%", format = { "$it" }) { v ->
             val from = prefs.ambientSensitivity
             prefs.ambientSensitivity = v
             logSetting("ambient_sensitivity", "氛围灯灵敏度", from, v)
             // 立刻生效：灵敏度决定「弱音有多亮」
             com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "灵敏度")
+        }
         }
         // 亮度上下限是**旧版链路**的参数（旧版是「下限 + (上限−下限)×电平^γ」
         // 的线性映射）。新版用「基础亮度 + 感知明度区间映射」，压根不读这两个值
@@ -2809,6 +2811,15 @@ class SettingsOverlay(
                 prefs.ambientBeatMinGapMs,
                 prefs.ambientJumpHoldMs,
             )
+            val customMode = prefs.ambientCustomMode
+            // 改预设 / 开关自定义都要重建这一页（滑杆显隐变了）。
+            // 重建会 `scrollTo(0,0)`，在车上等于「点一下页面就跳回顶部」——
+            // 所以重建前记住位置、重建后滚回原处。
+            fun rebuildKeepingScroll() {
+                val y = bodyScroll.scrollY
+                select(selectedKey)
+                bodyScroll.post { bodyScroll.scrollTo(0, y) }
+            }
             chipRow("预设", com.cardesk.launcher.core.ambient.AmbientPresets.NAMES, presetIndex) { index ->
                 val p = com.cardesk.launcher.core.ambient.AmbientPresets.ALL[index]
                 prefs.ambientAttackMs = p.attackMs
@@ -2831,12 +2842,27 @@ class SettingsOverlay(
                 prefs.ambientPulseGainHundredths = p.pulseGainHundredths
                 prefs.ambientBeatMinGapMs = p.beatMinGapMs
                 prefs.ambientJumpHoldMs = p.jumpHoldMs
+                // 套预设 = 回到预设页（滑杆收起），自定义开关也关掉
+                prefs.ambientCustomMode = false
                 logSetting("ambient_preset", "氛围灯预设", presetIndex, p.name)
                 com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "预设")
                 onApply?.invoke()
-                // 滑杆读数变了 → 重建这一页
-                select(selectedKey)
+                // 滑杆读数变了 → 重建这一页（保留滚动位置）
+                rebuildKeepingScroll()
             }
+            // 自定义模式入口：**单独一行**，不塞进预设 chip 行。
+            // 车机屏宽 1920，预设行已经占满（6 个预设 + 一个「自定义」会溢出成横向滚动，
+            // 入口看不见 = 找不到），所以用一个显式的开关行。
+            switchRow(
+                "自定义参数",
+                customMode,
+                "关：只看预设；开：展开全部滑杆（当前参数不变）",
+            ) { on ->
+                prefs.ambientCustomMode = on
+                logSetting("ambient_custom_mode", "氛围灯自定义参数", !on, on)
+                rebuildKeepingScroll()
+            }
+            if (customMode) {
             sliderRow("亮度起 attack", prefs.ambientAttackMs, 10, 300, "ms", step = 5) { v ->
                 val from = prefs.ambientAttackMs
                 prefs.ambientAttackMs = v
@@ -3004,9 +3030,19 @@ class SettingsOverlay(
                 logSettingDebug("ambient_breath", "氛围灯空闲呼吸", from, v)
                 com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "空闲呼吸")
             }
+            } else {
+                // 预设页只给一句效果说明：不列参数、不放滑杆。
+                note(
+                    com.cardesk.launcher.core.ambient.AmbientPresets.summaryOf(
+                        if (presetIndex >= 0) com.cardesk.launcher.core.ambient.AmbientPresets.ALL[presetIndex].name
+                        else com.cardesk.launcher.core.ambient.AmbientPresets.CUSTOM_NAME,
+                    ),
+                )
+            }
         } else {
         }
 
+        if (prefs.ambientEngine != Prefs.ENGINE_V2 || prefs.ambientCustomMode) {
         section("分区编排")
         switchRow(
             "区域巡游",
@@ -3026,6 +3062,8 @@ class SettingsOverlay(
                 logSettingDebug("ambient_zone_dwell_ms", "氛围灯分区驻留", from, v)
                 com.cardesk.launcher.core.ambient.AmbientLightController.applySettings(context, "分区驻留")
             }
+        }
+
         }
 
         // 进这一页就把录音权限要到手（不打断首屏，这里才是自然的时机）

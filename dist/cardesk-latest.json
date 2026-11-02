@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1096",
-  "versionCode": 4192,
-  "tag": "v1.0.1096",
-  "name": "CarDesk 4192 / 1.0.1096-system",
-  "notes": "第100轮补丁：导航/巡航识别按引导帧内容判定 + 60021 巡航道路名 + 未处理广播诊断；4190 诊断包回归",
-  "publishedAt": "2026-11-02T04:16:54Z",
+  "version": "1.0.1098",
+  "versionCode": 4194,
+  "tag": "v1.0.1098",
+  "name": "CarDesk 4194 / 1.0.1098-system",
+  "notes": "氛围灯页面拆成预设页/自定义页：预设页只给一句效果说明，自定义参数开关才展开滑杆",
+  "publishedAt": "2026-11-02T06:53:43Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4192.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4192.apk",
-    "size": 2175066,
-    "sha256": "78c11affe51104d4029909768d0bbd4a21f5f2f72354f4958aafdab5e27d03a8"
+    "name": "CarDesk-platform-ecarx-cardesk-4194.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4194.apk",
+    "size": 2176242,
+    "sha256": "81644b33b3480e356fbc5a64baba641cc01d51cc600fb516784d7b1d85caf43e"
   }
 }
