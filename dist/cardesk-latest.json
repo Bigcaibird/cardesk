@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1098",
-  "versionCode": 4194,
-  "tag": "v1.0.1098",
-  "name": "CarDesk 4194 / 1.0.1098-system",
-  "notes": "氛围灯页面拆成预设页/自定义页：预设页只给一句效果说明，自定义参数开关才展开滑杆",
-  "publishedAt": "2026-11-02T06:53:43Z",
+  "version": "1.0.1099",
+  "versionCode": 4195,
+  "tag": "v1.0.1099",
+  "name": "CarDesk 4195 / 1.0.1099-system",
+  "notes": "氛围灯预设 chip 收紧内边距：「跳跃」不再被右边界裁掉",
+  "publishedAt": "2026-11-02T07:03:55Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4194.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4194.apk",
-    "size": 2176242,
-    "sha256": "81644b33b3480e356fbc5a64baba641cc01d51cc600fb516784d7b1d85caf43e"
+    "name": "CarDesk-platform-ecarx-cardesk-4195.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4195.apk",
+    "size": 2176654,
+    "sha256": "63b9cb4857a5ecdffb422ea294df06ea11e861b5fc149f95e3b8c4ae3b87eab5"
   }
 }

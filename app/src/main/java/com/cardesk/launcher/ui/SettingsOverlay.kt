@@ -669,20 +669,40 @@ class SettingsOverlay(
 
     /** 一行选择：左侧标题 + 右侧横向滚动的选项条（选项多时也能滚）。 */
     /** 按**下标**取值的选择行（options 是文案，selected 是下标）。 */
-    private fun chipRow(label: String, options: List<String>, selected: Int, onPick: (Int) -> Unit) {
-        chipRowCore<Int>(label, options, selected, { it }, onPick)
+    private fun chipRow(
+        label: String,
+        options: List<String>,
+        selected: Int,
+        compact: Boolean = false,
+        onPick: (Int) -> Unit,
+    ) {
+        chipRowCore<Int>(label, options, selected, { it }, compact, onPick)
     }
 
     /** 按**字符串**取值的选择行（如车型编号 `01` / `02HB` / `03+`，不是下标）。 */
-    private fun chipRow(label: String, options: List<String>, selected: String, onPick: (String) -> Unit) {
-        chipRowCore<String>(label, options, options.indexOf(selected), { options[it] }, onPick)
+    private fun chipRow(
+        label: String,
+        options: List<String>,
+        selected: String,
+        compact: Boolean = false,
+        onPick: (String) -> Unit,
+    ) {
+        chipRowCore<String>(label, options, options.indexOf(selected), { options[it] }, compact, onPick)
     }
 
+    /**
+     * @param compact 收紧每个选项的内边距（22 → 16、间距 6 → 4）。
+     *
+     * 选项多的一行（氛围灯的 6 个预设）在 1920 宽下会超出可视区一点，
+     * 最后一个 chip 被裁掉半截 —— 它不是看不见，是**看起来像被截断**，
+     * 比真的看不见更糟。收紧一点正好放下；其它行保持原样。
+     */
     private fun <T> chipRowCore(
         label: String,
         options: List<String>,
         selectedIndex: Int,
         valueOf: (Int) -> T,
+        compact: Boolean = false,
         onPick: (T) -> Unit,
     ) {
         val holder = FrameLayout(context)
@@ -691,7 +711,7 @@ class SettingsOverlay(
             FrameLayout.LayoutParams(300, -1).also { it.leftMargin = 18 },
         )
         val scroll = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false }
-        val seg = buildSegment(options, selectedIndex) { index ->
+        val seg = buildSegment(options, selectedIndex, compact) { index ->
             onPick(valueOf(index))
             onApply?.invoke()
         }
@@ -717,6 +737,7 @@ class SettingsOverlay(
     private fun buildSegment(
         options: List<String>,
         selectedIndex: Int,
+        compact: Boolean = false,
         onPick: (Int) -> Unit,
     ): LinearLayout {
         val seg = LinearLayout(context).apply {
@@ -726,16 +747,20 @@ class SettingsOverlay(
         }
         val views = ArrayList<TextView>()
         options.forEachIndexed { index, text ->
+            val padX = if (compact) 16 else 22
             val item = Ui.text(context, text, 20f, pal.textDim).apply {
                 gravity = Gravity.CENTER
-                setPadding(22, 9, 22, 9)
+                setPadding(padX, 9, padX, 9)
                 setOnClickListener {
                     views.forEachIndexed { i, v -> paintSegment(v, i == index) }
                     onPick(index)
                 }
             }
             views.add(item)
-            seg.addView(item, LinearLayout.LayoutParams(-2, -2).also { if (index > 0) it.leftMargin = 6 })
+            seg.addView(
+                item,
+                LinearLayout.LayoutParams(-2, -2).also { if (index > 0) it.leftMargin = if (compact) 4 else 6 },
+            )
         }
         views.forEachIndexed { i, v -> paintSegment(v, i == selectedIndex) }
         return seg
@@ -2820,7 +2845,13 @@ class SettingsOverlay(
                 select(selectedKey)
                 bodyScroll.post { bodyScroll.scrollTo(0, y) }
             }
-            chipRow("预设", com.cardesk.launcher.core.ambient.AmbientPresets.NAMES, presetIndex) { index ->
+            // 6 个预设 + 标签在 1920 下会超出右边界（「跳跃」被裁半截）⇒ 收紧内边距
+            chipRow(
+                "预设",
+                com.cardesk.launcher.core.ambient.AmbientPresets.NAMES,
+                presetIndex,
+                compact = true,
+            ) { index ->
                 val p = com.cardesk.launcher.core.ambient.AmbientPresets.ALL[index]
                 prefs.ambientAttackMs = p.attackMs
                 prefs.ambientDecayMs = p.decayMs
