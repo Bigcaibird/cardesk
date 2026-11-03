@@ -345,6 +345,12 @@ object Diagnostics {
         // 定位状态：真机上「天气一直获取中」的原因有好几种
         // （AppOps 没打开 / 全局位置开关关着 / provider 没数据 / 不是 system app），
         // 之前只能翻几百行日志猜。这里直接给一行结论。
+        // 导航数据源（第 107 轮）：巡航红绿灯收不到时，先分清「高德没发」还是「我们没解」。
+        sb.append("\n---- 导航数据源 ----\n")
+        runCatching {
+            sb.append(com.cardesk.launcher.core.nav.AmapGuideStats.describe(app)).append('\n')
+        }.onFailure { sb.append("导航数据源状态读取失败: ").append(it.message).append('\n') }
+
         sb.append("\n---- 定位状态 ----\n")
         runCatching { sb.append(com.cardesk.launcher.core.Permissions.describeLocationState(app)).append('\n') }
             .onFailure { sb.append("定位状态读取失败: ").append(it.message).append('\n') }

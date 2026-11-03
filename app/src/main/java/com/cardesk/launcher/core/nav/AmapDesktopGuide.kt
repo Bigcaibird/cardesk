@@ -228,6 +228,7 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
             Logx.w(LogTags.NAV_UI, "注册高德导航广播失败", it)
         }.isSuccess
         registered = ok
+        AmapGuideStats.onRegistered(ok)
         Logx.i(LogTags.NAV_UI, "启动导航引导数据源", "registered" to ok, "action" to ACTION_SEND)
         if (ok) requestGuideData()
     }
@@ -240,6 +241,7 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
                 .onFailure { Logx.w(LogTags.NAV_UI, "注销高德导航广播失败", it) }
         }
         registered = false
+        AmapGuideStats.onRegistered(false)
         navigating = false
         lastLanes = null
         lastRoadName = null
@@ -267,7 +269,9 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
             return
         }
         if (ACTION_SEND != intent.action) return
-        when (val type = intent.getIntExtra(EXTRA_KEY_TYPE, -1)) {
+        val keyType = intent.getIntExtra(EXTRA_KEY_TYPE, -1)
+        AmapGuideStats.onSendFrame(keyType)
+        when (val type = keyType) {
             KEY_STATE -> handleState(intent.getIntExtra(EXTRA_STATE, -1))
             KEY_DRIVE_WAY, KEY_DRIVE_WAY_YH_A, KEY_DRIVE_WAY_YH_B -> handleLanes(intent.getStringExtra(EXTRA_DRIVE_WAY))
             KEY_GUIDE, KEY_GUIDE_EXT, KEY_GUIDE_YH -> handleGuide(intent, type)
@@ -342,6 +346,7 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
      */
     private fun handleState(state: Int) {
         lastState = state
+        AmapGuideStats.onState(state)
         // 高德空闲时每 10 秒推一次同样的状态；只在**变化**时记 INFO，重复的降 DEBUG。
         // （是打进 logcat 不落盘；我们 Logx.i 落盘，照抄会把车机存储吃满。）
         if (lastLoggedState == state) {
@@ -547,6 +552,7 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
     }
 
     private fun handleStandardTrafficLight(intent: Intent) {
+        AmapGuideStats.onLightFrame()
         val extras = intent.extras ?: return
         val map = numericExtras(extras)
         val signal = AmapTrafficLight.standard(map)
@@ -619,6 +625,7 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
      */
     private fun handleCruiseTrafficLight(intent: Intent) {
         val json = intent.getStringExtra(AmapTrafficLight.EXTRA_CRUISE_DATA)
+        AmapGuideStats.onCruiseFrame(json?.length ?: -1)
         if (json.isNullOrEmpty()) {
             Logx.d(LogTags.NAV_UI, "红绿灯巡航广播没有 data")
             return
@@ -628,6 +635,7 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
         if (multi.isNotEmpty()) {
             cruiseLights = multi
             cruiseAt = SystemClock.elapsedRealtime()
+            AmapGuideStats.onLightFrame()
             Logx.i(
                 LogTags.NAV_UI,
                 "收到巡航多方向红绿灯",
