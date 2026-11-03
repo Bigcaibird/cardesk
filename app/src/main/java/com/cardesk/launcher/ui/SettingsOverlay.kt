@@ -1449,7 +1449,6 @@ class SettingsOverlay(
 
         // ---------------------------------------------------------- 自定义壁纸（第 105 轮）
         section("自定义壁纸")
-        note("选一张本地照片做桌面壁纸：导入时缩到 1920×1080 存一份，之后只解这张小图。")
         val customHolder = FrameLayout(context)
         val customPreview = android.widget.ImageView(context).apply {
             scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
@@ -1533,7 +1532,6 @@ class SettingsOverlay(
             }
         }
 
-        section("说明")
     }
 
     /**

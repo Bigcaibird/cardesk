@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1104",
-  "versionCode": 4200,
-  "tag": "v1.0.1104",
-  "name": "CarDesk 4200 / 1.0.1104-system",
-  "notes": "第105轮：设置 → 壁纸新增「自定义壁纸」。可从系统相册导入一张照片：导入时后台缩到 1920×1080 只存一份小图（约 0.2–0.8MB），之后启动只解这张小图、只保留一张全屏位图，夜间用 scrim 不额外存图；首页与设置页都能切回预设。",
-  "publishedAt": "2026-11-03T09:32:02Z",
+  "version": "1.0.1105",
+  "versionCode": 4201,
+  "tag": "v1.0.1105",
+  "name": "CarDesk 4201 / 1.0.1105-system",
+  "notes": "第105轮补丁：壁纸页去掉需求/功能描述性文字（自定义壁纸说明段落、空的「说明」小节），只保留状态与按钮。",
+  "publishedAt": "2026-11-03T11:22:16Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4200.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4200.apk",
-    "size": 2192218,
-    "sha256": "85550a239a44b1b1b4fb86fc1913927ec93d863496ecd286e1a3aadadc31da4c"
+    "name": "CarDesk-platform-ecarx-cardesk-4201.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4201.apk",
+    "size": 2192042,
+    "sha256": "25227840d4332740d56c4c7913fd7bf7ae049eb4ee7432e20cf9858d90e3f102"
   }
 }
