@@ -165,7 +165,7 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
         panel.addView(scroll, abs(PANEL_PAD, GRID_TOP, GRID_W, GRID_H))
 
         // —— 底部提示（长按拖动排序是 App 侧能力，也有）——
-        val foot = Ui.text(context, "点按图标启动，长按拖动排序；格子右上角 ⋮ 可重命名 / 应用信息 / 卸载", 16f, Skin.TEXT_DIM).apply {
+        val foot = Ui.text(context, "点按图标启动，长按拖动排序；格子右上角 ⋮ 可重命名 / 应用信息 / 禁用·启用 / 卸载", 16f, Skin.TEXT_DIM).apply {
             gravity = Gravity.CENTER
         }
         panel.addView(foot, abs(PANEL_PAD, FOOT_TOP, PANEL_W - PANEL_PAD * 2, 26))
@@ -207,8 +207,9 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         // 排障场景：「抽屉里一个应用都没有」——加载耗时与数量要能查。
         val startMs = System.currentTimeMillis()
+        // 第九十四轮：已禁用的应用也要留在抽屉里（置灰显示），否则禁用后就"消失"了。
         val apps = try {
-            pm.queryIntentActivities(intent, 0)
+            pm.queryIntentActivities(intent, PackageManager.MATCH_DISABLED_COMPONENTS)
                 .distinctBy { it.activityInfo.packageName }
                 .sortedBy { it.loadLabel(pm).toString() }
         } catch (e: Exception) {
@@ -237,6 +238,7 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
         for (info in sorted) {
             val pkg = info.activityInfo.packageName
             val display = displayLabel(info, pm)
+            val enabled = isEnabled(info)
             // 第九十五轮 C5：格子 = 图标列（点按启动 / 长按拖动排序）+ 右上角「⋮」菜单。
             val cell = FrameLayout(context)
             val body = LinearLayout(context).apply {
@@ -247,7 +249,14 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
                 // 整排图标右移了 112px，跟设计板对不上。
                 gravity = Gravity.TOP or Gravity.START
                 isClickable = true
-                setOnClickListener { openApp(info, display) }
+                setOnClickListener {
+                    if (enabled) {
+                        openApp(info, display)
+                    } else {
+                        showItemMenu(info, display)
+                        toast("应用已禁用，可在菜单里启用")
+                    }
+                }
                 // 长按 = 拖动排序（Drawer 的 startDragAndDrop +）
                 setOnLongClickListener {
                     val clip = ClipData.newPlainText("package", pkg)
@@ -270,6 +279,8 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
                 null
             }
             iv.setImageDrawable(icon)
+            // 已禁用：图标压暗，和可用应用区分开。
+            if (!enabled) iv.alpha = 0.35f
             iv.background = Skin.solid(Skin.surfaceSoft, 20f)
             // 图标 + 名称放进一个 76 宽的竖列（设计板 `.appicon` 宽 76），
             // 名称在这一列里居中 —— 整列再贴到 300 宽格子的左沿。
@@ -278,12 +289,18 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
                 gravity = Gravity.CENTER_HORIZONTAL
             }
             column.addView(iv, LinearLayout.LayoutParams(ICON, ICON))
-            val label = Ui.text(context, display, 18f, Skin.TEXT_SOFT).apply {
+            val label = Ui.text(context, display, 18f, if (enabled) Skin.TEXT_SOFT else pal.textFaint).apply {
                 gravity = Gravity.CENTER
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
             }
             column.addView(label, LinearLayout.LayoutParams(-1, 26).apply { topMargin = 12 })
+            if (!enabled) {
+                column.addView(
+                    Ui.text(context, "已禁用", 14f, pal.textFaint),
+                    LinearLayout.LayoutParams(-1, 18).also { it.topMargin = 2 },
+                )
+            }
             body.addView(column, LinearLayout.LayoutParams(ICON, LayoutParams.WRAP_CONTENT))
             cell.addView(body, FrameLayout.LayoutParams(-1, -1))
 
@@ -347,6 +364,7 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
 
     private var itemMenu: View? = null
     private var renameDialog: View? = null
+    private var confirmDialog: View? = null
 
     /** 格子右上角「⋮」菜单：重命名 / 应用信息 / 卸载。 */
     private fun showItemMenu(info: ResolveInfo, display: String) {
@@ -385,6 +403,21 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
             dismissItemMenu()
             openAppInfo(pkg)
         }
+        // 第九十四轮：禁用 / 启用。禁用后应用仍在抽屉里，只是置灰。
+        when {
+            pkg == context.packageName -> card.addView(
+                Ui.text(context, "桌面本身不能禁用", 18f, pal.textFaint),
+                LinearLayout.LayoutParams(-1, 64).also { it.topMargin = 8 },
+            )
+            isEnabled(info) -> row("禁用应用", pal.danger) {
+                dismissItemMenu()
+                showDisableDialog(info, display)
+            }
+            else -> row("启用应用", Skin.ACCENT) {
+                dismissItemMenu()
+                setAppEnabled(info, true, display)
+            }
+        }
         val systemApp = (info.activityInfo.applicationInfo.flags and
             android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0
         if (systemApp) {
@@ -412,6 +445,136 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
         val menu = itemMenu ?: return
         itemMenu = null
         removeView(menu)
+    }
+
+    private fun componentOf(info: ResolveInfo) =
+        android.content.ComponentName(info.activityInfo.packageName, info.activityInfo.name)
+
+    /**
+     * 应用当前是否可用：清单里的 enabled + PackageManager 里应用级/组件级的状态都要看。
+     *
+     * 只读 `activityInfo.enabled` 不够——系统里被禁用（或默认禁用，如 SIM Toolkit）的组件，
+     * 查询回来的 ActivityInfo.enabled 仍然是 true，必须查 [PackageManager.getComponentEnabledSetting]。
+     */
+    private fun isEnabled(info: ResolveInfo): Boolean {
+        val app = info.activityInfo.applicationInfo ?: return false
+        if (!app.enabled || !info.activityInfo.enabled) return false
+        val pm = context.packageManager
+        fun usable(state: Int) = state != PackageManager.COMPONENT_ENABLED_STATE_DISABLED &&
+            state != PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER &&
+            state != PackageManager.COMPONENT_ENABLED_STATE_DISABLED_UNTIL_USED
+        val appState = try {
+            pm.getApplicationEnabledSetting(info.activityInfo.packageName)
+        } catch (e: Exception) {
+            PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
+        }
+        val compState = try {
+            pm.getComponentEnabledSetting(componentOf(info))
+        } catch (e: Exception) {
+            PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
+        }
+        return usable(appState) && usable(compState)
+    }
+
+    /**
+     * 禁用 / 启用应用。
+     *
+     * 写 `PackageManager.setApplicationEnabledSetting(...)`，需要
+     * `CHANGE_COMPONENT_ENABLED_STATE`（平台签名的系统应用才有）。普通安装拿不到权限时
+     * 只提示、不崩，也不改界面。
+     */
+    private fun setAppEnabled(info: ResolveInfo, enabled: Boolean, display: String) {
+        val pkg = info.activityInfo.packageName
+        try {
+            context.packageManager.setApplicationEnabledSetting(
+                pkg,
+                if (enabled) PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                else PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER,
+                PackageManager.DONT_KILL_APP,
+            )
+            if (enabled) {
+                // 有些应用只是「入口组件」被禁用（如 SIM Toolkit），应用级恢复后还要把入口组件打开。
+                context.packageManager.setComponentEnabledSetting(
+                    componentOf(info),
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                    PackageManager.DONT_KILL_APP,
+                )
+            }
+            Logx.event(LogTags.DRAWER, "应用状态变更", "pkg" to pkg, "enabled" to enabled)
+            toast(if (enabled) "已启用 $display" else "已禁用 $display")
+            reload()
+        } catch (e: SecurityException) {
+            Logx.w(LogTags.DRAWER, "应用状态变更失败", e, "pkg" to pkg, "enabled" to enabled)
+            toast("没有系统权限，无法禁用/启用应用")
+        } catch (e: IllegalArgumentException) {
+            Logx.w(LogTags.DRAWER, "应用状态变更失败", e, "pkg" to pkg, "enabled" to enabled)
+            toast("该应用不支持禁用到用户态")
+        }
+    }
+
+    private fun toast(text: String) {
+        android.widget.Toast.makeText(context, text, android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    /** 禁用前确认：误点会把应用停掉（可在菜单里恢复，但先问一句更稳）。 */
+    private fun showDisableDialog(info: ResolveInfo, display: String) {
+        if (confirmDialog != null) return
+        val overlay = FrameLayout(context).apply {
+            setBackgroundColor(0xB3000000.toInt())
+            isClickable = true
+            setOnClickListener { dismissConfirmDialog() }
+        }
+        val card = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            background = Skin.flat(Shape.CARD)
+            setPadding(34, 28, 34, 26)
+            isClickable = true
+        }
+        card.addView(Ui.text(context, "禁用应用", 30f, pal.text, bold = true), LinearLayout.LayoutParams(-1, -2))
+        card.addView(
+            Ui.text(
+                context,
+                "禁用后「$display」会停止运行、图标变灰；随时可以在它的 ⋮ 菜单里重新启用。",
+                18f,
+                pal.textDim,
+            ),
+            LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 },
+        )
+        val actions = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+        }
+        fun button(text: String, primary: Boolean, onClick: () -> Unit) {
+            val tv = Ui.text(context, text, 22f, if (primary) Skin.ACCENT_INK else pal.text, bold = true).apply {
+                gravity = Gravity.CENTER
+                setPadding(28, 12, 28, 12)
+                background = Ui.round(
+                    if (primary) Skin.ACCENT else Skin.CHIP_FILL,
+                    Shape.PILL,
+                    if (primary) 0f else 1f,
+                    Skin.CHIP_STROKE,
+                )
+                isClickable = true
+                pressFeedback()
+                setOnClickListener { onClick() }
+            }
+            actions.addView(tv, LinearLayout.LayoutParams(-2, 64).also { it.leftMargin = 16 })
+        }
+        button("取消", false) { dismissConfirmDialog() }
+        button("禁用", true) {
+            dismissConfirmDialog()
+            setAppEnabled(info, false, display)
+        }
+        card.addView(actions, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 22 })
+        overlay.addView(card, FrameLayout.LayoutParams(820, LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+        confirmDialog = overlay
+        addView(overlay, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+    }
+
+    private fun dismissConfirmDialog() {
+        val d = confirmDialog ?: return
+        confirmDialog = null
+        removeView(d)
     }
 
     /** 重命名：本地别名写入 Prefs（`launcher_app_alias`），空串 = 恢复系统名称。 */

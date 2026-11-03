@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1101",
-  "versionCode": 4197,
-  "tag": "v1.0.1101",
-  "name": "CarDesk 4197 / 1.0.1101-system",
-  "notes": "第101轮：全局 Dock 启用系统预留区（RRO 112px），其它应用只显示在 Dock 上方；桌面自绘 Dock 让位；关闭开关恢复导航栏",
-  "publishedAt": "2026-11-03T02:59:14Z",
+  "version": "1.0.1103",
+  "versionCode": 4199,
+  "tag": "v1.0.1103",
+  "name": "CarDesk 4199 / 1.0.1103-system",
+  "notes": "",
+  "publishedAt": "2026-11-03T05:49:10Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4197.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4197.apk",
-    "size": 2179110,
-    "sha256": "c1dfb01cbc5c71c911085530f3170e232a0bc431a35989411406677a5dcf7833"
+    "name": "CarDesk-platform-ecarx-cardesk-4199.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4199.apk",
+    "size": 2181746,
+    "sha256": "7d3e904bbf0ba6a1b061339bae11859937f8ba2e577cfe39ba648994024e9ba3"
   }
 }

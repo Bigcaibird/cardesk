@@ -1,0 +1,6 @@
+11-03 13:50:07.869  2803  2803 I CarDesk/Drawer: [EVT] 应用状态变更 pkg=com.android.stk enabled=true
+11-03 13:50:07.878  2803  2803 I CarDesk/Drawer: 抽屉应用列表加载 count=17 costMs=3 ordered=0
+11-03 13:50:40.034  2803  2803 I CarDesk/Drawer: [EVT] 应用状态变更 pkg=com.android.email enabled=false
+11-03 13:50:40.046  2803  2803 I CarDesk/Drawer: 抽屉应用列表加载 count=17 costMs=5 ordered=0
+11-03 13:50:58.434  2803  2803 I CarDesk/Drawer: [EVT] 应用状态变更 pkg=com.android.email enabled=true
+11-03 13:50:58.441  2803  2803 I CarDesk/Drawer: 抽屉应用列表加载 count=17 costMs=4 ordered=0

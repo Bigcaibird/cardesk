@@ -1099,3 +1099,25 @@ echo "sdk.dir=/path/to/android-sdk" > local.properties
 **已知限制**：真车 VIN 三个通道未上真机验证（需看日志 `读取到 VIN` 的 `source` 字段）；巡航卡依赖高德在巡航态推引导/红绿灯帧，
 若某方向没有帧就不会显示那一枚灯。
 
+
+## 应用抽屉「禁用 / 启用」（第104轮）
+
+抽屉每个格子的 ⋮ 菜单新增一项状态相关的动作：
+
+- **可用应用** → 「禁用应用」：先弹确认（禁用后停止运行、图标变灰，可随时恢复），
+  确认后走 `PackageManager.setApplicationEnabledSetting(pkg, COMPONENT_ENABLED_STATE_DISABLED_USER, DONT_KILL_APP)`。
+- **已禁用应用** → 「启用应用」：恢复应用级状态，并额外
+  `setComponentEnabledSetting(启动入口, COMPONENT_ENABLED_STATE_ENABLED)`——
+  像 SIM Toolkit 这种「入口组件默认被禁用」的应用，只改应用级是恢复不了的。
+- 能力要求：`CHANGE_COMPONENT_ENABLED_STATE`（平台签名/系统应用才有）。普通安装调用会抛
+  `SecurityException`，只提示「没有系统权限，无法禁用/启用应用」，界面不变、不崩溃。
+
+抽屉列表本身改为 `queryIntentActivities(..., MATCH_DISABLED_COMPONENTS)`：
+
+- 已禁用的应用**继续留在抽屉里**（否则禁用后就"消失"、再也找不到恢复入口）；
+- 图标 alpha 0.35 压暗、名称用弱色，名称下方加一行「已禁用」；
+- 点已禁用应用不会启动，而是打开它的 ⋮ 菜单（唯一的恢复入口）；
+- 状态判定同时看清单 `enabled` 和 `getApplicationEnabledSetting` / `getComponentEnabledSetting`，
+  保证系统默认禁用的应用也能正确显示与恢复。
+
+**已知限制**：禁用系统关键应用（如 Settings）会导致对应能力不可用，属预期；禁用桌面本身被显式禁止（菜单里提示「桌面本身不能禁用」）。
