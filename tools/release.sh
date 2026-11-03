@@ -183,6 +183,11 @@ if [ -n "$NOTES_FILE" ] && [ ! -f "$NOTES_FILE" ]; then
     echo "更新说明文件不存在：$NOTES_FILE" >&2
     exit 1
 fi
+# 清单里的 notes 会显示在 App 的「发现新版本」弹窗里；漏了就等于用户看不到更新说明。
+if [ -z "$NOTES" ] && [ -z "$NOTES_FILE" ]; then
+    echo "⚠️  没有传 --notes / --notes-file：本版 latest.json 的 notes 会是空字符串，" >&2
+    echo "   在线更新弹窗将没有更新说明。补说明：tools/release.sh --no-bump --notes \"...\"" >&2
+fi
 python3 "$REPO/tools/make_manifest.py" \
     --apk "$OUT" \
     --version "$NAME" \

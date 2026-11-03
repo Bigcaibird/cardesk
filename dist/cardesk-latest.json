@@ -4,7 +4,7 @@
   "versionCode": 4199,
   "tag": "v1.0.1103",
   "name": "CarDesk 4199 / 1.0.1103-system",
-  "notes": "",
+  "notes": "第104轮：应用抽屉每个应用的 ⋮ 菜单新增「禁用应用/启用应用」。已禁用应用继续留在抽屉里，图标压暗、名称变灰并标「已禁用」，点开是菜单可随时恢复；支持系统默认禁用的组件级应用（SIM Toolkit 等）。需要平台签名（CHANGE_COMPONENT_ENABLED_STATE），普通安装会降级为提示。",
   "publishedAt": "2026-11-03T05:49:10Z",
   "apk": {
     "name": "CarDesk-platform-ecarx-cardesk-4199.apk",
