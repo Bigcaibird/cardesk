@@ -2269,7 +2269,12 @@ private fun showCam() {
         // 第五十六轮：这里用的是**桌面自己**的隐藏开关（`hideHomeDock`），
         // 不再是「隐藏原车 Dock」那个 —— 之前两者共用一个键，
         // 结果勾「隐藏原车 Dock」消失的是桌面自己的 Dock。
-        val hide = prefs.hideHomeDock
+        // 第九十四轮起全局 Dock 可以真正占用系统预留区；预留区生效时
+        // 桌面自己的 Dock 必须让位（否则会出现「上一条+下一条」两条 Dock）。
+        val globalReserved = prefs.globalDockEnabled && runCatching {
+            com.cardesk.launcher.core.dock.NavInsets.applied(context)
+        }.getOrDefault(false)
+        val hide = prefs.hideHomeDock || globalReserved
         Logx.d(
             LogTags.DOCK,
             "Dock 可见性",

@@ -435,7 +435,30 @@ Dock 内部布局本来就是左右两端锚定的（`DockLayout.sections(dockWi
   单元格数值按格宽缩放并截断；**续航卡**的数值、油量条、燃料文案按卡宽缩放；
 - 窄卡效果图：`preview/y07-scene-cards-seven.png`（7 张卡同时在场，控件全部留在卡内）。
 
-### 模拟器全面验证（第九十五轮补丁）
+### 全局 Dock 启用系统预留区（第 101 轮）
+
+之前全局 Dock 只有两条路径：RRO 预留区已生效（系统给导航栏留 112px）或
+`immersive.navigation=*` 把原车导航栏整体隐藏。第二条路径下，其它应用会变成
+全屏，底部 112px 被悬浮 Dock 盖住——用户反馈的正是这个现象。
+
+现在全局 Dock 服务启动时会自己争取预留区：
+
+1. `NavInsets.prepare()` 静默安装包内的 `assets/cardesk-nav-insets.apk` 覆盖包；
+2. `NavInsets.activate()` 把系统导航栏高度改成 112px（需要平台签名的
+   `CHANGE_OVERLAY_PACKAGES` / `STATUS_BAR_SERVICE` 能力）；
+3. 成功后把悬浮窗从 `TYPE_APPLICATION_OVERLAY` 换成
+   `TYPE_NAVIGATION_BAR_PANEL`，Dock 正好占据系统预留带；
+4. 同时 `policy_control` 只隐藏状态栏，不再取消导航 inset —— 其它应用
+   自然只显示在 Dock 上方；
+5. 预留区生效后桌面自己的 Dock 让位（否则会出现上下两条 Dock），全局 Dock
+   在桌面页也保持可见（它就是系统导航栏的替代品）；
+6. 关掉全局 Dock 开关时 `NavInsets.restore()` 把导航栏高度还给系统。
+
+能力不足（普通签名 / 模拟器）时安静降级，并记日志
+`系统预留区启用结果 ok=… supported=… applied=…`；设置页「全局 Dock」下会提示
+「预留区未启用：其它应用底部可能被 Dock 遮挡（平台签名版会自动启用）」。
+
+## 模拟器全面验证（第九十五轮补丁）
 
 - 启动页/启动分段、Dock 铺满、全局 Dock 跨应用、C4 原厂设置目录、C5 应用菜单与重命名、
   C3 最近任务、C2 卡片库/尺寸档位/拖拽排序与持久化，全部在 AVD `cardesk-aosp` 上逐项验证；

@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1100",
-  "versionCode": 4196,
-  "tag": "v1.0.1100",
-  "name": "CarDesk 4196 / 1.0.1100-system",
-  "notes": "第103轮：巡航红绿灯改为从引导帧 extras 提取（10001/10003/12205 带灯态即解析）+ 无效帧日志带 extras keys；模拟器注入验证通过",
-  "publishedAt": "2026-11-03T01:22:58Z",
+  "version": "1.0.1101",
+  "versionCode": 4197,
+  "tag": "v1.0.1101",
+  "name": "CarDesk 4197 / 1.0.1101-system",
+  "notes": "第101轮：全局 Dock 启用系统预留区（RRO 112px），其它应用只显示在 Dock 上方；桌面自绘 Dock 让位；关闭开关恢复导航栏",
+  "publishedAt": "2026-11-03T02:59:14Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4196.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4196.apk",
-    "size": 2177302,
-    "sha256": "ce75d4556bf262bed47cbef2d81c56263df918b42218c749b0cf2fc547990aac"
+    "name": "CarDesk-platform-ecarx-cardesk-4197.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4197.apk",
+    "size": 2179110,
+    "sha256": "c1dfb01cbc5c71c911085530f3170e232a0bc431a35989411406677a5dcf7833"
   }
 }

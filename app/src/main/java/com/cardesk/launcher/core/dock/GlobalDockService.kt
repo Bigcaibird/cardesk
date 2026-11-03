@@ -103,6 +103,7 @@ class GlobalDockService : Service() {
 
     /** 这次窗口用的是不是 2024（导航栏面板）。 */
     private var nativeInsets = false
+    private var insetsAttemptRunning = false
 
     private var tick = 0
 
@@ -176,7 +177,7 @@ class GlobalDockService : Service() {
         // 桌面进程还没跑起来（比如冷启动直接开导航），policy 也得是全局 Dock 的那套，
         // 否则原车 Dock 会先露出来一会儿。
         applyPolicyAsync("服务启动")
-    }
+        ensureNavInsets()    }
 
     // ---------------------------------------------------------------- 窗口
 
@@ -329,9 +330,62 @@ class GlobalDockService : Service() {
     /**
      * 切可见性 —— 全服务唯一的「显示 / 隐藏」入口，`addView` 不在这里。
      */
+    /**
+     * 让系统真正给 Dock 预留一条 112px 的导航栏区域。
+     *
+     * 全局 Dock 想要「其它应用只显示在 Dock 上方」，只能靠系统导航栏 inset：
+     * 用 RRO 覆盖包把导航栏高度改成 112px，再用 `TYPE_NAVIGATION_BAR_PANEL`
+     * 占据这块区域。反之写 `immersive.navigation=*` 会让应用全屏、底部被悬浮
+     * Dock 盖住（用户反馈的问题）。平台签名包才有 INSTALL_PACKAGES /
+     * CHANGE_OVERLAY_PACKAGES / STATUS_BAR_SERVICE 能力；能力不足时安静降级。
+     */
+    private fun ensureNavInsets() {
+        if (nativeInsets || insetsAttemptRunning) return
+        if (runCatching { NavInsets.applied(this) }.getOrDefault(false)) {
+            main.post { rebuildWindowWithInsets() }
+            return
+        }
+        insetsAttemptRunning = true
+        Logx.i(LogTags.DOCK, "尝试启用系统预留区")
+        NavInsets.prepare(this) {
+            val ok = runCatching { NavInsets.activate(this) }.getOrDefault(false)
+            insetsAttemptRunning = false
+            Logx.i(
+                LogTags.DOCK,
+                "系统预留区启用结果",
+                "ok" to ok,
+                "supported" to runCatching { NavInsets.supported(this) }.getOrDefault(false),
+                "applied" to runCatching { NavInsets.applied(this) }.getOrDefault(false),
+            )
+            if (ok) {
+                main.post {
+                    rebuildWindowWithInsets()
+                    applyPolicyAsync("预留区已启用")
+                }
+            }
+        }
+    }
+
+    /** 预留区生效后，把悬浮 Dock 换成导航栏面板窗口（正好占据系统预留的 112px）。 */
+    private fun rebuildWindowWithInsets() {
+        val view = root ?: return
+        if (nativeInsets) return
+        Logx.i(LogTags.DOCK, "预留区生效，按导航栏面板重建 Dock 窗口")
+        runCatching { windowManager.removeViewImmediate(view) }
+        root = null
+        designLayer = null
+        dock = null
+        params = null
+        showing = false
+        startWindow()
+        applyGeometry()
+    }
+
     private fun updateVisibility() {
         val view = root ?: return
-        val want = !homeForeground
+        // 预留区生效时，Dock 就是系统导航栏的替代品：桌面页也要保持可见，
+        // 否则桌面自己会空出一条原车导航栏（或黑边）。
+        val want = nativeInsets || !homeForeground
         if (showing == want) return
         showing = want
         view.visibility = if (want) View.VISIBLE else View.INVISIBLE
@@ -551,6 +605,15 @@ class GlobalDockService : Service() {
     override fun onDestroy() {
         Logx.i(LogTags.DOCK, "全局 Dock 服务销毁")
         main.removeCallbacksAndMessages(null)
+        // 用户关掉全局 Dock 时把导航栏高度还给系统，避免关了开关、导航栏还停在 112px。
+        if (runCatching { prefs.globalDockEnabled }.getOrDefault(true).not()) {
+            runCatching {
+                if (NavInsets.applied(this)) {
+                    Logx.i(LogTags.DOCK, "全局 Dock 关闭，恢复系统预留区")
+                    NavInsets.restore(this)
+                }
+            }
+        }
         // 关掉全局 Dock（通知栏关闭 / 设置页关开关 / 权限被收 / 被系统杀掉）时，
         // 必须把 `policy_control` 恢复到「普通桌面」应有的状态：
         // 否则用户会得到「既没有原车 Dock、也没有 CarDesk Dock」的空白底边。

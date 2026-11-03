@@ -2049,6 +2049,12 @@ class SettingsOverlay(
             // 开关会导致下面的 note 与 policy 分支变化，重画本页。
             select("dock")
         }
+        if (prefs.globalDockEnabled && !runCatching {
+                com.cardesk.launcher.core.dock.NavInsets.applied(context)
+            }.getOrDefault(false)
+        ) {
+            note("预留区未启用：其它应用底部可能被 Dock 遮挡（平台签名版会自动启用）。")
+        }
         section("增强导航栏")
         switchRow("增强导航栏（贴底 pill）", prefs.enhancedNav, "与隐藏 Dock / 下移 Dock 互斥") {
             val from = prefs.enhancedNav
