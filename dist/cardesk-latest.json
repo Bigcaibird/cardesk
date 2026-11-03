@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1107",
-  "versionCode": 4203,
-  "tag": "v1.0.1107",
-  "name": "CarDesk 4203 / 1.0.1107-system",
-  "notes": "第107轮：巡航红绿灯排查。诊断包确认高德巡航时不发灯态广播（只有 12205/10001/10077，无 60073/无 NAVITOOL）；云端 9.1/9.5 两个高德包都不含 CruiseTrafficLightBroadcaster。本版新增「导航数据源」诊断段（高德版本 + 引导帧/巡航帧/灯态帧计数），便于确认发包方问题。导航态 60073 灯态仍支持。",
-  "publishedAt": "2026-11-03T14:38:27Z",
+  "version": "1.0.1108",
+  "versionCode": 4204,
+  "tag": "v1.0.1108",
+  "name": "CarDesk 4204 / 1.0.1108-system",
+  "notes": "巡航红绿灯：接收端兼容 lightsData 扩展（社区修改版高德会广播的多方向灯态 + clearLights 清空信号）；诊断包增加「导航数据源」统计；导航卡字号与首页歌词字号放大。",
+  "publishedAt": "2026-11-03T15:18:01Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4203.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4203.apk",
-    "size": 2195938,
-    "sha256": "9661faf1c70218de21f80cfd01adf717545ddade25ace5edb27d4369b6673e1e"
+    "name": "CarDesk-platform-ecarx-cardesk-4204.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4204.apk",
+    "size": 2197406,
+    "sha256": "4a26b955a980bbcdd17588e2d0287b74fc660706d319cd657f0b470a5cd23732"
   }
 }

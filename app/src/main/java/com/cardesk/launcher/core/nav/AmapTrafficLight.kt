@@ -121,6 +121,16 @@ object AmapTrafficLight {
     /** 巡航协议的 JSON 所在 extra 名。 */
     const val EXTRA_CRUISE_DATA = "data"
 
+    /**
+     * AMap Companion 风格：`60073` 帧里额外带一个 `lightsData`（CameraLightInfo 数组的 JSON），
+     * 一次给出**同一路口所有方向**的灯态；`clearLights` / `EXTRA_CLEAR_LIGHTS` 表示清空。
+     *
+     * 这是社区修改版高德（巡航包）的扩展，官方包不带；桌面按多方向数组处理。
+     */
+    const val EXTRA_LIGHTS_DATA = "lightsData"
+    const val EXTRA_CLEAR_LIGHTS = "clearLights"
+    const val EXTRA_CLEAR_LIGHTS_ALT = "EXTRA_CLEAR_LIGHTS"
+
     /** 消息类型键。 */
     const val EXTRA_KEY_TYPE = "KEY_TYPE"
 
@@ -341,6 +351,64 @@ object AmapTrafficLight {
         val countdownSeconds: Int?,
         val rawStatus: Int?,
     )
+
+    /**
+     * 解析 `lightsData` 数组（社区修改版高德 / AMap Companion 扩展）。
+     *
+     * 顶层是 JSON 数组，每个元素来自 `CameraLightInfo`：
+     * `direction`（1 左 / 2 直 / 3 右）、`status`（0 红 / 1 绿；部分版本 2 也当绿）、
+     * `countdown`、`waitNum`、`showType`。也兼容 `dir` / `trafficLightStatus` /
+     * `redLightCountDownSeconds` 这些标准命名。
+     *
+     * @return 按 左→直→右→其它 排好序、同方向去重的灯列表；空数组 / 坏 JSON 返回空列表。
+     */
+    fun standardArray(raw: String?): List<DirectionLight> {
+        if (raw.isNullOrEmpty() || raw.length > MAX_CRUISE_JSON_LENGTH) return emptyList()
+        val items = runCatching { JsonLite.parseArray(raw) }.getOrNull() ?: return emptyList()
+        if (items.isEmpty()) return emptyList()
+        val out = LinkedHashMap<Int, DirectionLight>()
+        for (item in items) {
+            if (out.size >= MAX_CRUISE_LIGHTS) break
+            // 社区扩展用 CameraLightInfo 的名字（direction/status），也兼容标准命名
+            // （dir/trafficLightStatus）；两者的方向与灯态枚举**不是同一套**，分别映射。
+            val standardNames = item.containsKey("trafficLightStatus") || item.containsKey("dir")
+            val dirRaw = strictInt(item["direction"] ?: item["dir"])
+            val direction = if (standardNames) {
+                when (dirRaw) {
+                    1 -> DIR_LEFT
+                    2 -> DIR_RIGHT
+                    4 -> DIR_STRAIGHT
+                    else -> null
+                }
+            } else {
+                when (dirRaw) {
+                    DIR_LEFT, DIR_STRAIGHT, DIR_RIGHT -> dirRaw
+                    else -> null
+                }
+            }
+            val status = strictInt(item["status"] ?: item["trafficLightStatus"]) ?: continue
+            val lamp = if (standardNames) {
+                when (status) {
+                    STATUS_STANDARD_RED -> Lamp.RED
+                    STATUS_STANDARD_GREEN -> Lamp.GREEN
+                    else -> Lamp.UNKNOWN
+                }
+            } else {
+                // CameraLightInfo：0=红、1/2=绿（社区与 UNI 实测一致）。
+                when (status) {
+                    0 -> Lamp.RED
+                    1, 2 -> Lamp.GREEN
+                    else -> Lamp.UNKNOWN
+                }
+            }
+            val countdown = seconds(item["countdown"] ?: item["redLightCountDownSeconds"])
+            val key = direction ?: -1
+            if (!out.containsKey(key)) {
+                out[key] = DirectionLight(direction, lamp, countdown, status)
+            }
+        }
+        return out.values.sortedBy { directionOrder(it.direction) }
+    }
 
     /**
      * 解析巡航协议的**全部方向**（最多 [MAX_CRUISE_LIGHTS] 条），用于巡航卡并列展示。

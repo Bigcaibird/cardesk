@@ -619,6 +619,9 @@ Dock 内部布局本来就是左右两端锚定的（`DockLayout.sections(dockWi
 - 巡航态当前高德**没有广播源**，卡片无从显示；需换装带
   `floatapp.CruiseTrafficLightBroadcaster` 的修改版（UNI 分析的
   `9.5高德-完美自动投屏3D彩虹.apk`，SHA-256 `d86d485b…`）。
+- **4204 起接收端两种扩展都兼容**：①UNI 那份的 `NAVITOOL_CRUISE_TRAFFIC_LIGHTS`（`data` JSON）；
+  ②社区修改版（`patch-amap-cruise-wrapper`）在 60073 帧里附带的 `lightsData`（CameraLightInfo 数组，
+  带 `lightsCount`、`clearLights` 清空信号）。装了会发巡航灯的高德后，巡航卡即可显示多方向灯；
 - 已加诊断段「---- 导航数据源 ----」：高德版本、引导帧/巡航帧/灯态帧计数、KEY_TYPE 统计，
   下次诊断包可直接区分「高德没发」还是「我们没解」。
 

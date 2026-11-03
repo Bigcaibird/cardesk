@@ -554,6 +554,34 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
     private fun handleStandardTrafficLight(intent: Intent) {
         AmapGuideStats.onLightFrame()
         val extras = intent.extras ?: return
+        // AMap Companion 风格扩展：同一帧带 lightsData（多方向数组）或 clearLights（清空）。
+        val clear = extras.getBoolean(AmapTrafficLight.EXTRA_CLEAR_LIGHTS, false) ||
+            extras.getBoolean(AmapTrafficLight.EXTRA_CLEAR_LIGHTS_ALT, false)
+        if (clear) {
+            cruiseLights = emptyList()
+            cruiseAt = 0L
+            lightStandard = null
+            lightStandardAt = 0L
+            standardByDir.clear()
+            Logx.i(LogTags.NAV_UI, "高德清空巡航红绿灯")
+            listener.onCruise()
+            return
+        }
+        val lightsData = extras.getString(AmapTrafficLight.EXTRA_LIGHTS_DATA)
+        val multi = AmapTrafficLight.standardArray(lightsData)
+        if (multi.isNotEmpty()) {
+            cruiseLights = multi
+            cruiseAt = SystemClock.elapsedRealtime()
+            AmapGuideStats.onLightFrame()
+            Logx.i(
+                LogTags.NAV_UI,
+                "收到巡航多方向红绿灯（lightsData）",
+                "count" to multi.size,
+                "dirs" to multi.joinToString(",") { it.direction.toString() },
+            )
+            listener.onCruise()
+            return
+        }
         val map = numericExtras(extras)
         val signal = AmapTrafficLight.standard(map)
         if (signal == null) {
