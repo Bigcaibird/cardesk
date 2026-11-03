@@ -1,0 +1,12 @@
+11-03 11:12:58.222  3232  3232 D CarDesk/Dock: Dock 可见性 hideHomeDock=true hideOemDock=false lowerDock=false page=0
+11-03 11:12:59.223  3232  3232 D CarDesk/Dock: Dock 可见性 hideHomeDock=true hideOemDock=false lowerDock=false page=0
+11-03 11:13:00.225  3232  3232 D CarDesk/Dock: Dock 可见性 hideHomeDock=true hideOemDock=false lowerDock=false page=0
+11-03 11:13:01.227  3232  3232 D CarDesk/Dock: Dock 可见性 hideHomeDock=true hideOemDock=false lowerDock=false page=0
+11-03 11:13:02.229  3232  3232 D CarDesk/Dock: Dock 可见性 hideHomeDock=true hideOemDock=false lowerDock=false page=0
+11-03 11:13:03.230  3232  3232 D CarDesk/Dock: Dock 可见性 hideHomeDock=true hideOemDock=false lowerDock=false page=0
+11-03 11:13:04.232  3232  3232 D CarDesk/Dock: Dock 可见性 hideHomeDock=true hideOemDock=false lowerDock=false page=0
+11-03 11:13:05.234  3232  3232 D CarDesk/Dock: Dock 可见性 hideHomeDock=true hideOemDock=false lowerDock=false page=0
+11-03 11:13:06.237  3232  3232 D CarDesk/Dock: Dock 可见性 hideHomeDock=true hideOemDock=false lowerDock=false page=0
+11-03 11:13:07.239  3232  3232 D CarDesk/Dock: Dock 可见性 hideHomeDock=true hideOemDock=false lowerDock=false page=0
+11-03 11:13:08.243  3232  3232 D CarDesk/Dock: Dock 可见性 hideHomeDock=true hideOemDock=false lowerDock=false page=0
+11-03 11:13:09.244  3232  3232 D CarDesk/Dock: Dock 可见性 hideHomeDock=true hideOemDock=false lowerDock=false page=0

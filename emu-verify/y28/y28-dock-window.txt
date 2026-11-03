@@ -1,0 +1,2 @@
+    mAttrs={(0,968)(1920x112) gr=TOP LEFT CENTER sim={adjust=nothing} ty=NAVIGATION_BAR_PANEL fmt=TRANSLUCENT
+[x] com.ecarx.cardesk.insets
