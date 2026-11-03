@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1105",
-  "versionCode": 4201,
-  "tag": "v1.0.1105",
-  "name": "CarDesk 4201 / 1.0.1105-system",
-  "notes": "第105轮补丁：壁纸页去掉需求/功能描述性文字（自定义壁纸说明段落、空的「说明」小节），只保留状态与按钮。",
-  "publishedAt": "2026-11-03T11:22:16Z",
+  "version": "1.0.1106",
+  "versionCode": 4202,
+  "tag": "v1.0.1106",
+  "name": "CarDesk 4202 / 1.0.1106-system",
+  "notes": "第106轮：导航卡底行字号放大 + 与车道块 18px 间距；大字歌词前后句 24→30。",
+  "publishedAt": "2026-11-03T12:53:20Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4201.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4201.apk",
-    "size": 2192042,
-    "sha256": "25227840d4332740d56c4c7913fd7bf7ae049eb4ee7432e20cf9858d90e3f102"
+    "name": "CarDesk-platform-ecarx-cardesk-4202.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4202.apk",
+    "size": 2192418,
+    "sha256": "0f01c5117da1c8266d0cecba97062aa1463229bfcfa7779168b717244991bc3e"
   }
 }

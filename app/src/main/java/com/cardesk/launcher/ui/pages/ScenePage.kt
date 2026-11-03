@@ -663,7 +663,8 @@ class ScenePage(context: Context) : View(context) {
         val x = left
         // 第五十二轮：状态栏缩到 2/3，内容基线 110 → 73
         val y = 73f
-        val w = 520f
+        // 第 106 轮：底部「剩余 距离/时间 + 到达时间」字号调大，卡宽从 520 放到 620 以容纳。
+        val w = 620f
         val pad = 26f
         val rowTop = y + pad
         // 行1 的高度不是 88（图标盒高），而是**文字列高**：
@@ -673,9 +674,9 @@ class ScenePage(context: Context) : View(context) {
         val hasLanes = guide.lanes.isNotEmpty()
         // 车道线行（高 70，marginTop 22）
         val lanesTop = rowTop + rowH + 22f
-        // 底部行（marginTop 20）
-        val bottomTop = if (hasLanes) lanesTop + 70f else rowTop + rowH + 20f
-        val bottomBaseline = bottomTop + 18f
+        // 底部行：与车道块之间留 18px 间距（第 106 轮用户要求：剩余距离/到达时间往下一点）
+        val bottomTop = if (hasLanes) lanesTop + 70f + 18f else rowTop + rowH + 20f
+        val bottomBaseline = bottomTop + 20f
         // 设计板 s01：带车道线时引导卡高 **296**（底部文字基线之下留 51 的呼吸区）
         val h = bottomTop - y + 42f + pad
 
@@ -731,33 +732,63 @@ class ScenePage(context: Context) : View(context) {
         }
 
         // —— 行3：剩余 X 公里 · Y 分 …… 预计到达 ——
-        text.textSize = 18f
-        text.color = Skin.TEXT_DIM
+        // 第 106 轮：这一行整体调大（弱标签 18→20、数值 21→25、到达 18→20/21→25）。
+        // 极端长文案（里程 + 小时级剩余）放不下时按比例收一点，避免和右侧 ETA 撞上。
         val dimLabel = "剩余 "
+        val midLabel = " 公里 · "
+        val labelSize = 20f
+        val valueSize = 25f
+        val etaSuffixSize = 20f
+        val etaTimeSize = 25f
+        var leftW = 0f
+        text.typeface = Typeface.DEFAULT
+        text.textSize = labelSize
+        leftW += text.measureText(dimLabel)
+        text.textSize = valueSize
+        leftW += text.measureText(guide.remainKm)
+        text.textSize = labelSize
+        leftW += text.measureText(midLabel)
+        text.textSize = valueSize
+        leftW += text.measureText(guide.remainTime)
+        var etaW = 0f
+        if (guide.etaTime.isNotEmpty()) {
+            text.typeface = Typeface.DEFAULT
+            text.textSize = etaTimeSize
+            etaW += text.measureText(guide.etaTime)
+            text.textSize = etaSuffixSize
+            etaW += text.measureText(NavGuideText.ETA_SUFFIX)
+        }
+        val avail = w - pad * 2f
+        val fit = if (leftW + 16f + etaW > avail) (avail / (leftW + 16f + etaW)).coerceIn(0.86f, 1f) else 1f
+        val ls = labelSize * fit
+        val vs = valueSize * fit
+        text.textSize = ls
+        text.color = Skin.TEXT_DIM
+        text.textAlign = Paint.Align.LEFT
         canvas.drawText(dimLabel, x + pad, bottomBaseline, text)
         var cx2 = x + pad + text.measureText(dimLabel)
-        text.textSize = 21f
+        text.textSize = vs
         text.color = Skin.TEXT
         canvas.drawText(guide.remainKm, cx2, bottomBaseline, text)
         cx2 += text.measureText(guide.remainKm)
-        text.textSize = 18f
+        text.textSize = ls
         text.color = Skin.TEXT_DIM
-        val midLabel = " 公里 · "
         canvas.drawText(midLabel, cx2, bottomBaseline, text)
         cx2 += text.measureText(midLabel)
-        text.textSize = 21f
+        text.textSize = vs
         text.color = Skin.TEXT
         canvas.drawText(guide.remainTime, cx2, bottomBaseline, text)
 
-        // 右侧 ETA：时间 21px + 「到达」18px，右对齐（分段着色）
+        // 右侧 ETA：时间 + 「到达」，右对齐（分段着色）
         if (guide.etaTime.isNotEmpty()) {
-            text.textSize = 18f
+            val suffix = NavGuideText.ETA_SUFFIX
+            text.textSize = etaSuffixSize * fit
             text.color = Skin.TEXT_DIM
             text.textAlign = Paint.Align.RIGHT
-            canvas.drawText(NavGuideText.ETA_SUFFIX, x + w - pad, bottomBaseline, text)
+            canvas.drawText(suffix, x + w - pad, bottomBaseline, text)
             text.textAlign = Paint.Align.LEFT
-            val suffixW = text.measureText(NavGuideText.ETA_SUFFIX)
-            text.textSize = 21f
+            val suffixW = text.measureText(suffix)
+            text.textSize = etaTimeSize * fit
             text.color = Skin.TEXT
             text.textAlign = Paint.Align.RIGHT
             canvas.drawText(guide.etaTime, x + w - pad - suffixW, bottomBaseline, text)
@@ -3056,7 +3087,7 @@ class ScenePage(context: Context) : View(context) {
         const val LYRIC_MAIN_SIZE = 52f
 
         /** 上一句 / 下一句字号。 */
-        const val LYRIC_SIDE_SIZE = 24f
+        const val LYRIC_SIDE_SIZE = 30f
 
         /** 上一句基线 y（设计坐标）。 */
         const val LYRIC_PREV_Y = 434f
