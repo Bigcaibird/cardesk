@@ -45,6 +45,14 @@ object WallpaperRenderer {
     /** 成品缓存条目数上限（1 张全屏 + 若干缩略图）。 */
     private const val MAX_CACHE = 10
 
+    /**
+     * 成品缓存**总字节**上限（第 105 轮）。
+     *
+     * 只按条数限的话：设置页 10 个缩略图条目就能把全屏那张挤出去；
+     * 自定义壁纸上来之后更明显。这里再加一道按字节的闸（40 MB）。
+     */
+    private const val MAX_CACHE_BYTES = 40L * 1024 * 1024
+
     /** 山脊 / 沙脊的采样点数。 */
     private const val SAMPLES = 200
 
@@ -56,9 +64,13 @@ object WallpaperRenderer {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Bitmap>?): Boolean {
             if (size <= MAX_CACHE) return false
             eldest?.value?.recycle()
+            cacheBytes -= eldest?.value?.byteCount?.toLong() ?: 0L
             return true
         }
     }
+
+    /** 当前缓存占用的字节数（估算，用 Bitmap.byteCount）。 */
+    private var cacheBytes = 0L
 
     /**
      * 把一张壁纸画到 [canvas]。
@@ -78,6 +90,16 @@ object WallpaperRenderer {
             val created = Bitmap.createBitmap(iw, ih, Bitmap.Config.ARGB_8888)
             drawScene(Canvas(created), spec, iw.toFloat(), ih.toFloat(), night)
             cache[key] = created
+            cacheBytes += created.byteCount.toLong()
+            // 条数没超但字节超了：从最久未用的开始丢（至少留 1 条）。
+            while (cacheBytes > MAX_CACHE_BYTES && cache.size > 1) {
+                val it = cache.entries.iterator()
+                if (!it.hasNext()) break
+                val eldest = it.next()
+                it.remove()
+                cacheBytes -= eldest.value.byteCount.toLong()
+                if (!eldest.value.isRecycled) eldest.value.recycle()
+            }
             created
         } else {
             cached
@@ -90,6 +112,52 @@ object WallpaperRenderer {
     fun clearCache() {
         cache.values.forEach { if (!it.isRecycled) it.recycle() }
         cache.clear()
+        cacheBytes = 0L
+    }
+
+    /**
+     * 画**自定义壁纸**（第 105 轮：用户导入的照片）。
+     *
+     * 稳态路径和预设壁纸完全一样：只是 `drawBitmap`（居中裁切）+ 夜间一层 scrim；
+     * 不在渲染器里做任何解码 / 缩放（导入时已经裁到 1920×1080 并落盘）。
+     *
+     * @param bitmap 已解码的自定义壁纸；null 时只铺桌面底色（解码完成后再 invalidate）。
+     */
+    fun drawCustom(canvas: Canvas, bitmap: Bitmap?, w: Float, h: Float, night: Boolean) {
+        if (w < 2f || h < 2f) return
+        if (bitmap == null || bitmap.isRecycled) return
+        // 等比填满 + 居中裁切（源图已被裁到 16:9，这里主要是兜底）。
+        val srcW = bitmap.width.toFloat()
+        val srcH = bitmap.height.toFloat()
+        val scale = max(w / srcW, h / srcH)
+        val dw = srcW * scale
+        val dh = srcH * scale
+        val left = (w - dw) / 2f
+        val top = (h - dh) / 2f
+        paint.isFilterBitmap = true
+        paint.alpha = 255
+        paint.shader = null
+        canvas.drawBitmap(
+            bitmap,
+            android.graphics.Rect(0, 0, bitmap.width, bitmap.height),
+            android.graphics.RectF(left, top, left + dw, top + dh),
+            paint,
+        )
+        if (night) {
+            // 夜间不额外存一张图：一层 40% 黑 + 顶部略深，保证白色字读得清。
+            canvas.save()
+            canvas.drawColor(0x66000000)
+            val g = LinearGradient(
+                0f, 0f, 0f, h,
+                intArrayOf(0x40000000, 0x00000000),
+                floatArrayOf(0f, 0.55f),
+                Shader.TileMode.CLAMP,
+            )
+            paint.shader = g
+            canvas.drawRect(0f, 0f, w, h, paint)
+            paint.shader = null
+            canvas.restore()
+        }
     }
 
     // ------------------------------------------------------------------ 场景

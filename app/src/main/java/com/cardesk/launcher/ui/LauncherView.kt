@@ -142,6 +142,9 @@ class LauncherView(context: Context) : FrameLayout(context) {
     private val prefs = Prefs(context.applicationContext)
     private var pal: Palette = resolvePalette().also { Skin.apply(it) }
     private val background = BackgroundView(context)
+
+    /** 自定义壁纸是否正在后台解码（避免重复起线程）。 */
+    private var customLoading = false
     private val content = FrameLayout(context)
 
     private lateinit var statusBar: ShellStatusBar
@@ -561,6 +564,12 @@ class LauncherView(context: Context) : FrameLayout(context) {
         setBackgroundColor(pal.bgTop)
         background.palette = pal
         background.wallpaper = prefs.wallpaper
+        // 自定义壁纸（第 105 轮）：有照片且选中时优先显示；位图异步解，先出底色。
+        background.custom = prefs.wallpaperCustom &&
+            com.cardesk.launcher.core.CustomWallpaper.has(context)
+        background.customBitmap =
+            if (background.custom) com.cardesk.launcher.core.CustomWallpaper.cachedBitmap() else null
+        if (background.custom) ensureCustomWallpaperLoaded()
         // 壁纸被拖拽切到上一张 / 下一张时落盘
         background.onWallpaperChanged = { index ->
             prefs.wallpaper = index
@@ -2154,6 +2163,10 @@ private fun showCam() {
         overlay.onShowPipPicker = { secondary -> showPipPicker(secondary) }
         // 壁纸（第五十七轮）：设置页里换壁纸 → 桌面立刻生效。
         overlay.onWallpaperChange = { index -> applyWallpaper(index) }
+        // 自定义壁纸（第 105 轮）：导入照片 / 切回照片 / 删除。
+        overlay.onImportWallpaper = { requestWallpaperImport() }
+        overlay.onUseCustomWallpaper = { applyCustomWallpaper() }
+        overlay.onDeleteCustomWallpaper = { deleteCustomWallpaper() }
         // 卡片风格（第五十八轮）：透明度 / 颜色 / 圆角 → 桌面重算 token 并刷新。
         overlay.onCardStyleChange = { applyCardStyle() }
         overlay.onShowCardColor = { showCardColorPicker() }
@@ -2181,11 +2194,112 @@ private fun showCam() {
     private fun applyWallpaper(index: Int) {
         val next = com.cardesk.launcher.core.Wallpapers.normalize(index)
         prefs.wallpaper = next
+        // 选预设 = 关掉自定义壁纸（照片还留着，随时可以再切回去）。
+        prefs.wallpaperCustom = false
+        background.custom = false
+        background.customBitmap = null
         background.wallpaper = next
         if (::scenePage.isInitialized) {
             scenePage.invalidate()
             scenePage.showWallpaperHint()
         }
+    }
+
+    // ---------------------------------------------------------- 自定义壁纸（第 105 轮）
+
+    /** 系统相册选图的结果：后台解码 + 落盘，成功后立刻切过去。 */
+    fun onWallpaperPicked(uri: android.net.Uri?) {
+        if (uri == null) {
+            toast("已取消导入壁纸")
+            return
+        }
+        toast("正在导入壁纸…")
+        Thread {
+            val ok = com.cardesk.launcher.core.CustomWallpaper
+                .importFromUri(context.applicationContext, uri)
+            post {
+                if (ok) {
+                    prefs.wallpaperCustom = true
+                    background.custom = true
+                    background.customBitmap = com.cardesk.launcher.core.CustomWallpaper.cachedBitmap()
+                    ensureCustomWallpaperLoaded()
+                    if (::scenePage.isInitialized) {
+                        scenePage.invalidate()
+                        scenePage.showWallpaperHint()
+                    }
+                    refreshSettingsWallpaper()
+                    toast("壁纸已导入")
+                } else {
+                    toast("导入失败：这张图片解不出来")
+                }
+            }
+        }.start()
+    }
+
+    /** 使用已经导入的自定义壁纸。 */
+    fun applyCustomWallpaper() {
+        val core = com.cardesk.launcher.core.CustomWallpaper
+        if (!core.has(context)) {
+            toast("还没有导入壁纸")
+            return
+        }
+        prefs.wallpaperCustom = true
+        background.custom = true
+        background.customBitmap = core.cachedBitmap()
+        ensureCustomWallpaperLoaded()
+        if (::scenePage.isInitialized) {
+            scenePage.invalidate()
+            scenePage.showWallpaperHint()
+        }
+        refreshSettingsWallpaper()
+        toast("已切换为自定义壁纸")
+    }
+
+    /** 删除自定义壁纸，回到预设（不会动预设下标）。 */
+    fun deleteCustomWallpaper() {
+        com.cardesk.launcher.core.CustomWallpaper.reset(context)
+        prefs.wallpaperCustom = false
+        background.custom = false
+        background.customBitmap = null
+        applyWallpaper(prefs.wallpaper)
+        refreshSettingsWallpaper()
+        toast("已删除自定义壁纸")
+    }
+
+    /** 通知设置页重建「壁纸」页（导入 / 删除后刷新预览与按钮）。 */
+    private fun refreshSettingsWallpaper() {
+        settings?.refreshWallpaperPage()
+    }
+
+    /** 打开系统相册选图（结果回到 MainActivity.onActivityResult）。 */
+    private fun requestWallpaperImport() {
+        (context as? com.cardesk.launcher.MainActivity)?.startWallpaperImport()
+    }
+
+    /**
+     * 后台解码自定义壁纸（首帧之后，不阻塞启动）。
+     *
+     * 只保留一张全屏位图：解码结果直接塞给 BackgroundView，不进壁纸渲染器的 LRU。
+     */
+    private fun ensureCustomWallpaperLoaded() {
+        if (!background.custom) return
+        if (background.customBitmap != null) return
+        if (customLoading) return
+        customLoading = true
+        Thread {
+            val bmp = com.cardesk.launcher.core.CustomWallpaper.loadScaled(context.applicationContext)
+            post {
+                customLoading = false
+                if (bmp != null && background.custom) {
+                    background.customBitmap = bmp
+                } else if (bmp == null) {
+                    // 文件坏了/被删：安静退回预设，避免一直黑底。
+                    prefs.wallpaperCustom = false
+                    background.custom = false
+                    background.customBitmap = null
+                }
+            }
+        }.start()
     }
 
     /**
@@ -2252,6 +2366,12 @@ private fun showCam() {
             return
         }
         background.wallpaper = prefs.wallpaper
+        // 自定义壁纸（第 105 轮）：设置页里导入/删除后同步到桌面。
+        background.custom = prefs.wallpaperCustom &&
+            com.cardesk.launcher.core.CustomWallpaper.has(context)
+        background.customBitmap =
+            if (background.custom) com.cardesk.launcher.core.CustomWallpaper.cachedBitmap() else null
+        if (background.custom) ensureCustomWallpaperLoaded()
         applyDockVisibility()
         applyOemPolicy()
         // 双画 / 全屏状态要同步给导航页

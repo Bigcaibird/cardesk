@@ -81,6 +81,16 @@ class Prefs(context: Context) {
         get() = sp.getInt("design_wallpaper_index", Wallpapers.DEFAULT_INDEX)
         set(v) = sp.edit().putInt("design_wallpaper_index", v).apply()
 
+    /**
+     * 是否使用**自定义壁纸**（第 105 轮：用户导入的照片）。
+     *
+     * 持久化键 `design_wallpaper_custom`。为 true 时 [wallpaper] 仍保留，
+     * 删掉自定义壁纸 / 拖动切换预设时直接回退到它。
+     */
+    var wallpaperCustom: Boolean
+        get() = sp.getBoolean("design_wallpaper_custom", false)
+        set(v) = sp.edit().putBoolean("design_wallpaper_custom", v).apply()
+
     /** 0=自动探测 1=强制模拟 2=强制真车 */
     var vehicleSource: Int
         get() = sp.getInt("vehicle_source", 0)

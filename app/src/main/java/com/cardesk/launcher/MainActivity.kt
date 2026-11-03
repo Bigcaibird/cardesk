@@ -601,7 +601,39 @@ class MainActivity : Activity() {
         return super.dispatchKeyEvent(event)
     }
 
+    /**
+     * 打开系统相册选壁纸（第 105 轮：自定义壁纸）。
+     *
+     * 用 `ACTION_OPEN_DOCUMENT`（不需要存储权限），结果在 [onActivityResult] 里回到
+     * [LauncherView.onWallpaperPicked]。
+     */
+    fun startWallpaperImport() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "image/*"
+        }
+        try {
+            startActivityForResult(intent, REQ_WALLPAPER)
+        } catch (e: Exception) {
+            android.widget.Toast.makeText(this, "没有可用的图片选择器", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == REQ_WALLPAPER) {
+            val uri = if (resultCode == RESULT_OK) data?.data else null
+            launcher?.onWallpaperPicked(uri)
+            return
+        }
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+    }
+
     companion object {
+        /** 系统相册选壁纸的请求码（第 105 轮）。 */
+        private const val REQ_WALLPAPER = 0x5101
+
         /**
          * 全局 Dock 的「回桌面后要做什么」（第八十七轮）。
          *

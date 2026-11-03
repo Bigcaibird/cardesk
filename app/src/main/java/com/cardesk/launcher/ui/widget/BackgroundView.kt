@@ -1,8 +1,10 @@
 package com.cardesk.launcher.ui.widget
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.view.View
+import com.cardesk.launcher.core.CustomWallpaper
 import com.cardesk.launcher.core.Palette
 import com.cardesk.launcher.core.Palettes
 import com.cardesk.launcher.core.Wallpapers
@@ -77,6 +79,30 @@ class BackgroundView(context: Context) : View(context) {
             invalidate()
         }
 
+    /**
+     * 是否显示**自定义壁纸**（第 105 轮：用户导入的照片）。
+     *
+     * 为 true 时 [wallpaper] 只是回退值：删掉自定义壁纸 / 下次打开预设就用它。
+     */
+    var custom: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
+
+    /**
+     * 自定义壁纸位图。
+     *
+     * 解码在后台线程（见 [CustomWallpaper.loadScaled]），完成后由 LauncherView 塞进来；
+     * null 表示还没解好 / 没有，此时只铺桌面底色。
+     */
+    var customBitmap: Bitmap? = null
+        set(value) {
+            field = value
+            invalidate()
+        }
+
     /** 壁纸切换回调（参数是新的壁纸下标）。 */
     var onWallpaperChanged: ((Int) -> Unit)? = null
 
@@ -92,6 +118,11 @@ class BackgroundView(context: Context) : View(context) {
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
 
+        // 自定义壁纸不参与「拖三张」的换纸动画：一张照片没有上一张/下一张。
+        if (custom) {
+            drawWallpaper(canvas, wallpaper, w, h)
+            return
+        }
         val off = dragOffset * (w / com.cardesk.launcher.core.Design.W)
         if (off == 0f) {
             drawWallpaper(canvas, wallpaper, w, h)
@@ -118,7 +149,11 @@ class BackgroundView(context: Context) : View(context) {
     private fun drawWallpaper(canvas: Canvas, index: Int, w: Float, h: Float) {
         // 底色兜底：拖拽时两张壁纸之间会露出缝隙，先铺一层桌面底色。
         canvas.drawColor(palette.bgTop)
-        WallpaperRenderer.draw(canvas, Wallpapers.spec(index), w, h, palette.night)
+        if (custom) {
+            WallpaperRenderer.drawCustom(canvas, customBitmap, w, h, palette.night)
+        } else {
+            WallpaperRenderer.draw(canvas, Wallpapers.spec(index), w, h, palette.night)
+        }
     }
 
     /**
@@ -135,6 +170,12 @@ class BackgroundView(context: Context) : View(context) {
     fun endDrag(delta: Float): Int {
         settleAnim?.cancel()
         settleAnim = null
+        if (custom) {
+            // 自定义壁纸时拖动不切纸，回弹即可。
+            Logx.event(LogTags.SCENE, "壁纸拖拽收尾", "delta" to delta, "step" to 0, "custom" to true)
+            dragOffset = 0f
+            return 0
+        }
         val step = when {
             delta <= -DRAG_THRESHOLD -> 1
             delta >= DRAG_THRESHOLD -> -1

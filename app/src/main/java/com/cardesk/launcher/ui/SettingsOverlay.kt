@@ -116,6 +116,15 @@ class SettingsOverlay(
      */
     var onWallpaperChange: ((Int) -> Unit)? = null
 
+    /** 打开系统相册选图（第 105 轮：自定义壁纸）。 */
+    var onImportWallpaper: (() -> Unit)? = null
+
+    /** 使用已经导入的自定义壁纸。 */
+    var onUseCustomWallpaper: (() -> Unit)? = null
+
+    /** 删除自定义壁纸。 */
+    var onDeleteCustomWallpaper: (() -> Unit)? = null
+
     /**
      * 卡片风格改了（第五十八轮）：透明度 / 颜色 / 圆角。
      *
@@ -524,6 +533,11 @@ class SettingsOverlay(
 
     /** 供外部（深链/预览测试）直接切到某一页。 */
     fun showPageKey(key: String) = select(key)
+
+    /** 导入 / 删除自定义壁纸后重建「壁纸」页（预览与按钮状态要跟着变）。 */
+    fun refreshWallpaperPage() {
+        if (selectedKey == "wallpaper") select("wallpaper")
+    }
 
     private fun select(key: String) {
         selectedKey = key
@@ -1390,20 +1404,83 @@ class SettingsOverlay(
      */
     private fun pageWallpaper() {
         val current = com.cardesk.launcher.core.Wallpapers.normalize(prefs.wallpaper)
+        val core = com.cardesk.launcher.core.CustomWallpaper
+        val hasCustom = core.has(context)
+        val usingCustom = prefs.wallpaperCustom && hasCustom
+        // 已导入的照片只是一张 1920×1080 的小图：设置页打开时同步解一次（缓存命中则更便宜）。
+        val customBmp = if (hasCustom) (core.cachedBitmap() ?: core.loadScaled(context)) else null
 
         section("当前壁纸")
         val previewHolder = FrameLayout(context)
-        val preview = WallpaperThumbView(
-            context,
-            com.cardesk.launcher.core.Wallpapers.spec(current),
-            pal.night,
-            pal.accent,
-        ).apply { chosen = true }
-        previewHolder.addView(preview, FrameLayout.LayoutParams(620, 349, Gravity.CENTER))
+        val preview: WallpaperThumbView?
+        if (usingCustom && customBmp != null) {
+            // 当前用的是照片：大预览直接显示照片。
+            preview = null
+            val iv = android.widget.ImageView(context).apply {
+                scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                background = Ui.round(Skin.surfaceSoft, Shape.CARD, 1f, Skin.NAV_STROKE)
+                clipToOutline = true
+                setImageBitmap(customBmp)
+            }
+            previewHolder.addView(iv, FrameLayout.LayoutParams(620, 349, Gravity.CENTER))
+            val border = View(context).apply {
+                background = Ui.round(0x00000000, Shape.CARD, 3f, pal.accent)
+            }
+            previewHolder.addView(border, FrameLayout.LayoutParams(620, 349, Gravity.CENTER))
+        } else {
+            val p = WallpaperThumbView(
+                context,
+                com.cardesk.launcher.core.Wallpapers.spec(current),
+                pal.night,
+                pal.accent,
+            ).apply { chosen = true }
+            preview = p
+            previewHolder.addView(p, FrameLayout.LayoutParams(620, 349, Gravity.CENTER))
+        }
         body.addView(previewHolder, LinearLayout.LayoutParams(-1, 349).also { it.topMargin = 10 })
 
-        val caption = Ui.text(context, "", 22f, pal.textDim)
+        val caption = Ui.text(
+            context,
+            if (usingCustom) "当前：自定义壁纸（导入的照片）" else "",
+            22f,
+            if (usingCustom) pal.accent else pal.textDim,
+        )
         body.addView(caption, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 14 })
+
+        // ---------------------------------------------------------- 自定义壁纸（第 105 轮）
+        section("自定义壁纸")
+        note("选一张本地照片做桌面壁纸：导入时缩到 1920×1080 存一份，之后只解这张小图。")
+        val customHolder = FrameLayout(context)
+        val customPreview = android.widget.ImageView(context).apply {
+            scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+            background = Ui.round(Skin.surfaceSoft, Shape.CARD, 1f, Skin.NAV_STROKE)
+            clipToOutline = true
+            if (customBmp != null) setImageBitmap(customBmp)
+        }
+        customHolder.addView(customPreview, FrameLayout.LayoutParams(620, 349, Gravity.CENTER))
+        val customBorder = View(context).apply {
+            background = Ui.round(0x00000000, Shape.CARD, 3f, if (usingCustom) pal.accent else 0x00000000)
+        }
+        customHolder.addView(customBorder, FrameLayout.LayoutParams(620, 349, Gravity.CENTER))
+        body.addView(customHolder, LinearLayout.LayoutParams(-1, 349).also { it.topMargin = 10 })
+        val customCaption = Ui.text(
+            context,
+            when {
+                usingCustom -> "当前：自定义壁纸（导入的照片）"
+                hasCustom -> "已有自定义壁纸，点「使用自定义壁纸」切换"
+                else -> "还没有导入壁纸"
+            },
+            22f,
+            if (usingCustom) pal.accent else pal.textDim,
+        )
+        body.addView(customCaption, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 12 })
+        actionButton("导入照片…") { onImportWallpaper?.invoke() }
+        if (hasCustom && !usingCustom) {
+            actionButton("使用自定义壁纸") { onUseCustomWallpaper?.invoke() }
+        }
+        if (hasCustom) {
+            actionButton("删除自定义壁纸", danger = true) { onDeleteCustomWallpaper?.invoke() }
+        }
 
         section("预设壁纸")
         val thumbs = ArrayList<WallpaperThumbView>()
@@ -1430,8 +1507,8 @@ class SettingsOverlay(
         /** 刷新「当前壁纸」预览 + 选中态。 */
         fun refresh(index: Int) {
             val spec = com.cardesk.launcher.core.Wallpapers.spec(index)
-            preview.spec = spec
-            caption.text = "当前：${spec.name} · ${spec.desc}"
+            preview?.spec = spec
+            if (!usingCustom) caption.text = "当前：${spec.name} · ${spec.desc}"
             thumbs.forEachIndexed { i, t ->
                 val on = i == index
                 t.chosen = on
@@ -1451,6 +1528,8 @@ class SettingsOverlay(
                 refresh(next)
                 // 立刻让桌面换上 —— 用户在设置页里就能看到效果。
                 onWallpaperChange?.invoke(next)
+                // 选预设 = 关掉自定义壁纸：重建本页，让自定义预览/按钮状态跟上。
+                select("wallpaper")
             }
         }
 
