@@ -589,6 +589,28 @@ Dock 内部布局本来就是左右两端锚定的（`DockLayout.sections(dockWi
 - 未处理的高德广播（60021/13011 等）会按 10s 限频打一行 `未处理广播内容`（键 + 前 8 个值），
   方便真车继续对字段。
 
+## 巡航红绿灯：从引导帧里提取（第 103 轮）
+
+- **现象**：4195 车机诊断包里巡航时完全没有红绿灯；`CarDesk/NavUI` 只有 12205（无效）、
+  10001（`icon=0 seg=0`）、60021（当前道路名），没有 60073、也没有 `NAVITOOL_CRUISE_TRAFFIC_LIGHTS`。
+- **定位**：反编译同款高德（`gd95_新基础版_v24t.apk`）：
+  * `floatapp.trafficlight.CruiseTrafficLightVoice` / `GuideTrafficLightVoice` 只做**语音播报**，
+    数据来自内部的 `CameraLightInfo`，不对外广播；
+  * `StandardProtocolKey` 里明确有 `greenLightLastSecond`、`redLightCountDownSeconds`、
+    `trafficLightStatus` 三个无协议号的 extra —— 说明高德靠**普通广播的 extras** 传灯态；
+  * 全 APK 搜不到 `NAVITOOL_CRUISE_TRAFFIC_LIGHTS` 字面量。
+- **修法**：`AmapDesktopGuide.handleGuide()` 开头先调 `maybeStandardLight()` ——
+  任何引导帧（10001/10003/12205）只要 extras 里同时有 `trafficLightStatus` 和
+  一个读秒字段，就按官方 60073 的口径解析一次（把 KEY_TYPE 临时替换成 60073，
+  其余字段原样交给 `AmapTrafficLight.standard()`）；巡航态按 `dir`（1 左 / 4 直 / 2 右）
+  累积到 `standardByDir`，巡航卡并排显示多个方向。
+- 无效引导帧的日志增加 `keys`（extras 键集合）；引导帧里提取到灯态会记
+  `收到红绿灯数据（引导帧(12205)）`，方便真车确认这条链路到底通不通。
+- 模拟器验证：注入带灯态的 12205（左红 20 / 右绿 12）→ 巡航卡出现两个方向灯，
+  见 `preview/y22-cruise-card.png` 与 `emu-verify/y27/`。
+- **风险**：如果车机高德确实不把灯态放进引导帧，则需要下一份诊断包再定位（日志已带 keys）；
+  另一种可能是需要在 Amap 的 HUD 设置里打开「巡航红绿灯播报」。
+
 ## 音乐播放/暂停状态跳动（第九十七轮）
 
 真机诊断包（4183 / 1.0.1087）里 `CarDesk/Media` 出现：

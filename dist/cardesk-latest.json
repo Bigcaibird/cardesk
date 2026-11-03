@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1099",
-  "versionCode": 4195,
-  "tag": "v1.0.1099",
-  "name": "CarDesk 4195 / 1.0.1099-system",
-  "notes": "氛围灯预设 chip 收紧内边距：「跳跃」不再被右边界裁掉",
-  "publishedAt": "2026-11-02T07:03:55Z",
+  "version": "1.0.1100",
+  "versionCode": 4196,
+  "tag": "v1.0.1100",
+  "name": "CarDesk 4196 / 1.0.1100-system",
+  "notes": "第103轮：巡航红绿灯改为从引导帧 extras 提取（10001/10003/12205 带灯态即解析）+ 无效帧日志带 extras keys；模拟器注入验证通过",
+  "publishedAt": "2026-11-03T01:22:58Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4195.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4195.apk",
-    "size": 2176654,
-    "sha256": "63b9cb4857a5ecdffb422ea294df06ea11e861b5fc149f95e3b8c4ae3b87eab5"
+    "name": "CarDesk-platform-ecarx-cardesk-4196.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4196.apk",
+    "size": 2177302,
+    "sha256": "ce75d4556bf262bed47cbef2d81c56263df918b42218c749b0cf2fc547990aac"
   }
 }

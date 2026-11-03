@@ -405,6 +405,10 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
     }
 
     private fun handleGuide(intent: Intent, type: Int) {
+        // 巡航红绿灯：本车高德不一定另发 `NAVITOOL_CRUISE_TRAFFIC_LIGHTS`，
+        // 有时把灯态塞在每秒一帧的引导广播里（实测 12205/10001 常无效但 extras 有东西）。
+        // 只要 extras 里同时有灯态和读秒字段，就按官方 60073 的口径解析一次。
+        maybeStandardLight(intent, type)
         val guide = Guide(
             icon = intent.getIntExtra(EXTRA_ICON, -1),
             segmentMeters = intent.getIntExtra(EXTRA_SEG_REMAIN_DIS, -1),
@@ -423,12 +427,14 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
             if (key != lastInvalidKey || now - lastInvalidAt > INVALID_LOG_WINDOW_MS) {
                 lastInvalidKey = key
                 lastInvalidAt = now
+                val keys = intent.extras?.keySet()?.sorted()?.joinToString(",").orEmpty()
                 Logx.i(
                     LogTags.NAV_UI,
                     "丢弃无效的导航引导数据",
                     "keyType" to type,
                     "icon" to guide.icon,
                     "seg" to guide.segmentMeters,
+                    "keys" to keys,
                 )
             } else {
                 Logx.d(
@@ -516,18 +522,55 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
      * 只取**数值型** extra —— 字符串 / 布尔一律当没有
      * （协议里这些字段本来就是数值，混进字符串说明不是这一类广播）。
      */
+    /**
+     * 从任意引导帧里尝试提取红绿灯（官方 60073 口径的 extras）。
+     *
+     * 只认「灯态 + 至少一个读秒字段」都在的情况，避免把无关帧里的 `dir` 当灯态。
+     */
+    private fun maybeStandardLight(intent: Intent, type: Int) {
+        val extras = intent.extras ?: return
+        if (extras.get(AmapTrafficLight.EXTRA_STATUS) !is Number) return
+        val hasCountdown = extras.get(AmapTrafficLight.EXTRA_RED_COUNTDOWN) is Number ||
+            extras.get(AmapTrafficLight.EXTRA_GREEN_LAST_SECOND) is Number
+        if (!hasCountdown) return
+        val map = numericExtras(extras)
+        // 引导帧的 KEY_TYPE 不是 60073，解析器只认 60073；这里替换成灯态帧的 keyType，
+        // 其余字段保持原样（dir/status/读秒）。
+        map[AmapTrafficLight.EXTRA_KEY_TYPE] = AmapTrafficLight.KEY_TYPE_TRAFFIC_LIGHT
+        val signal = AmapTrafficLight.standard(map)
+        if (signal == null) {
+            Logx.d(LogTags.NAV_UI, "引导帧里带灯态字段但解析失败", "keyType" to type)
+            return
+        }
+        Logx.d(LogTags.NAV_UI, "引导帧里发现灯态字段", "keyType" to type)
+        applyStandardSignal(signal, map, "引导帧($type)")
+    }
+
     private fun handleStandardTrafficLight(intent: Intent) {
         val extras = intent.extras ?: return
-        val map = HashMap<String, Any?>(AmapTrafficLight.STANDARD_EXTRAS.size)
-        for (key in AmapTrafficLight.STANDARD_EXTRAS) {
-            val v = extras.get(key)
-            if (v is Number) map[key] = v
-        }
+        val map = numericExtras(extras)
         val signal = AmapTrafficLight.standard(map)
         if (signal == null) {
             Logx.d(LogTags.NAV_UI, "红绿灯帧解析失败（官方协议）")
             return
         }
+        applyStandardSignal(signal, map, "官方协议")
+    }
+
+    private fun numericExtras(extras: android.os.Bundle): HashMap<String, Any?> {
+        val map = HashMap<String, Any?>(AmapTrafficLight.STANDARD_EXTRAS.size + 1)
+        for (key in AmapTrafficLight.STANDARD_EXTRAS) {
+            val v = extras.get(key)
+            if (v is Number) map[key] = v
+        }
+        return map
+    }
+
+    private fun applyStandardSignal(
+        signal: AmapTrafficLight.Signal,
+        map: Map<String, Any?>,
+        source: String,
+    ) {
         lightStandard = signal
         val now = SystemClock.elapsedRealtime()
         lightStandardAt = now
@@ -538,20 +581,15 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
         standardCountdown.accept(signal.lamp, signal.countdownSeconds, now)
         Logx.i(
             LogTags.NAV_UI,
-            "收到红绿灯数据（官方协议）",
+            "收到红绿灯数据（$source）",
             "lamp" to signal.lamp,
             "countdown" to signal.countdownSeconds,
-            // 两个读秒字段的**原始值**都记下来 ——
-            // `greenLightLastSecond` 的语义至今未验证（真车上绿灯读秒不往下走），
-            // 只看被灯态挑过的那一个字段，看不出到底是哪一路在动。
             "rawRed" to map[AmapTrafficLight.EXTRA_RED_COUNTDOWN],
             "rawGreen" to map[AmapTrafficLight.EXTRA_GREEN_LAST_SECOND],
             "rawStatus" to signal.rawStatus,
             "rawDir" to signal.rawDirection,
-            // 方向带中文，真车日志里能直接看出是哪个方向。
             "dir" to AmapTrafficLight.standardDirectionLabel(signal.rawDirection),
         )
-        // 第九十九轮：非导航时官方协议也按方向累积，巡航卡并排展示多个方向。
         if (!navigating) {
             val cruiseDir = when (signal.rawDirection) {
                 1 -> AmapTrafficLight.DIR_LEFT
