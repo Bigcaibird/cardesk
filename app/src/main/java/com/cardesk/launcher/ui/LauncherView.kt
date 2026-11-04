@@ -655,6 +655,10 @@ class LauncherView(context: Context) : FrameLayout(context) {
             onOpenSourceMenu = { openSourceMenu(scenePage.sourceAnchorRect) }
             // 底部卡片布局（顺序 + 尺寸 + 显隐）的持久化（键 scene_card_layout_v2）
             layoutStore = com.cardesk.launcher.core.CardLayout.PrefsStore(prefs)
+            // 第111轮：右侧固定「车况卡」的显隐（键 scene_car_status_card_visible）。
+            // 场景页自己默认是 true（= 升级前的现状），这里按偏好覆盖，
+            // 免得 build() 之后到 refresh() 之前闪一下。
+            showCarStatusCard = prefs.carStatusCardVisible
             onToggleWindow = { closed ->
                 // 模拟通道自己消化车窗开闭（这样桌面上的状态会跟着变）；
                 // 真车通道走原厂的 VfmiscManager，车窗只有下发、没有车况回读。
@@ -2630,6 +2634,9 @@ private fun showCam() {
         // 车模编号跟着设置走（第三十三轮：**接到第一页胎压卡的自绘图模**上）。
         scenePage.carModel = prefs.carModel
         navPage.carModel = prefs.carModel
+        // 第111轮：右侧固定「车况卡」的显隐跟着偏好走。
+        // 设置页开关 → `prefs.carStatusCardVisible` → 这里 → 场景页。
+        scenePage.showCarStatusCard = prefs.carStatusCardVisible
         // 首页中央大字歌词 vs 导航栏歌词槽：**同一首歌只显示一处**。
         // 槽位条形态且槽位里确实配了歌词槽 → 歌词归导航栏，中央大字让位。
         scenePage.showCenterLyric = !slotBarShowsLyric()

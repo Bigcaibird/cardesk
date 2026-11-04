@@ -118,4 +118,58 @@ class SceneCardLayoutRenderTest {
         assertNotNull("布局应能读回", loaded)
         assert(loaded!!.none { it.id == CardLayout.TIRE && it.visible })
     }
+
+    /**
+     * 第111轮效果图：
+     * - `preview/y14-settings-cards.png` —— 设置页「桌面卡片」页（新增「车况」独立开关）；
+     * - `preview/y15-scene-no-car-status.png` —— 关掉右侧车况卡后的桌面。
+     */
+    @Test
+    fun 车况卡开关效果图() {
+        val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        shadowOf(Looper.getMainLooper()).idle()
+        val decor = activity.window.decorView
+        decor.measure(
+            View.MeasureSpec.makeMeasureSpec(1920, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
+        )
+        decor.layout(0, 0, 1920, 1080)
+        shadowOf(Looper.getMainLooper()).idle()
+
+        val launcher = findLauncher(decor)
+        assertNotNull("LauncherView 应该挂在窗口里", launcher)
+
+        // —— 设置页「桌面卡片」——
+        LauncherView::class.java.getDeclaredMethod("showSettings").apply { isAccessible = true }
+            .invoke(launcher)
+        shadowOf(Looper.getMainLooper()).idle()
+        val overlayField = LauncherView::class.java.getDeclaredField("settings").apply { isAccessible = true }
+        val overlay = overlayField.get(launcher) as? com.cardesk.launcher.ui.SettingsOverlay
+        assertNotNull("设置页应该打开了", overlay)
+        overlay!!.showPageKey("cards")
+        shadowOf(Looper.getMainLooper()).idle()
+        val dir = File("../preview").apply { mkdirs() }
+        val bmp = Bitmap.createBitmap(1920, 1080, Bitmap.Config.ARGB_8888)
+        decor.draw(Canvas(bmp))
+        FileOutputStream(File(dir, "y14-settings-cards.png")).use {
+            bmp.compress(Bitmap.CompressFormat.PNG, 100, it)
+        }
+        // 关掉设置页，接着拍桌面
+        LauncherView::class.java.getDeclaredMethod("closeSettings").apply { isAccessible = true }
+            .invoke(launcher)
+        shadowOf(Looper.getMainLooper()).idle()
+
+        // —— 关掉右侧车况卡 ——
+        val field = LauncherView::class.java.getDeclaredField("scenePage").apply { isAccessible = true }
+        val scenePage = field.get(launcher) as com.cardesk.launcher.ui.pages.ScenePage
+        scenePage.showCarStatusCard = false
+        shadowOf(Looper.getMainLooper()).idle()
+        decor.invalidate()
+        val dir2 = File("../preview").apply { mkdirs() }
+        val bmp2 = Bitmap.createBitmap(1920, 1080, Bitmap.Config.ARGB_8888)
+        decor.draw(Canvas(bmp2))
+        FileOutputStream(File(dir2, "y15-scene-no-car-status.png")).use {
+            bmp2.compress(Bitmap.CompressFormat.PNG, 100, it)
+        }
+    }
 }

@@ -116,6 +116,31 @@ class Prefs(context: Context) {
         get() = sp.getInt("last_page", 0)
         set(v) = sp.edit().putInt("last_page", v).apply()
 
+    /**
+     * **车况卡**（右侧固定的那张：车门 / 车窗 / 引擎盖 / 后备箱俯视车模）是否显示。
+     *
+     * 持久化键 `scene_car_status_card_visible`，默认 **true**（保持升级前的现状：
+     * 这张卡以前一直显示，没有开关）。
+     *
+     * ## 为什么单独一个键，不走 [com.cardesk.launcher.core.CardLayout]
+     *
+     * `CardLayout` 管的是**底部卡片行**（顺序 / 尺寸 / 显隐），而车况卡
+     * 固定画在右侧、**不进底部卡片行**（`ScenePage.drawCarStatusCard`，
+     * 常量 `CAR_STATUS_CARD_TOP/W/H`）。它要是混进 `CardLayout.ALL`，
+     * 就会被 [com.cardesk.launcher.core.CardLayout.widths] 当成行内卡参与分宽，
+     * 把底部那一行挤变形。
+     *
+     * ## 第111轮
+     *
+     * 以前设置页「桌面卡片」里的「车况」开关控制的是**续航卡**
+     * （底部行 id = `car` 那张，画的是里程 + 油量条），
+     * 真正的车况卡反而没有开关。本轮把两者拆开：
+     * 底部行那张改叫「续航」，右侧这张叫「车况」，各有各的开关。
+     */
+    var carStatusCardVisible: Boolean
+        get() = sp.getBoolean("scene_car_status_card_visible", true)
+        set(v) = sp.edit().putBoolean("scene_car_status_card_visible", v).apply()
+
     /** 主题强调色，0 = 跟随日/夜配色。 */
     var accentColor: Int
         get() = intValue("accent_color", 0)

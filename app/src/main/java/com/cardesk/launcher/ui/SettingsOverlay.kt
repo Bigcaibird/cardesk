@@ -1559,6 +1559,23 @@ class SettingsOverlay(
         )
         section("桌面卡片")
         note("长按底部卡片可拖动排序。")
+
+        // 第111轮：右侧固定「车况」卡（车门 / 车窗 / 引擎盖 / 后备箱俯视车模）
+        // 单独一节 —— 它**不在底部卡片行里**，不参与拖拽排序，也没有宽度档位。
+        //
+        // 以前设置页里的「车况」开关控制的是底部行里那张**续航卡**
+        // （`CardLayout` 的 `car` 槽位，画的是里程 + 油量条），
+        // 而真正的车况卡压根没有开关 —— 两张卡被同一个名字混起来了。
+        // 本轮把车况卡补上开关，底部行那张在 [com.cardesk.launcher.core.CardLayout.title]
+        // 里改叫「续航」，两者各管各的。
+        section("车况")
+        note("右侧固定卡片（车门 / 车窗 / 引擎盖 / 后备箱），不在底部卡片行里。")
+        switchRow("显示这张卡", prefs.carStatusCardVisible, "关闭后桌面右侧不再显示这张卡") { on ->
+            val from = prefs.carStatusCardVisible
+            prefs.carStatusCardVisible = on
+            logSetting("scene_car_status_card_visible", "车况卡", from, on)
+        }
+
         val hidden = layout.filter { !it.visible }
         if (hidden.isNotEmpty()) {
             section("卡片库")
@@ -1583,8 +1600,8 @@ class SettingsOverlay(
                 onCardLayoutChanged?.invoke()
                 select(selectedKey)
             }
-            val subtitle = if (slot.id == com.cardesk.launcher.core.CardLayout.CAR) {
-                "车况卡自适应时会吃掉行尾剩余宽度；小/中/大是固定宽度"
+            val subtitle = if (slot.id == com.cardesk.launcher.core.CardLayout.RANGE) {
+                "续航卡自适应时会吃掉行尾剩余宽度；小/中/大是固定宽度"
             } else {
                 null
             }

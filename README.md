@@ -686,6 +686,57 @@ Dock 内部布局本来就是左右两端锚定的（`DockLayout.sections(dockWi
 导航状态不能被当成日夜）、`AdaptapiDayNightTest`（用同名同签名的假实现把反射路径真跑一遍：
 类名 / 方法名 / 动态代理 / 回调派发 / 合并延时）、`DayNightTest`（来源优先级）。
 
+## 桌面卡片：「车况」开关控制的其实是续航卡（第 111 轮）
+
+设置 → 桌面布局 → 桌面卡片 → 打开「车况」开关，**关掉的是续航卡**；
+而右侧那张真正的车况卡（车门 / 车窗 / 引擎盖 / 后备箱俯视车模）**压根没有开关**。
+
+**根因：两张卡被同一个名字混起来了。**
+
+| | 画的什么 | 在哪儿 | id | 以前的标题 |
+|---|---|---|---|---|
+| 行内卡 | **续航**（里程大字 + 油量条 + 「燃料剩余 · 62%」） | 底部卡片行，左起第一张 | `car` | 「车况」❌ |
+| 车况卡 | **车况**（俯视车模 + 门/窗/盖状态图例） | **右侧固定**，388×250 | — | 压根没开关 ❌ |
+
+- `core/CardLayout.kt`：`CAR -> "车况"`，而 `ScenePage.drawBottomCards()` 里
+  `CardLayout.CAR -> drawCarCard(...)` —— 那个函数画的是 `canvas.drawText("续航", ...)`；
+- 真正的车况卡是 `ScenePage.drawCarStatusCard()`（标题 `"车况"`），
+  **固定画在右侧**（`CAR_STATUS_CARD_TOP=490` / `W=388` / `H=250` / 右对齐 `rightEnd`），
+  `onDraw()` 里**无条件**调用，既不在底部卡片行、也不在 `CardLayout.ALL` 里；
+- 官方参考 App 的底部卡 ids 是「快捷 / 媒体 / 空调 / 胎压 / **续航**」
+  （`tools/ref_cites.json` 引用 `SceneDesktop.BOTTOM_CARD_IDS`），
+  我们自己的注释也写着「参考 `SceneDesktop.disableShortClick(sceneCarCard)`（:703）：**续航卡**不可点」
+  —— 说明 `car` 这个 id 在官方那里本来就是**续航卡**，只是我们后来给它错配了「车况」标题；
+- git 历史：第九十六轮 `8f4c2b6` 引入「续航 ↔ 行程1 位置互换」时，
+  注释已经写着「让『续航』排到最左」，但操作的是 `CAR`/`TRIP1` 槽位 —— 语义漂移从那时就埋下了。
+
+**修法：把两张卡彻底拆开。**
+
+- `core/CardLayout.kt`：
+  - `CAR` 常量改名 **`RANGE`**（**持久化 id 仍是 `"car"`**，只改 Kotlin 常量名与显示名）；
+  - `title(RANGE) = "续航"`；新增 `CAR_STATUS = "carstatus"`，`title(CAR_STATUS) = "车况"`；
+  - **`CAR_STATUS` 不进 `ALL`** —— 进了会被 `widths()` 当成行内卡参与分宽，把底部那一行挤变形；
+  - 顺带修掉误导性注释（`Size.AUTO` 的 KDoc、`widths()` 里的「车况卡吃掉行尾剩余宽度」，
+    实际管的是行内那张**续航**卡）。
+- `core/Prefs.kt`：新增 `carStatusCardVisible`（键 `scene_car_status_card_visible`，**默认 true** = 保持升级前现状）。
+- `ui/pages/ScenePage.kt`：新增 `showCarStatusCard`；
+  `drawCarStatusCard()` 开头提前返回 ⇒ 卡不画，**车窗命中区 `carWin0..3` 也不注册**
+  （点那个位置不会再误触「切换全部车窗」）。
+  行内那张的 `drawCarCard` 改名 `drawRangeCard`、`CAR_PRESET_W` 改名 `RANGE_CARD_W`。
+- `ui/SettingsOverlay.kt`：「桌面卡片」页**最上面**单独一节「车况」（右侧固定卡片），
+  底下才是底部卡片行里的「续航」等。
+- `ui/LauncherView.kt`：`prefs.carStatusCardVisible` → `scenePage.showCarStatusCard`
+  （建页时设一次，`refresh()` 里每轮同步）。
+
+**持久化 id 不动**：`scene_card_layout_v2` 里存的就是 id 字符串，改 id 会让老设备的布局
+整份读不出来（`decode` 认不出 id 直接回退默认布局）。所以本轮只改常量名与显示名，
+默认布局的编码串仍逐字节相同
+（`car:MEDIUM:1,quick:AUTO:0,music:AUTO:1,climate:AUTO:1,tire:AUTO:1,trip1:MEDIUM:1,trip2:AUTO:0,status:AUTO:0`）。
+
+单测：`CardLayoutTest`（标题映射、id 不变、`CAR_STATUS` 不进 `ALL`）、新增
+`CarStatusCardVisibilityTest`（Robolectric：隐藏后车窗命中区不再注册、那块像素真的不画、
+偏好默认 true）。
+
 ## 巡航红绿灯数据源排查（第 107 轮）
 
 4202 的诊断包确认：巡航时高德只发 `12205/10001/10077` 三类广播，**没有任何灯态字段**

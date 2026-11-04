@@ -527,6 +527,34 @@ class ScenePage(context: Context) : View(context) {
     /** 布局持久化通道（由宿主注入，例如 `CardLayout.PrefsStore(prefs)`）。 */
     var layoutStore: com.cardesk.launcher.core.CardLayout.Store? = null
 
+    // ---------------------------------------------------------------- 右侧车况卡
+
+    /**
+     * **右侧固定车况卡**是否显示（车门 / 车窗 / 引擎盖 / 后备箱俯视车模）。
+     *
+     * ## 它和底部卡片行是两套东西
+     *
+     * - 底部卡片行：由 [cardLayout] 管顺序 / 尺寸 / 显隐，行内可拖拽；
+     * - 车况卡：位置固定（右侧）、宽度固定（`CAR_STATUS_CARD_W`）、
+     *   **不进底部卡片行**（不进 `CardLayout.ALL`）。
+     *
+     * 所以它有自己的开关（`Prefs.carStatusCardVisible`，默认 true），
+     * 由宿主（`LauncherView`）从偏好同步过来。
+     *
+     * ## 第111轮
+     *
+     * 以前这张卡是**无条件**画的，而设置页「桌面卡片 → 车况」的开关
+     * 控制的是底部行里那张**续航卡**（id = `car`，画里程 + 油量条）——
+     * 两张卡被同一个名字混起来了。本轮把车况卡补上开关，
+     * 底部行那张改叫「续航」，两者各管各的。
+     */
+    var showCarStatusCard: Boolean = true
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
+
     // ---------------------------------------------------------------- 壁纸提示
 
     private val main = Handler(Looper.getMainLooper())
@@ -570,6 +598,7 @@ class ScenePage(context: Context) : View(context) {
         drawGuide(canvas)
         drawWeather(canvas)
         // 第九十六轮：天气下面那张「行程数据」卡挪到底部卡片行，这里不再画。
+        // 第111轮：右侧车况卡有自己的开关（`showCarStatusCard`），关掉时整张卡不画。
         drawCarStatusCard(canvas)
         drawCenterLyric(canvas)
         drawBottomCards(canvas)
@@ -1487,7 +1516,7 @@ class ScenePage(context: Context) : View(context) {
         com.cardesk.launcher.core.CardLayout.MUSIC -> MUSIC_CARD_W
         com.cardesk.launcher.core.CardLayout.CLIMATE -> CLIMATE_CARD_W
         com.cardesk.launcher.core.CardLayout.TIRE -> TIRE_CARD_W
-        com.cardesk.launcher.core.CardLayout.CAR -> CAR_PRESET_W
+        com.cardesk.launcher.core.CardLayout.RANGE -> RANGE_CARD_W
         com.cardesk.launcher.core.CardLayout.LEGACY_TRIP -> TRIP_BOTTOM_CARD_W
         com.cardesk.launcher.core.CardLayout.TRIP1 -> TRIP_BOTTOM_CARD_W
         com.cardesk.launcher.core.CardLayout.TRIP2 -> TRIP2_BOTTOM_CARD_W
@@ -1512,7 +1541,7 @@ class ScenePage(context: Context) : View(context) {
                 com.cardesk.launcher.core.CardLayout.MUSIC -> drawMusicCard(canvas, drawRect)
                 com.cardesk.launcher.core.CardLayout.CLIMATE -> drawClimateCard(canvas, drawRect)
                 com.cardesk.launcher.core.CardLayout.TIRE -> drawTireCard(canvas, drawRect)
-                com.cardesk.launcher.core.CardLayout.CAR -> drawCarCard(canvas, drawRect)
+                com.cardesk.launcher.core.CardLayout.RANGE -> drawRangeCard(canvas, drawRect)
                 com.cardesk.launcher.core.CardLayout.LEGACY_TRIP,
                 com.cardesk.launcher.core.CardLayout.TRIP1 -> drawTrip1Card(canvas, drawRect)
                 com.cardesk.launcher.core.CardLayout.TRIP2 -> drawTrip2Card(canvas, drawRect)
@@ -2300,7 +2329,7 @@ class ScenePage(context: Context) : View(context) {
      * `paintRangeProgress(fuelPercent)` 那条进度条**本来就是油量条**
      * 这里补一个显式百分比，让「油还剩多少」不用去猜条的长度。
      */
-    private fun drawCarCard(canvas: Canvas, rect: RectF) {
+    private fun drawRangeCard(canvas: Canvas, rect: RectF) {
         val x = rect.left
         val top = rect.top
         val w = rect.width()
@@ -2389,11 +2418,19 @@ class ScenePage(context: Context) : View(context) {
      *
      * ## 读不到怎么显示
      *
-     * 这张卡**始终画**（它有车模这个固定视觉主体，而且用户明确要求要有）：
-     * 读不到的那几项显示「--」，**不猜**——
+     * 只要这张卡是**显示**的，就**始终画**（它有车模这个固定视觉主体，
+     * 而且用户明确要求要有）：读不到的那几项显示「--」，**不猜**——
      * 「读不到」和「关着」是两回事（这条口径与 `VehicleStats.interpretDoorClosed` 一致）。
+     *
+     * ## 显隐
+     *
+     * 第111轮起这张卡有自己的开关 [showCarStatusCard]。
+     * 关掉时**整张卡不画**——车窗命中区（`carWin0..3`）也不会注册，
+     * 点那个位置不会再下发「切换全部车窗」命令。
      */
     private fun drawCarStatusCard(canvas: Canvas) {
+        // 第111轮：车况卡可隐藏。提前返回 ⇒ 车窗命中区不注册 ⇒ 点空白处不会误触车窗开关。
+        if (!showCarStatusCard) return
         val i = info ?: return
         val doors = i.doorsClosed
         val windows = resolveWindowOpenFlags()
@@ -3347,14 +3384,22 @@ class ScenePage(context: Context) : View(context) {
         /** 快捷入口卡左边距（设计板：图标底板从卡内 24 开始）。 */
         const val QUICK_PAD = 24f
 
-        /** 快捷入口卡宽（第五十轮对齐设计板 s01：与通用音乐 / 快捷车控同宽 338）。 */
-        /** 车况卡在「小/中/大」固定档位下的自然宽度（自适应时吃剩余宽度）。 */
-        const val CAR_PRESET_W = 311f
+        /**
+         * 续航卡（底部卡片行里那张，id = `car`）在固定档位下的自然宽度
+         * （自适应时由 `CardLayout.widths` 吃掉行尾剩余宽度）。
+         *
+         * 第111轮：原来这个常量叫 `CAR_PRESET_W`、注释还写着「车况卡」——
+         * 但它管的是画「续航」的那张卡（`drawRangeCard`）。
+         * 名字跟着显示名一起改掉，免得下次又被当成车况卡。
+         */
+        const val RANGE_CARD_W = 311f
 
         /** 卡片库新增：行程卡 / 车门车窗卡的自然宽度。 */
         const val TRIP_BOTTOM_CARD_W = 388f
         const val TRIP2_BOTTOM_CARD_W = 380f
         const val STATUS_BOTTOM_CARD_W = 380f
+
+        /** 快捷入口卡宽（第五十轮对齐设计板 s01：与通用音乐 / 快捷车控同宽 338）。 */
         const val QUICK_CARD_W = 338f
 
         /** 媒体卡宽。第四十九轮「浮屿」从 400 收到 338，与快捷卡 / 车控卡同宽。 */

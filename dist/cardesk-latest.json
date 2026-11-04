@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1112",
-  "versionCode": 4208,
-  "tag": "v1.0.1112",
-  "name": "CarDesk 4208 / 1.0.1112-system",
-  "notes": "修复桌面与高德地图的日夜模式不同步：接入高德下发的日夜信号（10019 状态 37 白天 / 38 黑夜），「跟随高德」下桌面随地图实时切换；桌面切好日夜后回推给高德（10048），地图与桌面保持一致。「跟随光感」改读车机真实光照（AdaptAPI 昼夜通道，跟随模式下取车机实际亮度），车机明暗变化即时刷新，不再是固定值。",
-  "publishedAt": "2026-11-04T03:42:32Z",
+  "version": "1.0.1113",
+  "versionCode": 4209,
+  "tag": "v1.0.1113",
+  "name": "CarDesk 4209 / 1.0.1113-system",
+  "notes": "第111轮：修复「桌面卡片 → 车况」开关实际控制续航卡的问题。\n\n- 设置「桌面卡片 → 车况」的开关，现在控制的是右侧那张真正的车况卡（车门 / 车窗 / 引擎盖 / 后备箱俯视车模）；以前它控制的是续航卡；\n- 底部卡片行里原来被叫「车况」的那张卡改叫「续航」（里程 + 油量条 + 燃料剩余），它的开关也归它自己；\n- 车况卡隐藏后不再响应点击（点那块位置不会误触「切换全部车窗」）；\n- 老的桌面布局设置不受影响（持久化 id 没变，默认布局逐字节相同）。",
+  "publishedAt": "2026-11-04T07:43:42Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4208.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4208.apk",
-    "size": 2206518,
-    "sha256": "04f8d00336c6116067968c2302b744e30dd330b56d0517ab323d3af8b64c7189"
+    "name": "CarDesk-platform-ecarx-cardesk-4209.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4209.apk",
+    "size": 2207030,
+    "sha256": "fe2fff1a6ad6c800041ecf0d77b4dbfc184ea1fe0d8e6e9543942f6a6afc60ba"
   }
 }

@@ -16,7 +16,45 @@ object CardLayout {
     const val MUSIC = "music"
     const val CLIMATE = "climate"
     const val TIRE = "tire"
-    const val CAR = "car"
+
+    /**
+     * 续航卡（底部卡片行左起第一张）：里程大字 + 油量条 + 「燃料剩余」。
+     *
+     * ## 为什么持久化 id 还叫 "car"
+     *
+     * 这个 id 是**官方桌面**的 `sceneCarCard`（参考 App 的底部卡 ids 是
+     * 快捷 / 媒体 / 空调 / 胎压 / **续航**）—— 官方那张 `sceneCarCard`
+     * 画的就是续航，不是「车况」（我们自己的注释也写着
+     * 「参考 `SceneDesktop.disableShortClick(sceneCarCard)`（:703）：续航卡不可点」）。
+     *
+     * cardesk 的「车况卡」（车门 / 车窗 / 引擎盖 / 后备箱的俯视车模）
+     * 是**另一张卡**：固定画在右侧，不进底部卡片行，见 [CAR_STATUS]。
+     *
+     * ## 持久化值保持 "car" 不动
+     *
+     * `scene_card_layout_v2` 里存的就是这个字符串；改值会让老设备的布局
+     * 整份读不出来（[decode] 认不出 id 直接回退默认布局），所以只改
+     * Kotlin 里的常量名与显示名，**不动线上的 id**。
+     *
+     * ## 第111轮修的就是这个撞名
+     *
+     * 以前这个槽位的标题写成「车况」，于是设置页「桌面卡片 → 车况」的开关
+     * 关掉的是**续航卡**，而真正的车况卡（右侧那张）压根没有开关。
+     */
+    const val RANGE = "car"
+
+    /**
+     * 车况卡（**右侧固定卡**，不进底部卡片行）。
+     *
+     * 车门 / 车窗 / 引擎盖 / 后备箱的俯视车模 + 状态图例，
+     * 固定位置固定宽度（388×250），画法见 `ScenePage.drawCarStatusCard`。
+     *
+     * 它和底部卡片行是两套东西，所以：
+     * - 有自己的 id（[title] 里叫「车况」）；
+     * - 有自己的显隐开关（`Prefs.carStatusCardVisible`）；
+     * - **不在 [ALL] 里**（进了就会被 [widths] 当成行内卡分宽度）。
+     */
+    const val CAR_STATUS = "carstatus"
 
     /**
      * 第九十五轮迭代 2 新增的可选卡片（默认不显示，从「卡片库」添加）。
@@ -32,8 +70,12 @@ object CardLayout {
     /** 旧 id（第九十五轮的单张行程卡）；只用于迁移，不再出现在 [ALL] 里。 */
     const val LEGACY_TRIP = "trip"
 
-    /** 全部可布局的卡片，顺序即默认顺序。 */
-    val ALL: List<String> = listOf(QUICK, MUSIC, CLIMATE, TIRE, CAR, TRIP1, TRIP2, STATUS)
+    /**
+     * 全部可布局的卡片，顺序即默认顺序。
+     *
+     * 注意：[CAR_STATUS] **不在**这里——它是右侧固定卡，不参与底部卡片行的排布与分宽。
+     */
+    val ALL: List<String> = listOf(QUICK, MUSIC, CLIMATE, TIRE, RANGE, TRIP1, TRIP2, STATUS)
 
     /** 默认就显示的卡（其余从卡片库添加）。 */
     /**
@@ -44,7 +86,7 @@ object CardLayout {
      * 后续第九十六轮补丁把续航与行程1 **位置互换**，所以现在默认布局是
      * 续航 / 音乐 / 空调 / 胎压 / 行程1；快捷应用卡收进卡片库，需要时自己加。
      */
-    private val DEFAULT_VISIBLE = setOf(TRIP1, MUSIC, CLIMATE, TIRE, CAR)
+    private val DEFAULT_VISIBLE = setOf(TRIP1, MUSIC, CLIMATE, TIRE, RANGE)
 
     /** 偏好键（第九十五轮起，替代旧的 `scene_bottom_card_order_v1`）。 */
     const val KEY = "scene_card_layout_v2"
@@ -55,7 +97,8 @@ object CardLayout {
         MUSIC -> "音乐"
         CLIMATE -> "空调"
         TIRE -> "胎压"
-        CAR -> "车况"
+        RANGE -> "续航"
+        CAR_STATUS -> "车况"
         TRIP1 -> "行程1（总）"
         TRIP2 -> "行程2（自复位）"
         STATUS -> "车门车窗"
@@ -82,7 +125,7 @@ object CardLayout {
     fun migrateSizes(layout: List<Slot>): List<Slot> = layout.map { slot ->
         when (slot.id) {
             TRIP1 -> slot.copy(size = Size.MEDIUM)
-            CAR -> slot.copy(size = Size.MEDIUM)
+            RANGE -> slot.copy(size = Size.MEDIUM)
             else -> slot
         }
     }
@@ -97,7 +140,7 @@ object CardLayout {
      * 只换位置，不动各自的尺寸/显隐。
      */
     fun migrateSwapCarTrip(layout: List<Slot>): List<Slot> {
-        val carIndex = layout.indexOfFirst { it.id == CAR }
+        val carIndex = layout.indexOfFirst { it.id == RANGE }
         val tripIndex = layout.indexOfFirst { it.id == TRIP1 }
         if (carIndex < 0 || tripIndex < 0 || carIndex == tripIndex) return layout
         val out = layout.toMutableList()
@@ -133,8 +176,9 @@ object CardLayout {
     /**
      * 尺寸档位。
      *
-     * [AUTO] = 自适应：普通卡取自然宽度，车况卡吃掉行尾剩余宽度；
-     * 其余档位按自然宽 × [scale] 缩放；车况卡选中/大档位时改为固定宽度。
+     * [AUTO] = 自适应：普通卡取自然宽度；**续航卡**（[RANGE]，底部卡片行里那张）
+     * 设为自适应时吃掉行尾剩余宽度（见 [widths]）。
+     * 其余档位按自然宽 × [scale] 缩放。
      */
     enum class Size(val label: String, val scale: Float) {
         AUTO("自适应", 1f),
@@ -153,7 +197,7 @@ object CardLayout {
      * 依次是 音乐 / 空调 / 胎压 / 续航；快捷应用、行程2、车门车窗只进卡片库。
      */
     val DEFAULT: List<Slot> = listOf(
-        defaultSlot(CAR).copy(size = Size.MEDIUM),
+        defaultSlot(RANGE).copy(size = Size.MEDIUM),
         defaultSlot(QUICK),
         defaultSlot(MUSIC),
         defaultSlot(CLIMATE),
@@ -205,7 +249,7 @@ object CardLayout {
         }
         if (out.none { it.visible }) {
             // 至少留一张可见，否则桌面底部会整条消失。
-            val idx = out.indexOfFirst { it.id == CAR }.takeIf { it >= 0 } ?: 0
+            val idx = out.indexOfFirst { it.id == RANGE }.takeIf { it >= 0 } ?: 0
             out[idx] = out[idx].copy(visible = true)
         }
         return out
@@ -238,7 +282,7 @@ object CardLayout {
      * @param rowWidth 可用宽度
      * @param gap 卡间距
      * @param naturalWidth 该卡的自然/固定宽度（不含档位缩放）
-     * @param minWidth 最小宽度保护（车况卡）
+     * @param minWidth 最小宽度保护（续航卡自适应时的兜底宽度）
      * @return 可见卡按顺序的 (id, width)；不会返回隐藏卡。
      */
     fun widths(
@@ -252,28 +296,28 @@ object CardLayout {
         if (slots.isEmpty()) return emptyList()
         val gaps = gap * (slots.size - 1)
         val base = slots.map { slot ->
-            if (slot.id == CAR && slot.size == Size.AUTO) 0f else naturalWidth(slot.id) * slot.size.scale
+            if (slot.id == RANGE && slot.size == Size.AUTO) 0f else naturalWidth(slot.id) * slot.size.scale
         }
         val leftover = rowWidth - base.sum() - gaps
         val widths = base.toMutableList()
-        val carIndex = slots.indexOfFirst { it.id == CAR && it.size == Size.AUTO }
-        if (carIndex >= 0) {
-            // 车况卡自适应：吃掉行尾剩余宽度。卡太多/太宽时把其它「自适应」卡按比例收窄，
-            // 保证整行不溢出（否则第 6、7 张卡会把车况卡挤到屏幕外）。
+        val rangeIndex = slots.indexOfFirst { it.id == RANGE && it.size == Size.AUTO }
+        if (rangeIndex >= 0) {
+            // 续航卡自适应：吃掉行尾剩余宽度。卡太多/太宽时把其它「自适应」卡按比例收窄，
+            // 保证整行不溢出（否则第 6、7 张卡会把续航卡挤到屏幕外）。
             if (leftover < minWidth) {
-                val others = slots.indices.filter { it != carIndex && slots[it].size == Size.AUTO }
+                val others = slots.indices.filter { it != rangeIndex && slots[it].size == Size.AUTO }
                 val totalOthers = others.sumOf { base[it].toDouble() }.toFloat()
                 val need = minWidth - leftover
                 if (totalOthers > 0f) {
                     val keep = (1f - need / totalOthers).coerceIn(0.25f, 1f)
                     for (i in others) widths[i] = base[i] * keep
                 }
-                widths[carIndex] = minWidth
+                widths[rangeIndex] = minWidth
             } else {
-                widths[carIndex] = leftover
+                widths[rangeIndex] = leftover
             }
         } else {
-            // 车况卡隐藏或被设成固定档位：剩余宽度在「自适应」卡之间均分/分摊。
+            // 续航卡隐藏或被设成固定档位：剩余宽度在「自适应」卡之间均分/分摊。
             val targets = slots.indices.filter { slots[it].size == Size.AUTO }
             val pool = targets.ifEmpty { listOf(slots.lastIndex) }
             if (leftover >= 0f) {
