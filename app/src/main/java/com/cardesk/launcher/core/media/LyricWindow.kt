@@ -66,4 +66,23 @@ object LyricWindow {
         val sp = split(total)
         return IntArray(sp[0] + 1 + sp[1]) { it - sp[0] }
     }
+
+    /**
+     * 取「以当前行为中心」的整窗文本。
+     *
+     * 第 113 轮：首页中央大字歌词改成**五行**（上 2 / 当前 / 下 2），
+     * 整窗的取句逻辑跟导航页组合卡完全一致 —— 所以把它提到这里，
+     * 两边共用一份**纯 Kotlin**实现（可在 JVM 单测里覆盖）。
+     *
+     * @param lines 全部歌词行
+     * @param index 当前行下标（< 0 表示没有歌词，整窗都是空串）
+     * @param total 总行数（含当前句），默认 [TOTAL_LINES]
+     * @return 长度恒为 `total` 的列表，顺序是「上 → 当前 → 下」；
+     *         越界 / 空行处是空串（界面保留位置但不画字）
+     */
+    fun window(lines: List<String>, index: Int, total: Int = TOTAL_LINES): List<String> {
+        val sp = split(total)
+        val past = sp[0]
+        return List(past + 1 + sp[1]) { i -> lineAt(lines, index, i - past) }
+    }
 }

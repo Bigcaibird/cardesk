@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1114",
-  "versionCode": 4210,
-  "tag": "v1.0.1114",
-  "name": "CarDesk 4210 / 1.0.1114-system",
-  "notes": "第112轮：修复画中画黑屏、行程卡合并、桌面启动不再唤起高德。\n\n1. 画中画黑屏（日夜模式切换后高德一直黑，要「全屏一次」才恢复）\n   - 根因：换肤重建时旧的画中画承载面没有释放，高德的 task 还挂在旧 VirtualDisplay 上，新承载面启动高德时被带到旧 display → 黑屏；\n   - 修法：重建前先释放旧承载面；新增「嵌入之后一直没出画面」的自愈路径（原来那条要求「先见过画面」，所以永远不自愈）。\n\n2. 卡片库去掉行程2 卡，只保留一张「行程卡」\n   - 行程卡的「里程 / 时长」改用 ITripData 那条路（原来读 VHAL 属性在真车上读不到）；\n   - 老设备布局里残留的 trip2 会被安全丢掉，不会让整份布局读不出来。\n\n3. 桌面启动时不再唤起高德\n   - 画中画承载与「向高德索要区域信息」都推迟到桌面完全启动（启动页淡出）之后再做。",
-  "publishedAt": "2026-11-04T15:03:05Z",
+  "version": "1.0.1115",
+  "versionCode": 4211,
+  "tag": "v1.0.1115",
+  "name": "CarDesk 4211 / 1.0.1115-system",
+  "notes": "第 113 轮：首页中央大字歌词改成五行，并把当前行之外的四行整体放大。\n\n- 歌词由三行改成五行：上 2 / 上 1 / 当前 / 下 1 / 下 2。\n- 衬句字号 30 → 40（紧邻当前句的两行）/ 34（最远的两行）；当前句 52 → 56。\n- 字号分三档、颜色由远及近递亮，视线自然落到正在唱的那一句。\n- 整块重新落位：上沿让开左上导航引导卡，下沿让开底部卡片区。\n- 取句与导航页组合卡共用同一份 LyricWindow.window，两边不会错位。\n- 没有歌词时整窗清空，不留上一首歌的残句。",
+  "publishedAt": "2026-11-04T15:50:14Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4210.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4210.apk",
-    "size": 2205462,
-    "sha256": "eff5972a371c050d46f6bf1c0af2b2f2052ad094828f63f6402e61dc49cb526d"
+    "name": "CarDesk-platform-ecarx-cardesk-4211.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4211.apk",
+    "size": 2206718,
+    "sha256": "96fc2d22063d6d3184f00b4e2c508d704bd9263ffbea3a3f5d0e28cbb831ea7e"
   }
 }

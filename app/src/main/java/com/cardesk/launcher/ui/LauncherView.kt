@@ -3087,10 +3087,15 @@ private fun showCam() {
             mediaLyricWipe = wipe
             mediaLyricFallback = MusicController.get().lyricState
             if (timeline != null && index >= 0) {
+                val lines = timeline.lines.map { it.text }
                 // 第三十三轮：第二页组合卡的播放器显示 **5 句**（上 2 + 当前 + 下 2），
                 // 整窗居中（expandedLyricWindow）。
-                navPage.setLyricWindow(timeline.lines.map { it.text }, index)
-                // 场景页中央大字歌词（当前句大号高亮 + 上下句淡出）—— 超出增强。
+                navPage.setLyricWindow(lines, index)
+                // 第 113 轮：首页中央大字歌词也改成 **5 句**
+                // （上 2 / 上 1 / 当前 / 下 1 / 下 2），字号分三档。
+                // 取句跟导航页共用 `LyricWindow.window` —— 同一份实现，两边不会错位。
+                scenePage.setLyricWindow(lines, index)
+                // 导航页那三句可能被外部直接赋值（占位文案），首页以导航页为准。
                 scenePage.lyricPrev = navPage.lyricPrev
                 scenePage.lyricCurrent = navPage.lyricCurrent
                 scenePage.lyricNext = navPage.lyricNext
@@ -3103,9 +3108,9 @@ private fun showCam() {
                 navPage.setLyricWindow(emptyList(), -1)
                 // 空闲/加载中/纯音乐：直接用控制器的状态文案
                 navPage.lyricCurrent = mediaLyricFallback
-                scenePage.lyricPrev = ""
+                // 首页整窗清空（**上 2 / 下 2 也要清**，否则会留下上一首歌的残句）
+                scenePage.setLyricWindow(emptyList(), -1)
                 scenePage.lyricCurrent = mediaLyricFallback
-                scenePage.lyricNext = ""
                 navPage.lyricWipe = 0f
                 scenePage.lyricWipe = 0f
                 slotsBar?.lyricWipe = 0f

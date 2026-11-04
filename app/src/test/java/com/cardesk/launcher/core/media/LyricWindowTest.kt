@@ -106,4 +106,59 @@ class LyricWindowTest {
     fun `默认总行数是五`() {
         assertEquals(5, LyricWindow.TOTAL_LINES)
     }
+
+    // ---------------------------------------------------------- 整窗取句（第 113 轮）
+
+    @Test
+    fun `整窗是上二当前下二`() {
+        val lines = listOf("一", "二", "三", "四", "五", "六", "七")
+        assertEquals(
+            listOf("一", "二", "三", "四", "五"),
+            LyricWindow.window(lines, 2),
+        )
+    }
+
+    @Test
+    fun `整窗长度恒等于总行数`() {
+        val lines = listOf("一", "二", "三", "四", "五", "六")
+        for (n in 1..9) {
+            assertEquals("总行数 $n", n, LyricWindow.window(lines, 2, n).size)
+        }
+    }
+
+    @Test
+    fun `整窗越界处是空串而不是少一行`() {
+        val lines = listOf("一", "二", "三")
+        // 当前句在最后一行：上面两行有，下面两行没有
+        assertEquals(
+            listOf("一", "二", "三", "", ""),
+            LyricWindow.window(lines, 2),
+        )
+        // 当前句在第一行：上面两行没有
+        assertEquals(
+            listOf("", "", "一", "二", "三"),
+            LyricWindow.window(lines, 0),
+        )
+    }
+
+    @Test
+    fun `整窗没有歌词时全是空串`() {
+        assertEquals(
+            listOf("", "", "", "", ""),
+            LyricWindow.window(emptyList(), 0),
+        )
+        assertEquals(
+            listOf("", "", "", "", ""),
+            LyricWindow.window(listOf("一"), -1),
+        )
+    }
+
+    @Test
+    fun `整窗的空行也占位`() {
+        val lines = listOf("一", "  ", "三")
+        assertEquals(
+            listOf("", "一", "", "三", ""),
+            LyricWindow.window(lines, 1),
+        )
+    }
 }
