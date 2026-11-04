@@ -8,7 +8,9 @@ import android.view.ViewGroup
 import com.cardesk.launcher.MainActivity
 import com.cardesk.launcher.core.CardLayout
 import com.cardesk.launcher.core.Prefs
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -69,7 +71,7 @@ class SceneCardLayoutRenderTest {
 
         // 卡片库：把行程 / 车门车窗两张新卡也放上桌面，再出一张效果图。
         val withLibrary = CardLayout.withVisible(
-            CardLayout.withVisible(custom, CardLayout.TRIP1, true),
+            CardLayout.withVisible(custom, CardLayout.TRIP_CARD, true),
             CardLayout.STATUS,
             true,
         )
@@ -92,16 +94,13 @@ class SceneCardLayoutRenderTest {
             bmp3.compress(Bitmap.CompressFormat.PNG, 100, it)
         }
 
-        // 第九十六轮：行程1（总）/ 行程2（自复位）两张卡，行程2 右上角带「复位」胶囊。
-        val trips = CardLayout.withVisible(
-            CardLayout.withVisible(
-                CardLayout.withVisible(CardLayout.DEFAULT, CardLayout.TRIP1, true),
-                CardLayout.TRIP2,
-                true,
-            ),
-            CardLayout.TIRE,
-            false,
-        )
+        // 第112轮：只剩一张「行程卡」（原来的行程1），里程/时长走 ITripData。
+        //
+        // 这里用**默认布局本身**（不再手动关掉胎压卡）——
+        // 第九十六轮那张图要同时塞行程1 + 行程2 两张卡，位置不够才把胎压卡关掉；
+        // 第112轮行程2 没了，位置腾出来了，效果图必须跟真机一致：
+        // **续航 / 音乐 / 空调 / 胎压 / 行程卡** 五张。
+        val trips = CardLayout.DEFAULT
         scenePage.cardLayout = trips
         shadowOf(Looper.getMainLooper()).idle()
         decor.invalidate()
@@ -110,6 +109,39 @@ class SceneCardLayoutRenderTest {
         FileOutputStream(File(dir, "y13-trip-cards.png")).use {
             bmp4.compress(Bitmap.CompressFormat.PNG, 100, it)
         }
+
+        // 回归：默认布局**必须**把胎压卡画出来。
+        //
+        // 第112轮出过一次乌龙 —— 渲染测试为了给两张行程卡腾地方把胎压卡 `visible=false`，
+        // 结果交付出去的效果图里没有胎压卡，用户以为被删了。
+        // 这里把「默认布局 = 5 张可见、含胎压」钉死，别再靠肉眼。
+        val visibleIds = trips.filter { it.visible }.map { it.id }
+        assertEquals(
+            listOf(
+                CardLayout.RANGE, CardLayout.MUSIC, CardLayout.CLIMATE,
+                CardLayout.TIRE, CardLayout.TRIP_CARD,
+            ),
+            visibleIds,
+        )
+        assertTrue(
+            "胎压卡必须在默认布局里可见",
+            trips.any { it.id == CardLayout.TIRE && it.visible },
+        )
+        // 像素级：胎压卡那块**真的画了东西**（不是只排在布局里）。
+        // 反射拿 `ScenePage.cardRects`（真实排布结果），取胎压卡的矩形。
+        val rectsField = com.cardesk.launcher.ui.pages.ScenePage::class.java
+            .getDeclaredField("cardRects").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        val cardRects = rectsField.get(scenePage) as Map<String, android.graphics.RectF>
+        val tireRect = cardRects[CardLayout.TIRE]
+        assertNotNull("胎压卡应该在排布结果里", tireRect)
+        var tirePixels = 0
+        for (y in tireRect!!.top.toInt() until tireRect.bottom.toInt()) {
+            for (x in tireRect.left.toInt() until tireRect.right.toInt()) {
+                if (bmp4.getPixel(x, y) != 0) tirePixels++
+            }
+        }
+        assertTrue("胎压卡那块应该画出了内容（实际 $tirePixels 像素）", tirePixels > 0)
 
         // 布局落盘往返：下一个进程读回来还是这份布局。
         val prefs = Prefs(activity.applicationContext)

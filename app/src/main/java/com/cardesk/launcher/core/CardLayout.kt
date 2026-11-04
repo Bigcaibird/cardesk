@@ -57,14 +57,36 @@ object CardLayout {
     const val CAR_STATUS = "carstatus"
 
     /**
-     * 第九十五轮迭代 2 新增的可选卡片（默认不显示，从「卡片库」添加）。
+     * 行程卡（第十二轮起只留这一张）：本次行程的里程 / 时长 / 平均油耗 / 总里程。
      *
-     * 第九十六轮：原来的单张 `trip` 卡拆成两张——
-     * [TRIP1] 行程1（总行程，只读）、[TRIP2] 行程2（自复位，可复位）。
-     * 旧偏好里的 `trip` 在 [normalize] 里迁移到 [TRIP1]，不会丢用户布局。
+     * ## 为什么持久化 id 还叫 "trip1"
+     *
+     * 第九十六轮把它拆成「行程1（总）/ 行程2（自复位）」两张，
+     * 持久化的 id 是 `trip1`；第十二轮按用户要求**去掉行程2**，
+     * 这张改叫「行程卡」——
+     * 但**持久化 id 不动**（老设备布局里存的就是 `trip1`，
+     * 改 id 会让整份布局读不出来）。
+     *
+     * ## 里程 / 时长的数据源也换了（第十二轮）
+     *
+     * 这两项原来读 VHAL `TS_TripDistance / TS_TripTime`，
+     * 而真车上那两个属性**读不到**（诊断包实测：
+     * `行程1 原始信号 distanceRaw=null distanceVia=- format=-1 timeRaw=null`）。
+     *
+     * 现在改读 `ITripData.getLatestDrivingInfo()` ——
+     * 也就是**原来行程2 那张卡**的数据源，那条路是通的
+     * （诊断包：`行程里程/时长：8.5 km / 31.0 分钟`）。
      */
-    const val TRIP1 = "trip1"
-    const val TRIP2 = "trip2"
+    const val TRIP_CARD = "trip1"
+
+    /**
+     * 第112轮移除的「行程2（自复位）」卡的 id。
+     *
+     * **只用于迁移**：老设备布局里可能还留着 `trip2`，
+     * 解码时要**丢掉它**（见 [decode]）——
+     * 而不能让整份布局读不出来（那会把用户攒下来的顺序 / 尺寸 / 显隐全冲掉）。
+     */
+    const val LEGACY_TRIP2 = "trip2"
     const val STATUS = "status"
 
     /** 旧 id（第九十五轮的单张行程卡）；只用于迁移，不再出现在 [ALL] 里。 */
@@ -74,8 +96,10 @@ object CardLayout {
      * 全部可布局的卡片，顺序即默认顺序。
      *
      * 注意：[CAR_STATUS] **不在**这里——它是右侧固定卡，不参与底部卡片行的排布与分宽。
+     *
+     * 第112轮：行程2 卡被移除（[LEGACY_TRIP2] 只用于迁移），只剩一张 [TRIP_CARD]。
      */
-    val ALL: List<String> = listOf(QUICK, MUSIC, CLIMATE, TIRE, RANGE, TRIP1, TRIP2, STATUS)
+    val ALL: List<String> = listOf(QUICK, MUSIC, CLIMATE, TIRE, RANGE, TRIP_CARD, STATUS)
 
     /** 默认就显示的卡（其余从卡片库添加）。 */
     /**
@@ -84,9 +108,9 @@ object CardLayout {
      *
      * 需求原文：「1.把快捷应用卡片默认移除，把天气下面的行程卡挪过来」——
      * 后续第九十六轮补丁把续航与行程1 **位置互换**，所以现在默认布局是
-     * 续航 / 音乐 / 空调 / 胎压 / 行程1；快捷应用卡收进卡片库，需要时自己加。
+     * 续航 / 音乐 / 空调 / 胎压 / 行程卡；快捷应用卡收进卡片库，需要时自己加。
      */
-    private val DEFAULT_VISIBLE = setOf(TRIP1, MUSIC, CLIMATE, TIRE, RANGE)
+    private val DEFAULT_VISIBLE = setOf(TRIP_CARD, MUSIC, CLIMATE, TIRE, RANGE)
 
     /** 偏好键（第九十五轮起，替代旧的 `scene_bottom_card_order_v1`）。 */
     const val KEY = "scene_card_layout_v2"
@@ -99,19 +123,17 @@ object CardLayout {
         TIRE -> "胎压"
         RANGE -> "续航"
         CAR_STATUS -> "车况"
-        TRIP1 -> "行程1（总）"
-        TRIP2 -> "行程2（自复位）"
+        TRIP_CARD -> "行程卡"
         STATUS -> "车门车窗"
         LEGACY_TRIP -> "行程"
         else -> id
     }
 
     /** 把历史 id 迁移到当前 id（目前只有 `trip` → `trip1`）。 */
-    fun migrate(id: String): String = if (id == LEGACY_TRIP) TRIP1 else id
+    fun migrate(id: String): String = if (id == LEGACY_TRIP) TRIP_CARD else id
 
     /** 「快捷应用 → 行程1」一次性迁移的偏好标记（第九十六轮）。 */
     const val MIGRATE_QUICK_KEY = "card_layout_quick_to_trip_v1"
-
     /** 「行程/续航尺寸互换」一次性迁移的偏好标记（第九十六轮补丁 5）。 */
     const val MIGRATE_SIZES_KEY = "card_layout_sizes_v1"
 
@@ -124,7 +146,7 @@ object CardLayout {
      */
     fun migrateSizes(layout: List<Slot>): List<Slot> = layout.map { slot ->
         when (slot.id) {
-            TRIP1 -> slot.copy(size = Size.MEDIUM)
+            TRIP_CARD -> slot.copy(size = Size.MEDIUM)
             RANGE -> slot.copy(size = Size.MEDIUM)
             else -> slot
         }
@@ -141,7 +163,7 @@ object CardLayout {
      */
     fun migrateSwapCarTrip(layout: List<Slot>): List<Slot> {
         val carIndex = layout.indexOfFirst { it.id == RANGE }
-        val tripIndex = layout.indexOfFirst { it.id == TRIP1 }
+        val tripIndex = layout.indexOfFirst { it.id == TRIP_CARD }
         if (carIndex < 0 || tripIndex < 0 || carIndex == tripIndex) return layout
         val out = layout.toMutableList()
         val car = layout[carIndex]
@@ -158,8 +180,8 @@ object CardLayout {
      * 其它卡的位置 / 尺寸 / 显隐原样保留。
      */
     fun migrateQuickToTrip(layout: List<Slot>): List<Slot> {
-        val trip = layout.firstOrNull { it.id == TRIP1 } ?: Slot(TRIP1, Size.AUTO, true)
-        val rest = layout.filter { it.id != TRIP1 && it.id != QUICK }
+        val trip = layout.firstOrNull { it.id == TRIP_CARD } ?: Slot(TRIP_CARD, Size.AUTO, true)
+        val rest = layout.filter { it.id != TRIP_CARD && it.id != QUICK }
         val quick = layout.firstOrNull { it.id == QUICK } ?: Slot(QUICK, Size.AUTO, false)
         return normalize(listOf(trip.copy(visible = true)) + rest + quick.copy(visible = false))
     }
@@ -171,7 +193,7 @@ object CardLayout {
      * 行程1/行程2 是卡片库能力，升级不替用户做决定：之前显示过旧行程卡的用户，
      * 升级后行程1 也先收进卡片库，需要时自己点「添加」。
      */
-    private fun legacySlot(slot: Slot): Slot = Slot(TRIP1, slot.size, visible = false)
+    private fun legacySlot(slot: Slot): Slot = Slot(TRIP_CARD, slot.size, visible = false)
 
     /**
      * 尺寸档位。
@@ -193,8 +215,10 @@ object CardLayout {
     fun defaultSlot(id: String): Slot = Slot(id, Size.AUTO, visible = id in DEFAULT_VISIBLE)
 
     /**
-     * 默认布局：行程1 在左起第一张（原来快捷应用卡的位置），
-     * 依次是 音乐 / 空调 / 胎压 / 续航；快捷应用、行程2、车门车窗只进卡片库。
+     * 默认布局：续航在左起第一张（原来快捷应用卡的位置），
+     * 依次是 音乐 / 空调 / 胎压 / 行程卡；快捷应用、车门车窗只进卡片库。
+     *
+     * 第112轮：行程2 卡被移除，默认布局里不再有它。
      */
     val DEFAULT: List<Slot> = listOf(
         defaultSlot(RANGE).copy(size = Size.MEDIUM),
@@ -202,8 +226,7 @@ object CardLayout {
         defaultSlot(MUSIC),
         defaultSlot(CLIMATE),
         defaultSlot(TIRE),
-        defaultSlot(TRIP1).copy(size = Size.MEDIUM),
-        defaultSlot(TRIP2),
+        defaultSlot(TRIP_CARD).copy(size = Size.MEDIUM),
         defaultSlot(STATUS),
     )
 
@@ -219,6 +242,13 @@ object CardLayout {
             if (part.isBlank()) continue
             val fields = part.split(':')
             if (fields.size != 3) return null
+            // 第112轮：行程2 卡被移除 —— 老布局里残留的 `trip2` **丢掉它**。
+            //
+            // 不能让它走下面那句 `if (id !in ALL) return null`：
+            // 那样整份布局都读不出来 → 调用方回退默认布局 →
+            // 用户攒下来的顺序 / 尺寸 / 显隐**全被冲掉**。
+            // 丢一张卡只是少一张卡，代价小得多。
+            if (fields[0] == LEGACY_TRIP2) continue
             val legacy = fields[0] == LEGACY_TRIP
             val id = migrate(fields[0])
             if (id !in ALL) return null

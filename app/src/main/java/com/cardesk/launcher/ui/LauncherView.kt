@@ -96,8 +96,6 @@ class LauncherView(context: Context) : FrameLayout(context) {
 
         /** 驾驶模式切换成功后，快捷面板停留一下再自动关闭。 */
         const val DRIVE_MODE_CLOSE_DELAY_MS = 700L
-        /** 复位行程2 成功后自动关确认弹窗的延迟。 */
-        const val TRIP_RESET_CLOSE_DELAY_MS = 900L
 
         /** 右缘竖滑命中区宽度。 */
         private const val EDGE_WIDTH = 120f
@@ -288,6 +286,26 @@ class LauncherView(context: Context) : FrameLayout(context) {
      * 现在由 `MainActivity` 在桌面**画出第一帧之后**再调 [startServices]。
      */
     private var servicesStarted = false
+
+    /**
+     * 画中画承载（**= 唤起高德**）是否已经开始过。
+     *
+     * 第112轮：桌面启动时**不**承载画中画。
+     *
+     * 承载 = `ActivityEmbed.embed` → `startActivity` —— 那就是**真的把高德这个
+     * Activity 启动起来**。以前它在 `build()` 里就做了（桌面还在搭骨架），
+     * 于是「开机时高德先跳出来」，跟桌面自己的首帧抢 CPU / 抢焦点。
+     *
+     * 现在推迟到桌面**完全启动之后**（[startDeferredAmapActions]）。
+     */
+    private var pipHostingStarted = false
+
+    /**
+     * 「桌面完全启动后的跨进程动作」是否已经做过（第112轮）。
+     *
+     * 幂等：重复调用直接返回。
+     */
+    private var deferredAmapStarted = false
 
     /** 上一次「车身状态变化」触发的立即刷新时刻（`SystemClock.uptimeMillis()`）。 */
     private var lastBodyRefreshAt = 0L
@@ -484,20 +502,10 @@ class LauncherView(context: Context) : FrameLayout(context) {
             if (isAttachedToWindow) navGuideSource?.start()
         }.onFailure { Logx.w(LogTags.NAV_UI, "启动导航引导数据源失败", it) }
 
-        // 接收器注册好之后，再向高德**索要区域信息**（第三十一轮新增；第九十三轮挪到这里）。
-        //
-        // 高德收到广播后会去向车机（ecarx.naviservice）要区域信息，
-        // 车机回包后高德把城市**全局广播**出来 ——
-        // 真机上系统定位长期没有位置时，这是我们唯一的坐标来源入口。
-        // 已经有城市（本次进程拿到过 / 上次落盘过）就不再重复要。
-        runCatching {
-            if (com.cardesk.launcher.core.AmapCitySource.broadcastCity.isNullOrBlank() &&
-                prefs.weatherCity.isBlank()
-            ) {
-                Logx.i(LogTags.WEATHER, "启动时向高德索要区域信息")
-                com.cardesk.launcher.core.AmapCitySource.requestAreaInfo(context.applicationContext)
-            }
-        }.onFailure { Logx.w(LogTags.WEATHER, "向高德索要区域信息失败", it) }
+        // 「向高德索要区域信息」**挪到 [startDeferredAmapActions]**（第112轮）——
+        // 那个广播带 `FLAG_INCLUDE_STOPPED_PACKAGES`，注释里写得很清楚：
+        // 「才能把高德顺带拉起来」—— 所以它是「唤起高德」的一条路径，
+        // 不能在桌面还没启动完的时候就发。
 
         // 每秒刷新：首帧已经画出来了，现在开始跑定时刷新。
         handler.removeCallbacks(ticker)
@@ -512,6 +520,58 @@ class LauncherView(context: Context) : FrameLayout(context) {
             updateCheckRunnable,
             com.cardesk.launcher.core.update.UpdateStartupCheck.CHECK_DELAY_MS,
         )
+    }
+
+    /**
+     * 桌面**完全启动之后**才做的跨进程动作（第112轮）。
+     *
+     * ## 背景：桌面启动时为什么要唤起高德
+     *
+     * 桌面启动时我们做两件**会唤起高德**的事：
+     *
+     * 1. **画中画承载**（[refreshPip] → `ActivityEmbed.embed` → `startActivity`）
+     *    —— 那就是**真的把高德这个 Activity 启动起来**（启动在 VirtualDisplay 上）；
+     * 2. **向高德索要区域信息**
+     *    （[com.cardesk.launcher.core.AmapCitySource.requestAreaInfo]）
+     *    —— 那个广播带 `FLAG_INCLUDE_STOPPED_PACKAGES`，
+     *    `AmapAreaInfo` 的注释里写得很直白：「才能把高德顺带拉起来」。
+     *
+     * 这两件事以前都在桌面**还没画完**的时候做（画中画在 `build()` 里，
+     * 索要区域信息在 `startServices()` 里），于是：
+     *
+     * - 开机时**高德先跳出来**，盖在还在加载的桌面上；
+     * - 高德进程启动（地图初始化、网络、定位）跟桌面自己的首帧抢 CPU。
+     *
+     * ## 现在怎么做
+     *
+     * 统一推到**启动页淡出之后**（`MainActivity` 的 `desktopReady` 那一刻）：
+     * 桌面这时已经完全可见、自己的活干完了，才去动高德。
+     *
+     * 幂等：重复调用直接返回。
+     */
+    fun startDeferredAmapActions() {
+        if (deferredAmapStarted) return
+        deferredAmapStarted = true
+        Logx.i(LogTags.APP, "桌面就绪后开始唤起高德相关动作")
+
+        // —— 1) 画中画承载（= 启动高德 Activity）——
+        pipHostingStarted = true
+        refreshPip()
+
+        // —— 2) 向高德索要区域信息 ——
+        //
+        // 高德收到后会去向车机（`ecarx.naviservice`）要区域信息，
+        // 车机回包后高德把城市**全局广播**出来 ——
+        // 真机上系统定位长期没有位置时，这是我们唯一的坐标来源入口。
+        // 已经有城市（本次进程拿到过 / 上次落盘过）就不再重复要。
+        runCatching {
+            if (com.cardesk.launcher.core.AmapCitySource.broadcastCity.isNullOrBlank() &&
+                prefs.weatherCity.isBlank()
+            ) {
+                Logx.i(LogTags.WEATHER, "桌面就绪后向高德索要区域信息")
+                com.cardesk.launcher.core.AmapCitySource.requestAreaInfo(context.applicationContext)
+            }
+        }.onFailure { Logx.w(LogTags.WEATHER, "向高德索要区域信息失败", it) }
     }
 
     // ------------------------------------------------------------------ 启动更新检测（第九十八轮）
@@ -610,6 +670,15 @@ class LauncherView(context: Context) : FrameLayout(context) {
             prefs.wallpaper = index
             scenePage.showWallpaperHint()
         }
+        // 第十二轮：换肤重建前**先释放旧的画中画承载面**。
+        //
+        // 不释放的话会出两件事：
+        // 1. 旧的 `ActivityView` + `VirtualDisplay` 泄漏，反复切日夜会攒出一堆残留 task；
+        // 2. **新承载面黑屏**（用户报的现象）：高德的 task 还挂在旧 VirtualDisplay 上，
+        //    新承载面用同一套 `NEW_TASK | RESET_TASK_IF_NEEDED` 旗标再启动一次高德时，
+        //    系统会把**旧 task 拉到前台** —— 旧 task 在旧 display 上 → 新承载面只剩一块黑。
+        //    用户绕法是「全屏一次再还原」（那条路会重新下发启动，把 task 搬过来）。
+        releasePipSurfaces("重建前")
         content.removeAllViews()
 
         // 这一轮把 content 整个重建了，上面挂着的浮层（设置 / 空调 / 抽屉 / 槽位编辑 /
@@ -673,8 +742,6 @@ class LauncherView(context: Context) : FrameLayout(context) {
                     if (!ok) toast("车窗控制通道不可用")
                 }
             }
-            // 行程2 卡上的「复位」胶囊：先弹确认，再交 VehicleController 做多路尝试 + 回读验证。
-            onTripReset = { showTripResetDialog() }
         }
         // 导航页（navCanvas / desktopNavPage）：左地图卡（承载画中画）+ 右组合卡（胎压/音乐）
         navPage = NavPage(context, pal).apply {
@@ -802,7 +869,19 @@ class LauncherView(context: Context) : FrameLayout(context) {
         }
         content.addView(sourceMenu, Ui.frame(Design.W.toInt(), Design.H.toInt()))
 
+        // 第十二轮：画中画原来在**全屏态**的话，重建后要恢复。
+        //
+        // 顺序不能反：
+        // - 先按普通态 `showPage` → `refreshPip()` 才会去承载应用
+        //   （`refreshPip` 在 `pipFullscreen` 为真时是直接 return 的）；
+        // - 再把它提到最上层（`enterPipFullscreen`）。
+        val pipWasFullscreen = pipFullscreen
+        pipFullscreen = false
         showPage(page)
+        if (pipWasFullscreen) {
+            pipFullscreen = true
+            enterPipFullscreen()
+        }
         refresh()
         // 第五十六轮：启动就把「沉浸系统导航栏」写进 `policy_control` ——
         // 否则系统自带 Dock 平时还是那个状态，点桌面 Dock 就会把它唤出来。
@@ -860,6 +939,13 @@ class LauncherView(context: Context) : FrameLayout(context) {
     private fun refreshPip() {
         if (!::navPage.isInitialized) return
         if (pipFullscreen) return
+        // 第112轮：桌面启动时**不要**唤起高德。
+        //
+        // 承载画中画 = `ActivityEmbed.embed` → `startActivity` = 真的启动高德。
+        // 以前这一步在 `build()` 里（桌面还在搭骨架）就做了，
+        // 结果开机时高德先跳出来，跟桌面首帧抢 CPU / 抢焦点。
+        // 现在推迟到桌面完全启动之后（[startDeferredAmapActions]）。
+        if (!pipHostingStarted) return
         val dual = prefs.dualPip
         val mainPkg = prefs.pipApp
         val subPkg = prefs.pip2App
@@ -917,6 +1003,16 @@ class LauncherView(context: Context) : FrameLayout(context) {
             return
         }
         pipFullscreen = true
+        enterPipFullscreen()
+    }
+
+    /**
+     * 进入画中画全屏态：把承载面提到最上层并铺满设计画布。
+     *
+     * 第十二轮：单独拆出来，是因为**换肤重建**（[build]）后也要走这一步
+     * —— 重建时承载面被换成了新的，不重新提到最层就会掉回导航页的地图卡里。
+     */
+    private fun enterPipFullscreen() {
         navPage.pip.visibility = android.view.View.VISIBLE
         navPage.syncPipState(prefs.dualPip, true)
         // 全屏：画中画铺满整块画布（不留白）
@@ -1703,33 +1799,6 @@ class LauncherView(context: Context) : FrameLayout(context) {
         showOverlayDialog(dialog)
     }
 
-    /**
-     * 行程2（自复位行程）复位确认（第九十六轮）。
-     *
-     * 复位入口文档里只有常量、没有实现，所以先让用户确认，再走
-     * [com.cardesk.launcher.vehicle.VehicleController.resetTrip2] 的多路尝试；
-     * 成功刷新桌面并自动关弹窗，失败保留弹窗把原因写清楚。
-     */
-    private fun showTripResetDialog() {
-        Logx.event(LogTags.SCENE, "打开行程2复位确认")
-        if (overlayDialog is com.cardesk.launcher.ui.dialogs.TripResetDialog) return
-        lateinit var dialog: com.cardesk.launcher.ui.dialogs.TripResetDialog
-        dialog = com.cardesk.launcher.ui.dialogs.TripResetDialog(context, pal)
-        dialog.onReset = {
-            com.cardesk.launcher.vehicle.VehicleController.resetTrip2 { ok, message ->
-                dialog.showResult(ok, message)
-                if (ok) {
-                    refresh()
-                    handler.postDelayed({
-                        if (overlayDialog === dialog) closeOverlayDialog(dialog)
-                    }, TRIP_RESET_CLOSE_DELAY_MS)
-                }
-            }
-        }
-        dialog.onClose = { closeOverlayDialog(dialog) }
-        showOverlayDialog(dialog)
-    }
-
     private fun showHvac() {
         if (hvac != null) return
         Logx.event(LogTags.HVAC, "打开空调面板")
@@ -2158,6 +2227,18 @@ private fun showCam() {
     private fun reloadSceneCardLayout() {
         val store = com.cardesk.launcher.core.CardLayout.PrefsStore(prefs)
         scenePage.cardLayout = store.load() ?: com.cardesk.launcher.core.CardLayout.DEFAULT
+    }
+
+    /**
+     * 释放画中画承载面（主画 + 副画）。
+     *
+     * 第十二轮：换肤重建（`build`）前必须调用 —— 详见 [build] 里那段说明
+     * 与 [com.cardesk.launcher.ui.pip.PipSurface.release]。
+     */
+    private fun releasePipSurfaces(reason: String) {
+        if (!::navPage.isInitialized) return
+        navPage.pip.release(reason)
+        navPage.pipSecondary.release(reason)
     }
 
     private fun showSettings() {

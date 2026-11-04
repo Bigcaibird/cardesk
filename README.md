@@ -737,6 +737,79 @@ Dock 内部布局本来就是左右两端锚定的（`DockLayout.sections(dockWi
 `CarStatusCardVisibilityTest`（Robolectric：隐藏后车窗命中区不再注册、那块像素真的不画、
 偏好默认 true）。
 
+## 画中画黑屏 / 行程卡 / 桌面启动唤起高德（第 112 轮）
+
+第 112 轮一次修三件事（依据 4209 的诊断包 `cardesk-logs-20261104-212457.zip`）。
+
+### 1. 日夜切换后画中画高德一直黑屏（要「全屏一次」才恢复）
+
+**根因：换肤重建时旧的画中画承载面没有释放。**
+
+`applyTheme()` → `build()` 会把整棵 UI 树重建 —— 包括导航页里的 `PipSurface`。
+但 `PipSurface` **没有 `onDetachedFromWindow` 释放**，`ActivityView` + `VirtualDisplay`
+只 `clearContent()`（换应用 / 关闭）时才 release。于是：
+
+1. 旧的 `VirtualDisplay` **泄漏**（反复切日夜会攒出一堆残留 task）；
+2. **高德的 task 还挂在旧 VirtualDisplay 上**；
+3. 新承载面用同一套 `FLAG_ACTIVITY_NEW_TASK | FLAG_ACTIVITY_RESET_TASK_IF_NEEDED`
+   旗标再启动一次高德时，系统会把**旧 task 拉到前台** ——
+   而旧 task 在旧 display 上 → **新承载面里只剩一块黑**。
+
+（诊断包里 `画中画已承载该包名，复用当前画面` / `画中画画面采样 maxLuma=255 black=false streak=0`
+都来自切页时刻；切主题那一刻的日志已经被日志轮转冲掉了，所以根因是从代码链推出来的。）
+
+**用户绕法为什么有效**：全屏 → 还原那条路会 `relaunchAfterResize()` **重新下发一次启动**，
+把 task 搬到当前 display 上 —— 于是恢复了。
+
+**修法**：
+
+- `PipSurface.release(reason)`：彻底拆掉承载面（release `ActivityView` → 释放 VirtualDisplay
+  → 连带销毁旧 task），并让占位回来（**绝不留一块黑屏**）；
+- `LauncherView.build()`：**重建前**先 `releasePipSurfaces("重建前")`；
+- `PipFrameProbe.shouldHealNeverSeenContent()`：**新增一条自愈路径** ——
+  「嵌入之后一直没出画面」（`samples ≥ 4` 且连续全黑）。
+  老路径要求「**先见过非黑画面**」，而新承载面从头到尾是黑的 → `sawContent` 永远是 false
+  → 老路径**永远不自愈**。新路径只在**刚嵌入的 90 秒窗口内**判、且**一轮只自愈一次**
+  （`PixelCopy` 恒为黑的设备最多多重启一次承载应用）；
+- 顺带修好「重建时画中画在全屏态」的边界：重建后按普通态承载、再提到最层
+  （`enterPipFullscreen()`），否则会掉回地图卡里且不承载。
+
+> AOSP 9 `android.app.ActivityView` 的 `release()` 会在 `mVirtualDisplay == null` 时抛
+> `IllegalStateException`（没就绪过就没有 display，本来也不泄漏）；
+> `performRelease()` 会 `mVirtualDisplay.release()` —— 这就是旧 task 被清掉的那一步。
+
+### 2. 卡片库去掉行程2，只留一张「行程卡」
+
+- `CardLayout`：`TRIP1` 常量改名 **`TRIP_CARD`**（**持久化 id 仍是 `trip1`**），
+  `title()` 改成「行程卡」；`TRIP2` 从 `ALL` / `DEFAULT` / `title()` 里**移除**，
+  改留 `LEGACY_TRIP2 = "trip2"` 只用于迁移；
+- `decode()` 遇到老布局里的 `trip2` **丢掉这一张**，而不是让整份布局读不出来 ——
+  否则 `decode` 返回 null → 回退默认布局 → 用户攒下来的顺序 / 尺寸 / 显隐**全被冲掉**；
+- `ScenePage`：`drawTrip1Card` → `drawTripCard`，卡上标题「行程1 · 总」→「行程」；
+  **里程 / 时长改用 `ITripData.getLatestDrivingInfo()`**（原来行程2 卡用的那条路）——
+  原来读的 VHAL `TS_TripDistance / TS_TripTime` 在真车上**读不到**
+  （诊断包：`行程1 原始信号 distanceRaw=null distanceVia=- format=-1 timeRaw=null`），
+  而 `ITripData` 是通的（诊断包：`行程里程/时长：8.5 km / 31.0 分钟`）；
+  平均油耗与总里程不变；
+- 行程2 卡上的「复位」胶囊、命中区、`TripResetDialog` 一并移除
+  （入口没了）；车控层的 `VehicleController.resetTrip2()` **保留**（是车控能力，不是 UI）。
+
+### 3. 桌面启动不再唤起高德
+
+桌面启动时我们做两件**会唤起高德**的事：
+
+1. **画中画承载**（`refreshPip()` → `ActivityEmbed.embed` → `startActivity`）
+   —— 那就是**真的把高德这个 Activity 启动起来**；
+2. **向高德索要区域信息**（`AmapCitySource.requestAreaInfo`）
+   —— 那个广播带 `FLAG_INCLUDE_STOPPED_PACKAGES`，
+   `AmapAreaInfo` 的注释里写得很直白：「**才能把高德顺带拉起来**」。
+
+这两件事以前都在桌面**还没画完**的时候做（画中画在 `build()` 里、索要区域信息在
+`startServices()` 里）→ 开机时**高德先跳出来**，跟桌面自己的首帧抢 CPU / 抢焦点。
+
+**现在统一推到「桌面完全启动之后」**（启动页淡出、`desktopReady` 那一刻）：
+新增 `LauncherView.startDeferredAmapActions()`，由 `MainActivity.onDesktopReady()` 调用。
+
 ## 巡航红绿灯数据源排查（第 107 轮）
 
 4202 的诊断包确认：巡航时高德只发 `12205/10001/10077` 三类广播，**没有任何灯态字段**

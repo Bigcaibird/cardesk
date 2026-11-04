@@ -74,4 +74,57 @@ class PipFrameProbeTest {
         assertEquals(64, PipFrameProbe.SAMPLE_W)
         assertEquals(36, PipFrameProbe.SAMPLE_H)
     }
+
+    // ---------------------------------------------------------------- 第112轮
+
+    /**
+     * 第112轮：换肤重建后画中画**一直黑**、永远不自愈。
+     *
+     * 新承载面一次都没出过画面 → `sawContent` 永远是 false →
+     * 路径 A 的第一道闸过不去 → 永远不自愈。
+     *
+     * 所以补了路径 B：「嵌入之后一直没出画面」。
+     */
+    @Test
+    fun `嵌入后一直没出画面时走新路径自愈`() {
+        assertTrue(
+            PipFrameProbe.shouldHealNeverSeenContent(
+                samples = PipFrameProbe.NEVER_SEEN_MIN_SAMPLES,
+                consecutiveBlack = PipFrameProbe.BLACK_STREAK_LIMIT,
+            ),
+        )
+    }
+
+    @Test
+    fun `没采够帧不自愈_避免误判`() {
+        // 一次都没采到（探针没工作）→ 不能判
+        assertFalse(
+            PipFrameProbe.shouldHealNeverSeenContent(
+                samples = 0,
+                consecutiveBlack = 99,
+            ),
+        )
+        // 采了几帧但还不够多（应用还在起）→ 不能判
+        assertFalse(
+            PipFrameProbe.shouldHealNeverSeenContent(
+                samples = PipFrameProbe.NEVER_SEEN_MIN_SAMPLES - 1,
+                consecutiveBlack = PipFrameProbe.BLACK_STREAK_LIMIT,
+            ),
+        )
+    }
+
+    @Test
+    fun `黑帧不够多不自愈_新路径`() {
+        assertFalse(
+            PipFrameProbe.shouldHealNeverSeenContent(
+                samples = 99,
+                consecutiveBlack = PipFrameProbe.BLACK_STREAK_LIMIT - 1,
+            ),
+        )
+    }
+
+    @Test
+    fun `新路径的阈值常量符合预期`() {
+        assertEquals(4, PipFrameProbe.NEVER_SEEN_MIN_SAMPLES)
+    }
 }

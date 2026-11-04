@@ -1,6 +1,7 @@
 package com.cardesk.launcher.core
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -16,8 +17,7 @@ class CardLayoutTest {
         CardLayout.CLIMATE to 333f,
         CardLayout.TIRE to 350f,
         CardLayout.RANGE to 311f,
-        CardLayout.TRIP1 to 388f,
-        CardLayout.TRIP2 to 380f,
+        CardLayout.TRIP_CARD to 388f,
         CardLayout.STATUS to 380f,
     )
 
@@ -28,7 +28,7 @@ class CardLayoutTest {
         val encoded = CardLayout.encode(CardLayout.DEFAULT)
         assertEquals(
             "car:MEDIUM:1,quick:AUTO:0,music:AUTO:1,climate:AUTO:1,tire:AUTO:1," +
-                "trip1:MEDIUM:1,trip2:AUTO:0,status:AUTO:0",
+                "trip1:MEDIUM:1,status:AUTO:0",
             encoded,
         )
         assertEquals(CardLayout.DEFAULT, CardLayout.decode(encoded))
@@ -51,7 +51,7 @@ class CardLayoutTest {
         assertEquals(
             listOf(
                 CardLayout.RANGE, CardLayout.QUICK, CardLayout.MUSIC, CardLayout.CLIMATE,
-                CardLayout.TIRE, CardLayout.TRIP1, CardLayout.TRIP2, CardLayout.STATUS,
+                CardLayout.TIRE, CardLayout.TRIP_CARD, CardLayout.STATUS,
             ),
             decoded.map { it.id },
         )
@@ -60,23 +60,21 @@ class CardLayoutTest {
     }
 
     @Test
-    fun 旧行程卡迁移到行程1但默认隐藏() {
+    fun 旧行程卡迁移到行程卡但默认隐藏() {
         // 需求：行程卡只在卡片库里，升级不自动上桌。
         val decoded = CardLayout.decode("trip:AUTO:1,quick:AUTO:0")!!
-        assertEquals(CardLayout.TRIP1, decoded.first().id)
+        assertEquals(CardLayout.TRIP_CARD, decoded.first().id)
         assertEquals(false, decoded.first().visible)
-        assertEquals(CardLayout.TRIP1, CardLayout.migrate("trip"))
-        assertEquals(CardLayout.TRIP2, CardLayout.migrate(CardLayout.TRIP2))
-        // 第九十六轮：行程1 默认显示（挪到原来快捷应用卡的位置），行程2 仍在卡片库
-        assertEquals(true, CardLayout.DEFAULT.first { it.id == CardLayout.TRIP1 }.visible)
-        assertEquals(false, CardLayout.DEFAULT.first { it.id == CardLayout.TRIP2 }.visible)
+        assertEquals(CardLayout.TRIP_CARD, CardLayout.migrate("trip"))
+        // 第九十六轮：行程卡默认显示（挪到原来快捷应用卡的位置）
+        assertEquals(true, CardLayout.DEFAULT.first { it.id == CardLayout.TRIP_CARD }.visible)
     }
 
     @Test
     fun 移动顺序() {
         val moved = CardLayout.move(CardLayout.DEFAULT, 0, 2)
         assertEquals(
-            listOf("quick", "music", "car", "climate", "tire", "trip1", "trip2", "status"),
+            listOf("quick", "music", "car", "climate", "tire", "trip1", "status"),
             moved.map { it.id },
         )
         assertEquals(CardLayout.DEFAULT, CardLayout.move(CardLayout.DEFAULT, 9, 0))
@@ -135,7 +133,7 @@ class CardLayoutTest {
     fun 大档位比中档位更宽() {
         val medium = CardLayout.widths(CardLayout.DEFAULT, 1832f, 20f, ::natural)
         val large = CardLayout.widths(
-            CardLayout.withSize(CardLayout.DEFAULT, CardLayout.TRIP1, CardLayout.Size.LARGE),
+            CardLayout.withSize(CardLayout.DEFAULT, CardLayout.TRIP_CARD, CardLayout.Size.LARGE),
             1832f,
             20f,
             ::natural,
@@ -146,28 +144,27 @@ class CardLayoutTest {
     @Test
     fun 卡片库新增卡默认隐藏并可添加() {
         val defaults = CardLayout.DEFAULT
-        assertEquals(true, defaults.first { it.id == CardLayout.TRIP1 }.visible)
+        assertEquals(true, defaults.first { it.id == CardLayout.TRIP_CARD }.visible)
         assertEquals(false, defaults.first { it.id == CardLayout.QUICK }.visible)
-        assertEquals(false, defaults.first { it.id == CardLayout.TRIP2 }.visible)
         assertEquals(false, defaults.first { it.id == CardLayout.STATUS }.visible)
-        val added = CardLayout.withVisible(defaults, CardLayout.TRIP2, true)
+        val added = CardLayout.withVisible(defaults, CardLayout.QUICK, true)
         assertEquals(6, CardLayout.visible(added).size)
     }
 
     @Test
-    fun 八张卡同时显示时整行不溢出() {
+    fun 七张卡同时显示时整行不溢出() {
         val all = CardLayout.DEFAULT.map { it.copy(visible = true) }
         val widths = CardLayout.widths(all, 1832f, 20f, ::natural)
-        assertEquals(8, widths.size)
-        val sum = widths.sumOf { it.second.toDouble() }.toFloat() + 20f * 7
+        assertEquals(7, widths.size)
+        val sum = widths.sumOf { it.second.toDouble() }.toFloat() + 20f * 6
         assertEquals("整行必须刚好铺满且不溢出", 1832f, sum, 1f)
         assertTrue("每张卡都要保留最小可读宽度", widths.all { it.second >= 120f })
     }
 
     @Test
-    fun 续航与行程1位置互换() {
+    fun 续航与行程卡位置互换() {
         val swapped = CardLayout.migrateSwapCarTrip(CardLayout.DEFAULT)
-        assertEquals(CardLayout.TRIP1, swapped.first().id)
+        assertEquals(CardLayout.TRIP_CARD, swapped.first().id)
         assertEquals(CardLayout.RANGE, swapped[5].id)
         // 尺寸/显隐跟着卡走
         assertEquals(CardLayout.Size.MEDIUM, swapped.first().size)
@@ -177,10 +174,10 @@ class CardLayoutTest {
         // 升级前的默认布局：快捷应用可见在最左，行程1 隐藏在卡片库。
         val old = listOf(
             CardLayout.QUICK, CardLayout.MUSIC, CardLayout.CLIMATE,
-            CardLayout.TIRE, CardLayout.RANGE, CardLayout.TRIP1, CardLayout.TRIP2, CardLayout.STATUS,
-        ).map { id -> CardLayout.Slot(id, CardLayout.Size.AUTO, visible = id != CardLayout.TRIP1 && id != CardLayout.TRIP2 && id != CardLayout.STATUS) }
+            CardLayout.TIRE, CardLayout.RANGE, CardLayout.TRIP_CARD, CardLayout.STATUS,
+        ).map { id -> CardLayout.Slot(id, CardLayout.Size.AUTO, visible = id != CardLayout.TRIP_CARD && id != CardLayout.STATUS) }
         val migrated = CardLayout.migrateQuickToTrip(old)
-        assertEquals(CardLayout.TRIP1, migrated.first().id)
+        assertEquals(CardLayout.TRIP_CARD, migrated.first().id)
         assertEquals(true, migrated.first().visible)
         assertEquals(false, migrated.first { it.id == CardLayout.QUICK }.visible)
         // 其它卡的尺寸/显隐原样保留
@@ -192,7 +189,7 @@ class CardLayoutTest {
     fun 行程与续航尺寸迁移成固定档() {
         val old = CardLayout.DEFAULT.map { it.copy(size = CardLayout.Size.AUTO) }
         val migrated = CardLayout.migrateSizes(old)
-        assertEquals(CardLayout.Size.MEDIUM, migrated.first { it.id == CardLayout.TRIP1 }.size)
+        assertEquals(CardLayout.Size.MEDIUM, migrated.first { it.id == CardLayout.TRIP_CARD }.size)
         assertEquals(CardLayout.Size.MEDIUM, migrated.first { it.id == CardLayout.RANGE }.size)
         // 其它卡尺寸不动
         assertEquals(CardLayout.Size.AUTO, migrated.first { it.id == CardLayout.MUSIC }.size)
@@ -222,7 +219,7 @@ class CardLayoutTest {
         // 默认布局的编码串与第111轮之前逐字节相同
         assertEquals(
             "car:MEDIUM:1,quick:AUTO:0,music:AUTO:1,climate:AUTO:1,tire:AUTO:1," +
-                "trip1:MEDIUM:1,trip2:AUTO:0,status:AUTO:0",
+                "trip1:MEDIUM:1,status:AUTO:0",
             CardLayout.encode(CardLayout.DEFAULT),
         )
     }
@@ -244,5 +241,50 @@ class CardLayoutTest {
         // 不进 CardLayout ⇒ 行内宽度分配与它无关。
         val withRange = CardLayout.widths(CardLayout.DEFAULT, 1832f, 20f, ::natural)
         assertEquals(listOf("car", "music", "climate", "tire", "trip1"), withRange.map { it.first })
+    }
+
+    // ---------------------------------------------------------------- 第112轮
+
+    /**
+     * 第112轮：卡片库里**去掉行程2 卡**，行程1 改名「行程卡」。
+     */
+    @Test
+    fun 行程卡改名且行程2出库() {
+        assertEquals("行程卡", CardLayout.title(CardLayout.TRIP_CARD))
+        assertTrue("行程2 不能进 ALL", CardLayout.LEGACY_TRIP2 !in CardLayout.ALL)
+        assertTrue(
+            "默认布局里不该有行程2",
+            CardLayout.DEFAULT.none { it.id == CardLayout.LEGACY_TRIP2 },
+        )
+        assertEquals(7, CardLayout.ALL.size)
+    }
+
+    @Test
+    fun 行程卡持久化id不变_仍是trip1() {
+        // 改 id 老设备整份布局读不出来 —— 只改常量名与显示名。
+        assertEquals("trip1", CardLayout.TRIP_CARD)
+        assertEquals("trip2", CardLayout.LEGACY_TRIP2)
+    }
+
+    /**
+     * 第112轮最关键的一条：老设备布局里还留着 `trip2` 时，
+     * **不能**让整份布局读不出来。
+     *
+     * `decode` 认不出 id 就返回 null → 调用方回退默认布局 →
+     * 用户攒下来的顺序 / 尺寸 / 显隐全被冲掉。
+     * 所以 `trip2` 走的是「**丢掉这一张**」而不是「整份作废」。
+     */
+    @Test
+    fun 老布局里的行程2被丢掉但整份布局还能读出来() {
+        val decoded = CardLayout.decode(
+            "car:MEDIUM:1,quick:AUTO:0,music:AUTO:1,climate:AUTO:1,tire:AUTO:1," +
+                "trip1:MEDIUM:1,trip2:AUTO:0,status:AUTO:0",
+        )
+        assertNotNull("老布局必须还能读出来（不能整份回退默认布局）", decoded)
+        assertTrue("行程2 要被丢掉", decoded!!.none { it.id == CardLayout.LEGACY_TRIP2 })
+        // 其余卡的顺序 / 尺寸 / 显隐原样保留
+        assertEquals(CardLayout.RANGE, decoded.first().id)
+        assertEquals(CardLayout.Size.MEDIUM, decoded.first { it.id == CardLayout.TRIP_CARD }.size)
+        assertEquals(false, decoded.first { it.id == CardLayout.QUICK }.visible)
     }
 }

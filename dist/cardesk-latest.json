@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1113",
-  "versionCode": 4209,
-  "tag": "v1.0.1113",
-  "name": "CarDesk 4209 / 1.0.1113-system",
-  "notes": "第111轮：修复「桌面卡片 → 车况」开关实际控制续航卡的问题。\n\n- 设置「桌面卡片 → 车况」的开关，现在控制的是右侧那张真正的车况卡（车门 / 车窗 / 引擎盖 / 后备箱俯视车模）；以前它控制的是续航卡；\n- 底部卡片行里原来被叫「车况」的那张卡改叫「续航」（里程 + 油量条 + 燃料剩余），它的开关也归它自己；\n- 车况卡隐藏后不再响应点击（点那块位置不会误触「切换全部车窗」）；\n- 老的桌面布局设置不受影响（持久化 id 没变，默认布局逐字节相同）。",
-  "publishedAt": "2026-11-04T07:43:42Z",
+  "version": "1.0.1114",
+  "versionCode": 4210,
+  "tag": "v1.0.1114",
+  "name": "CarDesk 4210 / 1.0.1114-system",
+  "notes": "第112轮：修复画中画黑屏、行程卡合并、桌面启动不再唤起高德。\n\n1. 画中画黑屏（日夜模式切换后高德一直黑，要「全屏一次」才恢复）\n   - 根因：换肤重建时旧的画中画承载面没有释放，高德的 task 还挂在旧 VirtualDisplay 上，新承载面启动高德时被带到旧 display → 黑屏；\n   - 修法：重建前先释放旧承载面；新增「嵌入之后一直没出画面」的自愈路径（原来那条要求「先见过画面」，所以永远不自愈）。\n\n2. 卡片库去掉行程2 卡，只保留一张「行程卡」\n   - 行程卡的「里程 / 时长」改用 ITripData 那条路（原来读 VHAL 属性在真车上读不到）；\n   - 老设备布局里残留的 trip2 会被安全丢掉，不会让整份布局读不出来。\n\n3. 桌面启动时不再唤起高德\n   - 画中画承载与「向高德索要区域信息」都推迟到桌面完全启动（启动页淡出）之后再做。",
+  "publishedAt": "2026-11-04T15:03:05Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4209.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4209.apk",
-    "size": 2207030,
-    "sha256": "fe2fff1a6ad6c800041ecf0d77b4dbfc184ea1fe0d8e6e9543942f6a6afc60ba"
+    "name": "CarDesk-platform-ecarx-cardesk-4210.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4210.apk",
+    "size": 2205462,
+    "sha256": "eff5972a371c050d46f6bf1c0af2b2f2052ad094828f63f6402e61dc49cb526d"
   }
 }

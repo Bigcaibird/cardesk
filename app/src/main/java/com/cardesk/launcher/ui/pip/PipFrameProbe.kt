@@ -170,6 +170,15 @@ class PipFrameProbe(private val view: View) {
         const val BLACK_STREAK_LIMIT = 3
 
         /**
+         * 「从没见过非黑画面」这条自愈路径至少要采到几帧（第十二轮新增）。
+         *
+         * 4 帧 × 看门狗 3s 一轮 ≈ **12 秒**。这段时间里如果承载应用
+         * 一帧画面都没出（探针采到的全是黑），基本可以断定它没跑在
+         * 当前这个 VirtualDisplay 上。
+         */
+        const val NEVER_SEEN_MIN_SAMPLES = 4
+
+        /**
          * 黑屏自愈的冷却（毫秒）。
          *
          * 一次黑屏只自愈一次（[markHealed] 会「忘掉见过非黑画面」），
@@ -198,5 +207,43 @@ class PipFrameProbe(private val view: View) {
             if (consecutiveBlack < streakLimit) return false
             return sinceLastHealMs >= cooldownMs
         }
+
+        /**
+         * 「**嵌入之后一直没出过画面**」要不要自愈（**纯函数**，可单测）。
+         *
+         * ## 为什么要有这一条（第十二轮）
+         *
+         * [shouldHeal] 的第一道闸是「**必须先见过非黑画面**」，
+         * 那是给「有些设备上 `PixelCopy` 采 SurfaceView **恒为黑**」
+         * （硬件 overlay 直通）兜底的 —— 那种设备上探针永远是黑，
+         * 不能让它一直以为「黑了」，否则会不停重启承载应用。
+         *
+         * 但第十二轮撞上的正是这条闸的**副作用**：
+         *
+         * 换肤重建 → 旧承载面没释放 → 高德的 task 还挂在**旧 VirtualDisplay** 上
+         * → 新承载面**一次都没出现过画面** → `sawContent` 永远是 false
+         * → [shouldHeal] 永远返回 false → **一直黑屏、永远不自愈**。
+         *
+         * ## 怎么和「恒为黑」区分
+         *
+         * 两者在数据上长得一模一样（采到的帧全是黑）。
+         * 只能靠**别的信号**区分，所以这两道限制是必须的：
+         *
+         * 1. **只在刚嵌入的一小段时间窗内判**（窗口由 [com.cardesk.launcher.ui.pip.PipSurface] 的
+         *    `embeddedAt` 守着，见那里的 `NEVER_SEEN_WINDOW_MS`）；
+         * 2. **只自愈一次**（[markHealed] 之后不再来）。
+         *
+         * 窗口 + 一次性，把误判代价压到「多重启一次承载应用」——
+         * 而那正是用户「全屏一次再还原」本来就在做的事。
+         *
+         * @param samples 探针累计采样次数（0 = 一次都没采到，那不算）
+         * @param consecutiveBlack 连续全黑的次数
+         */
+        fun shouldHealNeverSeenContent(
+            samples: Int,
+            consecutiveBlack: Int,
+            minSamples: Int = NEVER_SEEN_MIN_SAMPLES,
+            streakLimit: Int = BLACK_STREAK_LIMIT,
+        ): Boolean = samples >= minSamples && consecutiveBlack >= streakLimit
     }
 }

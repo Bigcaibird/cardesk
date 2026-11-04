@@ -154,6 +154,21 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
     /** 承载应用的启动 Intent（看门狗重新拉起时复用）。 */
     private var launchIntent: Intent? = null
 
+    /**
+     * 本次承载面**嵌入**的时刻（毫秒）。
+     *
+     * 「嵌入之后一直没出画面」那条自愈路径只在**刚嵌入的一小段时间窗内**判
+     * （见 [NEVER_SEEN_WINDOW_MS]），靠的就是这个时间戳。
+     */
+    private var embeddedAt = 0L
+
+    /**
+     * 这一轮承载面**有没有自愈过**。
+     *
+     * 一次黑屏只自愈一次 —— 反复重启承载应用比一直黑更烦人。
+     */
+    private var blackHealDone = false
+
     /** 嵌入是否已就绪。 */
     private var ready: Boolean = false
 
@@ -254,6 +269,10 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
             RoundClip.applySurfaceZOrder(view)
             // 画面探针：黑屏自愈用（降级卡片不需要）
             frameProbe = PipFrameProbe(view)
+            // 第十二轮：记下嵌入时刻与「本轮还没自愈过」——
+            // 「嵌入之后一直没出画面」那条自愈路径靠这两个状态。
+            embeddedAt = System.currentTimeMillis()
+            blackHealDone = false
             post { syncVirtualDisplay() }
             startWatchdog()
             // 排障场景：「画中画不显示」——嵌入成功 / 降级必须能一眼看出来。
@@ -359,6 +378,53 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
         }
     }
 
+    /**
+     * **彻底拆掉承载面**（释放 `ActivityView` / `VirtualDisplay`）。
+     *
+     * ## 为什么 [hide] 不够（第十二轮）
+     *
+     * [hide] 是「用户把画中画关掉」，它会把包名清掉并显示占位；
+     * 而桌面**换肤重建**（`LauncherView.build`）时，旧的那套承载面必须
+     * **先释放掉**，否则会出两件事：
+     *
+     * 1. **泄漏**：旧的 `ActivityView` + `VirtualDisplay` 还活着，
+     *    反复切日夜就会在车机上攒出一堆 VirtualDisplay 和残留 task；
+     * 2. **新承载面黑屏**（用户报的现象）：
+     *    高德的 task 还挂在**旧 VirtualDisplay** 上，
+     *    新承载面用同一套 `NEW_TASK | RESET_TASK_IF_NEEDED` 旗标再启动一次高德时，
+     *    系统会把**旧 task 拉到前台** —— 而旧 task 在旧 display 上 →
+     *    **新承载面里就只剩一块黑**。
+     *
+     * 用户的绕法是「全屏一次再还原」：那条路会 `relaunchAfterResize`
+     * 重新下发启动，把 task 搬到当前 display 上 —— 于是恢复了。
+     *
+     * 所以这里在重建前把旧承载面**拆干净**，让新承载面能干净地接管。
+     *
+     * @param reason 释放原因（只进日志，便于事后对账）
+     */
+    fun release(reason: String) {
+        val prev = packageName
+        stopWatchdog()
+        clearContent()
+        ready = false
+        packageName = ""
+        launchIntent = null
+        embeddedAt = 0L
+        blackHealDone = false
+        // 承载内容没了 → 占位回来（**绝不留一块黑屏**）
+        placeholder.text = TEXT_PICK_APP
+        placeholder.visibility = View.VISIBLE
+        if (prev.isNotEmpty()) {
+            Logx.i(
+                LogTags.NAV_UI,
+                "画中画承载面释放",
+                "pkg" to prev,
+                "role" to role,
+                "reason" to reason,
+            )
+        }
+    }
+
     // ------------------------------------------------------------------ 看门狗
 
     /**
@@ -434,7 +500,7 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
     }
 
     /**
-     * 黑屏自愈（第六十七轮）。
+     * 黑屏自愈（第六十七轮；第十二轮补了「嵌入后一直没出画面」这条）。
      *
      * ## 现象
      *
@@ -446,35 +512,56 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
      * （Activity 被系统回收 / 应用自己退出了）→ ActivityView 里只剩一块黑。
      * 现有的进程看门狗查出来「进程活着」→ 什么都不做 → 一直黑。
      *
-     * ## 做法
+     * ## 两条自愈路径
      *
-     * 画面探针（[PipFrameProbe]）连续采到全黑、而且**之前见过非黑画面**时，
-     * 就做与「全屏还原」同样的动作：重新下发一次启动。
+     * | 路径 | 判据 | 对应场景 |
+     * |---|---|---|
+     * | A：见过画面之后黑了 | [PipFrameProbe.shouldHeal] | 承载应用跑着跑着黑了 |
+     * | B：**嵌入之后一直没出画面** | [PipFrameProbe.shouldHealNeverSeenContent] | 第十二轮：换肤重建后新承载面从头到尾是黑的 |
      *
-     * 探针侧的三道防误判闸在 [PipFrameProbe] 里，这里再加一道冷却。
+     * B 这条必须有，否则第十二轮那个现象**永远不自愈**：
+     * 新承载面一次都没出过画面 → `sawContent` 永远是 false → 路径 A 的第一道闸过不去。
+     *
+     * 探针侧的三道防误判闸在 [PipFrameProbe] 里，这里再加一道冷却
+     * 和「一轮只自愈一次」。
      */
     private fun checkBlackScreen() {
         val probe = frameProbe ?: return
         probe.request()
+        if (blackHealDone) return
         val since = if (lastBlackHealAt == 0L) Long.MAX_VALUE
         else System.currentTimeMillis() - lastBlackHealAt
-        if (!PipFrameProbe.shouldHeal(
-                sawContent = probe.sawContent,
-                consecutiveBlack = probe.consecutiveBlack,
-                streakLimit = BLACK_STREAK_LIMIT,
-                cooldownMs = BLACK_HEAL_COOLDOWN_MS,
-                sinceLastHealMs = since,
-            )
-        ) {
-            return
-        }
+        // —— 路径 A：见过画面之后黑了 ——
+        val healSeen = PipFrameProbe.shouldHeal(
+            sawContent = probe.sawContent,
+            consecutiveBlack = probe.consecutiveBlack,
+            streakLimit = BLACK_STREAK_LIMIT,
+            cooldownMs = BLACK_HEAL_COOLDOWN_MS,
+            sinceLastHealMs = since,
+        )
+        // —— 路径 B：嵌入之后一直没出画面（第十二轮）——
+        //
+        // 只在**刚嵌入的时间窗内**判，且这一轮只自愈一次 ——
+        // 「PixelCopy 恒为黑」的设备上，最多多重启一次承载应用。
+        val inWindow = embeddedAt > 0L &&
+            System.currentTimeMillis() - embeddedAt <= NEVER_SEEN_WINDOW_MS
+        val healNeverSeen = inWindow && PipFrameProbe.shouldHealNeverSeenContent(
+            samples = probe.samples,
+            consecutiveBlack = probe.consecutiveBlack,
+            minSamples = NEVER_SEEN_MIN_SAMPLES,
+            streakLimit = BLACK_STREAK_LIMIT,
+        )
+        if (!healSeen && !healNeverSeen) return
         lastBlackHealAt = System.currentTimeMillis()
+        blackHealDone = true
         Logx.w(
             LogTags.NAV_UI,
             "画中画黑屏自愈：重新拉起承载应用",
             "pkg" to packageName,
             "role" to role,
             "streak" to probe.consecutiveBlack,
+            "samples" to probe.samples,
+            "path" to if (healSeen) "seen-then-black" else "never-seen-content",
         )
         // 一次黑屏只自愈一次：清掉计数，也忘掉「见过非黑画面」
         //（免得反复重启承载应用 —— 那比一直黑更烦人）
@@ -676,6 +763,25 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
 
         /** 黑屏自愈的冷却（见 [PipFrameProbe]）。 */
         const val BLACK_HEAL_COOLDOWN_MS = PipFrameProbe.BLACK_HEAL_COOLDOWN_MS
+
+        /**
+         * 「嵌入之后一直没出画面」这条自愈路径的**时间窗**（毫秒）。
+         *
+         * 第十二轮：换肤重建后新承载面从头到尾是黑的（旧的 task 还挂在旧
+         * VirtualDisplay 上）。这条路径要在**刚嵌入的一小段时间内**判，
+         * 免得「PixelCopy 恒为黑」的设备上过了很久还在反复重启承载应用。
+         *
+         * 4 帧 × 看门狗 3s ≈ 12s 出结论，留 90s 窗口足够覆盖
+         * 「重建 → 承载面就绪 → 应用起不来 → 判定自愈」这一整段。
+         */
+        const val NEVER_SEEN_WINDOW_MS = 90_000L
+
+        /**
+         * 「嵌入之后一直没出画面」这条自愈路径至少要采到几帧。
+         *
+         * 见 [PipFrameProbe.NEVER_SEEN_MIN_SAMPLES]。
+         */
+        const val NEVER_SEEN_MIN_SAMPLES = PipFrameProbe.NEVER_SEEN_MIN_SAMPLES
 
         /**
          * 尺寸变化后重新拉起承载应用的延迟（毫秒）。

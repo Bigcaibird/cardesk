@@ -262,19 +262,37 @@ class MainActivity : Activity() {
 
     /** 启动页淡出，随后移除自己（桌面已经完整可交互）。 */
     private fun fadeOutSplash() {
-        val current = splash ?: return
+        val current = splash
+        if (current == null) {
+            // 没有启动页（异常路径）也照样做「桌面完全启动后」的动作，
+            // 否则画中画永远不会承载。
+            onDesktopReady()
+            return
+        }
         splash = null
         current.animate()
             .alpha(0f)
             .setDuration(SPLASH_FADE_MS)
             .withEndAction {
                 (current.parent as? ViewGroup)?.removeView(current)
-                current.post {
-                    StartupTrace.mark("desktopReady")
-                    StartupTrace.summary()
-                }
+                current.post { onDesktopReady() }
             }
             .start()
+    }
+
+    /**
+     * 桌面**完全可见**（启动页已淡出）——这时才做「会唤起高德」的动作。
+     *
+     * 第112轮：画中画承载（= 启动高德 Activity）与「向高德索要区域信息」
+     * （那个广播带 `FLAG_INCLUDE_STOPPED_PACKAGES`）以前都在桌面还没画完时做，
+     * 结果开机时高德先跳出来、跟桌面首帧抢 CPU。
+     * 现在统一推迟到这里。
+     */
+    private fun onDesktopReady() {
+        StartupTrace.mark("desktopReady")
+        StartupTrace.summary()
+        runCatching { launcher?.startDeferredAmapActions() }
+            .onFailure { Logx.w(LogTags.APP, "桌面就绪后的动作失败", it) }
     }
 
     /**
