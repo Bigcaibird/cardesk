@@ -67,24 +67,103 @@ object TripSignals {
         val avgFuelL100: Double?,
     )
 
-    /** 读行程1；三项都读不到返回 null。 */
+    /**
+     * 读行程1；三项都读不到返回 null。
+     *
+     * ## 第一百零九轮：里程/时长读不到的原因
+     *
+     * 4204 的诊断包（Android 9 / MSM8996）里 `行程1 原始信号 distanceRaw=null format=-1
+     * timeRaw=null`，而同一帧 `avg=10.4` 是好的 —— 说明**平均油耗这条属性是 byte[]**
+     * （能按 `PublicAttrValue` 解），但 `TS_TripDistance` / `TS_TripTime` 在车机上登记的
+     * 是 **Integer** 类型，按 `byte[]` 读自然永远 null。
+     *
+     * 因此这里改成**多通道读**：`PublicAttrValue` → `getProperty(int,int)` 数值通道 →
+     * `getProperty(Integer.class,…)` 显式类型 → 全区域读取，
+     * 谁先读到就用谁，并在 DEBUG 日志里带上 `via`，下次诊断一眼能看出是哪条通道生效。
+     */
     fun readTrip1(): Trip1? {
-        val distance = readProp(PROP_TRIP1_DISTANCE)
-        val time = readProp(PROP_TRIP1_TIME)
-        val avg = readProp(PROP_AVG_FUEL)
+        val distance = readIntProp(PROP_TRIP1_DISTANCE)
+        val time = readIntProp(PROP_TRIP1_TIME)
+        val avg = readDoubleProp(PROP_AVG_FUEL)
         if (distance == null && time == null && avg == null) return null
-        val meters = distance?.integerData()?.toDouble()?.let { raw ->
+        val meters = distance?.value?.toDouble()?.let { raw ->
             if (distance.format == 1) raw * YARDS_TO_METERS else raw
         }
         Logx.d(
             LogTags.VEHICLE,
             "行程1 原始信号",
-            "distanceRaw" to (distance?.integerData() ?: "null"),
+            "distanceRaw" to (distance?.value ?: "null"),
+            "distanceVia" to (distance?.via ?: "-"),
             "format" to (distance?.format ?: -1),
-            "timeRaw" to (time?.integerData() ?: "null"),
-            "avg" to (avg?.doubleData() ?: "null"),
+            "timeRaw" to (time?.value ?: "null"),
+            "timeVia" to (time?.via ?: "-"),
+            "avg" to (avg?.value ?: "null"),
+            "avgVia" to (avg?.via ?: "-"),
         )
-        return Trip1(meters?.div(1000.0), time?.integerData(), avg?.doubleData())
+        return Trip1(meters?.div(1000.0), time?.value, avg?.value)
+    }
+
+    /** 一条整数属性的读取结果（值 + 生效通道 + 线格式）。 */
+    private class IntProp(val value: Int, val via: String, val format: Int)
+
+    /** 一条浮点属性的读取结果（值 + 生效通道）。 */
+    private class DoubleProp(val value: Double, val via: String)
+
+    /**
+     * 多通道读整数属性：PA 字节 → `getProperty(int,int)` → `getProperty(Integer,…)` → 全区域。
+     *
+     * 车机没登记成 `byte[]` 的属性（TS_TripDistance / TS_TripTime）只能走后三条。
+     */
+    private fun readIntProp(propId: Int): IntProp? {
+        readProp(propId)?.let { attr ->
+            val i = attr.integerData()
+            if (i != null) return IntProp(i, "PA", attr.format ?: 0)
+        }
+        CarProperties.readInt(propId, 0)?.let { return IntProp(it, "num", 0) }
+        CarProperties.readIntViaClass(propId, 0)?.let { return IntProp(it, "class", 0) }
+        CarProperties.readAllAreas(propId)?.firstOrNull { !it.isNaN() }?.let {
+            return IntProp(it.toInt(), "areas", 0)
+        }
+        return null
+    }
+
+    /** 多通道读浮点属性：PA 字节 → 数值通道 → 全区域。 */
+    private fun readDoubleProp(propId: Int): DoubleProp? {
+        readProp(propId)?.let { attr ->
+            val d = attr.doubleData()
+            if (d != null) return DoubleProp(d, "PA")
+        }
+        CarProperties.readNumber(propId, 0)?.let { return DoubleProp(it, "num") }
+        CarProperties.readAllAreas(propId)?.firstOrNull { !it.isNaN() }?.let {
+            return DoubleProp(it, "areas")
+        }
+        return null
+    }
+
+    /**
+     * 诊断探针（只读）：把行程1三条属性在**每条通道**上的结果打出来。
+     *
+     * 为什么单列：这台车机上「读不到」可能是类型不符、区域不对、值不可用（availability≠1），
+     * 四种原因在 UI 上都表现为「--」，只有把类型和各通道结果一起报出来才能一次定位。
+     */
+    fun probe(): String {
+        fun one(propId: Int): String {
+            val type = CarProperties.propertyTypeOf(propId) ?: "?"
+            val pa = readProp(propId)?.let {
+                "PA(active=${it.active()},int=${it.integerData()},dbl=${it.doubleData()},format=${it.format})"
+            } ?: "PA=null"
+            val num = CarProperties.readNumber(propId, 0)
+            val int = CarProperties.readInt(propId, 0)
+            val cls = CarProperties.readIntViaClass(propId, 0)
+            val areas = CarProperties.readAllAreas(propId)?.joinToString("/") {
+                if (it.isNaN()) "-" else it.toInt().toString()
+            }
+            return "0x%08X type=%s %s num=%s int=%s class=%s areas=%s".format(
+                propId, type, pa, num?.toString() ?: "-", int?.toString() ?: "-",
+                cls?.toString() ?: "-", areas ?: "-",
+            )
+        }
+        return listOf(PROP_TRIP1_DISTANCE, PROP_TRIP1_TIME, PROP_AVG_FUEL).joinToString("; ") { one(it) }
     }
 
     /** 读行程2 的兜底值（ITripData 读不到时用）。 */

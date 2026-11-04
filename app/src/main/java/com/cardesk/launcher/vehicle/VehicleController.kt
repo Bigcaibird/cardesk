@@ -727,6 +727,9 @@ object VehicleController {
         // 兜底用的平均油耗（由行程油耗反解，单位同样是 L/100km）
         lines += "平均油耗（行程反解）：${trip.avgFuelConsumptionFromTrip?.let { String.format(java.util.Locale.US, "%.2f L/100km", it) } ?: "读不到"}"
         lines += "行程里程/时长：${trip.tripKm?.let { String.format(java.util.Locale.US, "%.1f km", it) } ?: "--"} / ${trip.tripDurationMs?.let { "${it / 60000.0} 分钟" } ?: "--"}"
+        // 行程1（总行程）是读 VHAL 原始属性，跟 ITripData 不是一条路；
+        // 单独报类型与各通道结果，避免「UI 显示 -- 但不知道卡在哪」。
+        lines += "行程1 信号：${TripSignals.probe()}"
 
         val text = lines.joinToString("\n")
         Logx.i(LogTags.SIGNAL, "车辆信号自检", "report" to text.replace("\n", " | "))

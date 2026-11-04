@@ -607,6 +607,16 @@ Dock 内部布局本来就是左右两端锚定的（`DockLayout.sections(dockWi
 - 底行与车道块之间新增 **18px** 间距（原来紧贴），基线再 +2；卡片高度随内容自动增加。
 - 首页中央大字歌词：上一句 / 下一句 24 → **30**（当前句 52 不变）。
 
+## 行程1 里程/时长读不到（第 108 轮修复）
+
+4204 诊断包显示 `行程1 原始信号 distanceRaw=null format=-1 timeRaw=null`。
+原因：`TS_TripDistance`/`TS_TripTime` 在车机上登记为 **Integer**，而旧实现只按
+`byte[]` + `PublicAttrValue` 读，自然永远 null（平均油耗那条恰好是 byte[]，所以正常）。
+
+修复：`TripSignals` 改为多通道读取（byte[] → `getProperty(int,int)` →
+`getProperty(Integer,…)` → 全区域），诊断「车辆信号自检」新增「行程1 信号」一行，
+列出登记类型与每条通道的读取结果。
+
 ## 巡航红绿灯数据源排查（第 107 轮）
 
 4202 的诊断包确认：巡航时高德只发 `12205/10001/10077` 三类广播，**没有任何灯态字段**

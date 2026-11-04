@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1108",
-  "versionCode": 4204,
-  "tag": "v1.0.1108",
-  "name": "CarDesk 4204 / 1.0.1108-system",
-  "notes": "巡航红绿灯：接收端兼容 lightsData 扩展（社区修改版高德会广播的多方向灯态 + clearLights 清空信号）；诊断包增加「导航数据源」统计；导航卡字号与首页歌词字号放大。",
-  "publishedAt": "2026-11-03T15:18:01Z",
+  "version": "1.0.1109",
+  "versionCode": 4205,
+  "tag": "v1.0.1109",
+  "name": "CarDesk 4205 / 1.0.1109-system",
+  "notes": "修复行程1卡片里程/时长一直显示 --：TS_TripDistance/TS_TripTime 在车机上登记为 Integer 类型，按 byte[] 永远读不到；改为多通道读取（PublicAttrValue → getProperty(int,int) → getProperty(Integer,…) → 全区域）。诊断「车辆信号自检」新增「行程1 信号」一行，列出每条属性的类型与各通道结果，便于继续定位。",
+  "publishedAt": "2026-11-04T01:30:02Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4204.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4204.apk",
-    "size": 2197406,
-    "sha256": "4a26b955a980bbcdd17588e2d0287b74fc660706d319cd657f0b470a5cd23732"
+    "name": "CarDesk-platform-ecarx-cardesk-4205.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4205.apk",
+    "size": 2199970,
+    "sha256": "12be436f8e624a06a106f5de87921266184c4bb3a5f7ae69d6a355e9b9967dd0"
   }
 }
