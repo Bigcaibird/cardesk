@@ -707,18 +707,20 @@ class ScenePage(context: Context) : View(context) {
             asc[i] = -fm.ascent
             desc[i] = fm.descent
         }
-        val base = FloatArray(5)
-        base[2] = 0f
-        base[1] = base[2] - (asc[2] + gapMain + desc[1])
-        base[0] = base[1] - (asc[1] + gapSide + desc[0])
-        base[3] = base[2] + (desc[2] + gapMain + asc[3])
-        base[4] = base[3] + (desc[3] + gapSide + asc[4])
-        // —— 整块平移到「块中心」——
-        // 块的范围：从上 2 句的字顶（base[0] - ascent）到下 2 句的字底（base[4] + descent）。
-        // 平移量 = 目标中心 - 块现在的中心 → 字号怎么调，整块都在同一个中心上。
-        val blockTop = base[0] - asc[0]
-        val blockBottom = base[4] + desc[4]
-        val shift = LYRIC_BLOCK_CENTER_Y - (blockTop + blockBottom) / 2f
+        // 基线与居中走**共用**的排版规则（跟设置页里的预览条同一份）——
+        // 两边各写一套的话，预览跟实际画出来的东西会对不上。
+        val base = com.cardesk.launcher.core.media.LyricBlockLayout.baselines(
+            asc,
+            desc,
+            gapMain,
+            gapSide,
+        )
+        val shift = com.cardesk.launcher.core.media.LyricBlockLayout.centerShift(
+            asc,
+            desc,
+            base,
+            LYRIC_BLOCK_CENTER_Y,
+        )
         for (i in 0..4) base[i] += shift
 
         // —— 四行衬句（上 2 / 上 1 / 下 1 / 下 2）——

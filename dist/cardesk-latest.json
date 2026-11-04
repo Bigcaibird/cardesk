@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1116",
-  "versionCode": 4212,
-  "tag": "v1.0.1116",
-  "name": "CarDesk 4212 / 1.0.1116-system",
-  "notes": "第 114 轮：首页中央大字歌词整块居中，字号改成设置里可调。\n\n- 歌词块锚点从「当前行基线」改成「块中心」，不再偏下。\n  100% 时整块墨迹 353~643，140% 时 294~702，中心都在 498。\n- 设置 → 桌面设置 → 仪表歌词 → 新增「首页中央歌词」一节：\n  「字号缩放」滑杆 70% ~ 140%，当前句与上下四行一起变。\n- 拖滑杆时桌面立刻跟着变，不用等刷新。\n- 缩放后歌词块仍然居中，不会往一边偏。\n- 有导航引导卡时，只有够高的行才收窄宽度，绝不压到卡片上。",
-  "publishedAt": "2026-11-04T16:10:30Z",
+  "version": "1.0.1117",
+  "versionCode": 4213,
+  "tag": "v1.0.1117",
+  "name": "CarDesk 4213 / 1.0.1117-system",
+  "notes": "第 115 轮：设置页里加歌词实时预览条。\n\n- 设置 → 桌面设置 → 仪表歌词 →「首页中央歌词」新增预览条：\n  桌面正中那五行歌词的同比例缩小版，拖滑杆时立刻能看到效果。\n- 预览与桌面共用同一份排版规则（LyricBlockLayout）与同一套字号常量，\n  字多大、一句能显示几个字、块居不居中，所见即所得。\n- 正在放歌时预览用真实歌词；没在放歌才用示例文案。\n- 全量单测 1582 全绿。",
+  "publishedAt": "2026-11-04T23:54:09Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4212.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4212.apk",
-    "size": 2207914,
-    "sha256": "c060c8b1968b3d7e9af9e2c7cf8cceac0277a44aa36ccae731fc4e7935c188d0"
+    "name": "CarDesk-platform-ecarx-cardesk-4213.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4213.apk",
+    "size": 2211810,
+    "sha256": "4eb0fe28138d4d34685c055380c374fba6b5f9f40a8ed94271e6e0297740bf3f"
   }
 }

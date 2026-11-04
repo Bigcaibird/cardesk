@@ -90,6 +90,14 @@ class SettingsOverlay(
      * 拖着滑杆却要等一秒才看到反馈，很别扭。
      */
     var onSceneLyricChanged: (() -> Unit)? = null
+
+    /**
+     * 预览条用的**真实歌词**（顺序：上 2 / 上 1 / 当前 / 下 1 / 下 2）。
+     *
+     * 第 115 轮：返回 null 就用预览条自带的示例文案。
+     * 桌面正在放歌时用真实歌词，用户看到的就是自己那首歌变大的效果。
+     */
+    var lyricPreviewLines: (() -> List<String>?)? = null
     var onShowUpdate: (() -> Unit)? = null
     var onShowRestart: (() -> Unit)? = null
     var onShowAccent: (() -> Unit)? = null
@@ -2054,10 +2062,24 @@ class SettingsOverlay(
         // 跟桌面正中这块大字歌词是两套画面，混在一起会让人以为改一个动两个。
         section("首页中央歌词")
         note("桌面正中那五行大字歌词的整体缩放（当前句和上下四行一起变）。")
+        // 第115轮：滑杆上面加一条**实时预览**。
+        //
+        // 为什么必须有：设置面板把桌面正中那块歌词整个挡住了，
+        // 拖滑杆时用户在背后根本看不到变化 —— 只能关掉面板再回来看一次，
+        // 来回折腾好几轮才调得出来。
+        //
+        // 预览走的是**桌面同一份排版**（`LyricBlockLayout`）+ 同一套字号常量，
+        // 所以「字多大 / 一句能显示几个字 / 块居不居中」全都是真的。
+        val preview = com.cardesk.launcher.ui.widget.LyricScalePreviewView(context).apply {
+            scale = prefs.sceneLyricScalePct / 100f
+            lyricLines = lyricPreviewLines?.invoke() ?: com.cardesk.launcher.ui.widget.LyricScalePreviewView.DEFAULT_LINES
+        }
+        body.addView(preview, LinearLayout.LayoutParams(-1, 430).also { it.topMargin = 10 })
         sliderRow("字号缩放", prefs.sceneLyricScalePct, 70, 140, "%", step = 5) { v ->
             val from = prefs.sceneLyricScalePct
             prefs.sceneLyricScalePct = v
             logSettingDebug("scene_lyric_scale_pct", "首页中央歌词字号", from, v)
+            preview.scale = v / 100f
             onSceneLyricChanged?.invoke()
         }
         note("歌词块始终居中，调大调小都不会往一边偏。")

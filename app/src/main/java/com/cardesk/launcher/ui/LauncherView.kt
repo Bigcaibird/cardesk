@@ -2241,6 +2241,26 @@ private fun showCam() {
         navPage.pipSecondary.release(reason)
     }
 
+    /**
+     * 设置页预览条用的**五行歌词**（顺序：上 2 / 上 1 / 当前 / 下 1 / 下 2）。
+     *
+     * 第 115 轮：桌面正在放歌时用**真实歌词**，用户看到的就是自己那首歌变大的效果；
+     * 没在放歌 / 歌词还没加载 → 返回 null，预览条用自带的示例文案。
+     */
+    private fun previewLyricLines(): List<String>? {
+        val timeline = mediaLyric ?: return null
+        val index = mediaLyricIndex
+        if (index < 0) return null
+        val lines = timeline.lines.map { it.text }
+        return listOf(
+            com.cardesk.launcher.core.media.LyricWindow.lineAt(lines, index, -2),
+            com.cardesk.launcher.core.media.LyricWindow.lineAt(lines, index, -1),
+            com.cardesk.launcher.core.media.LyricWindow.lineAt(lines, index, 0),
+            com.cardesk.launcher.core.media.LyricWindow.lineAt(lines, index, 1),
+            com.cardesk.launcher.core.media.LyricWindow.lineAt(lines, index, 2),
+        )
+    }
+
     private fun showSettings() {
         if (settings != null) return
         Logx.event(LogTags.SETTING, "打开设置页")
@@ -2253,6 +2273,8 @@ private fun showCam() {
             scenePage.lyricScale = prefs.sceneLyricScalePct / 100f
             scenePage.invalidate()
         }
+        // 第115轮：预览条优先用**真实歌词**（正在放的那首歌），没有才用示例文案。
+        overlay.lyricPreviewLines = { previewLyricLines() }
         overlay.onEditNavSlots = {
             closeSettings()
             showNavSlots()

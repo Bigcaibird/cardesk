@@ -926,6 +926,35 @@ Dock 内部布局本来就是左右两端锚定的（`DockLayout.sections(dockWi
 - 效果图：`preview/y27-lyrics-5lines.png`、`preview/y27-lyrics-5lines-guide.png`、
   `preview/y28-lyrics-scale-140.png`、`preview/y29-settings-lyric-scale.png`。
 
+## 设置页里的歌词预览条（第 115 轮）
+
+第 114 轮把歌词字号做成了可调，但留了个尾巴：**设置面板把桌面正中那块歌词整个挡住了**，
+拖滑杆时用户在背后根本看不到变化 —— 只能关掉面板再回来看一次，
+来回折腾好几轮才调得出来。
+
+现在滑杆上面加了一条**实时预览**（`LyricScalePreviewView`）。
+
+- 画的是**桌面那块歌词的同比例缩小版**：同样的字号常量（34 / 40 / 56）、
+  同样的行距、同样的三档配色（`TEXT_DIM` → `TEXT_SOFT` → `TEXT`）、
+  同样的居中规则；
+- 走的是**共用排版** `LyricBlockLayout`（**纯 Kotlin**，JVM 单测覆盖）——
+  桌面（`ScenePage`）和预览条用的是同一份基线/居中算法，
+  两边各写一套的话，预览跟实际画出来的东西会对不上，用户就白调了；
+- 宽度用**真实的**歌词最大宽度（960），所以「一句能显示多少字」也是真的；
+- **优先用真实歌词**：桌面正在放歌时，预览里就是自己那首歌的上下五句
+  （`LauncherView.previewLyricLines()` → `LyricWindow.lineAt` 取窗口）；
+  没在放歌 / 歌词还没加载才退回自带示例文案。
+
+### 单测
+
+- `LyricBlockLayoutTest`（纯 Kotlin，6 例）：行序、相邻间距公式、
+  上下近似对称的差值来源、**放大后平移量把块拉回同一个中心**；
+- `LyricScalePreviewRenderTest`（Robolectric 渲染，3 例）：预览条正好 5 行、上下对称、
+  140% 时每行更高且**块仍然居中**、没有歌词时不画字；
+- 全量单测 **1582 全绿**（上一轮 1572 → 本轮 1582）。
+
+效果图：`preview/y30-settings-lyric-preview.png`。
+
 ## 巡航红绿灯数据源排查（第 107 轮）
 
 4202 的诊断包确认：巡航时高德只发 `12205/10001/10077` 三类广播，**没有任何灯态字段**

@@ -60,6 +60,15 @@ class SettingsLayoutRenderTest {
         shot(decor, overlay, "ambient", "x10-settings-ambient.png")
         // 第114轮：「仪表歌词」页新增「首页中央歌词 · 字号缩放」滑杆
         shot(decor, overlay, "layout", "y29-settings-lyric-scale.png")
+        // 第115轮：滑杆上面那条**歌词预览条**（在页面下方，要滚一点才看得到）
+        overlay.showPageKey("layout")
+        shadowOf(Looper.getMainLooper()).idle()
+        findField<android.widget.ScrollView>(overlay, "bodyScroll")?.scrollTo(0, 700)
+        shadowOf(Looper.getMainLooper()).idle()
+        val previewBmp = Bitmap.createBitmap(1920, 1080, Bitmap.Config.ARGB_8888)
+        decor.draw(Canvas(previewBmp))
+        FileOutputStream(File(dir, "y30-settings-lyric-preview.png"))
+            .use { previewBmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
         // —— 滚到底：看免责声明与车辆信息
         val scroll = findField<android.widget.ScrollView>(overlay, "bodyScroll")
         scroll?.scrollTo(0, 100000)
