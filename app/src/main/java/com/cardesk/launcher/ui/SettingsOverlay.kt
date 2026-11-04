@@ -82,6 +82,14 @@ class SettingsOverlay(
 
     /** 桌面卡片布局（顺序/尺寸/显隐）变了：让场景页立刻重排。 */
     var onCardLayoutChanged: (() -> Unit)? = null
+
+    /**
+     * 首页中央大字歌词的**缩放**变了：让场景页立刻重画。
+     *
+     * 第 114 轮：拖滑杆时桌面在背后就能看到字变大 —— 等每秒 tick 刷新太慢，
+     * 拖着滑杆却要等一秒才看到反馈，很别扭。
+     */
+    var onSceneLyricChanged: (() -> Unit)? = null
     var onShowUpdate: (() -> Unit)? = null
     var onShowRestart: (() -> Unit)? = null
     var onShowAccent: (() -> Unit)? = null
@@ -2040,6 +2048,20 @@ class SettingsOverlay(
         // 第三十二轮起桌面只有两页，`desk_desk_page3_main_sp` / `desk_desk_page3_sub_sp`
         // 这两个「第三页全屏歌词」字号已经没有对应的画面了，设置项随之移除；
         // 落盘键 `desk_desk_page3_main_sp` / `desk_desk_page3_sub_sp` 保留，将来恢复独立播放器页可直接用。
+        // 第114轮：首页中央那坨**五行大字歌词**的字号做成了可调。
+        //
+        // 为什么单独一节：上面四个滑杆管的是**导航栏歌词槽**（收起 / 展开两种形态），
+        // 跟桌面正中这块大字歌词是两套画面，混在一起会让人以为改一个动两个。
+        section("首页中央歌词")
+        note("桌面正中那五行大字歌词的整体缩放（当前句和上下四行一起变）。")
+        sliderRow("字号缩放", prefs.sceneLyricScalePct, 70, 140, "%", step = 5) { v ->
+            val from = prefs.sceneLyricScalePct
+            prefs.sceneLyricScalePct = v
+            logSettingDebug("scene_lyric_scale_pct", "首页中央歌词字号", from, v)
+            onSceneLyricChanged?.invoke()
+        }
+        note("歌词块始终居中，调大调小都不会往一边偏。")
+        note("放大后一句能显示的字会变少（屏幕就那么宽）。")
         section("胎压")
         sliderRow("胎压数字字号", prefs.deskTpmsValueSp, 10, 48, " px") {
             val from = prefs.deskTpmsValueSp

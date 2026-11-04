@@ -224,6 +224,22 @@ class ScenePage(context: Context) : View(context) {
     var lyricNext2: String = ""
 
     /**
+     * 歌词**整体缩放**（0.7 ~ 1.4，1 = 设计原值）。
+     *
+     * 第 114 轮：字号做成了设置里可调（`Prefs.sceneLyricScalePct`）。
+     * 缩放同时作用于三个字号和两个行距；
+     * 歌词块**始终居中**（见 [LYRIC_BLOCK_CENTER_Y]），
+     * 放大时上下均匀生长，不会往一边偏。
+     */
+    var lyricScale: Float = 1f
+        set(value) {
+            val next = value.coerceIn(0.7f, 1.4f)
+            if (field == next) return
+            field = next
+            invalidate()
+        }
+
+    /**
      * 一次性刷入**五行**歌词窗口（上 2 / 上 1 / 当前 / 下 1 / 下 2）。
      *
      * 取句逻辑复用 [com.cardesk.launcher.core.media.LyricWindow.window] ——
@@ -631,6 +647,13 @@ class ScenePage(context: Context) : View(context) {
      * 现在「字号越大越靠近当前句 + 颜色越亮越靠近当前句」，
      * 两层线索叠在一起，视线自然落到中间那一句。
      *
+     * **为什么整块居中而不是写死某一行**：第 114 轮把字号做成了设置里可调，
+     * 字号一变，整块的高度就变 —— 如果锚在「当前行基线」上，
+     * 放大时整块会往上顶、缩小时会往下坠，位置跟着字号漂。
+     * 所以锚点改成**块中心**（[LYRIC_BLOCK_CENTER_Y]）：
+     * 先按字号算出 5 条基线的相对位置，再把整块平移到中心。
+     * 这样不管用户把字号调到 70% 还是 140%，歌词块都在同一个位置居中。
+     *
      * **为什么基线算出来而不是写死**：行距是**像素**，但一行文字的上下留白
      * （ascent / descent）取决于字号和字体。写死基线一旦改字号，
      * 就会「两行贴在一起」或「中间裂开一大段」；
@@ -653,10 +676,15 @@ class ScenePage(context: Context) : View(context) {
         val moving = lyricWipeState.advance(System.currentTimeMillis())
         if (moving) postInvalidateOnAnimation()
 
+        // 字号与行距一起按设置里的缩放放大/缩小（第 114 轮）。
+        val k = lyricScale
         // 每行字号：远（上 2 / 下 2）小、近（上 1 / 下 1）大、当前行最大。
         val sizes = floatArrayOf(
-            LYRIC_FAR_SIZE, LYRIC_NEAR_SIZE, LYRIC_MAIN_SIZE, LYRIC_NEAR_SIZE, LYRIC_FAR_SIZE,
+            LYRIC_FAR_SIZE * k, LYRIC_NEAR_SIZE * k, LYRIC_MAIN_SIZE * k,
+            LYRIC_NEAR_SIZE * k, LYRIC_FAR_SIZE * k,
         )
+        val gapMain = LYRIC_GAP_MAIN * k
+        val gapSide = LYRIC_GAP_SIDE * k
         // 每行颜色：越靠近当前行越亮。
         val colors = intArrayOf(
             Skin.TEXT_DIM, Skin.TEXT_SOFT, Skin.TEXT, Skin.TEXT_SOFT, Skin.TEXT_DIM,
@@ -680,20 +708,33 @@ class ScenePage(context: Context) : View(context) {
             desc[i] = fm.descent
         }
         val base = FloatArray(5)
-        base[2] = LYRIC_MAIN_Y
-        base[1] = base[2] - (asc[2] + LYRIC_GAP_MAIN + desc[1])
-        base[0] = base[1] - (asc[1] + LYRIC_GAP_SIDE + desc[0])
-        base[3] = base[2] + (desc[2] + LYRIC_GAP_MAIN + asc[3])
-        base[4] = base[3] + (desc[3] + LYRIC_GAP_SIDE + asc[4])
+        base[2] = 0f
+        base[1] = base[2] - (asc[2] + gapMain + desc[1])
+        base[0] = base[1] - (asc[1] + gapSide + desc[0])
+        base[3] = base[2] + (desc[2] + gapMain + asc[3])
+        base[4] = base[3] + (desc[3] + gapSide + asc[4])
+        // —— 整块平移到「块中心」——
+        // 块的范围：从上 2 句的字顶（base[0] - ascent）到下 2 句的字底（base[4] + descent）。
+        // 平移量 = 目标中心 - 块现在的中心 → 字号怎么调，整块都在同一个中心上。
+        val blockTop = base[0] - asc[0]
+        val blockBottom = base[4] + desc[4]
+        val shift = LYRIC_BLOCK_CENTER_Y - (blockTop + blockBottom) / 2f
+        for (i in 0..4) base[i] += shift
 
         // —— 四行衬句（上 2 / 上 1 / 下 1 / 下 2）——
+        // 有导航引导卡时，**够高**（字顶在引导卡下沿之上）的行要收窄宽度：
+        // 歌词居中在 x=960，太宽就会伸到引导卡底下、被卡片压住半行字。
+        // 宁可截断加省略号，也不让两行字叠在一张卡上。
+        val guideOn = navGuide != null
         for (i in intArrayOf(0, 1, 3, 4)) {
             val s = contents[i]
             if (s.isEmpty()) continue
             text.typeface = Typeface.DEFAULT
             text.textSize = sizes[i]
             text.color = colors[i]
-            canvas.drawText(clipLabel(s, LYRIC_MAX_W), cx, base[i], text)
+            val inkTop = base[i] - asc[i]
+            val w = if (guideOn && inkTop < LYRIC_GUIDE_CARD_BOTTOM) LYRIC_GUIDE_CLEAR_W else LYRIC_MAX_W
+            canvas.drawText(clipLabel(s, w), cx, base[i], text)
         }
 
         // —— 当前句（视觉焦点）—— 带**擦除高亮** ——
@@ -3191,19 +3232,19 @@ class ScenePage(context: Context) : View(context) {
         const val LYRIC_FAR_SIZE = 34f
 
         /**
-         * 当前句基线 y（设计坐标）。
+         * 歌词**块中心** y（设计坐标）。
          *
-         * 第 113 轮：516 → **562**。
+         * 第 114 轮：锚点从「当前句基线」改成**块中心** ——
+         * 字号改成可调之后，整块高度会跟着变，锚在某一行的基线上，
+         * 放大时整块往上顶、缩小时往下坠，位置跟着字号漂。
+         * 锚在块中心上，字号怎么调，整块都在同一个位置居中。
          *
-         * **为什么必须下移**：三行时整块只占 y 410~590；
-         * 改成五行、字号又放大后，整块高了近一倍（实测墨迹 290px）。
-         * 桌面中间能用的是「左上引导卡下沿 387」到「底部卡片区上沿 764」这一段，
-         * 五行块要**整块落在里面**，当前句基线自然落到 562 附近
-         * （实测整块 396~686：上沿离引导卡 9px，下沿离卡片区 78px）。
-         *
-         * （其余四行的基线不是写死的，是按真实字体度量 + 行距常量往上/下推的。）
+         * **为什么是 500**：桌面中间那段空区是「天气下沿 223」到
+         * 「底部卡片区上沿 764」，中心 493；取 500 是为了跟第 106 轮
+         * 那版三行歌词（墨迹 410~590，中心正好 500）对齐 ——
+         * 用户看惯了那个位置，五行版不该让他觉得「往下沉了」。
          */
-        const val LYRIC_MAIN_Y = 562f
+        const val LYRIC_BLOCK_CENTER_Y = 500f
 
         /**
          * 当前句与相邻衬句之间的行距（设计 px）。
@@ -3233,6 +3274,17 @@ class ScenePage(context: Context) : View(context) {
          * 引导卡最高的一种形态（带车道线）：`73 + 314 = 387`。
          */
         const val LYRIC_GUIDE_CARD_BOTTOM = 387f
+
+        /**
+         * 有引导卡时，歌词**够高**的行的最大宽度（设计 px）。
+         *
+         * 引导卡右缘 664；歌词居中在 960，
+         * 宽度 576 → 左缘 = `960 - 288 = 672`，离卡片右缘留 8px。
+         *
+         * **为什么只收窄「够高」的行**：正常字号下只有最上面一行够高，
+         * 放大字号后第二行也可能够高 —— 其余行离卡片很远，不该被牵连截断。
+         */
+        const val LYRIC_GUIDE_CLEAR_W = 576f
 
         /**
          * 底部卡片区的**上沿**（设计 px）—— 歌词整块不能压到它。

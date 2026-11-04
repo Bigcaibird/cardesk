@@ -54,4 +54,34 @@ class SceneLyricWindowTest {
         assertEquals("二", page.lyricNext)
         assertEquals("", page.lyricNext2)
     }
+
+    // ---------------------------------------------------------- 字号缩放（第 114 轮）
+
+    @Test
+    fun `歌词缩放默认是百分之百`() {
+        val prefs = com.cardesk.launcher.core.Prefs(RuntimeEnvironment.getApplication())
+        assertEquals(100, prefs.sceneLyricScalePct)
+    }
+
+    @Test
+    fun `歌词缩放越界会被夹住`() {
+        val prefs = com.cardesk.launcher.core.Prefs(RuntimeEnvironment.getApplication())
+        prefs.sceneLyricScalePct = 10
+        assertEquals(70, prefs.sceneLyricScalePct)
+        prefs.sceneLyricScalePct = 999
+        assertEquals(140, prefs.sceneLyricScalePct)
+        prefs.sceneLyricScalePct = 120
+        assertEquals(120, prefs.sceneLyricScalePct)
+    }
+
+    @Test
+    fun `场景页的缩放系数越界也会被夹住`() {
+        val page = scene()
+        page.lyricScale = 0.1f
+        assertEquals(0.7f, page.lyricScale, 0.001f)
+        page.lyricScale = 9f
+        assertEquals(1.4f, page.lyricScale, 0.001f)
+        page.lyricScale = 1.2f
+        assertEquals(1.2f, page.lyricScale, 0.001f)
+    }
 }

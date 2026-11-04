@@ -645,6 +645,20 @@ class Prefs(context: Context) {
     // ------------------------------------------------------------------ 桌面布局字号
 
     /**
+     * 首页中央大字歌词的**整体缩放**（`scene_lyric_scale_pct`，默认 100，范围 70..140）。
+     *
+     * 第 114 轮：五行大字歌词的字号做成了可调。
+     * 存的是**百分比**（整数），不是浮点 —— 避免不同机型上浮点精度带来的
+     * 「同一台车重启后字号变了一点」；用的时候再除成缩放系数。
+     *
+     * 缩放同时作用于三个字号（远 / 近 / 当前）和两个行距，
+     * 并且**歌词块始终居中** —— 放大时上下均匀长，不往某一边偏。
+     */
+    var sceneLyricScalePct: Int
+        get() = intValue("scene_lyric_scale_pct", 100).coerceIn(70, 140)
+        set(value) = setIntValue("scene_lyric_scale_pct", value.coerceIn(70, 140))
+
+    /**
      * 桌面紧凑模式主歌词字号（`desk_desk_compact_main_sp`，范围 14..64）。
      */
     var deskCompactMainSp: Int

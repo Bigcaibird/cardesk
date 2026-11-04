@@ -2248,6 +2248,11 @@ private fun showCam() {
         overlay.onClose = { closeSettings() }
         overlay.onApply = { onSettingsApplied() }
         overlay.onCardLayoutChanged = { reloadSceneCardLayout() }
+        // 第114轮：拖「首页中央歌词字号」滑杆时，桌面立刻跟着变。
+        overlay.onSceneLyricChanged = {
+            scenePage.lyricScale = prefs.sceneLyricScalePct / 100f
+            scenePage.invalidate()
+        }
         overlay.onEditNavSlots = {
             closeSettings()
             showNavSlots()
@@ -2718,6 +2723,9 @@ private fun showCam() {
         // 第111轮：右侧固定「车况卡」的显隐跟着偏好走。
         // 设置页开关 → `prefs.carStatusCardVisible` → 这里 → 场景页。
         scenePage.showCarStatusCard = prefs.carStatusCardVisible
+        // 第114轮：首页中央大字歌词的**整体缩放**跟着设置走
+        // （设置页滑杆 → `prefs.sceneLyricScalePct` → 这里 → 场景页）。
+        scenePage.lyricScale = prefs.sceneLyricScalePct / 100f
         // 首页中央大字歌词 vs 导航栏歌词槽：**同一首歌只显示一处**。
         // 槽位条形态且槽位里确实配了歌词槽 → 歌词归导航栏，中央大字让位。
         scenePage.showCenterLyric = !slotBarShowsLyric()

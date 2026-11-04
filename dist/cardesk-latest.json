@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1115",
-  "versionCode": 4211,
-  "tag": "v1.0.1115",
-  "name": "CarDesk 4211 / 1.0.1115-system",
-  "notes": "第 113 轮：首页中央大字歌词改成五行，并把当前行之外的四行整体放大。\n\n- 歌词由三行改成五行：上 2 / 上 1 / 当前 / 下 1 / 下 2。\n- 衬句字号 30 → 40（紧邻当前句的两行）/ 34（最远的两行）；当前句 52 → 56。\n- 字号分三档、颜色由远及近递亮，视线自然落到正在唱的那一句。\n- 整块重新落位：上沿让开左上导航引导卡，下沿让开底部卡片区。\n- 取句与导航页组合卡共用同一份 LyricWindow.window，两边不会错位。\n- 没有歌词时整窗清空，不留上一首歌的残句。",
-  "publishedAt": "2026-11-04T15:50:14Z",
+  "version": "1.0.1116",
+  "versionCode": 4212,
+  "tag": "v1.0.1116",
+  "name": "CarDesk 4212 / 1.0.1116-system",
+  "notes": "第 114 轮：首页中央大字歌词整块居中，字号改成设置里可调。\n\n- 歌词块锚点从「当前行基线」改成「块中心」，不再偏下。\n  100% 时整块墨迹 353~643，140% 时 294~702，中心都在 498。\n- 设置 → 桌面设置 → 仪表歌词 → 新增「首页中央歌词」一节：\n  「字号缩放」滑杆 70% ~ 140%，当前句与上下四行一起变。\n- 拖滑杆时桌面立刻跟着变，不用等刷新。\n- 缩放后歌词块仍然居中，不会往一边偏。\n- 有导航引导卡时，只有够高的行才收窄宽度，绝不压到卡片上。",
+  "publishedAt": "2026-11-04T16:10:30Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4211.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4211.apk",
-    "size": 2206718,
-    "sha256": "96fc2d22063d6d3184f00b4e2c508d704bd9263ffbea3a3f5d0e28cbb831ea7e"
+    "name": "CarDesk-platform-ecarx-cardesk-4212.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4212.apk",
+    "size": 2207914,
+    "sha256": "c060c8b1968b3d7e9af9e2c7cf8cceac0277a44aa36ccae731fc4e7935c188d0"
   }
 }

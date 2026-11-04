@@ -58,6 +58,8 @@ class SettingsLayoutRenderTest {
         shot(decor, overlay, "lan", "x09-settings-lan.png")
         // 第七十轮：新增「氛围灯」页（频谱预览 + 颜色设置）
         shot(decor, overlay, "ambient", "x10-settings-ambient.png")
+        // 第114轮：「仪表歌词」页新增「首页中央歌词 · 字号缩放」滑杆
+        shot(decor, overlay, "layout", "y29-settings-lyric-scale.png")
         // —— 滚到底：看免责声明与车辆信息
         val scroll = findField<android.widget.ScrollView>(overlay, "bodyScroll")
         scroll?.scrollTo(0, 100000)
