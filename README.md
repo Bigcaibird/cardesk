@@ -636,6 +636,56 @@ Dock 内部布局本来就是左右两端锚定的（`DockLayout.sections(dockWi
 模拟器注入验证（`emu-verify/y26/`）：注入 3 个方向 → 巡航卡显示「掉头 35 红 / 左 12 红 / 直 7 绿」，
 日志 `收到巡航多方向红绿灯 count=3 dirs=0,2,3`。
 
+## 日夜模式：与高德互相同步（第 110 轮）
+
+「日夜模式 → 跟随高德」原来**根本同步不了**：「跟随光感」也**读不到光**。两处根因都不是高德的问题，
+是高德车机版（`gd95_新基础版_v24t.apk`，9.5）反编译出来的协议：
+
+| 方向 | action | `KEY_TYPE` | 字段 | 语义 |
+|---|---|---|---|---|
+| 高德 → 车机 | `AUTONAVI_STANDARD_BROADCAST_SEND` | `10019` | `EXTRA_STATE` | `37` 白天 / `38` 黑夜 |
+| 车机 → 高德 | `AUTONAVI_STANDARD_BROADCAST_RECV` | `10048` | `EXTRA_DAY_NIGHT_MODE` | `0` 自动 / `1` 白天 / `2` 黑夜 |
+| 车机 → 高德 | `AUTONAVI_STANDARD_BROADCAST_RECV` | `13030` | — | 查询高德当前日夜（高德回 `10019` 的 37/38） |
+
+证据：`AndroidProtocolExe.sendAutoStatus` 的 `case 37 → onDayNightChange(1)`（白天）、
+`case 38 → onDayNightChange(2)`（黑夜）；`defpackage/y70.java` `30→37`/`32→38`；
+`defpackage/xh.java`（`EXTRA_DAY_NIGHT_MODE` → `nativeDayNightMode`）；
+`defpackage/ga0.java`（`13030` → `nativeRequestDayNightMode`）。
+
+**根因 1：「跟随高德」的信源取错了。**
+高德的 `10019` 是**共用通道** —— 导航中(8)、巡航(9)、模拟(10)、在不在地图页(3/4) 与
+**白天(37)/黑夜(38)** 挤在同一个 `EXTRA_STATE` 上。桌面原来把 `10019` 一律当「导航状态」，
+`37`/`38` 被静默丢掉（诊断包里能看到 `高德导航状态 state=40/50/51/3/4` 就是这么记的）。
+于是「跟随高德」退而读系统 uiMode —— 而这台车机上**没人写 uiMode**
+（只有官方桌面 `DayNightController.writeAndroidUiNightMode` 会写），读到的永远是死值。
+
+**根因 2：「跟随光感」读的其实是设置值，不是光。**
+车机日间模式功能值（`0x20150100`）在真车上**恒为 AUTO**（诊断包实测
+`读取属性 func=0x20150100 value=538247427`），AUTO 时它没有明暗信息，只能回落到
+`UiModeManager.nightMode` —— 那是**设置值**（固定 1/2，或 AUTO 时压根读不到），
+不是「当前明暗」。真正的光感是 AdaptAPI 的 `Device.getDayNightMode().getDayNight()`，
+跟随时取车机光照 `Twlibrists`（`OFF`→夜间、`ON`→白天）；官方桌面读明暗走的就是这条。
+
+**修完之后的来源链**（与官方 `computeDesiredNightUi` 一致）：
+
+```
+跟随高德 = 高德广播(10019/37,38) → 车机光感 → 车机日间模式功能值 → 系统 uiMode → 上次应用值
+跟随光感 =                        车机光感 → 车机日间模式功能值 → 系统 uiMode → 上次应用值
+跟随时间 = 本地时段表（不依赖车机）
+```
+
+- 新增 `core/nav/AmapDayNight.kt`：高德日夜协议常量与解析；
+- `AmapDesktopGuide` 先认 `37`/`38` 再当导航状态；新增回写 `10048` 与查询 `13030`；
+- 新增 `vehicle/AdaptapiDayNight.kt`：反射开 `Device.getDayNightMode()` 读真·光感，
+  `Proxy` 注册 `IDayNightChangeCallBack` 做**推送**（400ms 合并，避免明暗边界上配色来回闪）；
+- 桌面切好日夜后**回推高德**（`10048`），地图跟桌面一致；
+  **但「跟随高德」时绝不回写** —— 回写等于把高德的「自动」锁死成固定昼夜，
+  高德以后自己就不切了，桌面也就永远停在旧值上。
+
+单测：`AmapDayNightTest`（协议解析）、`AmapDesktopGuideDayNightTest`（`37`/`38` 必须走日夜通道、
+导航状态不能被当成日夜）、`AdaptapiDayNightTest`（用同名同签名的假实现把反射路径真跑一遍：
+类名 / 方法名 / 动态代理 / 回调派发 / 合并延时）、`DayNightTest`（来源优先级）。
+
 ## 巡航红绿灯数据源排查（第 107 轮）
 
 4202 的诊断包确认：巡航时高德只发 `12205/10001/10077` 三类广播，**没有任何灯态字段**

@@ -102,6 +102,15 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
          * 所以城市一变就该重跑一轮天气。
          */
         fun onCityChanged(city: String)
+
+        /**
+         * 高德把自己的日夜状态广播出来了（`10019` + `EXTRA_STATE` 37 白天 / 38 黑夜）。
+         *
+         * 与导航状态**共用** `10019` 这条通道，所以必须在这里分开认：
+         * 以前桌面把 `37`/`38` 当成「导航状态」丢掉了，
+         * 于是「跟随高德」的桌面永远读不到高德的日夜。
+         */
+        fun onDayNight(nightUi: Boolean) {}
     }
 
     private val app = context.applicationContext
@@ -202,6 +211,9 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
         stopGuide()
     }
 
+    /** 启动 10 秒后再问一次高德的日夜（高德刚起来时可能还没准备好回）。 */
+    private val dayNightQuery = Runnable { requestDayNightMode() }
+
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             handle(intent)
@@ -230,12 +242,21 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
         registered = ok
         AmapGuideStats.onRegistered(ok)
         Logx.i(LogTags.NAV_UI, "启动导航引导数据源", "registered" to ok, "action" to ACTION_SEND)
-        if (ok) requestGuideData()
+        if (ok) {
+            requestGuideData()
+            // 高德现在是白天还是黑夜，桌面上车时并不知道（高德不保证主动广播）。
+            // 问一次（`13030`），高德会回 `10019` + `EXTRA_STATE=37/38`。
+            // 官方桌面也是启动问一次、10 秒后再问一次，这里照抄。
+            requestDayNightMode()
+            main.removeCallbacks(dayNightQuery)
+            main.postDelayed(dayNightQuery, DAY_NIGHT_QUERY_DELAY_MS)
+        }
     }
 
     /** 注销广播接收器。 */
     fun stop() {
         main.removeCallbacks(staleCheck)
+        main.removeCallbacks(dayNightQuery)
         if (registered) {
             runCatching { app.unregisterReceiver(receiver) }
                 .onFailure { Logx.w(LogTags.NAV_UI, "注销高德导航广播失败", it) }
@@ -345,6 +366,14 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
      * - 2 / 9 / 12 / 19 → 收起卡片
      */
     private fun handleState(state: Int) {
+        // `10019` 是**共用通道**：37=白天 / 38=黑夜 与导航状态(8/10/2/9/12/19)挤在同一个
+        // `EXTRA_STATE` 上。日夜必须先认出来，否则「跟随高德」拿到的永远是导航状态。
+        val nightUi = AmapDayNight.nightFromAutoState(state)
+        if (nightUi != null) {
+            Logx.i(LogTags.THEME, "收到高德日夜状态", "night" to nightUi, "state" to state)
+            listener.onDayNight(nightUi)
+            return
+        }
         lastState = state
         AmapGuideStats.onState(state)
         // 高德空闲时每 10 秒推一次同样的状态；只在**变化**时记 INFO，重复的降 DEBUG。
@@ -823,6 +852,57 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
     }
 
     /**
+     * 把桌面的日夜状态推给高德（`10048` + `EXTRA_DAY_NIGHT_MODE`）。
+     *
+     * 高德收到后由 `nativeDayNightMode()` 切自己的地图主题，
+     * 这样「桌面切了、地图也跟着切」。
+     *
+     * **只在桌面不是跟着高德走的时候才调**（见 `ui/LauncherView.kt` 的
+     * `pushDayNightToAmap`）：跟随高德时桌面就是高德的状态，
+     * 这时候回写等于把高德的「自动」锁死成固定白天/黑夜，
+     * 高德以后自己就不切了，桌面也就永远停在旧值上。
+     */
+    fun sendDayNight(nightUi: Boolean) {
+        val mode = AmapDayNight.dayNightModeFor(nightUi)
+        val targets = wakeTargets()
+        Logx.i(LogTags.THEME, "推送日夜状态给高德", "night" to nightUi, "mode" to mode, "targets" to targets.joinToString(","))
+        for (pkg in targets) {
+            val intent = Intent(ACTION_RECV)
+            intent.setPackage(pkg)
+            intent.setClassName(pkg, AMAP_RECEIVER)
+            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            intent.putExtra(AmapDayNight.KEY_TYPE, AmapDayNight.KEY_TYPE_SET_DAY_NIGHT)
+            intent.putExtra(AmapDayNight.EXTRA_DAY_NIGHT_MODE, mode)
+            val ok = runCatching { sendAsUser(intent) }
+                .onFailure { Logx.w(LogTags.THEME, "推送日夜状态给高德失败", it, "pkg" to pkg) }
+                .isSuccess
+            if (!ok) return
+        }
+    }
+
+    /**
+     * 问高德当前是白天还是黑夜（`13030`）。
+     *
+     * 高德回一条 `10019` + `EXTRA_STATE=37/38`，走 [handle] 进来。
+     * 开机时高德已经在夜间了、而我们还没收到过任何信号时，靠这一条把状态补齐。
+     */
+    fun requestDayNightMode() {
+        val targets = wakeTargets()
+        Logx.i(LogTags.THEME, "查询高德当前日夜", "targets" to targets.joinToString(","))
+        for (pkg in targets) {
+            val intent = Intent(ACTION_RECV)
+            intent.setPackage(pkg)
+            intent.setClassName(pkg, AMAP_RECEIVER)
+            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            intent.putExtra(AmapDayNight.KEY_TYPE, AmapDayNight.KEY_TYPE_QUERY_DAY_NIGHT)
+            val ok = runCatching { sendAsUser(intent) }
+                .onFailure { Logx.w(LogTags.THEME, "查询高德当前日夜失败", it, "pkg" to pkg) }
+                .isSuccess
+            if (!ok) return
+        }
+    }
+
+    /**
      * 尽量用 `sendBroadcastAsUser` 发（车机多用户场景下高德在当前用户下）。
      *
      * 是反射调用，拿不到就退回普通 `sendBroadcast`。
@@ -921,13 +1001,13 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
 
     companion object {
         /** 高德发出来的广播 action（`AmapDesktopGuide.ACTION_SEND`）。 */
-        const val ACTION_SEND = "AUTONAVI_STANDARD_BROADCAST_SEND"
+        const val ACTION_SEND = AmapDayNight.ACTION_SEND
 
         /** 我们发给高德的 action（`AmapDesktopGuide.ACTION_RECV`）。 */
-        const val ACTION_RECV = "AUTONAVI_STANDARD_BROADCAST_RECV"
+        const val ACTION_RECV = AmapDayNight.ACTION_RECV
 
         /** 高德广播接收组件（`AmapDesktopGuide.AMAP_RECEIVER`）。 */
-        const val AMAP_RECEIVER = "com.autonavi.amapauto.adapter.internal.AmapAutoBroadcastReceiver"
+        const val AMAP_RECEIVER = AmapDayNight.AMAP_RECEIVER
 
         /** 高德主包。 */
         const val AMAP_PKG = "com.autonavi.amapauto"
@@ -1059,6 +1139,14 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
 
         /** 多久没有新数据就收起卡片（`AmapDesktopGuide.STALE_MS = 12000`）。 */
         const val STALE_MS = 12000L
+
+        /**
+         * 启动后再问一次高德日夜的间隔（毫秒）。
+         *
+         * 高德刚起来时可能还没准备好回应查询，10 秒后再问一次兜底
+         * （官方桌面也是启动问一次、10 秒后再问一次）。
+         */
+        const val DAY_NIGHT_QUERY_DELAY_MS = 10_000L
 
         /**
          * 「无效引导」记 INFO 的最小间隔（毫秒）。

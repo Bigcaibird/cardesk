@@ -74,17 +74,24 @@ object DayNight {
      * 1. 总开关关闭（`daynight_enabled=false`）→ 回落到 `daynight_applied_night_ui`；
      *    没有这个键时按 **夜间** 处理（返回 null → `true`）。
      * 2. `mode == 1`（跟随时间）→ 按本地时段表判定。
-     * 3. `mode == 2`（跟随光感）→ 用系统光感值；取不到时回落到上次应用值 / 夜间。
-     * 4. `mode == 0`（跟随高德，**默认**）→ 优先用高德下发的夜间信号；
-     *    没有信号时用系统值；再没有就回落到上次应用值 / 夜间。
+     * 3. `mode == 2`（跟随光感）→ 用车机光感（AdaptAPI 昼夜通道）；
+     *    取不到时依次回落到车机日间模式功能值、系统 UI 夜间态、上次应用值 / 夜间。
+     * 4. `mode == 0`（跟随高德，**默认**）→ **高德广播出来的日夜信号优先**；
+     *    没有信号时用车机光感，再依次回落到车机日间模式功能值、系统 UI 夜间态、
+     *    最后回落到上次应用值 / 夜间。
+     *
+     * 这条链与官方桌面 `computeDesiredNightUi`（:328-399）一致：
+     * 高德信号 → 系统明暗（AdaptAPI）→ 车机日间模式功能值 → 上次应用值。
      *
      * @param enabled `daynight_enabled`
      * @param mode `daynight_mode`
      * @param minuteOfDay 当天分钟数（跟随时间时用）
      * @param dayStartMin 白天开始分钟
      * @param nightStartMin 夜间开始分钟
-     * @param amapNightUi 高德下发的夜间态（null = 没有信号）
-     * @param sensorNightUi 系统光感夜间态（null = 取不到）
+     * @param amapNightUi 高德广播的日夜态（null = 没收到过高德的信号）
+     * @param sensorNightUi 车机光感（AdaptAPI 昼夜通道的当前明暗；null = 读不到）
+     * @param carNightUi 车机日间模式功能值（null = 读不到）
+     * @param systemNightUi 系统 UI 的夜间态（null = 读不到）
      * @param lastAppliedNightUi 上次实际应用的夜间态（null = 还没应用过）
      */
     fun resolveNightUi(
@@ -95,13 +102,15 @@ object DayNight {
         nightStartMin: Int,
         amapNightUi: Boolean? = null,
         sensorNightUi: Boolean? = null,
+        carNightUi: Boolean? = null,
+        systemNightUi: Boolean? = null,
         lastAppliedNightUi: Boolean? = null,
     ): Boolean {
         if (!enabled) return lastAppliedNightUi ?: true
         return when (normalizeMode(mode)) {
             MODE_FOLLOW_TIME -> isNight(minuteOfDay, dayStartMin, nightStartMin)
-            MODE_FOLLOW_SENSOR -> sensorNightUi ?: (lastAppliedNightUi ?: true)
-            else -> amapNightUi ?: sensorNightUi ?: (lastAppliedNightUi ?: true)
+            MODE_FOLLOW_SENSOR -> sensorNightUi ?: carNightUi ?: systemNightUi ?: (lastAppliedNightUi ?: true)
+            else -> amapNightUi ?: sensorNightUi ?: carNightUi ?: systemNightUi ?: (lastAppliedNightUi ?: true)
         }
     }
 }

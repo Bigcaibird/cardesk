@@ -160,4 +160,168 @@ class DayNightTest {
             )
         )
     }
+
+    /**
+     * 「跟随高德」时**高德广播的信号优先**于车机/系统的值。
+     *
+     * 这一条是本次修复的核心：以前桌面没有接高德的信号，
+     * 「跟随高德」读的是系统 uiMode（这台车机上没人写，永远是死值），
+     * 所以桌面跟高德怎么切都对不上。
+     */
+    @Test
+    fun resolveNightUi_followAmap_amapSignalBeatsCarAndSystem() {
+        // 高德说夜间、车机与系统都说白天 → 听高德的
+        assertTrue(
+            DayNight.resolveNightUi(
+                enabled = true,
+                mode = DayNight.MODE_FOLLOW_AMAP,
+                minuteOfDay = 720,
+                dayStartMin = 360,
+                nightStartMin = 1110,
+                amapNightUi = true,
+                sensorNightUi = false,
+                systemNightUi = false,
+            )
+        )
+        // 高德说白天、车机与系统都说夜间 → 还是听高德的
+        assertFalse(
+            DayNight.resolveNightUi(
+                enabled = true,
+                mode = DayNight.MODE_FOLLOW_AMAP,
+                minuteOfDay = 1200,
+                dayStartMin = 360,
+                nightStartMin = 1110,
+                amapNightUi = false,
+                sensorNightUi = true,
+                systemNightUi = true,
+            )
+        )
+    }
+
+    /** 没有高德信号时，按「车机光感 → 车机日间模式 → 系统 UI」回落。 */
+    @Test
+    fun resolveNightUi_followAmap_withoutAmapSignal_fallsBackToSensorThenCarThenSystem() {
+        // 光感有值 → 用光感
+        assertTrue(
+            DayNight.resolveNightUi(
+                enabled = true,
+                mode = DayNight.MODE_FOLLOW_AMAP,
+                minuteOfDay = 720,
+                dayStartMin = 360,
+                nightStartMin = 1110,
+                amapNightUi = null,
+                sensorNightUi = true,
+                carNightUi = false,
+                systemNightUi = false,
+            )
+        )
+        // 光感读不到 → 用车机日间模式功能值
+        assertFalse(
+            DayNight.resolveNightUi(
+                enabled = true,
+                mode = DayNight.MODE_FOLLOW_AMAP,
+                minuteOfDay = 720,
+                dayStartMin = 360,
+                nightStartMin = 1110,
+                amapNightUi = null,
+                sensorNightUi = null,
+                carNightUi = false,
+                systemNightUi = true,
+            )
+        )
+        // 光感与车机都读不到 → 用系统 UI 夜间态
+        assertTrue(
+            DayNight.resolveNightUi(
+                enabled = true,
+                mode = DayNight.MODE_FOLLOW_AMAP,
+                minuteOfDay = 720,
+                dayStartMin = 360,
+                nightStartMin = 1110,
+                amapNightUi = null,
+                sensorNightUi = null,
+                carNightUi = null,
+                systemNightUi = true,
+            )
+        )
+    }
+
+    /**
+     * 「跟随光感」优先用**真·光感**（AdaptAPI 昼夜通道），读不到才往下回落。
+     *
+     * 这一条是「跟随光感」能真正工作的关键：车机日间模式功能值在真车上恒为 AUTO，
+     * 真正的明暗只能从光感通道拿。
+     */
+    @Test
+    fun resolveNightUi_followSensor_prefersLightSensor() {
+        // 光感说夜间、车机与系统都说白天 → 听光感的
+        assertTrue(
+            DayNight.resolveNightUi(
+                enabled = true,
+                mode = DayNight.MODE_FOLLOW_SENSOR,
+                minuteOfDay = 720,
+                dayStartMin = 360,
+                nightStartMin = 1110,
+                sensorNightUi = true,
+                carNightUi = false,
+                systemNightUi = false,
+            )
+        )
+        // 光感说白天、车机与系统都说夜间 → 还是听光感的
+        assertFalse(
+            DayNight.resolveNightUi(
+                enabled = true,
+                mode = DayNight.MODE_FOLLOW_SENSOR,
+                minuteOfDay = 720,
+                dayStartMin = 360,
+                nightStartMin = 1110,
+                sensorNightUi = false,
+                carNightUi = true,
+                systemNightUi = true,
+            )
+        )
+        // 光感读不到 → 落到车机日间模式功能值
+        assertTrue(
+            DayNight.resolveNightUi(
+                enabled = true,
+                mode = DayNight.MODE_FOLLOW_SENSOR,
+                minuteOfDay = 720,
+                dayStartMin = 360,
+                nightStartMin = 1110,
+                sensorNightUi = null,
+                carNightUi = true,
+                systemNightUi = false,
+            )
+        )
+    }
+
+    /** 「跟随光感」不听高德的信号。 */
+    @Test
+    fun resolveNightUi_followSensor_ignoresAmapSignal() {
+        assertTrue(
+            DayNight.resolveNightUi(
+                enabled = true,
+                mode = DayNight.MODE_FOLLOW_SENSOR,
+                minuteOfDay = 720,
+                dayStartMin = 360,
+                nightStartMin = 1110,
+                amapNightUi = false,
+                sensorNightUi = true,
+                carNightUi = false,
+                systemNightUi = false,
+            )
+        )
+        assertFalse(
+            DayNight.resolveNightUi(
+                enabled = true,
+                mode = DayNight.MODE_FOLLOW_SENSOR,
+                minuteOfDay = 720,
+                dayStartMin = 360,
+                nightStartMin = 1110,
+                amapNightUi = true,
+                sensorNightUi = false,
+                carNightUi = false,
+                systemNightUi = false,
+            )
+        )
+    }
 }

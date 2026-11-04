@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1111",
-  "versionCode": 4207,
-  "tag": "v1.0.1111",
-  "name": "CarDesk 4207 / 1.0.1111-system",
-  "notes": "适配高德 9.5 巡航红绿灯灯态广播补丁协议：status 按原生枚举 1绿/4红（兼容老包 0红/1绿/2绿）、countdown 0=通行/-1=无读秒不显示数字、direction 0=掉头（新增掉头箭头）；用 10001 的 TYPE 判断导航/巡航模式；巡航卡多方向灯按 掉头→左→直→右 排序。",
-  "publishedAt": "2026-11-04T02:11:50Z",
+  "version": "1.0.1112",
+  "versionCode": 4208,
+  "tag": "v1.0.1112",
+  "name": "CarDesk 4208 / 1.0.1112-system",
+  "notes": "修复桌面与高德地图的日夜模式不同步：接入高德下发的日夜信号（10019 状态 37 白天 / 38 黑夜），「跟随高德」下桌面随地图实时切换；桌面切好日夜后回推给高德（10048），地图与桌面保持一致。「跟随光感」改读车机真实光照（AdaptAPI 昼夜通道，跟随模式下取车机实际亮度），车机明暗变化即时刷新，不再是固定值。",
+  "publishedAt": "2026-11-04T03:42:32Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4207.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4207.apk",
-    "size": 2200342,
-    "sha256": "22f033011a4d52ab87651f4d997de47da61f3049eba0bde865ff34ebe46d8f0b"
+    "name": "CarDesk-platform-ecarx-cardesk-4208.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4208.apk",
+    "size": 2206518,
+    "sha256": "04f8d00336c6116067968c2302b744e30dd330b56d0517ab323d3af8b64c7189"
   }
 }

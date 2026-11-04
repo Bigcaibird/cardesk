@@ -217,6 +217,21 @@ class LauncherView(context: Context) : FrameLayout(context) {
     /** 导航引导数据源。 */
     private var navGuideSource: com.cardesk.launcher.core.nav.AmapDesktopGuide? = null
 
+    /**
+     * 高德广播过来的日夜状态（null = 还没收到过高德的信号）。
+     *
+     * 这是「跟随高德」的**第一来源**：高德主题一变就会广播
+     * `10019` + `EXTRA_STATE` 37（白天）/ 38（黑夜），见 `core/nav/AmapDayNight`。
+     *
+     * 以前桌面没有接这条信号，「跟随高德」读的是系统 uiMode ——
+     * 那个值在这台车机上没人写（只有官方桌面会写），所以永远是个死值，
+     * 表现就是「桌面切了、高德没切 / 高德切了、桌面没切」。
+     */
+    private var amapDayNightSignal: Boolean? = null
+
+    /** 上一次推给高德的日夜态（null = 还没推过）。 */
+    private var amapPushedNight: Boolean? = null
+
     /** 最近一条引导数据。 */
     private var navGuideRaw: com.cardesk.launcher.core.nav.AmapDesktopGuide.Guide? = null
 
@@ -375,6 +390,18 @@ class LauncherView(context: Context) : FrameLayout(context) {
         servicesStarted = true
         com.cardesk.launcher.core.StartupTrace.mark("servicesBegin")
 
+        // 车机昼夜（真·光感）通道：AdaptAPI 的 `Device.getDayNightMode()`。
+        // 「跟随光感」要靠它；车机服务没连上时内部会按 5 秒节流重试。
+        runCatching {
+            com.cardesk.launcher.vehicle.AdaptapiDayNight.listener = { night ->
+                // 车机推来的明暗变了 → 立刻重算配色（不用等 1 秒的定时刷新）。
+                // 优先级仍由 resolveNight 决定（跟随高德时高德信号优先）。
+                Logx.i(LogTags.THEME, "车机光感变化", "night" to night)
+                applyDayNightIfChanged()
+            }
+            com.cardesk.launcher.vehicle.AdaptapiDayNight.attach(context.applicationContext)
+        }.onFailure { Logx.w(LogTags.THEME, "启动车机昼夜通道失败", it) }
+
         // 天气：桌面起来就拉一次
         runCatching {
             Logx.i(LogTags.WEATHER, "启动天气子系统")
@@ -441,6 +468,14 @@ class LauncherView(context: Context) : FrameLayout(context) {
                         // 城市一变就得立刻用新城市再取一次天气，不能等 30 分钟的定时刷新。
                         Logx.i(LogTags.WEATHER, "高德城市变化，重跑天气", "city" to city)
                         weatherDesk?.requestFresh()
+                    }
+
+                    override fun onDayNight(nightUi: Boolean) {
+                        // 高德把自己切成了白天/黑夜 → 桌面立刻跟上（别等 1 秒的定时刷新）。
+                        if (amapDayNightSignal == nightUi) return
+                        amapDayNightSignal = nightUi
+                        Logx.i(LogTags.THEME, "高德日夜状态变化", "night" to nightUi)
+                        applyDayNightIfChanged()
                     }
                 },
             )
@@ -1337,7 +1372,30 @@ class LauncherView(context: Context) : FrameLayout(context) {
         val old = pal
         pal = resolvePalette().also { Skin.apply(it) }
         Logx.i(LogTags.THEME, "主题切换", "night" to pal.night, "wasNight" to old.night, "accent" to prefs.accentColor)
+        // 桌面换了日夜 → 告诉高德一声（跟随高德时除外，见 [pushDayNightToAmap]）。
+        pushDayNightToAmap(pal.night)
         build()
+    }
+
+    /**
+     * 把桌面的日夜状态推给高德，让地图跟着切。
+     *
+     * **只在桌面不是跟着高德走的时候才推**（官方桌面在「跟随高德」时同样不回写）：
+     * 跟随高德时桌面就是高德的状态，回写等于把高德的「自动」锁死成固定白天/黑夜，
+     * 高德以后自己就不切了，桌面也就永远停在旧值上。
+     */
+    private fun pushDayNightToAmap(nightUi: Boolean) {
+        if (!prefs.dayNightEnabled) return
+        if (prefs.dayNightMode == com.cardesk.launcher.core.DayNight.MODE_FOLLOW_AMAP) {
+            // 回到「跟随高德」：清掉记录，等下次切到别的模式时再推。
+            amapPushedNight = null
+            return
+        }
+        if (amapPushedNight == nightUi) return
+        // 数据源还没起来（首帧之前的启动阶段）就先不记，下次再推。
+        val source = navGuideSource ?: return
+        amapPushedNight = nightUi
+        source.sendDayNight(nightUi)
     }
 
     /**
@@ -1351,6 +1409,15 @@ class LauncherView(context: Context) : FrameLayout(context) {
      */
     private fun resolveNight(): Boolean {
         val cal = Calendar.getInstance()
+        // 三个来源，按优先级交给 DayNight 排：
+        // 跟随高德 = 高德信号 → 车机光感 → 车机日间模式 → 系统 UI 夜间态；
+        // 跟随光感 = 车机光感 → 车机日间模式 → 系统 UI 夜间态。
+        //
+        // 车机光感走 AdaptAPI 的昼夜通道（`AdaptapiDayNight`）：车机日间模式功能值
+        // 在真车上恒为 AUTO，而 AUTO 的明暗只能从这条通道拿（`Twlibrists` 真光照）。
+        val lightNight = com.cardesk.launcher.vehicle.AdaptapiDayNight.nightUi()
+        val carNight = carDayModeNight()
+        val sysNight = systemNightMode()
         val night = com.cardesk.launcher.core.DayNight.resolveNightUi(
             enabled = prefs.dayNightEnabled,
             mode = prefs.dayNightMode,
@@ -1360,8 +1427,10 @@ class LauncherView(context: Context) : FrameLayout(context) {
             ),
             dayStartMin = prefs.dayStartMin,
             nightStartMin = prefs.nightStartMin,
-            amapNightUi = systemNightMode(),
-            sensorNightUi = carDayModeNight(),
+            amapNightUi = amapDayNightSignal,
+            sensorNightUi = lightNight,
+            carNightUi = carNight,
+            systemNightUi = sysNight,
             lastAppliedNightUi = prefs.lastAppliedNight(),
         )
         val last = prefs.lastAppliedNight()
@@ -1373,8 +1442,9 @@ class LauncherView(context: Context) : FrameLayout(context) {
                 "was" to last,
                 "enabled" to prefs.dayNightEnabled,
                 "mode" to prefs.dayNightMode,
-                "amap" to systemNightMode(),
-                "sensor" to carDayModeNight(),
+                "amap" to amapDayNightSignal,
+                "sensor" to lightNight,
+                "car" to carNight,
             )
             prefs.setLastAppliedNight(night)
         }
@@ -2382,6 +2452,10 @@ private fun showCam() {
         refreshPip()
         refresh()
         if (resolvePalette().night != pal.night) applyTheme()
+        // 设置里改了日夜来源（跟随高德 / 跟随光感 / 跟随时间）后，
+        // 把当前状态推给高德，让地图跟桌面一致
+        // （跟随高德模式下不推，见 [pushDayNightToAmap]）。
+        pushDayNightToAmap(pal.night)
     }
 
     private fun applyDockVisibility() {
@@ -2480,13 +2554,24 @@ private fun showCam() {
         refresh()
     }
 
+    /**
+     * 日夜态变了就重新上主题。
+     *
+     * 只重算配色（`applyTheme` → `build`），不做整套车况/媒体刷新。
+     *
+     * @return true = 已经重新上过主题（调用方可以提前收工）
+     */
+    private fun applyDayNightIfChanged(): Boolean {
+        if (!::statusBar.isInitialized) return false
+        if (resolvePalette().night == pal.night) return false
+        Logx.i(LogTags.THEME, "日夜状态变化，重新应用主题")
+        applyTheme()
+        return true
+    }
+
     private fun refresh() {
         if (!::statusBar.isInitialized) return
-        if (resolvePalette().night != pal.night) {
-            Logx.i(LogTags.THEME, "日夜状态变化，重新应用主题")
-            applyTheme()
-            return
-        }
+        if (applyDayNightIfChanged()) return
         val now = Date()
         val info = currentVehicleInfo()
         val state = VehicleController.state
@@ -2962,6 +3047,8 @@ private fun showCam() {
         handler.removeCallbacksAndMessages(null)
         weatherDesk?.stop()
         navGuideSource?.stop()
+        // 车机昼夜回调不再往已销毁的视图派发
+        com.cardesk.launcher.vehicle.AdaptapiDayNight.detach()
         VehicleController.removeObserver { }
         super.onDetachedFromWindow()
     }
