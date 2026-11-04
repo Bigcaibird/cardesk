@@ -252,11 +252,12 @@ class AmapTrafficLightTest {
     }
 
     @Test
-    fun `巡航协议 灯态 2 语义未定 按未知处理`() {
+    fun `巡航协议 灯态 2 按绿色兼容`() {
         val signal = AmapTrafficLight.cruise(cruiseJson(light(2, 2, 10)))
         assertNotNull(signal)
-        // 浮窗里索引 2 也用绿色，但语义没确定 —— 不能当成绿灯。
-        assertEquals(AmapTrafficLight.Lamp.UNKNOWN, signal!!.lamp)
+        // 高德 9.5 灯态广播文档（插件接入说明）只用 1绿/4红；
+        // 老 YH 包浮窗把索引 2 也画成绿色，因此按绿色兼容，不再当未知。
+        assertEquals(AmapTrafficLight.Lamp.GREEN, signal!!.lamp)
         assertEquals(2, signal.rawStatus)
     }
 

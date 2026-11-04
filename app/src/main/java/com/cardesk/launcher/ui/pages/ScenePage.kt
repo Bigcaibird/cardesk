@@ -907,6 +907,7 @@ class ScenePage(context: Context) : View(context) {
 
     /** 巡航方向码 → 车道箭头图形（识别不出返回 null，不画方向箭头）。 */
     private fun cruiseDirectionShape(direction: Int?): LaneShape? = when (direction) {
+        AmapTrafficLight.DIR_UTURN -> LaneShape.UTURN
         AmapTrafficLight.DIR_LEFT -> LaneShape.LEFT
         AmapTrafficLight.DIR_STRAIGHT -> LaneShape.STRAIGHT
         AmapTrafficLight.DIR_RIGHT -> LaneShape.RIGHT

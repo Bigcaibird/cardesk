@@ -409,7 +409,31 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
         }
     }
 
+    /**
+     * 用引导帧里的 `TYPE` 判断出行模式（`0` 导航 / `1` 模拟导航 / `2` 巡航）。
+     *
+     * 为什么需要：高德 9.5 的红绿灯补丁对**巡航和导航**都会发
+     * `NAVITOOL_CRUISE_TRAFFIC_LIGHTS`，广播本身不带模式，
+     * 所以巡航卡/导航卡该显示哪张只能看这条 `TYPE`。
+     *
+     * 老版本高德不带 `TYPE` 时保持原判据（`ROUTE_REMAIN_*` 有无），不强行改。
+     */
+    private fun applyGuideMode(intent: Intent) {
+        if (!intent.hasExtra(EXTRA_GUIDE_MODE)) return
+        val mode = intent.getIntExtra(EXTRA_GUIDE_MODE, -1)
+        val cruise = mode == GUIDE_MODE_CRUISE
+        if (cruise && navigating) {
+            navigating = false
+            Logx.i(LogTags.NAV_UI, "高德进入巡航态", "mode" to mode)
+            listener.onCruise()
+        } else if (!cruise && (mode == GUIDE_MODE_NAV || mode == GUIDE_MODE_NAV_SIM) && !navigating) {
+            navigating = true
+            Logx.i(LogTags.NAV_UI, "高德进入导航态", "mode" to mode)
+        }
+    }
+
     private fun handleGuide(intent: Intent, type: Int) {
+        applyGuideMode(intent)
         // 巡航红绿灯：本车高德不一定另发 `NAVITOOL_CRUISE_TRAFFIC_LIGHTS`，
         // 有时把灯态塞在每秒一帧的引导广播里（实测 12205/10001 常无效但 extras 有东西）。
         // 只要 extras 里同时有灯态和读秒字段，就按官方 60073 的口径解析一次。
@@ -874,10 +898,11 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
         }
         val lights = merged.values.sortedBy {
             when (it.direction) {
-                AmapTrafficLight.DIR_LEFT -> 0
-                AmapTrafficLight.DIR_STRAIGHT -> 1
-                AmapTrafficLight.DIR_RIGHT -> 2
-                else -> 3
+                AmapTrafficLight.DIR_UTURN -> 0
+                AmapTrafficLight.DIR_LEFT -> 1
+                AmapTrafficLight.DIR_STRAIGHT -> 2
+                AmapTrafficLight.DIR_RIGHT -> 3
+                else -> 4
             }
         }
         if (!guideFresh && lights.isEmpty()) return null
@@ -915,6 +940,17 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
 
         /** 导航状态键。 */
         const val EXTRA_STATE = "EXTRA_STATE"
+
+        /**
+         * 引导帧里的**出行模式**（`TYPE`）：`0` 导航 / `1` 模拟导航 / `2` 巡航。
+         *
+         * 高德官方的 `NAVITOOL_CRUISE_TRAFFIC_LIGHTS` 灯态广播**不区分模式**
+         * （巡航、导航同一个回调都发），只能靠这个字段判断当前该显示导航卡还是巡航卡。
+         */
+        const val EXTRA_GUIDE_MODE = "TYPE"
+        const val GUIDE_MODE_NAV = 0
+        const val GUIDE_MODE_NAV_SIM = 1
+        const val GUIDE_MODE_CRUISE = 2
 
         /** 车道线数据键（`AmapDesktopGuide.EXTRA_DRIVE_WAY`）。 */
         const val EXTRA_DRIVE_WAY = "EXTRA_DRIVE_WAY"

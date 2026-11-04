@@ -57,22 +57,26 @@ import com.cardesk.launcher.core.JsonLite
  *   照字段名当剩余秒数用，绿灯倒计时就会在 3/2 之间来回跳。
  *   依据见 [EXTRA_GREEN_LAST_SECOND] 的 KDoc。
  *
- * ### 修改版巡航协议
+ * ### 巡航红绿灯广播（高德 9.5 补丁包）
  *
- * action `NAVITOOL_CRUISE_TRAFFIC_LIGHTS`，extra `data` 是 JSON 字符串：
+ * action `NAVITOOL_CRUISE_TRAFFIC_LIGHTS`，extra `data` 是 JSON 字符串，
+ * `count` = 灯组数量，`ts` = 毫秒时间戳（协议由 `巡航红绿灯灯态广播_插件接入说明.md` 定义）：
  *
  * ```json
- * { "ts": 1712345678901, "lights": [ { "direction": 2, "status": 0, "countdown": 23, "waitNum": 1, "showType": 0 } ] }
+ * { "ts": 1762234567890, "lights": [
+ *     { "direction": 2, "status": 1, "countdown": 7,  "waitNum": 0, "showType": 1 },
+ *     { "direction": 1, "status": 4, "countdown": 12, "waitNum": 0, "showType": 1 }
+ * ] }
  * ```
  *
- * 这一套的枚举在 YH 包里**已验证**（`FloatViewUtils` 的方向表 / 背景表）：
- * - 方向：`1` 左转 / `2` 直行 / `3` 右转；
- * - 灯态：`0` 红 / `1` 绿；`2` 在浮窗里也用绿色，语义未确定 → 按**未知**处理。
+ * 字段口径（**原生枚举**，与官方 `trafficLightStatus` 同族）：
+ * - 方向：`0` 掉头 / `1` 左转 / `2` 直行 / `3` 右转；
+ * - 灯态：`1` 绿 / `4` 红；老 YH 包用 `0` 红 / `1` 绿 / `2` 绿，这里一并兼容；
+ * - 读秒：`>0` 秒数 / `0` = 通行（不显示数字）/ `-1` = 无读秒（也不显示数字）。
  *
- * ⚠️ 这套枚举**只适用于巡航协议**，不能套到官方协议的 `dir` / `trafficLightStatus` 上 ——
- * 两套协议的灯态取值**正好是反的**（巡航 0=红，官方 1=红）。
- *
- * 另外：那份 YH APK 里**没有** `CruiseTrafficLightBroadcaster` ⇒ 真车走的是**官方标准协议**。
+ * 高德原生每次推来灯态就发一帧（无节流），巡航态与导航态都会发；
+ * 判断当前是导航还是巡航要另看 `AUTONAVI_STANDARD_BROADCAST_SEND + KEY_TYPE=10001` 的 `TYPE`
+ * （`0` 导航 / `1` 模拟导航 / `2` 巡航）。
  */
 object AmapTrafficLight {
 
@@ -238,6 +242,9 @@ object AmapTrafficLight {
     const val DIR_STANDARD_STRAIGHT = 4
 
     /** 巡航方向：左转（YH 包里已验证）。 */
+    /** 掉头（原生方向枚举 0）。 */
+    const val DIR_UTURN = 0
+
     const val DIR_LEFT = 1
 
     /** 巡航方向：直行（YH 包里已验证）。 */
@@ -431,15 +438,11 @@ object AmapTrafficLight {
             val map = item as? Map<*, *> ?: continue
             val direction = strictInt(map["direction"])
             val status = strictInt(map["status"]) ?: continue
-            val lamp = when (status) {
-                0 -> Lamp.RED
-                1 -> Lamp.GREEN
-                else -> Lamp.UNKNOWN
-            }
+            val lamp = lampFromCruiseStatus(status)
             // 方向识别不出的帧统一归到一个「未知方向」槽位，避免同一帧里重复占位。
             val key = direction ?: UNKNOWN_DIRECTION_KEY
             if (!out.containsKey(key)) {
-                out[key] = DirectionLight(direction, lamp, seconds(map["countdown"]), status)
+                out[key] = DirectionLight(direction, lamp, cruiseCountdown(map["countdown"]), status)
             }
         }
         return out.values.sortedBy { directionOrder(it.direction) }
@@ -450,10 +453,11 @@ object AmapTrafficLight {
 
     /** 巡航方向的展示顺序：左、直、右、其它。 */
     private fun directionOrder(direction: Int?): Int = when (direction) {
-        DIR_LEFT -> 0
-        DIR_STRAIGHT -> 1
-        DIR_RIGHT -> 2
-        else -> 3
+        DIR_UTURN -> 0
+        DIR_LEFT -> 1
+        DIR_STRAIGHT -> 2
+        DIR_RIGHT -> 3
+        else -> 4
     }
 
     /**
@@ -487,22 +491,15 @@ object AmapTrafficLight {
                 CruiseLight(
                     direction = direction,
                     status = status,
-                    countdown = seconds(map["countdown"]),
+                    countdown = cruiseCountdown(map["countdown"]),
                 ),
             )
         }
         val picked = preferredDirection?.let { want -> parsed.firstOrNull { it.direction == want } }
             ?: parsed.singleOrNull()
             ?: return null
-        // 灯态枚举在这一套里**已验证**（YH 包的浮窗方向表 / 背景表）。
-        val lamp = when (picked.status) {
-            0 -> Lamp.RED
-            1 -> Lamp.GREEN
-            // 浮窗里索引 2 也用绿色，但语义没确定 → 按未知处理，不当成绿灯。
-            else -> Lamp.UNKNOWN
-        }
         return Signal(
-            lamp = lamp,
+            lamp = lampFromCruiseStatus(picked.status),
             countdownSeconds = picked.countdown,
             rawStatus = picked.status,
             rawDirection = picked.direction,
@@ -542,5 +539,31 @@ object AmapTrafficLight {
     private fun seconds(value: Any?): Int? {
         val n = strictInt(value) ?: return null
         return if (n in 0..MAX_COUNTDOWN_SECONDS) n else null
+    }
+
+    /**
+     * 巡航广播的灯态 → [Lamp]。
+     *
+     * 原生枚举是 `1` 绿 / `4` 红（与官方 `trafficLightStatus` 同族）；
+     * 老 YH 包用的是 `0` 红 / `1` 绿 / `2` 绿，一并兼容，
+     * 认不出的值按 [Lamp.UNKNOWN]（**不猜**）。
+     */
+    private fun lampFromCruiseStatus(status: Int): Lamp = when (status) {
+        1 -> Lamp.GREEN
+        4 -> Lamp.RED
+        0 -> Lamp.RED
+        2 -> Lamp.GREEN
+        else -> Lamp.UNKNOWN
+    }
+
+    /**
+     * 巡航广播的读秒 → 显示用秒数。
+     *
+     * 协议约定：`>0` 秒数；`0` = 通行；`-1` = 无读秒。
+     * 后两种都不显示数字（null），由卡片按「—」或只画灯处理。
+     */
+    private fun cruiseCountdown(value: Any?): Int? {
+        val n = strictInt(value) ?: return null
+        return if (n > 0 && n <= MAX_COUNTDOWN_SECONDS) n else null
     }
 }

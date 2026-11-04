@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1109",
-  "versionCode": 4205,
-  "tag": "v1.0.1109",
-  "name": "CarDesk 4205 / 1.0.1109-system",
-  "notes": "修复行程1卡片里程/时长一直显示 --：TS_TripDistance/TS_TripTime 在车机上登记为 Integer 类型，按 byte[] 永远读不到；改为多通道读取（PublicAttrValue → getProperty(int,int) → getProperty(Integer,…) → 全区域）。诊断「车辆信号自检」新增「行程1 信号」一行，列出每条属性的类型与各通道结果，便于继续定位。",
-  "publishedAt": "2026-11-04T01:30:02Z",
+  "version": "1.0.1111",
+  "versionCode": 4207,
+  "tag": "v1.0.1111",
+  "name": "CarDesk 4207 / 1.0.1111-system",
+  "notes": "适配高德 9.5 巡航红绿灯灯态广播补丁协议：status 按原生枚举 1绿/4红（兼容老包 0红/1绿/2绿）、countdown 0=通行/-1=无读秒不显示数字、direction 0=掉头（新增掉头箭头）；用 10001 的 TYPE 判断导航/巡航模式；巡航卡多方向灯按 掉头→左→直→右 排序。",
+  "publishedAt": "2026-11-04T02:11:50Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4205.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4205.apk",
-    "size": 2199970,
-    "sha256": "12be436f8e624a06a106f5de87921266184c4bb3a5f7ae69d6a355e9b9967dd0"
+    "name": "CarDesk-platform-ecarx-cardesk-4207.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4207.apk",
+    "size": 2200342,
+    "sha256": "22f033011a4d52ab87651f4d997de47da61f3049eba0bde865ff34ebe46d8f0b"
   }
 }

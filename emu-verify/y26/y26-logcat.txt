@@ -1,0 +1,7 @@
+# 4206 巡航红绿灯（高德 9.5 灯态广播补丁协议）模拟器注入验证
+# 证据来源：adb shell am broadcast 注入（设备 emulator-5558，AVD cardesk-aosp）
+11-04 09:57:27.698 I CarDesk/NavUI: 收到巡航多方向红绿灯 count=3 dirs=1,2,3
+11-04 09:57:27.699 I CarDesk/NavUI: 收到红绿灯数据（巡航协议） lamp=GREEN countdown=7 rawStatus=1 rawDir=2
+11-04 09:58:00.377 I CarDesk/NavUI: 收到巡航多方向红绿灯 count=3 dirs=0,2,3
+11-04 10:00:37.088 I CarDesk/NavUI: 高德进入导航态 mode=0
+11-04 10:00:37.733 I CarDesk/NavUI: 收到巡航多方向红绿灯 count=1 dirs=2
