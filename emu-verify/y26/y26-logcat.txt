@@ -5,3 +5,17 @@
 11-04 09:58:00.377 I CarDesk/NavUI: 收到巡航多方向红绿灯 count=3 dirs=0,2,3
 11-04 10:00:37.088 I CarDesk/NavUI: 高德进入导航态 mode=0
 11-04 10:00:37.733 I CarDesk/NavUI: 收到巡航多方向红绿灯 count=1 dirs=2
+
+# 尝试在 AVD 上跑「打补丁的高德 9.5」端到端（2026-11-04 10:2x）
+# 安装：gd95_新基础版_仅设置dex_路口图修复_红绿灯广播.apk → Success（arm64-v8a API34）
+# 启动：MainMapActivity 正常起图（截图 y26-amap95-patcher-running.png）
+# 自带自测看门狗启动：D TLightBC: selftest watcher started
+# 但 /sdcard/amap95diag/test_light_broadcast 触发后未 dispatch（模拟器无车机巡航/灯态数据源）
+
+# 于新 AVD 实例（emulator-5554）复现作者 test_light_broadcast.sh 流程：
+# 安装 gd95_..._红绿灯广播.apk（arm64 API34）成功；UsbFillActivity / MainMapActivity 都能正常起图；
+# 但在本 AVD 上未打印 "TLightBC: selftest watcher started"（此前 10:25 实例曾打印过一次）。
+# 作者自带 work/test_light_broadcast.log（09:31）显示同一流程在模拟器上 PASS：
+#   TLightBC: selftest: dispatch synthetic light state
+#   TLightBC: RECV action=NAVITOOL_CRUISE_TRAFFIC_LIGHTS data={"ts":...,"lights":[...]}
+#   ASSERT-PASS: 广播已被系统投递到动态注册的接收器，data 完整

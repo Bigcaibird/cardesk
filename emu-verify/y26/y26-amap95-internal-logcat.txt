@@ -1,0 +1,1503 @@
+--------- beginning of events
+11-04 10:21:06.579  1565  1565 I auditd  : type=1400 audit(0.0:16): avc: granted { read } for comm="main" name="u:object_r:net_dns_prop:s0" dev="tmpfs" ino=7333 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:net_dns_prop:s0 tclass=file app=com.android.email
+11-04 10:21:07.507  1565  1565 I auditd  : type=1400 audit(0.0:17): avc: denied { search } for comm="NetworkParam" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:21:07.507  1565  1565 I auditd  : type=1400 audit(0.0:18): avc: denied { search } for comm="NetworkParam" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:21:09.779  1565  1565 I auditd  : type=1400 audit(0.0:67): avc: denied { search } for comm="ALLocationHandl" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:21:09.779  1565  1565 I auditd  : type=1400 audit(0.0:68): avc: denied { search } for comm="ALLocationHandl" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:21:10.003  1565  1565 I auditd  : type=1400 audit(0.0:69): avc: denied { write } for comm="GNaviMap-GL-0" name="property_service" dev="tmpfs" ino=7380 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:property_socket:s0 tclass=sock_file permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:21:10.104  1565  2048 I dvm_lock_sample: [com.autonavi.amapautp.yh,0,LocationThreadPool,379,SourceFile,-1,void com.amap.location.sdk.c.a.c.b(boolean),Thread.java,-2,void java.lang.Thread.nativeCreate(java.lang.Thread, long, boolean),75]
+11-04 10:21:10.238  1565  2018 I dvm_lock_sample: [com.autonavi.amapautp.yh,0,locsdklog,97,SourceFile,18,void com.amap.location.k.d.c.a(int, int, int, java.lang.Object),SQLiteConnection.java,-2,long android.database.sqlite.SQLiteConnection.nativeOpen(java.lang.String, int, java.lang.String, boolean, boolean, int, int),19]
+11-04 10:21:10.283  2069  2069 I auditd  : type=1400 audit(0.0:70): avc: granted { read } for comm="main" name="u:object_r:net_dns_prop:s0" dev="tmpfs" ino=7333 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:net_dns_prop:s0 tclass=file app=com.autonavi.amapautp.yh
+11-04 10:21:11.259  1565  1565 I auditd  : type=1400 audit(0.0:71): avc: denied { search } for comm="data_sd_sdisk" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:21:11.259  1565  1565 I auditd  : type=1400 audit(0.0:72): avc: denied { search } for comm="data_sd_sdisk" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:21:11.375  1565  1565 I auditd  : type=1400 audit(0.0:73): avc: denied { search } for comm="locationThread" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:21:11.375  1565  1565 I auditd  : type=1400 audit(0.0:74): avc: denied { search } for comm="locationThread" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:21:11.527  1565  1565 I auditd  : type=1400 audit(0.0:75): avc: denied { search } for comm="data_sd_sdisk" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:21:11.527  1565  1565 I auditd  : type=1400 audit(0.0:76): avc: denied { search } for comm="data_sd_sdisk" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:21:12.403  1565  1565 I auditd  : type=1400 audit(0.0:81): avc: denied { search } for comm="MainScreen" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:21:12.403  1565  1565 I auditd  : type=1400 audit(0.0:82): avc: denied { search } for comm="MainScreen" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:21:12.427  1565  1565 I auditd  : type=1400 audit(0.0:83): avc: denied { search } for comm="bl_thd_pool_wor" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:21:12.427  1565  1565 I auditd  : type=1400 audit(0.0:84): avc: denied { search } for comm="bl_thd_pool_wor" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:21:12.463  1565  1565 I auditd  : type=1400 audit(0.0:85): avc: denied { search } for comm="sync1" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:21:13.635  1565  1565 I auditd  : type=1400 audit(0.0:116): avc: denied { search } for comm="dl_theme_main" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:21:13.635  1565  1565 I auditd  : type=1400 audit(0.0:117): avc: denied { search } for comm="dl_theme_main" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:21:30.795  1565  2094 I service_manager_stats: [200,167,39951]
+11-04 10:21:40.821  2069  2137 I service_manager_stats: [200,106,49977]
+11-04 10:21:48.199  1565  1565 I auditd  : type=1400 audit(0.0:118): avc: denied { search } for comm="UpdateMsgThread" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:21:48.203  1565  1565 I auditd  : type=1400 audit(0.0:119): avc: denied { search } for comm="UpdateMsgThread" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:22:08.979  1565  1565 I auditd  : type=1400 audit(0.0:120): avc: denied { search } for comm="bl_timer" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:22:08.979  1565  1565 I auditd  : type=1400 audit(0.0:121): avc: denied { search } for comm="bl_timer" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:22:10.957  2069  2137 I service_manager_stats: [200,29,30136]
+11-04 10:22:41.143  2069  2137 I service_manager_stats: [200,23,30185]
+11-04 10:23:08.687  1565  1565 I auditd  : type=1400 audit(0.0:122): avc: denied { search } for comm="bl_cloud" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:23:08.687  1565  1565 I auditd  : type=1400 audit(0.0:123): avc: denied { search } for comm="bl_cloud" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:23:11.237  2069  2137 I service_manager_stats: [200,24,30094]
+11-04 10:23:41.359  2069  2118 I service_manager_stats: [200,63,30123]
+11-04 10:24:12.298  2069  2226 I service_manager_stats: [200,132,30939]
+11-04 10:24:25.342  1565  2174 I service_manager_stats: [200,38,174546]
+11-04 10:24:42.365  2069  2226 I service_manager_stats: [200,93,30067]
+11-04 10:25:13.439  2069  2226 I service_manager_stats: [200,123,31073]
+11-04 10:25:43.533  2069  2226 I service_manager_stats: [200,118,30095]
+11-04 10:26:08.967  1565  1565 I auditd  : type=1400 audit(0.0:124): avc: denied { search } for comm="GSQuirrel" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:26:08.975  1565  1565 I chatty  : uid=10119(com.autonavi.amapautp.yh) identical 2 lines
+11-04 10:26:08.975  1565  1565 I auditd  : type=1400 audit(0.0:127): avc: denied { search } for comm="GSQuirrel" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:26:14.606  2069  2226 I service_manager_stats: [200,174,31072]
+11-04 10:26:18.967  1565  1565 I auditd  : type=1400 audit(0.0:128): avc: denied { search } for comm="GSQuirrel" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:26:28.967  1565  1565 I chatty  : uid=10119(com.autonavi.amapautp.yh) identical 2 lines
+11-04 10:26:28.967  1565  1565 I auditd  : type=1400 audit(0.0:131): avc: denied { search } for comm="GSQuirrel" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:26:44.699  2069  2226 I service_manager_stats: [200,127,30094]
+11-04 10:27:15.791  2069  2226 I service_manager_stats: [200,113,31091]
+11-04 10:27:45.860  2069  2226 I service_manager_stats: [200,72,30070]
+11-04 10:28:16.921  2069  2226 I service_manager_stats: [200,59,31060]
+11-04 10:28:46.991  2069  2226 I service_manager_stats: [200,52,30071]
+--------- beginning of main
+11-04 10:28:58.018  1565  2019 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:28:58.019  1565  2019 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:28:58.032  1565  1788 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:28:58.033  1565  1788 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:28:58.033  1565  1788 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:28:58.033  1565  1788 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:28:58.332  2175  2175 E mapautp.yh:pus: No implementation found for void com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.nativeSetNaviType(int, int) (tried Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType and Java_com_autonavi_amapauto_jni_protocol_AndroidProtocolExe_nativeSetNaviType__II)
+11-04 10:28:59.018  1565  2019 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:28:59.019  1565  2019 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:28:59.917  2069  2105 E BluetoothAdapter: Bluetooth binder is null
+11-04 10:29:00.019  1565  2019 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:00.020  1565  2019 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:00.034  1565  1788 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:00.034  1565  1788 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:00.034  1565  1788 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:00.035  1565  1788 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:00.487  2467  2467 I auditd  : type=1400 audit(0.0:132): avc: granted { read } for comm="main" name="u:object_r:net_dns_prop:s0" dev="tmpfs" ino=7333 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:net_dns_prop:s0 tclass=file app=com.autonavi.amapautp.yh
+11-04 10:29:00.487  2467  2467 W main    : type=1400 audit(0.0:132): avc: granted { read } for name="u:object_r:net_dns_prop:s0" dev="tmpfs" ino=7333 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:net_dns_prop:s0 tclass=file app=com.autonavi.amapautp.yh
+11-04 10:29:00.516  2467  2467 I avi.amapautp.y: The ClassLoaderContext is a special shared library.
+11-04 10:29:00.539  2467  2467 I DexTrace.MapApplicationProxy: app scene false
+11-04 10:29:00.562  2467  2467 D LogProxy: isWriteLog false
+11-04 10:29:00.563  2467  2467 D SelfUpdate: getNeedVersionPath:9.5.0.600013
+11-04 10:29:00.565  2467  2467 D SelfUpdate: appProcess.processName:com.autonavi.amapautp.yh   context.getPackageName: com.autonavi.amapautp.yh
+11-04 10:29:00.565  2467  2467 D SelfUpdate: appProcess.pid：2467  myPid:2467
+11-04 10:29:00.565  2467  2467 D SelfUpdate: main process:Effect start
+11-04 10:29:00.565  2467  2467 D SelfUpdate: little endian
+11-04 10:29:00.566  2467  2467 D SelfUpdate: /data/user/0/com.autonavi.amapautp.yh/UpdateVerInfo.dat: open failed: ENOENT (No such file or directory)
+11-04 10:29:00.566  2467  2467 D SelfUpdate: no last Ver
+11-04 10:29:00.566  2467  2467 D map_bench: attachBaseContext begin
+11-04 10:29:00.577  2467  2467 I MapApplication: Process Is :2467 :com.autonavi.amapautp.yh myPid:2467
+11-04 10:29:00.577  2467  2467 I MapApplication: isMainApp is :2467 :com.autonavi.amapautp.yh
+11-04 10:29:00.577  2467  2467 D MapApplication: com.autonavi.amapautp.yh mMainApp=true
+11-04 10:29:00.577  2467  2467 D map_bench: copyDir begin
+11-04 10:29:00.577  2467  2467 I LoadSoBy: fromPath :/data/local/tmp/debug/ toPath:/data/user/0/com.autonavi.amapautp.yh/app_libs
+11-04 10:29:00.577  2467  2467 D map_bench: copyDir end
+11-04 10:29:00.577  2467  2467 I LoadSoBy: soName : hook
+11-04 10:29:00.577  2467  2467 I LoadSoBy: dir : /data/user/0/com.autonavi.amapautp.yh/app_libs
+11-04 10:29:00.577  2467  2467 D map_bench: hook end
+11-04 10:29:00.577  2467  2467 D map_bench: attachBaseContext end
+11-04 10:29:00.601  2467  2467 D floatapp.AutoamapPluginManage: load: processName = com.autonavi.amapautp.yh is main process, start init
+11-04 10:29:00.616  2467  2467 D AutoProtocolManager: 绑定服务结果: true, 重试次数: 0
+11-04 10:29:00.629  2467  2467 D Citygps : City receivers registered
+11-04 10:29:00.629  2467  2467 D 主题  : 创建新的DayNight实例
+11-04 10:29:00.629  2467  2467 D 主题  : 锁定自动 #高德始终切换自动
+11-04 10:29:00.630  2467  2467 D 主题  : 发送主题切换广播: 0 (自动)
+11-04 10:29:00.634  2467  2467 D 主题  : 锁定自动 #高德始终切换自动
+11-04 10:29:00.634  2467  2467 D 主题  : 发送主题切换广播: 0 (自动)
+11-04 10:29:00.635  2467  2467 D 主题  : 锁定自动 #高德始终切换自动
+11-04 10:29:00.635  2467  2467 D 主题  : 发送主题切换广播: 0 (自动)
+11-04 10:29:00.641  2467  2467 D 主题  : DayNight实例创建完成
+11-04 10:29:00.643  2467  2467 D 配置  : 自动3D视角配置值: 0
+11-04 10:29:00.644  2467  2467 D 配置  : 未开启自动3D视角功能
+11-04 10:29:00.644  2467  2467 D 配置  : 导航道路播报配置值: 1
+11-04 10:29:00.644  2467  2467 D 配置  : 导航简洁播报配置值: 0
+11-04 10:29:00.644  2467  2467 D 配置  : 导航道路播报间隔配置值: 2000 毫秒
+11-04 10:29:00.644  2467  2467 D 配置  : 已开启导航道路播报功能
+11-04 10:29:00.645  2467  2467 D 配置  : 巡航道路播报配置值: 1
+11-04 10:29:00.645  2467  2467 D 配置  : 巡航简洁播报配置值: 0
+11-04 10:29:00.645  2467  2467 D 配置  : 巡航道路播报间隔配置值: 2000 毫秒
+11-04 10:29:00.645  2467  2467 D 配置  : 已开启巡航道路播报功能
+11-04 10:29:00.645  2467  2467 D 配置  : 导航红绿灯播报配置值: 1
+11-04 10:29:00.645  2467  2467 D 配置  : 导航简洁播报配置值: 0
+11-04 10:29:00.645  2467  2467 D 配置  : 导航播报速度配置值: 25 km/h
+11-04 10:29:00.645  2467  2467 D 配置  : 导航播报距离配置值: 200 米
+11-04 10:29:00.645  2467  2467 D 配置  : 导航播报倒计时配置值: 5 秒
+11-04 10:29:00.645  2467  2467 D 配置  : 已开启导航红绿灯播报功能
+11-04 10:29:00.645  2467  2467 D 配置  : 巡航红绿灯播报配置值: 1
+11-04 10:29:00.645  2467  2467 D 配置  : 巡航简洁播报配置值: 0
+11-04 10:29:00.645  2467  2467 D 配置  : 巡航播报速度配置值: 25 km/h
+11-04 10:29:00.645  2467  2467 D 配置  : 巡航播报距离配置值: 200 米
+11-04 10:29:00.646  2467  2467 D 配置  : 巡航播报倒计时配置值: 5 秒
+11-04 10:29:00.646  2467  2467 D 配置  : 巡航组合灯播报配置值: 7 秒
+11-04 10:29:00.646  2467  2467 D 配置  : 已开启巡航红绿灯播报功能
+11-04 10:29:00.646  2467  2467 D 配置  : 领航用户ID配置值: #未设置
+11-04 10:29:00.646  2467  2467 D 配置  : 红绿灯播报条件 #速度限制
+11-04 10:29:00.646  2467  2467 D 配置  : 带城市天气播报配置值: 1
+11-04 10:29:00.646  2467  2467 D 配置  : 城市播报省信息配置值: 0
+11-04 10:29:00.646  2467  2467 D 配置  : 城市播报市信息配置值: 1
+11-04 10:29:00.646  2467  2467 D 配置  : 城市播报区县信息配置值: 1
+11-04 10:29:00.646  2467  2467 D 配置  : 天气简洁播报配置值: 1
+11-04 10:29:00.646  2467  2467 D 配置  : 延迟天气播报配置值: 1000 毫秒
+11-04 10:29:00.646  2467  2467 D 配置  : 位置刷新间隔配置值: 30 秒
+11-04 10:29:00.646  2467  2467 D 配置  : 问候语配置值: 高德地图提醒您
+11-04 10:29:00.646  2467  2467 D 配置  : 高德Key配置值: #未设置
+11-04 10:29:00.646  2467  2467 D 配置  : 已开启带城市天气播报功能 #备用API
+11-04 10:29:00.646  2467  2467 D 配置  : 自动黑白模式配置值: 3
+11-04 10:29:00.646  2467  2467 D 配置  : 已开启自动黑白模式功能 #锁定自动
+11-04 10:29:00.646  2467  2467 D 配置  : 使用配置文件配置值: 1
+11-04 10:29:00.646  2467  2467 D 配置  : 图标始终显示配置值: 1
+11-04 10:29:00.646  2467  2467 D 配置  : 图标显示距离配置值: 1
+11-04 10:29:00.646  2467  2467 D 配置  : 悬浮图标大小配置值: 25 sp
+11-04 10:29:00.646  2467  2467 D 配置  : 图标淡化时间配置值: 5 秒
+11-04 10:29:00.646  2467  2467 D 配置  : 距离图标缩放配置值: 1.0
+11-04 10:29:00.646  2467  2467 D 配置  : 悬浮图标透明度配置值: 0.7
+11-04 10:29:00.646  2467  2467 D 配置  : 悬浮图标颜色配置值: FFEB0B0B
+11-04 10:29:00.646  2467  2467 D 配置  : 悬浮图标自定义配置值: 设置
+11-04 10:29:00.646  2467  2467 D 配置  : 悬浮窗字体大小配置值: 15 sp
+11-04 10:29:00.647  2467  2467 D 配置  : 悬浮窗透明度配置值: 0.7
+11-04 10:29:00.647  2467  2467 D 配置  : 悬浮窗缩放比例配置值: 1.0
+11-04 10:29:00.647  2467  2467 D 配置  : 忽略音乐播放配置值: 1
+11-04 10:29:00.647  2467  2467 D 配置  : 悬浮音乐插件配置值: 0
+11-04 10:29:00.647  2467  2467 D 配置  : 调试日志打印配置值: 1
+11-04 10:29:00.647  2467  2467 D 配置  : 日志Tag过滤配置值: 配置|主题|天气|红绿灯
+11-04 10:29:00.647  2467  2467 D map_bench: Application.onCreate begin
+11-04 10:29:00.647  2467  2467 D PathUtils: isAdapterAndroidR targetSdkVersion = 24
+11-04 10:29:00.648  2467  2467 I PathUtils: getAvailableSdcardPath, isNeedFrontMemory:0
+11-04 10:29:00.649  2467  2467 I PathUtils: getAvailableSdcardPath, spUsedInnerPath = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files
+11-04 10:29:00.650  2467  2467 I PathUtils: getAvailableSdcardPath, isExternalFilesDir
+11-04 10:29:00.650  2467  2467 I PathUtils: getAvailableSdcardPath, mAutoUsedSdcardPath = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files
+11-04 10:29:00.651  2467  2467 I MapApplication: setting enable =0
+11-04 10:29:00.651  2467  2467 I MapApplication: BuildConfig.AL_LOGGER_FLAG=8
+11-04 10:29:00.651  2467  2467 D LoggerTracer: init flags 8
+11-04 10:29:00.651  2467  2467 D PathUtils: getAutoLogRootPath loadLogPathFromAssets start
+11-04 10:29:00.651  2467  2467 D PathUtils: getAutoLogRootPath loadLogPathFromAssets end
+11-04 10:29:00.651  2467  2467 D PathUtils: isAdapterAndroidR targetSdkVersion = 24
+11-04 10:29:00.652  2467  2467 I PathUtils: getAvailableSdcardPath, isNeedFrontMemory:0
+11-04 10:29:00.652  2467  2467 I PathUtils: getAvailableSdcardPath, spUsedInnerPath = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files
+11-04 10:29:00.652  2467  2467 I PathUtils: getAvailableSdcardPath, isExternalFilesDir
+11-04 10:29:00.652  2467  2467 I PathUtils: getAvailableSdcardPath, mAutoUsedSdcardPath = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files
+11-04 10:29:00.652  2467  2467 D PathUtils: getAutoLogRootPath loadLogPathFromAssets start
+11-04 10:29:00.652  2467  2467 D PathUtils: getAutoLogRootPath loadLogPathFromAssets end
+11-04 10:29:00.652  2467  2467 D PathUtils: isAdapterAndroidR targetSdkVersion = 24
+11-04 10:29:00.652  2467  2467 D PathUtils: getAutoLogRootPath path = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files/amapauto9/Log//
+11-04 10:29:00.652  2467  2467 D PathUtils: getAutoLogRootPath path = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files/amapauto9/Log//
+11-04 10:29:00.652  2467  2467 D AutoLibraryLoader: addLibrary priority = -1,path = /data/user/0/com.autonavi.amapautp.yh/cpplibs/
+11-04 10:29:00.653  2467  2467 D SelfUpdate: isErrorMatchScense enter 
+11-04 10:29:00.653  2467  2467 D SelfUpdate: isErrorMatchScense package version code: 9.5.0.600013
+11-04 10:29:00.653  2467  2467 D SelfUpdate: isErrorMatchScense: availVerCnt:0 errSceneCnt:0
+11-04 10:29:00.653  2467  2467 D SelfUpdate: getLibPathWithVerCheck: return getLibPath
+11-04 10:29:00.653  2467  2467 D SelfUpdate: getLibPath libpath :/data/user/0/com.autonavi.amapautp.yh/AutoUpdate/run/lib/
+11-04 10:29:00.653  2467  2467 D SelfUpdate: getLibPath return :null
+11-04 10:29:00.653  2467  2467 D AutoLibraryLoader: addLibrary priority = 1,path = null
+11-04 10:29:00.653  2467  2467 D SelfUpdate: isErrorMatchScense enter 
+11-04 10:29:00.653  2467  2467 D SelfUpdate: isErrorMatchScense package version code: 9.5.0.600013
+11-04 10:29:00.653  2467  2467 D SelfUpdate: isErrorMatchScense: availVerCnt:0 errSceneCnt:0
+11-04 10:29:00.653  2467  2467 D SelfUpdate: getGframePathWithVerCheck return getGframePath
+11-04 10:29:00.653  2467  2467 D SelfUpdate: getGframePath return :null
+11-04 10:29:00.653  2467  2467 D AutoLibraryLoader: addLibrary priority = 2,path = null
+11-04 10:29:00.653  2467  2467 D AutoLibraryLoader: addLibrary priority = 3,path = /data/user/0/com.autonavi.amapautp.yh/app_version/9.5.0.600013
+11-04 10:29:00.653  2467  2467 D AutoLibraryLoader: addLibrary priority = 4,path = /data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/
+11-04 10:29:00.653  2467  2467 D AutoLibraryLoader: addLibrary priority = 6,path = /system/lib64
+11-04 10:29:00.654  2467  2467 I System.out: MQTT LOG PATH:/storage/emulated/0/amapauto9/Log/log_mqtt_jni.log
+11-04 10:29:00.654  2467  2467 I System.out: MQTT LOG PATH:/storage/emulated/0/Android/data/com.autonavi.amapauto/files/amapauto9/Log/log_mqtt_jni.log
+11-04 10:29:00.654  2467  2467 D SelfUpdate: isErrorMatchScense enter 
+11-04 10:29:00.654  2467  2467 D SelfUpdate: isErrorMatchScense package version code: 9.5.0.600013
+11-04 10:29:00.655  2467  2467 D SelfUpdate: isErrorMatchScense: availVerCnt:0 errSceneCnt:0
+11-04 10:29:00.655  2467  2467 D SelfUpdate: getLibPathWithVerCheck: return getLibPath
+11-04 10:29:00.655  2467  2467 D SelfUpdate: getLibPath return :null
+11-04 10:29:00.655  2467  2467 D SelfUpdate: isErrorMatchScense enter 
+11-04 10:29:00.655  2467  2467 D SelfUpdate: isErrorMatchScense package version code: 9.5.0.600013
+11-04 10:29:00.655  2467  2467 D SelfUpdate: isErrorMatchScense: availVerCnt:0 errSceneCnt:0
+11-04 10:29:00.655  2467  2467 D SelfUpdate: getHmiPathWithVerCheck return getGframePath
+11-04 10:29:00.655  2467  2467 D SelfUpdate: getHmiPath return :null
+11-04 10:29:00.655  2467  2467 D SelfUpdate: isErrorMatchScense enter 
+11-04 10:29:00.655  2467  2467 D SelfUpdate: isErrorMatchScense package version code: 9.5.0.600013
+11-04 10:29:00.655  2467  2467 D SelfUpdate: isErrorMatchScense: availVerCnt:0 errSceneCnt:0
+11-04 10:29:00.655  2467  2467 D SelfUpdate: getGframePathWithVerCheck return getGframePath
+11-04 10:29:00.655  2467  2467 D SelfUpdate: getGframePath return :null
+11-04 10:29:00.658  2467  2467 D dumpcrash: no needTamperCrashFix 
+11-04 10:29:00.659  2467  2467 E DumpCrash: dumpcrash loadLibrary
+11-04 10:29:00.659  2467  2467 D AutoLibraryLoader: loadLibrary libname:/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libopenssl.so
+11-04 10:29:00.660  2467  2467 D AutoLibraryLoader: loadLibrary libname:/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libdumpcrash.so
+11-04 10:29:00.660  2467  2467 E DumpCrash: dumpcrash loadLibrary hasLoadLibrary = true
+11-04 10:29:00.660  2467  2467 E DumpCrash: getLocalCrashDir filePath = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files/amapauto9/Log/dumpcrash/
+11-04 10:29:00.660  2467  2467 E DumpCrash: dumpcrash.install workMode:2
+11-04 10:29:00.661  2467  2467 E DumpCrash: extractNativeLibs:true
+11-04 10:29:00.661  2467  2467 E DumpCrash: execlType:0
+11-04 10:29:00.661  2467  2467 E DumpCrash: dumpcrash.install useAes256:false libPath:/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/
+11-04 10:29:00.661  2467  2467 E CrashLog: [dumpcrash.cpp].jni_install(157): jni_install sdkVersion:29, execlType:0, workMode:2, useAes256:0
+11-04 10:29:00.661  2467  2467 E CrashLog: CrashSaver_install
+11-04 10:29:00.661  2467  2467 D CrashLog: [dly.cpp].initApplicationInitalTime(692): initApplicationInitalTime
+11-04 10:29:00.672  2467  2467 E DumpCrash: getLocalCrashDir filePath = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files/amapauto9/Log/dumpcrash/
+11-04 10:29:00.672  2467  2467 E DumpCrash: getLocalCrashDir filePath = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files/amapauto9/Log/dumpcrash/
+11-04 10:29:00.673  2467  2467 D SelfUpdate: getLibPath return :null
+11-04 10:29:00.673  2467  2467 D AutoLibraryLoader: loadLibrary libname:/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libbase_utils.so
+11-04 10:29:00.675  2467  2467 D AutoLibraryLoader: loadLibrary libname:/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libGPlatformInterface.so
+11-04 10:29:00.675  2467  2467 D AutoLibraryLoader: loadLibrary libname:/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libiksemel.so
+11-04 10:29:00.676  2467  2467 D AutoLibraryLoader: loadLibrary libname:/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libOSL_MNN.so
+11-04 10:29:00.676  2467  2467 D AutoLibraryLoader: loadLibrary libname:/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libGUltraLog.so
+11-04 10:29:00.676  2467  2467 D AutoLibraryLoader: loadLibrary libname:/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libAmapFreeType.so
+11-04 10:29:00.677  2467  2467 D AutoLibraryLoader: loadLibrary libname:/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libGComm3rd.so
+11-04 10:29:00.677  2467  2467 D AutoLibraryLoader: loadLibrary libname:/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libturbo.so
+11-04 10:29:00.678  2467  2467 D turbo   : JNI_OnLoad
+11-04 10:29:00.678  2467  2467 E turbo   : TurboPerformance  Onload
+11-04 10:29:00.678  2467  2512 D AutoLibraryLoader: getCeremonialPathString result = /data/user/0/com.autonavi.amapautp.yh/app_version/9.5.0.600013,/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/,/system/lib64
+11-04 10:29:00.679  2467  2513 I LibraryLoaderHelper: load so begin
+11-04 10:29:00.679  2467  2513 I turbo   : load GAdaptorInterface begin state=0
+11-04 10:29:00.679  2467  2513 I turbo   : path=/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libGAdaptorInterface.so, name=
+11-04 10:29:00.683  2467  2513 I turbo   : load /data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/ libGAdaptorInterface.so ret=1
+11-04 10:29:00.683  2467  2513 I turbo   : load GAdaptorInterface end state=1
+11-04 10:29:00.683  2467  2513 I turbo   : load AutoDice begin state=0
+11-04 10:29:00.683  2467  2513 I turbo   : path=/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libAutoDice.so, name=
+11-04 10:29:00.686  2467  2512 V BLOCK   : turbo::InitAlcLog pcAlcControl=0x722ece9d08 pcAlcDev=0x722ece9d10 pcAlcLog=0x722ece9d00 !!!!
+11-04 10:29:00.686  2467  2512 D ultra-inner: UltraImpl::setThreadFactory factory=0x722ed93580
+11-04 10:29:00.686  2467  2512 D ultra-inner: UltraImpl::init amapVersion=AutoCpp_20261104102900 saveDir=/storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files//amapauto9/Log/ externalSaveDir= uploadMaxFileSize=5242880 uploadMaxFiles=80 groupIdMask=0 levelMask=0 businessDesc=(null)
+11-04 10:29:00.686  2467  2512 D ultra-inner: UltraImpl::init thread
+11-04 10:29:00.686  2467  2512 D ultra-inner: UltraImpl::setRecordCache maxFileSize=5242880 maxFiles=80
+11-04 10:29:00.686  2467  2512 D ultra-inner: UltraImpl::switchOnCompress isCompress=1
+11-04 10:29:00.686  2467  2512 D ultra-inner: UltraImpl::setCloudConfig configJson={"storge":"P0"}
+11-04 10:29:00.686  2467  2512 I turbo   : turbo_router nativeRegisterPerformanceBridge begin
+11-04 10:29:00.686  2467  2512 I turbo   : AutoRuntime setPerformanceBridgeCallBack
+11-04 10:29:00.686  2467  2512 I turbo   : turbo_router nativeRegisterPerformanceBridge end
+11-04 10:29:00.703  2467  2513 I turbo   : load /data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/ libAutoDice.so ret=1
+11-04 10:29:00.703  2467  2513 I turbo   : load AutoDice end state=1
+11-04 10:29:00.703  2467  2513 I turbo   : load Eaglet begin state=0
+11-04 10:29:00.703  2467  2513 I turbo   : path=/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libEaglet.so, name=
+11-04 10:29:00.703  2467  2513 D turbo   : clazz=0x15,methodLoad=0x709330b8,path=/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libEaglet.so
+11-04 10:29:00.704  2467  2513 I turbo   : load /data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/ libEaglet.so ret=1
+11-04 10:29:00.704  2467  2513 I turbo   : load Eaglet end state=1
+11-04 10:29:00.704  2467  2513 I turbo   : load GNet begin state=0
+11-04 10:29:00.704  2467  2513 I turbo   : path=/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libGNet.so, name=
+11-04 10:29:00.705  2467  2513 I turbo   : load /data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/ libGNet.so ret=1
+11-04 10:29:00.705  2467  2513 I turbo   : load GNet end state=1
+11-04 10:29:00.705  2467  2513 I turbo   : load GSQuirrel begin state=0
+11-04 10:29:00.705  2467  2513 I turbo   : path=/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libGSQuirrel.so, name=
+11-04 10:29:00.705  2467  2513 I turbo   : load /data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/ libGSQuirrel.so ret=1
+11-04 10:29:00.705  2467  2513 I turbo   : load GSQuirrel end state=1
+11-04 10:29:00.705  2467  2513 I turbo   : load neonui_shared begin state=0
+11-04 10:29:00.705  2467  2513 I turbo   : path=/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libneonui_shared.so, name=
+11-04 10:29:00.705  2467  2513 W linker  : Warning: "/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libneonui_shared.so" unused DT entry: DT_RPATH (type 0xf arg 0x14e86) (ignoring)
+11-04 10:29:00.708  2467  2513 I turbo   : load /data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/ libneonui_shared.so ret=1
+11-04 10:29:00.708  2467  2513 I turbo   : load neonui_shared end state=1
+11-04 10:29:00.708  2467  2513 I turbo   : load GAdaptor begin state=0
+11-04 10:29:00.708  2467  2513 I turbo   : path=/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libGAdaptor.so, name=
+11-04 10:29:00.708  2467  2513 D turbo   : clazz=0x15,methodLoad=0x709330b8,path=/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libGAdaptor.so
+11-04 10:29:00.711  2467  2513 W avi.amapautp.y: JNI RegisterNativeMethods: attempt to register 0 native methods for com.autonavi.amapauto.jni.RequestDisplayMoveBack
+11-04 10:29:00.711  2467  2513 W avi.amapautp.y: JNI RegisterNativeMethods: attempt to register 0 native methods for com.autonavi.amapauto.jni.RequestDisplayMoveFront
+11-04 10:29:00.711  2467  2513 W avi.amapautp.y: JNI RegisterNativeMethods: attempt to register 0 native methods for com.autonavi.amapauto.jni.DataExchangeInterfaceInteract
+11-04 10:29:00.711  2467  2513 W avi.amapautp.y: JNI RegisterNativeMethods: attempt to register 0 native methods for com.autonavi.amapauto.jni.AccessDiagnosisInteract
+11-04 10:29:00.711  2467  2513 W avi.amapautp.y: JNI RegisterNativeMethods: attempt to register 0 native methods for com.autonavi.amapauto.CameraLightInfo.CameraLightInteract
+11-04 10:29:00.712  2467  2513 D GAdaptorJNI: mutual_trace read sp enable 0
+11-04 10:29:00.712  2467  2513 D GAdaptorJNI: AndroidLayerTracer obtain sEnable 0
+11-04 10:29:00.712  2467  2513 I turbo   : load /data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/ libGAdaptor.so ret=1
+11-04 10:29:00.712  2467  2513 I turbo   : load GAdaptor end state=1
+11-04 10:29:00.713  2467  2513 I turbo   : load UpdateMng begin state=0
+11-04 10:29:00.713  2467  2513 I turbo   : path=/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libUpdateMng.so, name=
+11-04 10:29:00.713  2467  2513 D turbo   : clazz=0x15,methodLoad=0x709330b8,path=/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libUpdateMng.so
+11-04 10:29:00.713  2467  2467 D AutoLibraryLoader: loadLibrary libname:/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libapssdk.so
+11-04 10:29:00.713  2467  2513 I turbo   : load /data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/ libUpdateMng.so ret=1
+11-04 10:29:00.713  2467  2513 I turbo   : load UpdateMng end state=1
+11-04 10:29:00.713  2467  2513 I turbo   : load GFrame begin state=0
+11-04 10:29:00.713  2467  2513 I turbo   : path=/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libGFrame.so, name=
+11-04 10:29:00.717  2467  2513 I turbo   : load /data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/ libGFrame.so ret=1
+11-04 10:29:00.717  2467  2513 I turbo   : load GFrame end state=1
+11-04 10:29:00.717  2467  2513 I turbo   : load mqtt_jni begin state=0
+11-04 10:29:00.717  2467  2513 I turbo   : path=/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libmqtt_jni.so, name=
+11-04 10:29:00.717  2467  2513 D turbo   : clazz=0x15,methodLoad=0x709330b8,path=/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libmqtt_jni.so
+11-04 10:29:00.717  2467  2467 W linker  : Warning: "/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libc++_shared.so" unused DT entry: unknown processor-specific (type 0x70000001 arg 0x0) (ignoring)
+11-04 10:29:00.718  2467  2467 D AutoLoader: initEarlyLibrary load finish
+11-04 10:29:00.718  2467  2513 I turbo   : load /data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/ libmqtt_jni.so ret=1
+11-04 10:29:00.718  2467  2513 I turbo   : load mqtt_jni end state=1
+11-04 10:29:00.718  2467  2513 I turbo   : load wireless begin state=0
+11-04 10:29:00.718  2467  2513 I turbo   : path=/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libwireless.so, name=
+11-04 10:29:00.718  2467  2513 D turbo   : clazz=0x15,methodLoad=0x709330b8,path=/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libwireless.so
+11-04 10:29:00.719  2467  2513 D WIRELESS: JNI_OnLoad sVm=-997264960 env=0x722ee22d80
+11-04 10:29:00.719  2467  2513 D WIRELESS: MQTT-SDK:tools->init mqtt_callback_mutext success
+11-04 10:29:00.719  2467  2513 D WIRELESS: JNI_OnLoad 0x3856 0x72c30d5f38
+11-04 10:29:00.719  2467  2513 I turbo   : load /data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/ libwireless.so ret=1
+11-04 10:29:00.719  2467  2513 I turbo   : load wireless end state=1
+11-04 10:29:00.719  2467  2513 I turbo   : load Gbl begin state=0
+11-04 10:29:00.719  2467  2513 I turbo   : path=/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libGbl.so, name=
+11-04 10:29:00.719  2467  2508 E Activity: [PERF][36585f5][B][handleBinderApplication][]
+11-04 10:29:00.720  2467  2508 I turbo   : load EagletEx begin state=0
+11-04 10:29:00.720  2467  2508 I turbo   : path=/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libEagletEx.so, name=
+11-04 10:29:00.725  2467  2467 D MapApplication: start initDiu
+11-04 10:29:00.729  2467  2517 I avi.amapautp.y: Starting a blocking GC Alloc
+11-04 10:29:00.729  2467  2517 I avi.amapautp.y: Starting a blocking GC Alloc
+11-04 10:29:00.730  2467  2467 I avi.amapautp.y: Waiting for a blocking GC Alloc
+11-04 10:29:00.733  2467  2467 I avi.amapautp.y: Starting a blocking GC Alloc
+11-04 10:29:00.736  2467  2467 D map_bench: Application.onCreate end
+11-04 10:29:00.737  2467  2482 W System  : A resource failed to call end. 
+11-04 10:29:00.743  2467  2467 D SurfaceViewManagerCfg: (dp)app:width=1920.0, height=968.0, real:width=1920.0, height=1080.0
+11-04 10:29:00.743  2467  2467 D SurfaceViewManagerCfg: (dp)statusBar=24.0, navigationBar=112.0, Density=1.0
+11-04 10:29:00.743  2467  2517 W avi.amapautp.y: No such thread id for suspend: 37
+11-04 10:29:00.744  2467  2467 D SurfaceViewManagerCfg: setString ret=true
+11-04 10:29:00.744  2467  2467 D SurfaceViewManagerCfg: sVarCache init...
+11-04 10:29:00.744  2467  2467 D SurfaceViewManagerCfg: 
+11-04 10:29:00.748  2467  2467 D SurfaceViewManagerCfg: WarnChecked: 1
+11-04 10:29:00.748  2467  2467 D SurfaceViewManagerCfg: set sm_eagletVariables=
+11-04 10:29:00.748  2467  2467 D SurfaceViewManagerCfg: setString ret=true
+11-04 10:29:00.752  2467  2467 W System.err: java.lang.InstantiationException: java.lang.Class<k60> cannot be instantiated
+11-04 10:29:00.754  2467  2467 W System.err: 	at java.lang.Class.newInstance(Native Method)
+11-04 10:29:00.754  2467  2467 W System.err: 	at com.autonavi.eaglet.surfacemng.PluginManager.declarePlugin(SourceFile:2)
+11-04 10:29:00.754  2467  2467 W System.err: 	at com.autonavi.eaglet.surfacemng.PluginManager.<init>(SourceFile:19)
+11-04 10:29:00.754  2467  2467 W System.err: 	at jf0.<init>(SourceFile:70)
+11-04 10:29:00.754  2467  2467 W System.err: 	at jf0.i(SourceFile:6)
+11-04 10:29:00.754  2467  2467 W System.err: 	at jf0.l(SourceFile:17)
+11-04 10:29:00.754  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.p(SourceFile:5)
+11-04 10:29:00.755  2467  2519 D PathUtils: isAdapterAndroidR targetSdkVersion = 24
+11-04 10:29:00.755  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.j(SourceFile:231)
+11-04 10:29:00.755  2467  2519 D PathUtils: isAdapterAndroidR targetSdkVersion = 24
+11-04 10:29:00.755  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.h(SourceFile:46)
+11-04 10:29:00.755  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.initAfterSoCorrupt(SourceFile:5)
+11-04 10:29:00.755  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.onCreate(SourceFile:247)
+11-04 10:29:00.755  2467  2467 W System.err: 	at java.lang.reflect.Method.invoke(Native Method)
+11-04 10:29:00.755  2467  2467 W System.err: 	at com.autonavi.amapauto.app.MapApplicationProxy.onCreate(SourceFile:23)
+11-04 10:29:00.755  2467  2467 W System.err: 	at android.app.Instrumentation.callApplicationOnCreate(Instrumentation.java:1182)
+11-04 10:29:00.755  2467  2467 W System.err: 	at android.app.ActivityThread.handleBindApplication(ActivityThread.java:6460)
+11-04 10:29:00.755  2467  2467 W System.err: 	at android.app.ActivityThread.access$1300(ActivityThread.java:219)
+11-04 10:29:00.755  2467  2467 W System.err: 	at android.app.ActivityThread$H.handleMessage(ActivityThread.java:1859)
+11-04 10:29:00.755  2467  2467 W System.err: 	at android.os.Handler.dispatchMessage(Handler.java:107)
+11-04 10:29:00.755  2467  2467 W System.err: 	at android.os.Looper.loop(Looper.java:214)
+11-04 10:29:00.755  2467  2467 W System.err: 	at android.app.ActivityThread.main(ActivityThread.java:7356)
+11-04 10:29:00.755  2467  2467 W System.err: 	at java.lang.reflect.Method.invoke(Native Method)
+11-04 10:29:00.755  2467  2467 W System.err: 	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:492)
+11-04 10:29:00.755  2467  2467 W System.err: 	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:930)
+11-04 10:29:00.755  2467  2467 W System.err: java.lang.InstantiationException: java.lang.Class<n60> cannot be instantiated
+11-04 10:29:00.755  2467  2467 W System.err: 	at java.lang.Class.newInstance(Native Method)
+11-04 10:29:00.755  2467  2467 W System.err: 	at com.autonavi.eaglet.surfacemng.PluginManager.declarePlugin(SourceFile:2)
+11-04 10:29:00.755  2467  2467 W System.err: 	at com.autonavi.eaglet.surfacemng.PluginManager.<init>(SourceFile:26)
+11-04 10:29:00.755  2467  2467 W System.err: 	at jf0.<init>(SourceFile:70)
+11-04 10:29:00.755  2467  2467 W System.err: 	at jf0.i(SourceFile:6)
+11-04 10:29:00.755  2467  2467 W System.err: 	at jf0.l(SourceFile:17)
+11-04 10:29:00.755  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.p(SourceFile:5)
+11-04 10:29:00.755  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.j(SourceFile:231)
+11-04 10:29:00.755  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.h(SourceFile:46)
+11-04 10:29:00.755  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.initAfterSoCorrupt(SourceFile:5)
+11-04 10:29:00.755  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.onCreate(SourceFile:247)
+11-04 10:29:00.755  2467  2467 W System.err: 	at java.lang.reflect.Method.invoke(Native Method)
+11-04 10:29:00.755  2467  2467 W System.err: 	at com.autonavi.amapauto.app.MapApplicationProxy.onCreate(SourceFile:23)
+11-04 10:29:00.755  2467  2467 W System.err: 	at android.app.Instrumentation.callApplicationOnCreate(Instrumentation.java:1182)
+11-04 10:29:00.755  2467  2467 W System.err: 	at android.app.ActivityThread.handleBindApplication(ActivityThread.java:6460)
+11-04 10:29:00.756  2467  2467 W System.err: 	at android.app.ActivityThread.access$1300(ActivityThread.java:219)
+11-04 10:29:00.756  2467  2467 W System.err: 	at android.app.ActivityThread$H.handleMessage(ActivityThread.java:1859)
+11-04 10:29:00.756  2467  2467 W System.err: 	at android.os.Handler.dispatchMessage(Handler.java:107)
+11-04 10:29:00.756  2467  2467 W System.err: 	at android.os.Looper.loop(Looper.java:214)
+11-04 10:29:00.756  2467  2467 W System.err: 	at android.app.ActivityThread.main(ActivityThread.java:7356)
+11-04 10:29:00.756  2467  2467 W System.err: 	at java.lang.reflect.Method.invoke(Native Method)
+11-04 10:29:00.756  2467  2467 W System.err: 	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:492)
+11-04 10:29:00.756  2467  2467 W System.err: 	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:930)
+11-04 10:29:00.756  2467  2467 W System.err: java.lang.InstantiationException: java.lang.Class<m60> cannot be instantiated
+11-04 10:29:00.756  2467  2467 W System.err: 	at java.lang.Class.newInstance(Native Method)
+11-04 10:29:00.756  2467  2467 W System.err: 	at com.autonavi.eaglet.surfacemng.PluginManager.declarePlugin(SourceFile:2)
+11-04 10:29:00.756  2467  2467 W System.err: 	at com.autonavi.eaglet.surfacemng.PluginManager.<init>(SourceFile:31)
+11-04 10:29:00.756  2467  2467 W System.err: 	at jf0.<init>(SourceFile:70)
+11-04 10:29:00.756  2467  2467 W System.err: 	at jf0.i(SourceFile:6)
+11-04 10:29:00.756  2467  2467 W System.err: 	at jf0.l(SourceFile:17)
+11-04 10:29:00.756  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.p(SourceFile:5)
+11-04 10:29:00.756  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.j(SourceFile:231)
+11-04 10:29:00.756  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.h(SourceFile:46)
+11-04 10:29:00.756  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.initAfterSoCorrupt(SourceFile:5)
+11-04 10:29:00.756  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.onCreate(SourceFile:247)
+11-04 10:29:00.756  2467  2467 W System.err: 	at java.lang.reflect.Method.invoke(Native Method)
+11-04 10:29:00.756  2467  2467 W System.err: 	at com.autonavi.amapauto.app.MapApplicationProxy.onCreate(SourceFile:23)
+11-04 10:29:00.756  2467  2467 W System.err: 	at android.app.Instrumentation.callApplicationOnCreate(Instrumentation.java:1182)
+11-04 10:29:00.756  2467  2467 W System.err: 	at android.app.ActivityThread.handleBindApplication(ActivityThread.java:6460)
+11-04 10:29:00.756  2467  2467 W System.err: 	at android.app.ActivityThread.access$1300(ActivityThread.java:219)
+11-04 10:29:00.756  2467  2467 W System.err: 	at android.app.ActivityThread$H.handleMessage(ActivityThread.java:1859)
+11-04 10:29:00.756  2467  2467 W System.err: 	at android.os.Handler.dispatchMessage(Handler.java:107)
+11-04 10:29:00.756  2467  2467 W System.err: 	at android.os.Looper.loop(Looper.java:214)
+11-04 10:29:00.756  2467  2467 W System.err: 	at android.app.ActivityThread.main(ActivityThread.java:7356)
+11-04 10:29:00.756  2467  2467 W System.err: 	at java.lang.reflect.Method.invoke(Native Method)
+11-04 10:29:00.756  2467  2467 W System.err: 	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:492)
+11-04 10:29:00.756  2467  2467 W System.err: 	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:930)
+11-04 10:29:00.756  2467  2467 W System.err: java.lang.InstantiationException: java.lang.Class<e60> cannot be instantiated
+11-04 10:29:00.756  2467  2467 W System.err: 	at java.lang.Class.newInstance(Native Method)
+11-04 10:29:00.756  2467  2467 W System.err: 	at com.autonavi.eaglet.surfacemng.PluginManager.declarePlugin(SourceFile:2)
+11-04 10:29:00.756  2467  2467 W System.err: 	at com.autonavi.eaglet.surfacemng.PluginManager.<init>(SourceFile:36)
+11-04 10:29:00.756  2467  2467 W System.err: 	at jf0.<init>(SourceFile:70)
+11-04 10:29:00.756  2467  2467 W System.err: 	at jf0.i(SourceFile:6)
+11-04 10:29:00.756  2467  2467 W System.err: 	at jf0.l(SourceFile:17)
+11-04 10:29:00.756  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.p(SourceFile:5)
+11-04 10:29:00.756  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.j(SourceFile:231)
+11-04 10:29:00.756  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.h(SourceFile:46)
+11-04 10:29:00.756  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.initAfterSoCorrupt(SourceFile:5)
+11-04 10:29:00.756  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.onCreate(SourceFile:247)
+11-04 10:29:00.756  2467  2467 W System.err: 	at java.lang.reflect.Method.invoke(Native Method)
+11-04 10:29:00.756  2467  2467 W System.err: 	at com.autonavi.amapauto.app.MapApplicationProxy.onCreate(SourceFile:23)
+11-04 10:29:00.756  2467  2467 W System.err: 	at android.app.Instrumentation.callApplicationOnCreate(Instrumentation.java:1182)
+11-04 10:29:00.756  2467  2467 W System.err: 	at android.app.ActivityThread.handleBindApplication(ActivityThread.java:6460)
+11-04 10:29:00.756  2467  2467 W System.err: 	at android.app.ActivityThread.access$1300(ActivityThread.java:219)
+11-04 10:29:00.756  2467  2467 W System.err: 	at android.app.ActivityThread$H.handleMessage(ActivityThread.java:1859)
+11-04 10:29:00.757  2467  2467 W System.err: 	at android.os.Handler.dispatchMessage(Handler.java:107)
+11-04 10:29:00.757  2467  2467 W System.err: 	at android.os.Looper.loop(Looper.java:214)
+11-04 10:29:00.757  2467  2467 W System.err: 	at android.app.ActivityThread.main(ActivityThread.java:7356)
+11-04 10:29:00.757  2467  2467 W System.err: 	at java.lang.reflect.Method.invoke(Native Method)
+11-04 10:29:00.757  2467  2467 W System.err: 	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:492)
+11-04 10:29:00.757  2467  2467 W System.err: 	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:930)
+11-04 10:29:00.757  2467  2467 W System.err: java.lang.InstantiationException: java.lang.Class<h60> cannot be instantiated
+11-04 10:29:00.758  2467  2467 W System.err: 	at java.lang.Class.newInstance(Native Method)
+11-04 10:29:00.758  2467  2467 W System.err: 	at com.autonavi.eaglet.surfacemng.PluginManager.declarePlugin(SourceFile:2)
+11-04 10:29:00.758  2467  2467 W System.err: 	at com.autonavi.eaglet.surfacemng.PluginManager.<init>(SourceFile:41)
+11-04 10:29:00.759  2467  2467 W System.err: 	at jf0.<init>(SourceFile:70)
+11-04 10:29:00.759  2467  2467 W System.err: 	at jf0.i(SourceFile:6)
+11-04 10:29:00.759  2467  2467 W System.err: 	at jf0.l(SourceFile:17)
+11-04 10:29:00.759  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.p(SourceFile:5)
+11-04 10:29:00.759  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.j(SourceFile:231)
+11-04 10:29:00.759  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.h(SourceFile:46)
+11-04 10:29:00.759  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.initAfterSoCorrupt(SourceFile:5)
+11-04 10:29:00.759  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.onCreate(SourceFile:247)
+11-04 10:29:00.759  2467  2467 W System.err: 	at java.lang.reflect.Method.invoke(Native Method)
+11-04 10:29:00.759  2467  2467 W System.err: 	at com.autonavi.amapauto.app.MapApplicationProxy.onCreate(SourceFile:23)
+11-04 10:29:00.759  2467  2467 W System.err: 	at android.app.Instrumentation.callApplicationOnCreate(Instrumentation.java:1182)
+11-04 10:29:00.760  2467  2467 W System.err: 	at android.app.ActivityThread.handleBindApplication(ActivityThread.java:6460)
+11-04 10:29:00.760  2467  2467 W System.err: 	at android.app.ActivityThread.access$1300(ActivityThread.java:219)
+11-04 10:29:00.760  2467  2467 W System.err: 	at android.app.ActivityThread$H.handleMessage(ActivityThread.java:1859)
+11-04 10:29:00.760  2467  2467 W System.err: 	at android.os.Handler.dispatchMessage(Handler.java:107)
+11-04 10:29:00.760  2467  2467 W System.err: 	at android.os.Looper.loop(Looper.java:214)
+11-04 10:29:00.761  2467  2467 W System.err: 	at android.app.ActivityThread.main(ActivityThread.java:7356)
+11-04 10:29:00.761  2467  2467 W System.err: 	at java.lang.reflect.Method.invoke(Native Method)
+11-04 10:29:00.761  2467  2467 W System.err: 	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:492)
+11-04 10:29:00.761  2467  2467 W System.err: 	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:930)
+11-04 10:29:00.763  2467  2467 W System.err: java.lang.InstantiationException: java.lang.Class<j60> cannot be instantiated
+11-04 10:29:00.763  2467  2467 W System.err: 	at java.lang.Class.newInstance(Native Method)
+11-04 10:29:00.763  2467  2467 W System.err: 	at com.autonavi.eaglet.surfacemng.PluginManager.declarePlugin(SourceFile:2)
+11-04 10:29:00.763  2467  2467 W System.err: 	at com.autonavi.eaglet.surfacemng.PluginManager.<init>(SourceFile:46)
+11-04 10:29:00.763  2467  2467 W System.err: 	at jf0.<init>(SourceFile:70)
+11-04 10:29:00.763  2467  2467 W System.err: 	at jf0.i(SourceFile:6)
+11-04 10:29:00.763  2467  2467 W System.err: 	at jf0.l(SourceFile:17)
+11-04 10:29:00.763  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.p(SourceFile:5)
+11-04 10:29:00.763  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.j(SourceFile:231)
+11-04 10:29:00.763  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.h(SourceFile:46)
+11-04 10:29:00.763  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.initAfterSoCorrupt(SourceFile:5)
+11-04 10:29:00.763  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.onCreate(SourceFile:247)
+11-04 10:29:00.763  2467  2467 W System.err: 	at java.lang.reflect.Method.invoke(Native Method)
+11-04 10:29:00.763  2467  2467 W System.err: 	at com.autonavi.amapauto.app.MapApplicationProxy.onCreate(SourceFile:23)
+11-04 10:29:00.763  2467  2467 W System.err: 	at android.app.Instrumentation.callApplicationOnCreate(Instrumentation.java:1182)
+11-04 10:29:00.763  2467  2467 W System.err: 	at android.app.ActivityThread.handleBindApplication(ActivityThread.java:6460)
+11-04 10:29:00.763  2467  2467 W System.err: 	at android.app.ActivityThread.access$1300(ActivityThread.java:219)
+11-04 10:29:00.763  2467  2467 W System.err: 	at android.app.ActivityThread$H.handleMessage(ActivityThread.java:1859)
+11-04 10:29:00.763  2467  2467 W System.err: 	at android.os.Handler.dispatchMessage(Handler.java:107)
+11-04 10:29:00.763  2467  2467 W System.err: 	at android.os.Looper.loop(Looper.java:214)
+11-04 10:29:00.763  2467  2467 W System.err: 	at android.app.ActivityThread.main(ActivityThread.java:7356)
+11-04 10:29:00.763  2467  2467 W System.err: 	at java.lang.reflect.Method.invoke(Native Method)
+11-04 10:29:00.763  2467  2467 W System.err: 	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:492)
+11-04 10:29:00.763  2467  2467 W System.err: 	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:930)
+11-04 10:29:00.763  2467  2467 W System.err: java.lang.InstantiationException: java.lang.Class<l60> cannot be instantiated
+11-04 10:29:00.764  2467  2467 W System.err: 	at java.lang.Class.newInstance(Native Method)
+11-04 10:29:00.764  2467  2467 W System.err: 	at com.autonavi.eaglet.surfacemng.PluginManager.declarePlugin(SourceFile:2)
+11-04 10:29:00.764  2467  2467 W System.err: 	at com.autonavi.eaglet.surfacemng.PluginManager.<init>(SourceFile:51)
+11-04 10:29:00.764  2467  2467 W System.err: 	at jf0.<init>(SourceFile:70)
+11-04 10:29:00.764  2467  2467 W System.err: 	at jf0.i(SourceFile:6)
+11-04 10:29:00.764  2467  2467 W System.err: 	at jf0.l(SourceFile:17)
+11-04 10:29:00.764  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.p(SourceFile:5)
+11-04 10:29:00.764  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.j(SourceFile:231)
+11-04 10:29:00.764  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.h(SourceFile:46)
+11-04 10:29:00.764  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.initAfterSoCorrupt(SourceFile:5)
+11-04 10:29:00.764  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.onCreate(SourceFile:247)
+11-04 10:29:00.764  2467  2467 W System.err: 	at java.lang.reflect.Method.invoke(Native Method)
+11-04 10:29:00.764  2467  2467 W System.err: 	at com.autonavi.amapauto.app.MapApplicationProxy.onCreate(SourceFile:23)
+11-04 10:29:00.764  2467  2467 W System.err: 	at android.app.Instrumentation.callApplicationOnCreate(Instrumentation.java:1182)
+11-04 10:29:00.764  2467  2467 W System.err: 	at android.app.ActivityThread.handleBindApplication(ActivityThread.java:6460)
+11-04 10:29:00.764  2467  2467 W System.err: 	at android.app.ActivityThread.access$1300(ActivityThread.java:219)
+11-04 10:29:00.764  2467  2467 W System.err: 	at android.app.ActivityThread$H.handleMessage(ActivityThread.java:1859)
+11-04 10:29:00.764  2467  2467 W System.err: 	at android.os.Handler.dispatchMessage(Handler.java:107)
+11-04 10:29:00.764  2467  2467 W System.err: 	at android.os.Looper.loop(Looper.java:214)
+11-04 10:29:00.764  2467  2467 W System.err: 	at android.app.ActivityThread.main(ActivityThread.java:7356)
+11-04 10:29:00.764  2467  2467 W System.err: 	at java.lang.reflect.Method.invoke(Native Method)
+11-04 10:29:00.764  2467  2467 W System.err: 	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:492)
+11-04 10:29:00.764  2467  2467 W System.err: 	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:930)
+11-04 10:29:00.764  2467  2467 W System.err: java.lang.InstantiationException: java.lang.Class<g60> cannot be instantiated
+11-04 10:29:00.765  2467  2467 W System.err: 	at java.lang.Class.newInstance(Native Method)
+11-04 10:29:00.765  2467  2467 W System.err: 	at com.autonavi.eaglet.surfacemng.PluginManager.declarePlugin(SourceFile:2)
+11-04 10:29:00.765  2467  2467 W System.err: 	at com.autonavi.eaglet.surfacemng.PluginManager.<init>(SourceFile:56)
+11-04 10:29:00.765  2467  2467 W System.err: 	at jf0.<init>(SourceFile:70)
+11-04 10:29:00.765  2467  2467 W System.err: 	at jf0.i(SourceFile:6)
+11-04 10:29:00.765  2467  2467 W System.err: 	at jf0.l(SourceFile:17)
+11-04 10:29:00.765  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.p(SourceFile:5)
+11-04 10:29:00.765  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.j(SourceFile:231)
+11-04 10:29:00.765  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.h(SourceFile:46)
+11-04 10:29:00.765  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.initAfterSoCorrupt(SourceFile:5)
+11-04 10:29:00.765  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.onCreate(SourceFile:247)
+11-04 10:29:00.765  2467  2467 W System.err: 	at java.lang.reflect.Method.invoke(Native Method)
+11-04 10:29:00.765  2467  2467 W System.err: 	at com.autonavi.amapauto.app.MapApplicationProxy.onCreate(SourceFile:23)
+11-04 10:29:00.765  2467  2467 W System.err: 	at android.app.Instrumentation.callApplicationOnCreate(Instrumentation.java:1182)
+11-04 10:29:00.765  2467  2467 W System.err: 	at android.app.ActivityThread.handleBindApplication(ActivityThread.java:6460)
+11-04 10:29:00.765  2467  2467 W System.err: 	at android.app.ActivityThread.access$1300(ActivityThread.java:219)
+11-04 10:29:00.765  2467  2467 W System.err: 	at android.app.ActivityThread$H.handleMessage(ActivityThread.java:1859)
+11-04 10:29:00.765  2467  2467 W System.err: 	at android.os.Handler.dispatchMessage(Handler.java:107)
+11-04 10:29:00.765  2467  2467 W System.err: 	at android.os.Looper.loop(Looper.java:214)
+11-04 10:29:00.765  2467  2467 W System.err: 	at android.app.ActivityThread.main(ActivityThread.java:7356)
+11-04 10:29:00.765  2467  2467 W System.err: 	at java.lang.reflect.Method.invoke(Native Method)
+11-04 10:29:00.765  2467  2467 W System.err: 	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:492)
+11-04 10:29:00.765  2467  2467 W System.err: 	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:930)
+11-04 10:29:00.765  2467  2467 W System.err: java.lang.InstantiationException: java.lang.Class<i60> cannot be instantiated
+11-04 10:29:00.765  2467  2467 W System.err: 	at java.lang.Class.newInstance(Native Method)
+11-04 10:29:00.765  2467  2467 W System.err: 	at com.autonavi.eaglet.surfacemng.PluginManager.declarePlugin(SourceFile:2)
+11-04 10:29:00.765  2467  2467 W System.err: 	at com.autonavi.eaglet.surfacemng.PluginManager.<init>(SourceFile:61)
+11-04 10:29:00.765  2467  2467 W System.err: 	at jf0.<init>(SourceFile:70)
+11-04 10:29:00.765  2467  2467 W System.err: 	at jf0.i(SourceFile:6)
+11-04 10:29:00.765  2467  2467 W System.err: 	at jf0.l(SourceFile:17)
+11-04 10:29:00.765  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.p(SourceFile:5)
+11-04 10:29:00.765  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.j(SourceFile:231)
+11-04 10:29:00.765  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.h(SourceFile:46)
+11-04 10:29:00.765  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.initAfterSoCorrupt(SourceFile:5)
+11-04 10:29:00.765  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.onCreate(SourceFile:247)
+11-04 10:29:00.765  2467  2467 W System.err: 	at java.lang.reflect.Method.invoke(Native Method)
+11-04 10:29:00.766  2467  2467 W System.err: 	at com.autonavi.amapauto.app.MapApplicationProxy.onCreate(SourceFile:23)
+11-04 10:29:00.766  2467  2467 W System.err: 	at android.app.Instrumentation.callApplicationOnCreate(Instrumentation.java:1182)
+11-04 10:29:00.766  2467  2467 W System.err: 	at android.app.ActivityThread.handleBindApplication(ActivityThread.java:6460)
+11-04 10:29:00.766  2467  2467 W System.err: 	at android.app.ActivityThread.access$1300(ActivityThread.java:219)
+11-04 10:29:00.766  2467  2467 W System.err: 	at android.app.ActivityThread$H.handleMessage(ActivityThread.java:1859)
+11-04 10:29:00.766  2467  2467 W System.err: 	at android.os.Handler.dispatchMessage(Handler.java:107)
+11-04 10:29:00.766  2467  2467 W System.err: 	at android.os.Looper.loop(Looper.java:214)
+11-04 10:29:00.766  2467  2467 W System.err: 	at android.app.ActivityThread.main(ActivityThread.java:7356)
+11-04 10:29:00.766  2467  2467 W System.err: 	at java.lang.reflect.Method.invoke(Native Method)
+11-04 10:29:00.766  2467  2467 W System.err: 	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:492)
+11-04 10:29:00.766  2467  2467 W System.err: 	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:930)
+11-04 10:29:00.766  2467  2467 W System.err: java.lang.InstantiationException: java.lang.Class<f60> cannot be instantiated
+11-04 10:29:00.767  2467  2467 W System.err: 	at java.lang.Class.newInstance(Native Method)
+11-04 10:29:00.767  2467  2467 W System.err: 	at com.autonavi.eaglet.surfacemng.PluginManager.declarePlugin(SourceFile:2)
+11-04 10:29:00.767  2467  2467 W System.err: 	at com.autonavi.eaglet.surfacemng.PluginManager.<init>(SourceFile:70)
+11-04 10:29:00.767  2467  2467 W System.err: 	at jf0.<init>(SourceFile:70)
+11-04 10:29:00.767  2467  2467 W System.err: 	at jf0.i(SourceFile:6)
+11-04 10:29:00.767  2467  2467 W System.err: 	at jf0.l(SourceFile:17)
+11-04 10:29:00.767  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.p(SourceFile:5)
+11-04 10:29:00.767  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.j(SourceFile:231)
+11-04 10:29:00.767  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.h(SourceFile:46)
+11-04 10:29:00.767  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.initAfterSoCorrupt(SourceFile:5)
+11-04 10:29:00.767  2467  2467 W System.err: 	at com.autonavi.amapauto.MapApplication.onCreate(SourceFile:247)
+11-04 10:29:00.767  2467  2467 W System.err: 	at java.lang.reflect.Method.invoke(Native Method)
+11-04 10:29:00.767  2467  2467 W System.err: 	at com.autonavi.amapauto.app.MapApplicationProxy.onCreate(SourceFile:23)
+11-04 10:29:00.767  2467  2467 W System.err: 	at android.app.Instrumentation.callApplicationOnCreate(Instrumentation.java:1182)
+11-04 10:29:00.768  2467  2467 W System.err: 	at android.app.ActivityThread.handleBindApplication(ActivityThread.java:6460)
+11-04 10:29:00.768  2467  2467 W System.err: 	at android.app.ActivityThread.access$1300(ActivityThread.java:219)
+11-04 10:29:00.768  2467  2467 W System.err: 	at android.app.ActivityThread$H.handleMessage(ActivityThread.java:1859)
+11-04 10:29:00.768  2467  2467 W System.err: 	at android.os.Handler.dispatchMessage(Handler.java:107)
+11-04 10:29:00.768  2467  2467 W System.err: 	at android.os.Looper.loop(Looper.java:214)
+11-04 10:29:00.769  2467  2467 W System.err: 	at android.app.ActivityThread.main(ActivityThread.java:7356)
+11-04 10:29:00.769  2467  2467 W System.err: 	at java.lang.reflect.Method.invoke(Native Method)
+11-04 10:29:00.769  2467  2467 W System.err: 	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:492)
+11-04 10:29:00.769  2467  2467 W System.err: 	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:930)
+11-04 10:29:00.775  2467  2467 I auditd  : type=1400 audit(0.0:133): avc: denied { search } for comm="NetworkParam" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:00.775  2467  2467 W NetworkParam: type=1400 audit(0.0:133): avc: denied { search } for name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:00.785  2467  2467 I Loader  : UsbFillActivity new loader: dalvik.system.PathClassLoader[DexPathList[[zip file "/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/base.apk"],nativeLibraryDirectories=[/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64, /data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/base.apk!/lib/arm64-v8a, /system/lib64, /system/product/lib64]]]
+11-04 10:29:00.790  2467  2527 D libEGL  : Emulator has host GPU support, qemu.gles is set to 1.
+11-04 10:29:00.791  2467  2527 W libc    : Unable to set property "qemu.gles" to "1": connection failed; errno=13 (Permission denied)
+11-04 10:29:00.775  2467  2467 I auditd  : type=1400 audit(0.0:134): avc: denied { search } for comm="NetworkParam" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:00.787  2467  2467 I auditd  : type=1400 audit(0.0:135): avc: denied { write } for comm="RenderThread" name="property_service" dev="tmpfs" ino=7380 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:property_socket:s0 tclass=sock_file permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:00.787  2467  2467 W RenderThread: type=1400 audit(0.0:135): avc: denied { write } for name="property_service" dev="tmpfs" ino=7380 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:property_socket:s0 tclass=sock_file permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:00.793  2467  2467 I AutoActivityLifecycle: com.autonavi.auto.remote.fill.UsbFillActivity@8cbbe19-->created
+11-04 10:29:00.794  2467  2467 D floatapp.LifecycleCallbacks: onActivityCreated activityName = UsbFillActivity
+11-04 10:29:00.794  2467  2467 I AutoActivityLifecycle: com.autonavi.auto.remote.fill.UsbFillActivity@8cbbe19-->created
+11-04 10:29:00.796  2467  2467 I UsbFillActivity: startMapActivity, isShowPermissionDialog:false
+11-04 10:29:00.796  2467  2467 E Activity: startMapActivity
+11-04 10:29:00.800  2467  2467 I am_on_create_called: [0,com.autonavi.auto.remote.fill.UsbFillActivity,performCreate]
+11-04 10:29:00.802  2467  2513 I turbo   : load /data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/ libGbl.so ret=1
+11-04 10:29:00.802  2467  2513 I turbo   : load Gbl end state=1
+11-04 10:29:00.802  2467  2513 I turbo   : load ifly_aime begin state=0
+11-04 10:29:00.802  2467  2513 I turbo   : path=/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libifly_aime.so, name=
+11-04 10:29:00.816  2467  2513 I turbo   : load /data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/ libifly_aime.so ret=1
+11-04 10:29:00.816  2467  2513 I turbo   : load ifly_aime end state=1
+11-04 10:29:00.816  2467  2513 I turbo   : load hsl begin state=0
+11-04 10:29:00.816  2467  2513 I turbo   : path=/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libhsl.so, name=
+11-04 10:29:00.836  2467  2513 I turbo   : load /data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/ libhsl.so ret=1
+11-04 10:29:00.836  2467  2513 I turbo   : load hsl end state=1
+11-04 10:29:00.837  2467  2513 I LoadSoBy: soName : GTestServer
+11-04 10:29:00.837  2467  2513 I LoadSoBy: dir : /data/user/0/com.autonavi.amapautp.yh/app_libs
+11-04 10:29:00.837  2467  2508 I turbo   : load /data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/ libEagletEx.so ret=1
+11-04 10:29:00.837  2467  2508 I turbo   : load EagletEx end state=1
+11-04 10:29:00.846  2467  2527 D libEGL  : loaded /vendor/lib64/egl/libEGL_emulation.so
+11-04 10:29:00.846  2467  2527 D libEGL  : loaded /vendor/lib64/egl/libGLESv1_CM_emulation.so
+11-04 10:29:00.847  2467  2527 D libEGL  : loaded /vendor/lib64/egl/libGLESv2_emulation.so
+11-04 10:29:00.848  2467  2513 I LibraryLoaderHelper: load so end
+11-04 10:29:00.849  2467  2508 D GAdaAndroid: getAssetManager unlocked:true
+11-04 10:29:00.854  2467  2467 I AutoBackgroundWorker: startAutoBackgroundService, isStartService:false,targetSdkVersion:24
+11-04 10:29:00.858  2467  2467 D 天气  : 开始逆地理编码获取城市信息
+11-04 10:29:00.858  2467  2467 D 天气  : 尝试直接获取城市信息
+11-04 10:29:00.860  2467  2529 D 天气  : GPS定位成功:39.237255,-123.15003166666665
+11-04 10:29:00.860  2467  2529 D 天气  : 请求URL(备用API): http://api.bigdatacloud.net/data/reverse-geocode-client?latitude=39.237255&longitude=-123.15003166666665&localityLanguage=zh-Hans&extensions=base
+11-04 10:29:00.862  2467  2467 D AutoProtocolManager: 服务已连接
+11-04 10:29:00.864  2467  2529 D NetworkSecurityConfig: Using Network Security Config from resource network_security_config debugBuild: false
+11-04 10:29:00.871  2467  2467 E Activity: [PERF][36585f5][B][onInitBackgrounndService][]
+11-04 10:29:00.871  2467  2467 E Activity: [PERF][36585f5][E][onInitBackgrounndService][](0)
+11-04 10:29:00.876  2467  2467 I AutoBackgroundWorker: startAutoBackgroundService, mIsWorkStarting
+11-04 10:29:00.877  2467  2467 W ActivityThread: handleWindowVisibility: no activity for token android.os.BinderProxy@edc5153
+11-04 10:29:00.879  2467  2467 I Loader  : com.autonavi.amapauto.AutoNativeActivity loader: dalvik.system.PathClassLoader[DexPathList[[zip file "/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/base.apk"],nativeLibraryDirectories=[/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64, /data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/base.apk!/lib/arm64-v8a, /system/lib64, /system/product/lib64]]]
+11-04 10:29:00.880  2467  2467 I Loader  : com.autonavi.amapauto.MainMapActivity loader: dalvik.system.PathClassLoader[DexPathList[[zip file "/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/base.apk"],nativeLibraryDirectories=[/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64, /data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/base.apk!/lib/arm64-v8a, /system/lib64, /system/product/lib64]]]
+11-04 10:29:00.885  2467  2467 E AutoNativeActivity: [PERF][53c4fbc][B][onCreate][taskId = 788]
+11-04 10:29:00.892  2467  2467 E Activity: [PERF][53c4fbc][B][onCreate][code:1 0]
+11-04 10:29:00.892  2467  2467 I AutoActivityLifecycle: com.autonavi.amapauto.MainMapActivity@53c4fbc-->created
+11-04 10:29:00.894  2467  2467 D floatapp.LifecycleCallbacks: onActivityCreated activityName = MainMapActivity
+11-04 10:29:00.894  2467  2467 I AutoActivityLifecycle: com.autonavi.amapauto.MainMapActivity@53c4fbc-->created
+11-04 10:29:00.896  2467  2508 W gatrace : #App; RegisterResPath vecPath[0] = /data/user/0/com.autonavi.amapautp.yh/app_version/9.5.0.600013,priority=2
+11-04 10:29:00.896  2467  2508 W gatrace : #App; RegisterResPath vecPath[1] = /data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/,priority=3
+11-04 10:29:00.896  2467  2508 W gatrace : #App; RegisterResPath vecPath[2] = /system/lib64,priority=4
+11-04 10:29:00.901  2467  2508 W gatrace : #App; use cmb file, retNormal = 0, retTheme=0
+11-04 10:29:00.903  2467  2538 W gatrace : #App;#CGResFileReader;LoadRes file libcmb_Common.so success, eCode = 0, path=/system/lib64
+11-04 10:29:00.904  2467  2508 I turbo   : load BootLoader begin state=0
+11-04 10:29:00.904  2467  2508 I turbo   : path=/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libBootLoader.so, name=
+11-04 10:29:00.910  2467  2508 I turbo   : load /data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/ libBootLoader.so ret=1
+11-04 10:29:00.910  2467  2508 I turbo   : load BootLoader end state=1
+11-04 10:29:00.910  2467  2508 E Activity: [PERF][36585f5][E][handleBinderApplication][](191)
+11-04 10:29:00.910  2467  2508 E Activity: [PERF][36585f5][B][handleStartBackgroundServiceFrame][]
+11-04 10:29:00.910  2467  2508 E Activity: [PERF][36585f5][E][handleStartBackgroundServiceFrame][handleStartUp](0)
+11-04 10:29:00.916  2467  2543 D GAdaptorJNI: GAda_GetDiskPermissionsReq _sdkVersion:[29]
+11-04 10:29:00.916  2467  2543 D GAdaptorJNI: GAda_GetDiskPermissionsReq dirPath: [/storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files/AutoPathTempDir1793759340916250/]
+11-04 10:29:00.916  2467  2543 D GAdaptorJNI: GAda_GetDiskPermissionsReq mkdirResult: [0]
+11-04 10:29:00.916  2467  2543 D GAdaptorJNI: GAda_GetDiskPermissionsReq rmdirResult:[0]
+11-04 10:29:00.916  2467  2543 D GAdaptorJNI: GAda_GetDiskPermissionsReq  path:/storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files, ret:3,result:2 
+11-04 10:29:00.917  2467  2467 E Activity: [PERF][36585f5][B][loadNativeCode][]
+11-04 10:29:00.917  2467  2467 E Activity: [PERF][36585f5][E][loadNativeCode][](0)
+11-04 10:29:00.918  2467  2467 E Activity: [PERF][53c4fbc][E][onCreate][taskId = 788](26)
+11-04 10:29:00.919  2467  2538 D GAdaptorJNI: GAda_GetDiskPermissionsReq _sdkVersion:[29]
+11-04 10:29:00.919  2467  2538 D GAdaptorJNI: GAda_GetDiskPermissionsReq dirPath: [/storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files/amapauto9//AutoPathTempDir1793759340919730/]
+11-04 10:29:00.919  2467  2538 D GAdaptorJNI: GAda_GetDiskPermissionsReq mkdirResult: [0]
+11-04 10:29:00.919  2467  2538 D GAdaptorJNI: GAda_GetDiskPermissionsReq rmdirResult:[0]
+11-04 10:29:00.919  2467  2538 D GAdaptorJNI: GAda_GetDiskPermissionsReq  path:/storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files/amapauto9/, ret:3,result:2 
+11-04 10:29:00.919  2467  2538 D GAdaptorJNI: GAda_GetDiskPermissionsReq _sdkVersion:[29]
+11-04 10:29:00.919  2467  2538 D GAdaptorJNI: GAda_GetDiskPermissionsReq dirPath: [/storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files/amapauto9/data/voice//AutoPathTempDir1793759340919900/]
+11-04 10:29:00.919  2467  2538 D GAdaptorJNI: GAda_GetDiskPermissionsReq mkdirResult: [0]
+11-04 10:29:00.919  2467  2538 D GAdaptorJNI: GAda_GetDiskPermissionsReq rmdirResult:[0]
+11-04 10:29:00.919  2467  2538 D GAdaptorJNI: GAda_GetDiskPermissionsReq  path:/storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files/amapauto9/data/voice/, ret:3,result:2 
+11-04 10:29:00.920  2467  2467 E Activity: init
+11-04 10:29:00.920  2467  2551 I PermissionUtils: checkPermissions, permission:android.permission.WRITE_EXTERNAL_STORAGE,op:android:write_external_storage
+11-04 10:29:00.921  2467  2551 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:00.925  2467  2467 I AutoBackgroundWorker: startAutoBackgroundService, mIsWorkStarting
+11-04 10:29:00.925  2467  2467 E AutoNativeActivity: [PERF][53c4fbc][E][onCreate][](40)
+11-04 10:29:00.925  2467  2467 I am_on_create_called: [0,com.autonavi.amapauto.MainMapActivity,performCreate]
+11-04 10:29:00.926  2467  2467 I AutoActivityLifecycle: com.autonavi.amapauto.MainMapActivity@53c4fbc-->started
+11-04 10:29:00.926  2467  2467 D floatapp.LifecycleCallbacks: onActivityStarted:  activityName = MainMapActivity
+11-04 10:29:00.926  2467  2467 I AutoActivityLifecycle: com.autonavi.amapauto.MainMapActivity@53c4fbc-->started
+11-04 10:29:00.926  2467  2467 E Activity: [PERF][53c4fbc][B][onStart][]
+11-04 10:29:00.926  2467  2467 E Activity: [PERF][53c4fbc][E][onStart][](0)
+11-04 10:29:00.926  2467  2467 I am_on_start_called: [0,com.autonavi.amapauto.MainMapActivity,handleStartActivity]
+11-04 10:29:00.926  2467  2508 E Activity: [PERF][36585f5][B][onStartNative][]
+11-04 10:29:00.927  2467  2467 D SelfUpdate: NotifyFirstForeground
+11-04 10:29:00.927  2467  2467 E Activity: [PERF][53c4fbc][B][onResume][]
+11-04 10:29:00.927  2467  2467 I AutoActivityLifecycle: com.autonavi.amapauto.MainMapActivity@53c4fbc-->resumed
+11-04 10:29:00.926  2467  2508 E Activity: [PERF][36585f5][E][onStartNative][](0)
+11-04 10:29:00.927  2467  2467 D floatapp.LifecycleCallbacks: onActivityResumed:  activityName = MainMapActivity
+11-04 10:29:00.927  2467  2467 D floatapp.LifecycleCallbacks:  activityName = MainMapActivity
+11-04 10:29:00.928  2467  2467 D houge   : 恢复位置()被调用
+11-04 10:29:00.931  2467  2467 D houge   : FloatingButtonHelper init done, ScreenCheck started
+11-04 10:29:00.931  2467  2467 I AutoActivityLifecycle: com.autonavi.amapauto.MainMapActivity@53c4fbc-->resumed
+11-04 10:29:00.932  2467  2467 E Activity: [PERF][53c4fbc][E][onResume][](5)
+11-04 10:29:00.932  2467  2508 E Activity: [PERF][36585f5][B][onResumeNative][]
+11-04 10:29:00.932  2467  2508 E Activity: [PERF][36585f5][E][onResumeNative][](0)
+11-04 10:29:00.937  2467  2538 D ultra-inner: UltraImpl::setService service=0x71a810a000
+11-04 10:29:00.938  2467  2538 D ultra-inner: UltraImpl::setRecordLogLevelMask level=0
+11-04 10:29:00.938  2467  2538 D ultra-inner: UltraImpl::setRecordGroupMask mask=0
+11-04 10:29:00.938  2467  2538 I gatrace : 490093, void bl::LogModuleImpl::SetGlobalSwith(bool):524, [0x71bff51a00][SetGlobalSwith][mGlobalOnOff=0]
+11-04 10:29:00.938  2467  2538 D ultra-inner: UltraImpl::setCustomGroupMask groupId=2147484098 enable=0
+11-04 10:29:00.938  2467  2538 D ultra-inner: UltraImpl::switchRecordCustomGroup groupId=2147484098 groupName=mapbinary enable=0
+11-04 10:29:00.938  2467  2538 D ultra-inner: UltraImpl::setCustomGroupMask groupId=2147484248 enable=1
+11-04 10:29:00.939  2467  2538 D ultra-inner: UltraImpl::setCustomGroupMask groupId=2147493649 enable=0
+11-04 10:29:00.942  2467  2467 W avi.amapautp.y: Class com.autonavi.amapauto.multiscreen.presentation.SecondaryGuideOverlay failed lock verification and will run slower.
+11-04 10:29:00.942  2467  2467 W avi.amapautp.y: Common causes for lock verification issues are non-optimized dex code
+11-04 10:29:00.942  2467  2467 W avi.amapautp.y: and incorrect proguard optimizations.
+11-04 10:29:00.942  2467  2467 I AMap95JavaOverlay: primary Activity opened; independent startup switches released
+11-04 10:29:00.945  2467  2467 I am_on_resume_called: [0,com.autonavi.amapauto.MainMapActivity,RESUME_ACTIVITY]
+11-04 10:29:00.943  2467  2467 I auditd  : type=1400 audit(0.0:136): avc: denied { search } for comm="gframe.qworker0" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:00.943  2467  2467 W gframe.qworker0: type=1400 audit(0.0:136): avc: denied { search } for name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:00.949  2467  2538 D WirelessSDK: WirelessSDK init start
+11-04 10:29:00.950  2467  2538 E ValarMorghulis: s
+11-04 10:29:00.943  2467  2467 I auditd  : type=1400 audit(0.0:137): avc: denied { search } for comm="gframe.qworker0" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:00.950  2467  2467 I am_on_top_resumed_gained_called: [0,com.autonavi.amapauto.MainMapActivity,topStateChangedWhenResumed]
+11-04 10:29:00.951  2467  2538 E avi.amapautp.y: Invalid ID 0x00000000.
+11-04 10:29:00.951  2467  2538 E avi.amapautp.y: Invalid ID 0x00000000.
+11-04 10:29:00.953  2467  2467 I AutoBackgroundWorker: startAutoBackgroundService, mIsWorkStarting
+11-04 10:29:00.953  2467  2467 D LoggerTracer: setIsALCInit:true
+11-04 10:29:00.962  2467  2558 D 天气  : GPS更新频率限制，跳过
+11-04 10:29:00.964  2467  2557 D 天气  : GPS更新频率限制，跳过
+11-04 10:29:00.964  2467  2538 D WIRELESS: WirelessSDKInit result:0
+11-04 10:29:00.964  2467  2561 D 天气  : GPS更新频率限制，跳过
+11-04 10:29:00.965  2467  2538 W System.err: java.lang.VerifyError: Verifier rejected class com.alibaba.wireless.security.framework.e: java.util.HashMap com.alibaba.wireless.security.framework.e.c() failed to verify: java.util.HashMap com.alibaba.wireless.security.framework.e.c(): [0x13] register v3 has type Undefined but expected Precise Reference: java.lang.String (declaration of 'com.alibaba.wireless.security.framework.e' appears in base.apk)
+11-04 10:29:00.965  2467  2538 W System.err: 	at com.alibaba.wireless.security.open.initialize.b.b(SourceFile:1)
+11-04 10:29:00.965  2467  2538 W System.err: 	at com.alibaba.wireless.security.open.initialize.a.loadLibrarySync(SourceFile:2)
+11-04 10:29:00.965  2467  2560 D 天气  : GPS更新频率限制，跳过
+11-04 10:29:00.965  2467  2538 W System.err: 	at com.alibaba.wireless.security.open.initialize.a.loadLibrarySync(SourceFile:1)
+11-04 10:29:00.965  2467  2538 W System.err: 	at com.alibaba.wireless.security.open.initialize.a.initialize(Unknown Source:0)
+11-04 10:29:00.965  2467  2538 W System.err: 	at com.autonavi.wireless.WirelessSDK.init(SourceFile:24)
+11-04 10:29:00.966  2467  2559 D 天气  : GPS更新频率限制，跳过
+11-04 10:29:00.967  2467  2562 D 天气  : GPS更新频率限制，跳过
+11-04 10:29:00.969  2467  2563 D 天气  : GPS更新频率限制，跳过
+11-04 10:29:00.997  2467  2538 D ultra-inner: UltraImpl::setCloudConfig configJson={"storge2":"P7","upload":{"P7":{"size":1024000,"timing":7,"events":"E010","network":13}}}
+11-04 10:29:00.997  2467  2538 D ultra-inner: UltraImpl::setRecordCloudConfig configJson=
+11-04 10:29:01.003  2467  2467 I JNIContext: onLayoutChange, width=1920, height=968
+11-04 10:29:01.003  2467  2467 D 调试  : LC: sw=1920 sh=944
+11-04 10:29:01.005  2467  2467 D houge   : 恢复位置()被调用
+11-04 10:29:01.029  2467  2525 D HostConnection: HostConnection::get() New Host Connection established 0x71a8021ae0, tid 2525
+11-04 10:29:01.027  2467  2467 I auditd  : type=1400 audit(0.0:138): avc: denied { search } for comm="gnet_n_1" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:01.027  2467  2467 W gnet_n_1: type=1400 audit(0.0:138): avc: denied { search } for name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:01.033  2467  2467 E MapSurfaceView: surfaceCreated getWidth: 1920 getHeight: 968
+11-04 10:29:01.046  2467  2525 D HostConnection: HostComposition ext ANDROID_EMU_CHECKSUM_HELPER_v1 ANDROID_EMU_native_sync_v2 ANDROID_EMU_dma_v1 ANDROID_EMU_direct_mem ANDROID_EMU_host_composition_v1 ANDROID_EMU_host_composition_v2 ANDROID_EMU_vulkan ANDROID_EMU_deferred_vulkan_commands ANDROID_EMU_vulkan_null_optional_strings ANDROID_EMU_vulkan_create_resources_with_requirements ANDROID_EMU_YUV_Cache ANDROID_EMU_vulkan_ignored_handles ANDROID_EMU_vulkan_free_memory_sync ANDROID_EMU_vulkan_shader_float16_int8 ANDROID_EMU_vulkan_async_queue_submit ANDROID_EMU_sync_buffer_data ANDROID_EMU_vulkan_async_qsri ANDROID_EMU_hwc_color_transform ANDROID_EMU_hwc_display_power_mode GL_OES_EGL_image_external_essl3 GL_OES_vertex_array_object ANDROID_EMU_host_side_tracing ANDROID_EMU_gles_max_version_3_1 
+11-04 10:29:01.049  2467  2566 E sliver  : value:channel&dic&dip
+11-04 10:29:01.052  2467  2467 E Eaglet  : [PERF][36585f5][B][surfaceCreated][]
+11-04 10:29:01.059  2467  2467 W gnet_n_1: type=1400 audit(0.0:140): avc: denied { search } for name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:01.069  2467  2508 E Activity: [PERF][36585f5][B][handleSurfaceCreate][]
+11-04 10:29:01.069  2467  2508 E Activity: [PERF][36585f5][B][handleSurfaceCreate lock][]
+11-04 10:29:01.069  2467  2508 E Activity: [PERF][36585f5][E][handleSurfaceCreate lock][](0)
+11-04 10:29:01.069  2467  2508 E Activity: [PERF][36585f5][B][onSurfaceCreatedNative][]
+11-04 10:29:01.070  2467  2508 E libEGL  : handle 0x71afb56010 
+11-04 10:29:01.070  2467  2508 E libEGL  : ForeBack bForeground 1 , isFinish 0
+11-04 10:29:01.071  2467  2525 W OpenGLRenderer: Failed to choose config with EGL_SWAP_BEHAVIOR_PRESERVED, retrying without...
+11-04 10:29:01.027  2467  2467 I chatty  : uid=10119(com.autonavi.amapautp.yh) identical 1 line
+11-04 10:29:01.059  2467  2467 I auditd  : type=1400 audit(0.0:140): avc: denied { search } for comm="gnet_n_1" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:01.072  2467  2508 E libEGL  : Resize nWidth=1920, nHeight=968
+11-04 10:29:01.073  2467  2508 E libEGL  : Resize _mWidth=0, _mHeight=0
+11-04 10:29:01.073  2467  2525 D EGL_emulation: eglCreateContext: 0x71a8022080: maj 3 min 1 rcv 4
+11-04 10:29:01.075  2467  2525 D EGL_emulation: eglMakeCurrent: 0x71a8022080: ver 3 1 (tinfo 0x7233981320)
+11-04 10:29:01.077  2467  2525 E eglCodecCommon: glUtilsParamSize: unknow param 0x000082da
+11-04 10:29:01.077  2467  2525 E eglCodecCommon: glUtilsParamSize: unknow param 0x000082da
+11-04 10:29:01.097  2467  2544 E libEGL  : InitEgl 0 
+11-04 10:29:01.098  2467  2544 D HostConnection: HostConnection::get() New Host Connection established 0x71a80235c0, tid 2544
+11-04 10:29:01.098  2467  2544 D HostConnection: HostComposition ext ANDROID_EMU_CHECKSUM_HELPER_v1 ANDROID_EMU_native_sync_v2 ANDROID_EMU_dma_v1 ANDROID_EMU_direct_mem ANDROID_EMU_host_composition_v1 ANDROID_EMU_host_composition_v2 ANDROID_EMU_vulkan ANDROID_EMU_deferred_vulkan_commands ANDROID_EMU_vulkan_null_optional_strings ANDROID_EMU_vulkan_create_resources_with_requirements ANDROID_EMU_YUV_Cache ANDROID_EMU_vulkan_ignored_handles ANDROID_EMU_vulkan_free_memory_sync ANDROID_EMU_vulkan_shader_float16_int8 ANDROID_EMU_vulkan_async_queue_submit ANDROID_EMU_sync_buffer_data ANDROID_EMU_vulkan_async_qsri ANDROID_EMU_hwc_color_transform ANDROID_EMU_hwc_display_power_mode GL_OES_EGL_image_external_essl3 GL_OES_vertex_array_object ANDROID_EMU_host_side_tracing ANDROID_EMU_gles_max_version_3_1 
+11-04 10:29:01.102  2467  2544 D EGL_emulation: eglCreateContext: 0x71a8023660: maj 3 min 1 rcv 4
+11-04 10:29:01.118  2467  2544 E libEGL  : UninitSurface
+11-04 10:29:01.118  2467  2544 E libEGL  : InitSurface 0 
+11-04 10:29:01.122  2467  2525 W Gralloc3: mapper 3.x is not supported
+11-04 10:29:01.124  2467  2525 D HostConnection: createUnique: call
+11-04 10:29:01.124  2467  2525 D HostConnection: HostConnection::get() New Host Connection established 0x71a8023a20, tid 2525
+11-04 10:29:01.124  2467  2525 D HostConnection: HostComposition ext ANDROID_EMU_CHECKSUM_HELPER_v1 ANDROID_EMU_native_sync_v2 ANDROID_EMU_dma_v1 ANDROID_EMU_direct_mem ANDROID_EMU_host_composition_v1 ANDROID_EMU_host_composition_v2 ANDROID_EMU_vulkan ANDROID_EMU_deferred_vulkan_commands ANDROID_EMU_vulkan_null_optional_strings ANDROID_EMU_vulkan_create_resources_with_requirements ANDROID_EMU_YUV_Cache ANDROID_EMU_vulkan_ignored_handles ANDROID_EMU_vulkan_free_memory_sync ANDROID_EMU_vulkan_shader_float16_int8 ANDROID_EMU_vulkan_async_queue_submit ANDROID_EMU_sync_buffer_data ANDROID_EMU_vulkan_async_qsri ANDROID_EMU_hwc_color_transform ANDROID_EMU_hwc_display_power_mode GL_OES_EGL_image_external_essl3 GL_OES_vertex_array_object ANDROID_EMU_host_side_tracing ANDROID_EMU_gles_max_version_3_1 
+11-04 10:29:01.125  2467  2525 D eglCodecCommon: allocate: Ask for block of size 0x1000
+11-04 10:29:01.125  2467  2525 D eglCodecCommon: allocate: ioctl allocate returned offset 0x1ff7d0000 size 0x8000
+11-04 10:29:01.127  2467  2544 E libEGL  : InitSurface success
+11-04 10:29:01.129  2467  2544 D EGL_emulation: eglMakeCurrent: 0x71a8023660: ver 3 1 (tinfo 0x71c006b5a0)
+11-04 10:29:01.138  2467  2544 E eglCodecCommon: glUtilsParamSize: unknow param 0x000082da
+11-04 10:29:01.138  2467  2544 E eglCodecCommon: glUtilsParamSize: unknow param 0x000082da
+11-04 10:29:01.149  2467  2544 E eglCodecCommon: glUtilsParamSize: unknow param 0x000084ff
+11-04 10:29:01.149  2467  2544 E eglCodecCommon: glUtilsParamSize: unknow param 0x000084ff
+11-04 10:29:01.151  2467  2544 E gatrace : #GDRAW; RenderSystem Initialize, ret=1
+11-04 10:29:01.155  2467  2544 E gatrace : #Canvas; GL_MAX_TEXTURE_SIZE=8192, GL_ALIASED_LINE_WIDTH_RANGE=[1,1]
+11-04 10:29:01.156  2467  2508 E Activity: [PERF][36585f5][E][onSurfaceCreatedNative][](87)
+11-04 10:29:01.156  2467  2508 E Activity: [PERF][36585f5][E][handleSurfaceCreate][](87)
+11-04 10:29:01.156  2467  2543 I turbo   : load MainScreen begin state=0
+11-04 10:29:01.156  2467  2543 I turbo   : path=/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libMainScreen.so, name=
+11-04 10:29:01.157  2467  2543 I turbo   : load /data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/ libMainScreen.so ret=1
+11-04 10:29:01.157  2467  2543 I turbo   : load MainScreen end state=1
+11-04 10:29:01.157  2467  2467 E Eaglet  : [PERF][36585f5][E][surfaceCreated][](105)
+11-04 10:29:01.158  2467  2467 E Eaglet  : [PERF][36585f5][B][surfaceChanged][]
+11-04 10:29:01.158  2467  2508 E Activity: [PERF][36585f5][B][handleSurfaceChange][]
+11-04 10:29:01.158  2467  2508 E Activity: [PERF][36585f5][B][handleSurfaceChange lock][]
+11-04 10:29:01.158  2467  2508 E Activity: [PERF][36585f5][E][handleSurfaceChange lock][](0)
+11-04 10:29:01.158  2467  2508 E Activity: [PERF][36585f5][B][onSurfaceChangedNative][]
+11-04 10:29:01.158  2467  2508 E libEGL  : handle 0x71afb56010 
+11-04 10:29:01.158  2467  2508 E libEGL  : ForeBack bForeground 1 , isFinish 0
+11-04 10:29:01.158  2467  2508 E libEGL  : Resize nWidth=1920, nHeight=968
+11-04 10:29:01.158  2467  2508 E libEGL  : Resize _mWidth=1920, _mHeight=968
+11-04 10:29:01.158  2467  2508 E libEGL  : size is smae return
+11-04 10:29:01.158  2467  2508 E Activity: [PERF][36585f5][E][onSurfaceChangedNative][](0)
+11-04 10:29:01.158  2467  2508 E Activity: [PERF][36585f5][E][handleSurfaceChange][](0)
+11-04 10:29:01.158  2467  2467 E Eaglet  : [PERF][36585f5][E][surfaceChanged][](0)
+11-04 10:29:01.158  2467  2508 E Activity: [PERF][36585f5][B][onResumeNative][]
+11-04 10:29:01.159  2467  2508 E libEGL  : ForeBack bForeground 1 , isFinish 0
+11-04 10:29:01.159  2467  2508 E libEGL  : ViewOnResume
+11-04 10:29:01.159  2467  2508 E Activity: [PERF][36585f5][E][onResumeNative][](1)
+11-04 10:29:01.159  2467  2539 W gatrace : #App;#CGResFileReader;LoadRes file libcmb_BootScreenPackage.so success, eCode = 0, path=/system/lib64
+11-04 10:29:01.162  2467  2525 D EGL_emulation: eglMakeCurrent: 0x71a8022080: ver 3 1 (tinfo 0x7233981320)
+11-04 10:29:01.391  2467  2606 I AMap95JavaOverlay: day/night=night
+11-04 10:29:01.392  2467  2606 E avi.amapautp.y: No implementation found for void com.autonavi.amapauto.multiscreen.presentation.SecondaryGuideOverlay.nativeSetIntervalTheme(boolean) (tried Java_com_autonavi_amapauto_multiscreen_presentation_SecondaryGuideOverlay_nativeSetIntervalTheme and Java_com_autonavi_amapauto_multiscreen_presentation_SecondaryGuideOverlay_nativeSetIntervalTheme__Z)
+11-04 10:29:01.392  2467  2606 W AMap95JavaOverlay: secondary interval theme deferred
+11-04 10:29:01.392  2467  2606 W AMap95JavaOverlay: java.lang.UnsatisfiedLinkError: No implementation found for void com.autonavi.amapauto.multiscreen.presentation.SecondaryGuideOverlay.nativeSetIntervalTheme(boolean) (tried Java_com_autonavi_amapauto_multiscreen_presentation_SecondaryGuideOverlay_nativeSetIntervalTheme and Java_com_autonavi_amapauto_multiscreen_presentation_SecondaryGuideOverlay_nativeSetIntervalTheme__Z)
+11-04 10:29:01.392  2467  2606 W AMap95JavaOverlay: 	at com.autonavi.amapauto.multiscreen.presentation.SecondaryGuideOverlay.nativeSetIntervalTheme(Native Method)
+11-04 10:29:01.392  2467  2606 W AMap95JavaOverlay: 	at com.autonavi.amapauto.multiscreen.presentation.SecondaryGuideOverlay.onDayNightChange(Unknown Source:64)
+11-04 10:29:01.392  2467  2606 W AMap95JavaOverlay: 	at com.autonavi.amapauto.jni.GAdaAndroid.onDayNightChange(Unknown Source:0)
+11-04 10:29:01.392  2467  2606 W AMap95JavaOverlay: 	at com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.sendAutoStatus(SourceFile:32)
+11-04 10:29:01.392  2467  2606 W AMap95JavaOverlay: 	at v70.a(SourceFile:2367)
+11-04 10:29:01.392  2467  2606 W AMap95JavaOverlay: 	at v70.b(SourceFile:268)
+11-04 10:29:01.392  2467  2606 W AMap95JavaOverlay: 	at com.autonavi.amapauto.jni.protocol.AndroidProtocolExe.sendJsonAsync(SourceFile:5)
+11-04 10:29:01.392  2467  2606 D EmbeddedMusic: 收到高德主题切换通知: 黑夜
+11-04 10:29:01.392  2467  2606 W EmbeddedMusic: 播放器未创建，主题切换通知暂存，创建后会读取当前模式
+11-04 10:29:01.419  2467  2619 E render_engine: [487165672784][doChooseEGLConfig][713]0x718eff6908 m_DeviceAttr.configAttrNum 0
+11-04 10:29:01.421  2467  2619 D HostConnection: HostConnection::get() New Host Connection established 0x722efde540, tid 2619
+11-04 10:29:01.422  2467  2619 D HostConnection: HostComposition ext ANDROID_EMU_CHECKSUM_HELPER_v1 ANDROID_EMU_native_sync_v2 ANDROID_EMU_dma_v1 ANDROID_EMU_direct_mem ANDROID_EMU_host_composition_v1 ANDROID_EMU_host_composition_v2 ANDROID_EMU_vulkan ANDROID_EMU_deferred_vulkan_commands ANDROID_EMU_vulkan_null_optional_strings ANDROID_EMU_vulkan_create_resources_with_requirements ANDROID_EMU_YUV_Cache ANDROID_EMU_vulkan_ignored_handles ANDROID_EMU_vulkan_free_memory_sync ANDROID_EMU_vulkan_shader_float16_int8 ANDROID_EMU_vulkan_async_queue_submit ANDROID_EMU_sync_buffer_data ANDROID_EMU_vulkan_async_qsri ANDROID_EMU_hwc_color_transform ANDROID_EMU_hwc_display_power_mode GL_OES_EGL_image_external_essl3 GL_OES_vertex_array_object ANDROID_EMU_host_side_tracing ANDROID_EMU_gles_max_version_3_1 
+11-04 10:29:01.422  2467  2619 E render_engine: [487165672784][TestEGLError][144]0x718eff6908 eglChooseConfig failed eglGetErrorCode (3000)
+11-04 10:29:01.424  2467  2619 I chatty  : uid=10119(com.autonavi.amapautp.yh) GNaviMap-GL-0 identical 6 lines
+11-04 10:29:01.425  2467  2619 E render_engine: [487165672784][TestEGLError][144]0x718eff6908 eglChooseConfig failed eglGetErrorCode (3000)
+11-04 10:29:01.426  2467  2619 E EGL_emulation: [getAttribValue] Bad attribute idx
+11-04 10:29:01.426  2467  2619 D EGL_emulation: eglGetConfigAttrib: bad attrib 0x3086
+11-04 10:29:01.426  2467  2619 E EGL_emulation: tid 2619: eglGetConfigAttrib(1029): error 0x3004 (EGL_BAD_ATTRIBUTE)
+11-04 10:29:01.426  2467  2619 E render_engine: [487165672784][doChooseEGLConfigFunc][1386]0x718eff6908 EGL_PBUFFER_BIT|EGL_WINDOW_BIT m_eglConfig=0x1
+11-04 10:29:01.426  2467  2619 E render_engine: [487165672784][TestEGLError][144]0x718eff6908 eglChooseConfig failed eglGetErrorCode (3000)
+11-04 10:29:01.427  2467  2619 I chatty  : uid=10119(com.autonavi.amapautp.yh) GNaviMap-GL-0 identical 6 lines
+11-04 10:29:01.428  2467  2619 E render_engine: [487165672784][TestEGLError][144]0x718eff6908 eglChooseConfig failed eglGetErrorCode (3000)
+11-04 10:29:01.428  2467  2619 E EGL_emulation: [getAttribValue] Bad attribute idx
+11-04 10:29:01.428  2467  2619 D EGL_emulation: eglGetConfigAttrib: bad attrib 0x3086
+11-04 10:29:01.428  2467  2619 E EGL_emulation: tid 2619: eglGetConfigAttrib(1029): error 0x3004 (EGL_BAD_ATTRIBUTE)
+11-04 10:29:01.428  2467  2619 E render_engine: [487165672784][doChooseEGLConfigFunc][1418]0x718eff6908 EGL_WINDOW_BIT m_eglConfig=0x1 nGLVersion:3  attr[8, 8, 8, 0, 24, 8, 0, 0]
+11-04 10:29:01.429  2467  2619 E render_engine: [487165672784][TestEGLError][144]0x718eff6908 eglChooseConfig failed eglGetErrorCode (3000)
+11-04 10:29:01.430  2467  2619 I chatty  : uid=10119(com.autonavi.amapautp.yh) GNaviMap-GL-0 identical 6 lines
+11-04 10:29:01.430  2467  2619 E render_engine: [487165672784][TestEGLError][144]0x718eff6908 eglChooseConfig failed eglGetErrorCode (3000)
+11-04 10:29:01.431  2467  2619 E EGL_emulation: [getAttribValue] Bad attribute idx
+11-04 10:29:01.431  2467  2619 D EGL_emulation: eglGetConfigAttrib: bad attrib 0x3086
+11-04 10:29:01.431  2467  2619 E EGL_emulation: tid 2619: eglGetConfigAttrib(1029): error 0x3004 (EGL_BAD_ATTRIBUTE)
+11-04 10:29:01.431  2467  2619 E render_engine: [487165672784][doChooseEGLConfigFunc][1439]0x718eff6908 EGL_PBUFFER_BIT m_eglPbufferConfig=0x1 attr[8, 8, 8, 0, 24, 8, 0, 0]
+11-04 10:29:01.431  2467  2619 E EGL_emulation: eglCreateContext: EGL_BAD_CONFIG: no ES 3.2 support
+11-04 10:29:01.431  2467  2619 E EGL_emulation: tid 2619: eglCreateContext(1585): error 0x3005 (EGL_BAD_CONFIG)
+11-04 10:29:01.431  2467  2619 E render_engine: [487165672784][TestEGLError][144]0x718eff6908 eglCreateContext Failed m_eglDisplay=0x1 m_eglConfig=0x1 pShareContext=0x0 m_eglContext=0x0,nGLMajorVersion=3,nGLMinorVersion=2 failed eglGetErrorCode (3005)
+11-04 10:29:01.431  2467  2619 E render_engine: [487165672784][doChooseEGLConfig][713]0x718eff6908 m_DeviceAttr.configAttrNum 0
+11-04 10:29:01.431  2467  2619 E render_engine: [487165672784][TestEGLError][144]0x718eff6908 eglChooseConfig failed eglGetErrorCode (3000)
+11-04 10:29:01.433  2467  2619 I chatty  : uid=10119(com.autonavi.amapautp.yh) GNaviMap-GL-0 identical 6 lines
+11-04 10:29:01.433  2467  2619 E render_engine: [487165672784][TestEGLError][144]0x718eff6908 eglChooseConfig failed eglGetErrorCode (3000)
+11-04 10:29:01.434  2467  2619 E EGL_emulation: [getAttribValue] Bad attribute idx
+11-04 10:29:01.434  2467  2619 D EGL_emulation: eglGetConfigAttrib: bad attrib 0x3086
+11-04 10:29:01.434  2467  2619 E EGL_emulation: tid 2619: eglGetConfigAttrib(1029): error 0x3004 (EGL_BAD_ATTRIBUTE)
+11-04 10:29:01.434  2467  2619 E render_engine: [487165672784][doChooseEGLConfigFunc][1386]0x718eff6908 EGL_PBUFFER_BIT|EGL_WINDOW_BIT m_eglConfig=0x1
+11-04 10:29:01.434  2467  2619 E render_engine: [487165672784][TestEGLError][144]0x718eff6908 eglChooseConfig failed eglGetErrorCode (3000)
+11-04 10:29:01.436  2467  2619 I chatty  : uid=10119(com.autonavi.amapautp.yh) GNaviMap-GL-0 identical 6 lines
+11-04 10:29:01.436  2467  2619 E render_engine: [487165672784][TestEGLError][144]0x718eff6908 eglChooseConfig failed eglGetErrorCode (3000)
+11-04 10:29:01.437  2467  2619 E EGL_emulation: [getAttribValue] Bad attribute idx
+11-04 10:29:01.437  2467  2619 D EGL_emulation: eglGetConfigAttrib: bad attrib 0x3086
+11-04 10:29:01.437  2467  2619 E EGL_emulation: tid 2619: eglGetConfigAttrib(1029): error 0x3004 (EGL_BAD_ATTRIBUTE)
+11-04 10:29:01.437  2467  2619 E render_engine: [487165672784][doChooseEGLConfigFunc][1418]0x718eff6908 EGL_WINDOW_BIT m_eglConfig=0x1 nGLVersion:3  attr[8, 8, 8, 0, 24, 8, 0, 0]
+11-04 10:29:01.437  2467  2619 E render_engine: [487165672784][TestEGLError][144]0x718eff6908 eglChooseConfig failed eglGetErrorCode (3000)
+11-04 10:29:01.438  2467  2619 I chatty  : uid=10119(com.autonavi.amapautp.yh) GNaviMap-GL-0 identical 6 lines
+11-04 10:29:01.439  2467  2619 E render_engine: [487165672784][TestEGLError][144]0x718eff6908 eglChooseConfig failed eglGetErrorCode (3000)
+11-04 10:29:01.439  2467  2619 E EGL_emulation: [getAttribValue] Bad attribute idx
+11-04 10:29:01.439  2467  2619 D EGL_emulation: eglGetConfigAttrib: bad attrib 0x3086
+11-04 10:29:01.439  2467  2619 E EGL_emulation: tid 2619: eglGetConfigAttrib(1029): error 0x3004 (EGL_BAD_ATTRIBUTE)
+11-04 10:29:01.439  2467  2619 E render_engine: [487165672784][doChooseEGLConfigFunc][1439]0x718eff6908 EGL_PBUFFER_BIT m_eglPbufferConfig=0x1 attr[8, 8, 8, 0, 24, 8, 0, 0]
+11-04 10:29:01.518  2467  2619 D EGL_emulation: eglCreateContext: 0x722efde5e0: maj 3 min 1 rcv 4
+11-04 10:29:01.519  2467  2619 D EGL_emulation: eglCreateContext: 0x722efde680: maj 3 min 1 rcv 4
+11-04 10:29:01.531  2467  2529 D 天气  : HTTP响应码(备用): 200
+11-04 10:29:01.531  2467  2529 D 调试  : API响应(备用): {  "latitude": 39.237255,  "lookupSource": "coordinates",  "longitude": -123.15003166666665,  "localityLanguageRequested": "zh-hans",  "continent": "北美洲",  "continentCode": "NA",  "countryName": "美国",  "countryCode": "US",  "principalSubdivision": "加利福尼亚州",  "principalSubdivisionCode": "US-CA",  "city": "Redwood Valley-Potter Valley",  "locality": "尤奇亚",  "postcode": "95482",  "plusCode": "84FR6RPX+WX",  "fips": {    "state": "06",    "county": "045",    "countySubdivision": "93490"  },  "localityInfo": {    "administrative": [      {        "name": "美国",        "description": "北美洲国家",        "isoName": "United States of America",        "order": 2,        "adminLevel": 2,        "isoCode": "US",        "wikidataId": "Q30",        "geonameId": 6252001      },      {        "name": "加利福尼亚州",        "description": "美国州份",        "isoName": "California",        "order": 5,        "adminLevel": 4,        "isoCode": "US-CA",        "wikidataId": "Q99",        "geonameId": 5332921      },      {        "name": "门多西诺县",        "description": "county in northwestern California, United States",        "order": 6,        "adminLevel": 6,        "wikidataId": "Q108087",        "geonameId": 5372163      },      {        "name": "尤奇亚",        "description": "city in and county seat of Mendocino County, California, United States",        "order": 10,        "adminLevel": 8,        "wikidataId": "Q837105",        "geonameId": 5404476      }    ],    "informative": [      {        "name": "北美洲",        "description": "七大洲之一",        "isoName": "North America",        "order": 1,        "isoCode": "NA",        "wikidataId": "Q49",        "geonameId": 6255149      },      {        "name": "美国本土",        "description": "the 48 states of the United States (all but Alaska and Hawaii) and the District of Columbia",        "order": 3,        "wikidataId": "Q578170"      },      {        "name": "America/Los_Angeles",        "description": "时区",        "order": 4      },      {        "name": "Redwood Valley-Potter Valley",        "order": 7,        "geonameId": 12523212      },      {        "name": "95482",        "description": "邮政编码",        "order": 8      },      {        "name": "06-045-93490",        "description": "FIPS code",        "order": 9      }    ]  }}
+11-04 10:29:01.531  2467  2529 D 天气  : 逆地理编码成功: 加利福尼亚州-Redwood Valley-Potter Valley-尤奇亚 #备用API
+11-04 10:29:01.532  2467  2619 D EGL_emulation: eglMakeCurrent: 0x722efde680: ver 3 1 (tinfo 0x71afc126e0)
+11-04 10:29:01.533  2467  2529 D 天气  : 逆地理编码成功，保存城市信息
+11-04 10:29:01.533  2467  2529 D 天气  : 开始更新城市信息
+11-04 10:29:01.545  2467  2529 D 天气  : 城市信息未变化，无需更新城市信息
+11-04 10:29:01.545  2467  2529 D 天气  : 执行成功
+11-04 10:29:01.594  2467  2619 E eglCodecCommon: glUtilsParamSize: unknow param 0x000082da
+11-04 10:29:01.594  2467  2619 E eglCodecCommon: glUtilsParamSize: unknow param 0x000082da
+11-04 10:29:01.595  2467  2467 I Choreographer: Skipped 36 frames!  The application may be doing too much work on its main thread.
+11-04 10:29:01.597  2467  2619 E eglCodecCommon: glUtilsParamSize: unknow param 0x000084ff
+11-04 10:29:01.597  2467  2619 E eglCodecCommon: glUtilsParamSize: unknow param 0x000084ff
+11-04 10:29:01.598  2467  2467 E Activity: onWindowFocusChanged
+11-04 10:29:01.601  2467  2619 E EGL_emulation: tid 2619: eglSurfaceAttrib(1400): error 0x3009 (EGL_BAD_MATCH)
+11-04 10:29:01.602  2467  2619 D EGL_emulation: eglMakeCurrent: 0x722efde5e0: ver 3 1 (tinfo 0x71afc126e0)
+11-04 10:29:01.603  2467  2467 D houge   : PosRun: cx=0 cy=400 mX=1895 mY=919
+11-04 10:29:01.605  2467  2467 D 配置  : 锁定音频通道配置值: #不锁定
+11-04 10:29:01.613  2467  2467 D 配置  : 实际使用音频通道值: 0
+11-04 10:29:01.616  2467  2467 D 配置  : 设置dpi配置值: #自动适配
+11-04 10:29:01.642  2467  2467 D 配置  : 实际使用dpi值: 170
+11-04 10:29:01.653  2467  2467 D 天气  : 跳过逆地理编码，防抖机制
+11-04 10:29:01.654  2467  2467 D houge   : 恢复位置()被调用
+11-04 10:29:01.655  2467  2467 D houge   : FloatingButtonHelper init done, ScreenCheck started
+11-04 10:29:01.655  2467  2467 D 调试  : LC: sw=1920 sh=944
+11-04 10:29:01.655  2467  2467 D houge   : 恢复位置()被调用
+11-04 10:29:01.753  2467  2606 D map_bench: postDelayed hideCover begin
+11-04 10:29:01.753  2467  2606 E DumpCrash: getLocalCrashDir filePath = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files/amapauto9/Log/dumpcrash/
+11-04 10:29:01.753  2467  2606 E DumpCrash: getLocalCrashDir filePath = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files/amapauto9/Log/dumpcrash/
+11-04 10:29:01.798  2467  2467 D houge   : PosRun: cx=0 cy=400 mX=1895 mY=919
+11-04 10:29:01.799  2467  2467 D map_bench: hideCover begin
+11-04 10:29:01.799  2467  2467 D map_bench: hideCover end
+11-04 10:29:02.008  2467  2508 D PathUtils: isAdapterAndroidR targetSdkVersion = 24
+11-04 10:29:02.008  2467  2508 D SelfUpdate: setExternalFilesDir : /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files/
+11-04 10:29:02.013  2467  2508 D LogPrint: isWriteLog false
+11-04 10:29:02.013  2467  2508 D AutoLibraryLoader: loadLibrary libname:/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libUpdateMng.so
+11-04 10:29:02.013  2467  2508 D SelfUpdate: init， After loadSo,Befor Init.  defPath: /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files/CppUpdate/
+11-04 10:29:02.017  2467  2508 D SelfUpdate: SelfUpdate config
+11-04 10:29:02.025  2467  2648 D DexTrace.DexOptimizeManager: init()
+11-04 10:29:02.038  2467  2508 D SelfUpdate: getLibPath return :null
+11-04 10:29:02.111  2467  2467 I auditd  : type=1400 audit(0.0:154): avc: denied { search } for comm="data_sd_sdisk" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:02.111  2467  2467 W data_sd_sdisk: type=1400 audit(0.0:154): avc: denied { search } for name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:02.175  2467  2467 W data_sd_sdisk: type=1400 audit(0.0:156): avc: denied { search } for name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:02.367  2467  2467 W data_sd_sdisk: type=1400 audit(0.0:158): avc: denied { search } for name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:02.989  2467  2467 D MultiScreen:MultiScreenMotionHandler: bindService
+11-04 10:29:03.327  2467  2467 W data_sd_sdisk: type=1400 audit(0.0:160): avc: denied { search } for name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:03.951  2467  2467 W data_sd_sdisk: type=1400 audit(0.0:162): avc: denied { search } for name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:05.531  2467  2467 W data_sd_sdisk: type=1400 audit(0.0:164): avc: denied { search } for name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:05.950  2467  2556 E avi.amapautp.y: Invalid ID 0x00000000.
+11-04 10:29:05.531  2467  2467 I chatty  : uid=10119(com.autonavi.amapautp.yh) identical 9 lines
+11-04 10:29:05.531  2467  2467 I auditd  : type=1400 audit(0.0:165): avc: denied { search } for comm="data_sd_sdisk" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:07.273  2467  2467 I JNIContext: onLayoutChange, width=1920, height=968
+11-04 10:29:07.365  2467  2539 I turbo   : load Common begin state=0
+11-04 10:29:07.365  2467  2539 I turbo   : path=/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libCommon.so, name=
+11-04 10:29:07.363  2467  2467 I auditd  : type=1400 audit(0.0:166): avc: denied { search } for comm="MainScreen" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:07.363  2467  2467 W MainScreen: type=1400 audit(0.0:166): avc: denied { search } for name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:07.386  2467  2655 D LocationInstrument: doStartLocate: requestLocationUpdates
+11-04 10:29:07.363  2467  2467 I auditd  : type=1400 audit(0.0:167): avc: denied { search } for comm="MainScreen" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:07.383  2467  2467 I auditd  : type=1400 audit(0.0:168): avc: denied { search } for comm="ALLocationHandl" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:07.383  2467  2467 W ALLocationHandl: type=1400 audit(0.0:168): avc: denied { search } for name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:07.499  2669  2669 I auditd  : type=1400 audit(0.0:170): avc: granted { read } for comm="main" name="u:object_r:net_dns_prop:s0" dev="tmpfs" ino=7333 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:net_dns_prop:s0 tclass=file app=com.autonavi.amapautp.yh
+11-04 10:29:07.499  2669  2669 W main    : type=1400 audit(0.0:170): avc: granted { read } for name="u:object_r:net_dns_prop:s0" dev="tmpfs" ino=7333 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:net_dns_prop:s0 tclass=file app=com.autonavi.amapautp.yh
+11-04 10:29:07.608  2669  2669 I locationservic: The ClassLoaderContext is a special shared library.
+11-04 10:29:07.623  2467  2539 I turbo   : load /data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/ libCommon.so ret=1
+11-04 10:29:07.624  2467  2539 I turbo   : load Common end state=1
+11-04 10:29:07.624  2467  2539 I turbo   : load autonavi begin state=0
+11-04 10:29:07.624  2467  2539 I turbo   : path=/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libautonavi.so, name=
+11-04 10:29:07.629  2669  2669 I DexTrace.MapApplicationProxy: app scene false
+11-04 10:29:07.637  2669  2669 D LogProxy: isWriteLog false
+11-04 10:29:07.637  2669  2669 D map_bench: attachBaseContext begin
+11-04 10:29:07.644  2467  2539 I turbo   : load /data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/ libautonavi.so ret=1
+11-04 10:29:07.644  2467  2539 I turbo   : load autonavi end state=1
+11-04 10:29:07.646  2669  2669 I MapApplication: Process Is :2467 :com.autonavi.amapautp.yh myPid:2669
+11-04 10:29:07.646  2669  2669 I MapApplication: Process Is :2669 :com.autonavi.amapautp.yh:locationservice myPid:2669
+11-04 10:29:07.646  2669  2669 D MapApplication:  load=Name:	locationservice
+11-04 10:29:07.646  2669  2669 D MapApplication: com.autonavi.amapautp.yh mMainApp=false
+11-04 10:29:07.646  2669  2669 D map_bench: attachBaseContext end
+11-04 10:29:07.654  2669  2669 D floatapp.AutoamapPluginManage: load: processName = com.autonavi.amapautp.yh:locationservice not main process
+11-04 10:29:07.661  2669  2669 D map_bench: Application.onCreate begin
+11-04 10:29:07.663  2669  2669 D PathUtils: isAdapterAndroidR targetSdkVersion = 24
+11-04 10:29:07.666  2669  2669 I PathUtils: getAvailableSdcardPath, isNeedFrontMemory:0
+11-04 10:29:07.670  2467  2539 W gatrace : #App;#CGResFileReader;LoadRes file libcmb_MainPackage.so success, eCode = 0, path=/system/lib64
+11-04 10:29:07.671  2467  2696 W gatrace : #App;#CGResFileReader;LoadRes file libcmb_TbtPackage.so success, eCode = 0, path=/system/lib64
+11-04 10:29:07.672  2467  2698 W gatrace : #App;#CGResFileReader;LoadRes file libcmb_UserInfoPackage.so success, eCode = 0, path=/system/lib64
+11-04 10:29:07.673  2669  2669 I PathUtils: getAvailableSdcardPath, spUsedInnerPath = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files
+11-04 10:29:07.677  2669  2669 I PathUtils: getAvailableSdcardPath, isExternalFilesDir
+11-04 10:29:07.677  2669  2669 I PathUtils: getAvailableSdcardPath, mAutoUsedSdcardPath = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files
+11-04 10:29:07.725  2669  2669 I MapApplication: setting enable =0
+11-04 10:29:07.725  2669  2669 I MapApplication: BuildConfig.AL_LOGGER_FLAG=8
+11-04 10:29:07.725  2669  2669 D LoggerTracer: init flags 8
+11-04 10:29:07.726  2669  2669 I MapApplication: Process Is :2467 :com.autonavi.amapautp.yh myPid:2669
+11-04 10:29:07.726  2669  2669 I MapApplication: Process Is :2669 :com.autonavi.amapautp.yh:locationservice myPid:2669
+11-04 10:29:07.726  2669  2669 D MapApplication:  load=Name:	locationservice
+11-04 10:29:07.727  2669  2669 D PathUtils: getAutoLogRootPath loadLogPathFromAssets start
+11-04 10:29:07.727  2669  2669 D PathUtils: getAutoLogRootPath loadLogPathFromAssets end
+11-04 10:29:07.727  2669  2669 D PathUtils: isAdapterAndroidR targetSdkVersion = 24
+11-04 10:29:07.728  2669  2669 I PathUtils: getAvailableSdcardPath, isNeedFrontMemory:0
+11-04 10:29:07.728  2669  2669 I PathUtils: getAvailableSdcardPath, spUsedInnerPath = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files
+11-04 10:29:07.730  2669  2669 I PathUtils: getAvailableSdcardPath, isExternalFilesDir
+11-04 10:29:07.730  2669  2669 I PathUtils: getAvailableSdcardPath, mAutoUsedSdcardPath = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files
+11-04 10:29:07.730  2669  2669 D PathUtils: getAutoLogRootPath loadLogPathFromAssets start
+11-04 10:29:07.732  2669  2669 D PathUtils: getAutoLogRootPath loadLogPathFromAssets end
+11-04 10:29:07.732  2669  2669 D PathUtils: isAdapterAndroidR targetSdkVersion = 24
+11-04 10:29:07.732  2669  2669 D PathUtils: getAutoLogRootPath path = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files/amapauto9/Log//
+11-04 10:29:07.747  2669  2669 D PathUtils: getAutoLogRootPath path = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files/amapauto9/Log//
+11-04 10:29:07.747  2669  2669 D AutoLibraryLoader: addLibrary priority = -1,path = /data/user/0/com.autonavi.amapautp.yh/cpplibs/
+11-04 10:29:07.754  2669  2669 D SelfUpdate: isErrorMatchScense enter 
+11-04 10:29:07.754  2669  2669 D SelfUpdate: isErrorMatchScense package version code: 9.5.0.600013
+11-04 10:29:07.756  2669  2669 D SelfUpdate: little endian
+11-04 10:29:07.757  2669  2669 D SelfUpdate: /data/user/0/com.autonavi.amapautp.yh/UpdateVerInfo.dat: open failed: ENOENT (No such file or directory)
+11-04 10:29:07.757  2669  2669 D SelfUpdate: isErrorMatchScense: availVerCnt:0 errSceneCnt:0
+11-04 10:29:07.757  2669  2669 D SelfUpdate: getLibPathWithVerCheck: return getLibPath
+11-04 10:29:07.757  2669  2669 D SelfUpdate: getLibPath libpath :/data/user/0/com.autonavi.amapautp.yh/AutoUpdate/run/lib/
+11-04 10:29:07.757  2669  2669 D SelfUpdate: getLibPath return :null
+11-04 10:29:07.757  2669  2669 D AutoLibraryLoader: addLibrary priority = 1,path = null
+11-04 10:29:07.757  2669  2669 D SelfUpdate: isErrorMatchScense enter 
+11-04 10:29:07.758  2669  2669 D SelfUpdate: isErrorMatchScense package version code: 9.5.0.600013
+11-04 10:29:07.758  2669  2669 D SelfUpdate: isErrorMatchScense: availVerCnt:0 errSceneCnt:0
+11-04 10:29:07.758  2669  2669 D SelfUpdate: getGframePathWithVerCheck return getGframePath
+11-04 10:29:07.759  2669  2669 D SelfUpdate: getGframePath return :null
+11-04 10:29:07.759  2669  2669 D AutoLibraryLoader: addLibrary priority = 2,path = null
+11-04 10:29:07.759  2669  2669 D AutoLibraryLoader: addLibrary priority = 3,path = /data/user/0/com.autonavi.amapautp.yh/app_version/9.5.0.600013
+11-04 10:29:07.759  2669  2669 D AutoLibraryLoader: addLibrary priority = 4,path = /data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/
+11-04 10:29:07.768  2669  2669 D AutoLibraryLoader: addLibrary priority = 6,path = /system/lib64
+11-04 10:29:07.771  2669  2669 I System.out: MQTT LOG PATH:/storage/emulated/0/amapauto9/Log/log_mqtt_jni.log
+11-04 10:29:07.771  2669  2669 I System.out: MQTT LOG PATH:/storage/emulated/0/Android/data/com.autonavi.amapauto/files/amapauto9/Log/log_mqtt_jni.log
+11-04 10:29:07.771  2669  2669 D MapApplication: start checkSign
+11-04 10:29:07.771  2669  2669 D MapApplication: start installDumpCrash
+11-04 10:29:07.777  2669  2669 E DumpCrash: dumpcrash loadLibrary
+11-04 10:29:07.777  2669  2669 D AutoLibraryLoader: loadLibrary libname:/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libopenssl.so
+11-04 10:29:07.780  2669  2669 D AutoLibraryLoader: loadLibrary libname:/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libdumpcrash.so
+11-04 10:29:07.781  2669  2669 E DumpCrash: dumpcrash loadLibrary hasLoadLibrary = true
+11-04 10:29:07.793  2669  2669 E DumpCrash: getLocalCrashDir filePath = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files/amapauto9/Log/dumpcrash/
+11-04 10:29:07.793  2669  2669 E DumpCrash: dumpcrash.install workMode:2
+11-04 10:29:07.793  2669  2669 E DumpCrash: extractNativeLibs:true
+11-04 10:29:07.793  2669  2669 E DumpCrash: execlType:0
+11-04 10:29:07.793  2669  2669 E DumpCrash: dumpcrash.install useAes256:false libPath:/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/
+11-04 10:29:07.793  2669  2669 E CrashLog: [dumpcrash.cpp].jni_install(157): jni_install sdkVersion:29, execlType:0, workMode:2, useAes256:0
+11-04 10:29:07.793  2669  2669 E CrashLog: CrashSaver_install
+11-04 10:29:07.793  2669  2669 D CrashLog: [dly.cpp].initApplicationInitalTime(692): initApplicationInitalTime
+11-04 10:29:07.794  2669  2669 D MapApplication: child app
+11-04 10:29:07.799  2467  2551 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:07.805  2467  2551 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:07.934  2669  2723 I locationservic: Starting a blocking GC Alloc
+11-04 10:29:07.934  2669  2723 I locationservic: Starting a blocking GC Alloc
+11-04 10:29:07.942  2669  2723 I locationservic: Alloc young concurrent copying GC freed 10067(3572KB) AllocSpace objects, 16(320KB) LOS objects, 84% free, 1168KB/7312KB, paused 293us total 7.214ms
+11-04 10:29:07.942  2467  2480 I avi.amapautp.y: Background young concurrent copying GC freed 11773(1184KB) AllocSpace objects, 9(180KB) LOS objects, 33% free, 2352KB/3564KB, paused 28us total 140.612ms
+11-04 10:29:07.965  2669  2707 W linker  : Warning: "/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libc++_shared.so" unused DT entry: unknown processor-specific (type 0x70000001 arg 0x0) (ignoring)
+11-04 10:29:07.975  2467  2467 I auditd  : type=1400 audit(0.0:171): avc: denied { search } for comm="OPT_THREAD" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:07.975  2467  2467 W OPT_THREAD: type=1400 audit(0.0:171): avc: denied { search } for name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:08.102  2669  2707 E BluetoothAdapter: Bluetooth binder is null
+11-04 10:29:07.975  2467  2467 I auditd  : type=1400 audit(0.0:172): avc: denied { search } for comm="OPT_THREAD" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:08.103  2467  2467 I auditd  : type=1400 audit(0.0:173): avc: denied { search } for comm="hsl_startup" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:08.103  2467  2467 W hsl_startup: type=1400 audit(0.0:173): avc: denied { search } for name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:08.147  2669  2745 D NetworkSecurityConfig: Using Network Security Config from resource network_security_config debugBuild: false
+11-04 10:29:08.213  2467  2551 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:08.232  2467  2551 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:08.357  2467  2539 W avi.amapautp.y: Accessing hidden method Landroid/view/Display;->getUniqueId()Ljava/lang/String; (blacklist, linking, denied)
+11-04 10:29:08.361  2669  2744 W com.google.protobuf.au: platform method missing - proto runtime falling back to safer methods: java.lang.NoSuchMethodException: sun.misc.Unsafe.copyMemory [class java.lang.Object, long, class java.lang.Object, long, long]
+11-04 10:29:08.478  2467  2543 E sliver  : value:channel&dic&div
+11-04 10:29:08.494  2467  2480 I avi.amapautp.y: Background concurrent copying GC freed 15634(1203KB) AllocSpace objects, 2(40KB) LOS objects, 49% free, 2364KB/4728KB, paused 2.940ms total 167.529ms
+11-04 10:29:08.103  2467  2467 I auditd  : type=1400 audit(0.0:174): avc: denied { search } for comm="hsl_startup" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:08.635  2467  2467 I auditd  : type=1400 audit(0.0:187): avc: denied { search } for comm="data_sd_sdisk" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:08.635  2467  2467 W data_sd_sdisk: type=1400 audit(0.0:187): avc: denied { search } for name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:08.679  2467  2467 I chatty  : uid=10119(com.autonavi.amapautp.yh) identical 2 lines
+11-04 10:29:08.683  2467  2467 W data_sd_sdisk: type=1400 audit(0.0:190): avc: denied { search } for name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:08.694  2467  2753 V iDST::Utils: TextUtils::GetVersion major 2 middle 5 minor 14
+11-04 10:29:08.695  2467  2753 V iDST::Utils: TextUtils::GetVersion is V2.5.14-026-20240919
+11-04 10:29:08.695  2467  2753 I iDST::NuiTtsSdk: NUI SDK VER <V2.5.14-026-20240919> DATE <Sep 19 2024>
+11-04 10:29:08.695  2467  2753 I iDST::NuiTtsSdk: NUI GIT SHA [sha1]:0561e35c [author]:jichi.lr [time]:2024-09-19 11:37:37 +0800 [commit]:[Update] lame update to 3.100 to fixed cve vuln. [branch]: (HEAD, origin/develop/mobile_local_tts)
+11-04 10:29:08.695  2467  2753 I iDST::NuiTtsSdk: add KEY[workspace] as VALUE[/storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files/amapauto9/data/voice/]
+11-04 10:29:08.695  2467  2753 W iDST::NuiTtsSdk: cannot find debug_path in params
+11-04 10:29:08.695  2467  2753 W iDST::NuiTtsSdk: cannot find authspace in params
+11-04 10:29:08.695  2467  2753 W iDST::NuiTtsSdk: cannot find url in params
+11-04 10:29:08.695  2467  2753 I iDST::NuiTtsSdk: add KEY[app_key] as VALUE[amapauto]
+11-04 10:29:08.695  2467  2753 W iDST::NuiTtsSdk: cannot find token in params
+11-04 10:29:08.695  2467  2753 W iDST::NuiTtsSdk: cannot find service_mode in params
+11-04 10:29:08.695  2467  2753 I iDST::NuiTtsSdk: add KEY[ak_id] as VALUE[xx]
+11-04 10:29:08.695  2467  2753 I iDST::NuiTtsSdk: add KEY[ak_secret] as VALUE[xx]
+11-04 10:29:08.695  2467  2753 I iDST::NuiTtsSdk: add KEY[sdk_code] as VALUE[software_nls_tts_offline]
+11-04 10:29:08.695  2467  2753 W iDST::NuiTtsSdk: cannot find mode_type in params
+11-04 10:29:08.695  2467  2753 I iDST::NuiTtsSdk: add KEY[device_id] as VALUE[0123456789aaaaa]
+11-04 10:29:08.695  2467  2753 W iDST::NuiTtsSdk: cannot find env in params
+11-04 10:29:08.695  2467  2753 W iDST::NuiTtsSdk: cannot find connection_timeout in params
+11-04 10:29:08.695  2467  2753 W iDST::NuiTtsSdk: cannot find sample_rate in params
+11-04 10:29:08.695  2467  2753 W iDST::NuiTtsSdk: cannot find auth_host in params
+11-04 10:29:08.695  2467  2753 W iDST::NuiTtsSdk: cannot find auth_url in params
+11-04 10:29:08.695  2467  2753 I iDST::NuiTtsSdk: add KEY[enable_et] as VALUE[false]
+11-04 10:29:08.695  2467  2753 W iDST::NuiTtsSdk: cannot find enable_ntp in params
+11-04 10:29:08.695  2467  2753 W iDST::NuiTtsSdk: cannot find enable_low_precision in params
+11-04 10:29:08.695  2467  2753 I iDST::NuiTtsSdk: api init with workspace=/storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files/amapauto9/data/voice/
+11-04 10:29:08.695  2467  2753 I iDST::NuiTtsSdk: log level is 2
+11-04 10:29:08.695  2467  2753 I iDST::TtsBase: The tts-debug path is not set and the log file will not be stored. Just print the log
+11-04 10:29:08.695  2467  2753 I iDST::TtsParamsMgr: ReadParaFromCfg[begin]
+11-04 10:29:08.695  2467  2753 I iDST::TtsParamsMgr: read tts parameter from /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files/amapauto9/data/voice//tts/parameter.cfg
+11-04 10:29:08.695  2467  2753 I iDST::TtsParamsMgr: set mode_type = 0
+11-04 10:29:08.695  2467  2753 I iDST::TtsParamsMgr: set debug_level = 0
+11-04 10:29:08.695  2467  2753 W iDST::TtsParamsMgr: debug_path use default val ./
+11-04 10:29:08.695  2467  2753 I iDST::TtsParamsMgr: set encode_type = pcm
+11-04 10:29:08.695  2467  2753 I iDST::TtsParamsMgr: set smart_engine = 3
+11-04 10:29:08.695  2467  2753 I iDST::TtsParamsMgr: GetValueFloat:set pitch_level:0.000000
+11-04 10:29:08.695  2467  2753 I iDST::TtsParamsMgr: GetValueFloat:set speed_level:1.000000
+11-04 10:29:08.695  2467  2753 I iDST::TtsParamsMgr: set sample_rate = 16000
+11-04 10:29:08.695  2467  2753 W iDST::TtsParamsMgr: play_audio use default val 0
+11-04 10:29:08.695  2467  2753 I iDST::TtsParamsMgr: set callback_raw_data = 0
+11-04 10:29:08.695  2467  2753 I iDST::TtsParamsMgr: GetValueFloat:set volume:1.000000
+11-04 10:29:08.695  2467  2753 I iDST::TtsParamsMgr: set font_name = nvzhongyin
+11-04 10:29:08.695  2467  2753 I iDST::TtsParamsMgr: set wait_time = 2000
+11-04 10:29:08.695  2467  2753 I iDST::TtsParamsMgr: set agc = 0
+11-04 10:29:08.695  2467  2753 I iDST::TtsParamsMgr: set ssml_personalrecording = 1
+11-04 10:29:08.695  2467  2753 I iDST::TtsParamsMgr: set ssml_punctuation = 1
+11-04 10:29:08.695  2467  2753 I iDST::TtsParamsMgr: set ssml_partial_match = 1
+11-04 10:29:08.695  2467  2753 I iDST::TtsParamsMgr: set stream = 0
+11-04 10:29:08.695  2467  2753 W iDST::TtsParamsMgr: enable_ntp use default val 1
+11-04 10:29:08.695  2467  2753 I iDST::TtsParamsMgr: set on = 0
+11-04 10:29:08.695  2467  2753 W iDST::TtsParamsMgr: mode use default val cmd
+11-04 10:29:08.695  2467  2753 I iDST::TtsParamsMgr: set max_cache_size = 2000000
+11-04 10:29:08.695  2467  2753 I iDST::TtsParamsMgr: set save_path = ./tmp
+11-04 10:29:08.695  2467  2753 W iDST::TtsParamsMgr: format use default val mp3
+11-04 10:29:08.695  2467  2753 I iDST::TtsParamsMgr: set on = 0
+11-04 10:29:08.695  2467  2753 I iDST::TtsParamsMgr: set mode = cmd
+11-04 10:29:08.695  2467  2753 I iDST::TtsParamsMgr: set save_path = /sdcard/mit
+11-04 10:29:08.695  2467  2753 I iDST::TtsParamsMgr: ReadParaFromCfg[done]
+11-04 10:29:08.695  2467  2753 W iDST::Context: context have no field for app
+11-04 10:29:08.695  2467  2753 I chatty  : uid=10119(com.autonavi.amapautp.yh) VolumeThread identical 1 line
+11-04 10:29:08.695  2467  2753 W iDST::Context: context have no field for app
+11-04 10:29:08.695  2467  2753 W iDST::Context: context have no field for system
+11-04 10:29:08.695  2467  2753 I chatty  : uid=10119(com.autonavi.amapautp.yh) VolumeThread identical 3 lines
+11-04 10:29:08.695  2467  2753 W iDST::Context: context have no field for system
+11-04 10:29:08.695  2467  2753 W iDST::Context: context have no value for [device][model]
+11-04 10:29:08.695  2467  2753 W iDST::Context: context have no value for [device][brand]
+11-04 10:29:08.695  2467  2753 W iDST::Context: context have no value for [device][type]
+11-04 10:29:08.695  2467  2753 W iDST::Context: context have no value for [device][imei]
+11-04 10:29:08.695  2467  2753 W iDST::Context: context have no field for network
+11-04 10:29:08.695  2467  2753 I chatty  : uid=10119(com.autonavi.amapautp.yh) VolumeThread identical 3 lines
+11-04 10:29:08.695  2467  2753 W iDST::Context: context have no field for network
+11-04 10:29:08.695  2467  2753 W iDST::Context: context have no field for geography
+11-04 10:29:08.695  2467  2753 I chatty  : uid=10119(com.autonavi.amapautp.yh) VolumeThread identical 5 lines
+11-04 10:29:08.695  2467  2753 W iDST::Context: context have no field for geography
+11-04 10:29:08.695  2467  2753 I iDST::Context: context have no field for custom
+11-04 10:29:08.695  2467  2753 I iDST::Context: parsed custom null
+11-04 10:29:08.695  2467  2753 I iDST::Context: generate custom {"dialect":"","tts_interrupted":"not_interrupt"}
+11-04 10:29:08.695  2467  2753 I iDST::TtsThreadMgr: initialize ...
+11-04 10:29:08.695  2467  2753 I iDST::TtsThreadMgr: insert thread:486748043232 begin
+11-04 10:29:08.695  2467  2753 I iDST::TtsThreadMgr: new executor:486748043232
+11-04 10:29:08.695  2467  2753 I iDST::TtsAudioPlayer: (486748043232)init AudioPlayer ...
+11-04 10:29:08.695  2467  2753 W iDST::TtsAudioPlayer: skip audiomanager(486748043232)
+11-04 10:29:08.695  2467  2753 I iDST::TtsAudioPlayer: (486748043232)smart; skip new audio buffer
+11-04 10:29:08.695  2467  2753 I iDST::TtsAudioPlayer: (486748043232)smart; skip new volume buffer
+11-04 10:29:08.695  2467  2753 I iDST::TtsAudioPlayer: (486748043232)init AudioPlayer done
+11-04 10:29:08.695  2467  2753 I iDST::TtsSynthesizerLocal: create tts task, handle 486748043232 ...
+11-04 10:29:08.695  2467  2753 I iDST::TtsSynthesizerLocal: construct local tts engine ...
+11-04 10:29:08.695  2467  2753 I iDST::TtsSynthesizerLocal: construct local tts engine done
+11-04 10:29:08.695  2467  2753 I iDST::TtsCeiImpl: construct tts engine /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files/amapauto9/data/voice//tts/voices [begin]
+11-04 10:29:08.695  2467  2753 I iDST::TtsCeiImpl: tts engine version V2.1.0
+11-04 10:29:08.696  2467  2753 I iDST::TtsCeiImpl: construct tts engine [done]
+11-04 10:29:08.696  2467  2753 I iDST::TtsCeiImpl: construct tts task ...
+11-04 10:29:08.696  2467  2753 I TtsLanguage : languagetype 2
+11-04 10:29:08.696  2467  2753 I TtsLanguage : LoadPhoneSet pass
+11-04 10:29:08.698  2467  2753 I TtsLanguage : LoadEnglishFrd 1
+11-04 10:29:08.698  2467  2753 I TtsLanguage : LoadBreakModel 1
+11-04 10:29:08.698  2467  2753 I TtsLanguage : LoadPosSet 1
+11-04 10:29:08.698  2467  2753 I TtsLanguage : LoadEmbedding 1
+11-04 10:29:08.705  2467  2753 I TtsLanguage : LoadMap::m_py_phone_map 1
+11-04 10:29:08.716  2467  2753 I TtsLanguage : LoadMap::m_en_ch_syll_map 0
+11-04 10:29:08.717  2467  2753 I TtsLanguage : LoadMap::ch_en_danwei_map_ 1
+11-04 10:29:08.717  2467  2753 I TtsLanguage : LoadMap::ch_en_phone_map_ 0
+11-04 10:29:08.717  2467  2753 I TtsLanguage : LoadMap::en_ch_phone_map_ 1
+11-04 10:29:08.717  2467  2753 I TtsLanguage : LoadDADictionary 1
+11-04 10:29:08.719  2467  2753 I TtsLanguage : Load TNRules 1
+11-04 10:29:08.725  2467  2753 I TtsLanguage : Load da_insert_break_ 1
+11-04 10:29:08.725  2467  2753 I TtsLanguage : LoadSet yi_specialcase_prevchar_ 1
+11-04 10:29:08.725  2467  2753 I TtsLanguage : LoadSet yi_specialcase_nextchar_ 1
+11-04 10:29:08.725  2467  2753 I TtsLanguage : LoadSet delimiter_l1_ 0
+11-04 10:29:08.725  2467  2753 I TtsLanguage : Sentence Separator L2 0
+11-04 10:29:08.725  2467  2753 I TtsLanguage : Sentence Separator Pre 0
+11-04 10:29:08.725  2467  2753 I TtsLanguage : LoadPolyphoneNnet::polyphone_model_type_ 0
+11-04 10:29:08.725  2467  2753 I TtsLanguage : LoadXnnNet 0
+11-04 10:29:08.725  2467  2753 I TtsLanguage : Load phonedur_mvn_val_ 0
+11-04 10:29:08.725  2467  2753 I TtsLanguage : Load ch_phone_list_ 0
+11-04 10:29:08.725  2467  2753 I TtsLanguage : LoadMap punc_map_ 0
+11-04 10:29:08.725  2467  2753 I TtsLanguage : LoadMap phone_category_map_ 0
+11-04 10:29:08.725  2467  2753 I TtsLanguage : Load phone_dur_list_str_ 0
+11-04 10:29:08.725  2467  2753 I TtsLanguage : Addtional data PolyRuleData nNameLength 12
+11-04 10:29:08.725  2467  2753 I TtsLanguage : Addtional data ToneRuleData nNameLength 12
+11-04 10:29:08.725  2467  2753 I TtsLanguage : Addtional data AddressBreakModelData nNameLength 2037539172
+11-04 10:29:08.725  2467  2753 I TtsLanguage : Addtional data BreakPostProcessData nNameLength 2037539172
+11-04 10:29:08.741  2467  2753 I iDST::TtsCeiImpl: 0 tts tasks before. retcode:0
+11-04 10:29:08.741  2467  2753 I iDST::TtsCeiImpl: construct tts task 486748043232, 1 left [done]
+11-04 10:29:08.746  2467  2753 I iDST::TtsThreadMgr: insert thread:486748043232 done
+11-04 10:29:08.746  2467  2753 I iDST::TtsThreadMgr: (486748043232)initialize done
+11-04 10:29:08.747  2467  2753 I iDST::TtsThreadMgr: (486748043232)method:GetParam valid
+11-04 10:29:08.747  2467  2753 I iDST::TtsThreadMgr: (486748043232)method:SetParam valid
+11-04 10:29:08.747  2467  2753 D GAdaptorJNI: AndroidTTSEngineImplCreat 0
+11-04 10:29:08.679  2467  2467 I chatty  : uid=10119(com.autonavi.amapautp.yh) identical 2 lines
+11-04 10:29:08.683  2467  2467 I auditd  : type=1400 audit(0.0:190): avc: denied { search } for comm="data_sd_sdisk" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:08.755  2467  2467 I auditd  : type=1400 audit(0.0:191): avc: denied { search } for comm="MainScreen" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:08.755  2467  2467 W MainScreen: type=1400 audit(0.0:191): avc: denied { search } for name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:08.955  2467  2770 D PathUtils: isAdapterAndroidR targetSdkVersion = 24
+11-04 10:29:08.957  2467  2770 W System.err: java.io.FileNotFoundException: /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_min_freq: open failed: ENOENT (No such file or directory)
+11-04 10:29:08.957  2467  2770 W System.err: 	at libcore.io.IoBridge.open(IoBridge.java:496)
+11-04 10:29:08.957  2467  2770 W System.err: 	at java.io.FileInputStream.<init>(FileInputStream.java:159)
+11-04 10:29:08.957  2467  2770 W System.err: 	at java.io.FileInputStream.<init>(FileInputStream.java:115)
+11-04 10:29:08.957  2467  2770 W System.err: 	at java.io.FileReader.<init>(FileReader.java:58)
+11-04 10:29:08.957  2467  2770 W System.err: 	at si.B(SourceFile:6)
+11-04 10:29:08.957  2467  2770 W System.err: 	at si.i(SourceFile:4)
+11-04 10:29:08.957  2467  2770 W System.err: 	at com.autonavi.amapauto.jni.NetworkParamNative.getAndNetworkParam(SourceFile:370)
+11-04 10:29:08.957  2467  2770 W System.err: Caused by: android.system.ErrnoException: open failed: ENOENT (No such file or directory)
+11-04 10:29:08.957  2467  2770 W System.err: 	at libcore.io.Linux.open(Native Method)
+11-04 10:29:08.957  2467  2770 W System.err: 	at libcore.io.ForwardingOs.open(ForwardingOs.java:167)
+11-04 10:29:08.957  2467  2770 W System.err: 	at libcore.io.BlockGuardOs.open(BlockGuardOs.java:252)
+11-04 10:29:08.957  2467  2770 W System.err: 	at libcore.io.ForwardingOs.open(ForwardingOs.java:167)
+11-04 10:29:08.957  2467  2770 W System.err: 	at android.app.ActivityThread$AndroidOs.open(ActivityThread.java:7255)
+11-04 10:29:08.957  2467  2770 W System.err: 	at libcore.io.IoBridge.open(IoBridge.java:482)
+11-04 10:29:08.957  2467  2770 W System.err: 	... 6 more
+11-04 10:29:08.958  2467  2770 W System.err: java.io.FileNotFoundException: /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq: open failed: ENOENT (No such file or directory)
+11-04 10:29:08.958  2467  2770 W System.err: 	at libcore.io.IoBridge.open(IoBridge.java:496)
+11-04 10:29:08.958  2467  2770 W System.err: 	at java.io.FileInputStream.<init>(FileInputStream.java:159)
+11-04 10:29:08.958  2467  2770 W System.err: 	at java.io.FileInputStream.<init>(FileInputStream.java:115)
+11-04 10:29:08.958  2467  2770 W System.err: 	at java.io.FileReader.<init>(FileReader.java:58)
+11-04 10:29:08.958  2467  2770 W System.err: 	at si.y(SourceFile:6)
+11-04 10:29:08.958  2467  2770 W System.err: 	at si.i(SourceFile:16)
+11-04 10:29:08.958  2467  2770 W System.err: 	at com.autonavi.amapauto.jni.NetworkParamNative.getAndNetworkParam(SourceFile:370)
+11-04 10:29:08.958  2467  2770 W System.err: Caused by: android.system.ErrnoException: open failed: ENOENT (No such file or directory)
+11-04 10:29:08.958  2467  2770 W System.err: 	at libcore.io.Linux.open(Native Method)
+11-04 10:29:08.958  2467  2770 W System.err: 	at libcore.io.ForwardingOs.open(ForwardingOs.java:167)
+11-04 10:29:08.958  2467  2770 W System.err: 	at libcore.io.BlockGuardOs.open(BlockGuardOs.java:252)
+11-04 10:29:08.958  2467  2770 W System.err: 	at libcore.io.ForwardingOs.open(ForwardingOs.java:167)
+11-04 10:29:08.958  2467  2770 W System.err: 	at android.app.ActivityThread$AndroidOs.open(ActivityThread.java:7255)
+11-04 10:29:08.958  2467  2770 W System.err: 	at libcore.io.IoBridge.open(IoBridge.java:482)
+11-04 10:29:08.958  2467  2770 W System.err: 	... 6 more
+11-04 10:29:09.080  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:09.086  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:09.127  2669  2707 E BluetoothAdapter: Bluetooth binder is null
+11-04 10:29:09.135  2669  2707 E BluetoothAdapter: Bluetooth binder is null
+11-04 10:29:09.294  2467  2606 D map_bench: postDelayed hideCover begin
+11-04 10:29:09.295  2467  2606 E DumpCrash: getLocalCrashDir filePath = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files/amapauto9/Log/dumpcrash/
+11-04 10:29:09.295  2467  2606 E DumpCrash: getLocalCrashDir filePath = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files/amapauto9/Log/dumpcrash/
+11-04 10:29:09.315  2467  2765 W System.err: java.io.FileNotFoundException: /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_min_freq: open failed: ENOENT (No such file or directory)
+11-04 10:29:09.316  2467  2765 W System.err: 	at libcore.io.IoBridge.open(IoBridge.java:496)
+11-04 10:29:09.316  2467  2765 W System.err: 	at java.io.FileInputStream.<init>(FileInputStream.java:159)
+11-04 10:29:09.316  2467  2765 W System.err: 	at java.io.FileInputStream.<init>(FileInputStream.java:115)
+11-04 10:29:09.316  2467  2765 W System.err: 	at java.io.FileReader.<init>(FileReader.java:58)
+11-04 10:29:09.316  2467  2765 W System.err: 	at si.B(SourceFile:6)
+11-04 10:29:09.316  2467  2765 W System.err: 	at si.i(SourceFile:4)
+11-04 10:29:09.316  2467  2765 W System.err: 	at com.autonavi.amapauto.jni.NetworkParamNative.getAndNetworkParam(SourceFile:370)
+11-04 10:29:09.316  2467  2765 W System.err: Caused by: android.system.ErrnoException: open failed: ENOENT (No such file or directory)
+11-04 10:29:09.316  2467  2765 W System.err: 	at libcore.io.Linux.open(Native Method)
+11-04 10:29:09.316  2467  2765 W System.err: 	at libcore.io.ForwardingOs.open(ForwardingOs.java:167)
+11-04 10:29:09.316  2467  2765 W System.err: 	at libcore.io.BlockGuardOs.open(BlockGuardOs.java:252)
+11-04 10:29:09.316  2467  2765 W System.err: 	at libcore.io.ForwardingOs.open(ForwardingOs.java:167)
+11-04 10:29:09.316  2467  2765 W System.err: 	at android.app.ActivityThread$AndroidOs.open(ActivityThread.java:7255)
+11-04 10:29:09.316  2467  2765 W System.err: 	at libcore.io.IoBridge.open(IoBridge.java:482)
+11-04 10:29:09.316  2467  2765 W System.err: 	... 6 more
+11-04 10:29:09.316  2467  2765 W System.err: java.io.FileNotFoundException: /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq: open failed: ENOENT (No such file or directory)
+11-04 10:29:09.316  2467  2765 W System.err: 	at libcore.io.IoBridge.open(IoBridge.java:496)
+11-04 10:29:09.316  2467  2765 W System.err: 	at java.io.FileInputStream.<init>(FileInputStream.java:159)
+11-04 10:29:09.316  2467  2765 W System.err: 	at java.io.FileInputStream.<init>(FileInputStream.java:115)
+11-04 10:29:09.316  2467  2765 W System.err: 	at java.io.FileReader.<init>(FileReader.java:58)
+11-04 10:29:09.316  2467  2765 W System.err: 	at si.y(SourceFile:6)
+11-04 10:29:09.316  2467  2765 W System.err: 	at si.i(SourceFile:16)
+11-04 10:29:09.316  2467  2765 W System.err: 	at com.autonavi.amapauto.jni.NetworkParamNative.getAndNetworkParam(SourceFile:370)
+11-04 10:29:09.316  2467  2765 W System.err: Caused by: android.system.ErrnoException: open failed: ENOENT (No such file or directory)
+11-04 10:29:09.316  2467  2765 W System.err: 	at libcore.io.Linux.open(Native Method)
+11-04 10:29:09.316  2467  2765 W System.err: 	at libcore.io.ForwardingOs.open(ForwardingOs.java:167)
+11-04 10:29:09.316  2467  2765 W System.err: 	at libcore.io.BlockGuardOs.open(BlockGuardOs.java:252)
+11-04 10:29:09.316  2467  2765 W System.err: 	at libcore.io.ForwardingOs.open(ForwardingOs.java:167)
+11-04 10:29:09.316  2467  2765 W System.err: 	at android.app.ActivityThread$AndroidOs.open(ActivityThread.java:7255)
+11-04 10:29:09.316  2467  2765 W System.err: 	at libcore.io.IoBridge.open(IoBridge.java:482)
+11-04 10:29:09.316  2467  2765 W System.err: 	... 6 more
+11-04 10:29:09.349  2467  2543 E sliver  : value:channel
+11-04 10:29:09.350  2467  2467 D map_bench: hideCover begin
+11-04 10:29:09.352  2467  2467 D map_bench: hideCover end
+11-04 10:29:09.431  2783  2783 I mapautp.yh:pus: The ClassLoaderContext is a special shared library.
+11-04 10:29:09.450  2783  2783 I DexTrace.MapApplicationProxy: app scene false
+11-04 10:29:09.467  2783  2783 D LogProxy: isWriteLog false
+11-04 10:29:09.470  2783  2783 D SelfUpdate: getNeedVersionPath:9.5.0.600013
+11-04 10:29:09.471  2783  2783 D SelfUpdate: appProcess.processName:com.autonavi.amapautp.yh   context.getPackageName: com.autonavi.amapautp.yh
+11-04 10:29:09.471  2783  2783 D SelfUpdate: appProcess.pid：2467  myPid:2783
+11-04 10:29:09.471  2783  2783 D SelfUpdate: appProcess.processName:com.autonavi.amapautp.yh:push   context.getPackageName: com.autonavi.amapautp.yh
+11-04 10:29:09.471  2783  2783 D SelfUpdate: appProcess.processName:com.autonavi.amapautp.yh:locationservice   context.getPackageName: com.autonavi.amapautp.yh
+11-04 10:29:09.471  2783  2783 D map_bench: attachBaseContext begin
+11-04 10:29:09.490  2783  2783 I MapApplication: Process Is :2467 :com.autonavi.amapautp.yh myPid:2783
+11-04 10:29:09.490  2783  2783 I MapApplication: Process Is :2783 :com.autonavi.amapautp.yh:push myPid:2783
+11-04 10:29:09.490  2783  2783 I MapApplication: Process Is :2669 :com.autonavi.amapautp.yh:locationservice myPid:2783
+11-04 10:29:09.491  2783  2783 D MapApplication:  load=Name:	mapautp.yh:push
+11-04 10:29:09.491  2783  2783 D MapApplication: com.autonavi.amapautp.yh mMainApp=false
+11-04 10:29:09.491  2783  2783 D map_bench: attachBaseContext end
+11-04 10:29:09.493  2783  2783 D floatapp.AutoamapPluginManage: load: processName = com.autonavi.amapautp.yh:push not main process
+11-04 10:29:09.502  2783  2783 D map_bench: Application.onCreate begin
+11-04 10:29:09.502  2783  2783 D PathUtils: isAdapterAndroidR targetSdkVersion = 24
+11-04 10:29:09.502  2783  2783 I PathUtils: getAvailableSdcardPath, isNeedFrontMemory:0
+11-04 10:29:09.507  2783  2783 I PathUtils: getAvailableSdcardPath, spUsedInnerPath = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files
+11-04 10:29:09.508  2783  2783 I PathUtils: getAvailableSdcardPath, isExternalFilesDir
+11-04 10:29:09.508  2783  2783 I PathUtils: getAvailableSdcardPath, mAutoUsedSdcardPath = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files
+11-04 10:29:09.529  2783  2783 I MapApplication: setting enable =0
+11-04 10:29:09.529  2783  2783 I MapApplication: BuildConfig.AL_LOGGER_FLAG=8
+11-04 10:29:09.529  2783  2783 D LoggerTracer: init flags 8
+11-04 10:29:09.531  2783  2783 I MapApplication: Process Is :2467 :com.autonavi.amapautp.yh myPid:2783
+11-04 10:29:09.533  2783  2783 I MapApplication: Process Is :2783 :com.autonavi.amapautp.yh:push myPid:2783
+11-04 10:29:09.533  2783  2783 I MapApplication: Process Is :2669 :com.autonavi.amapautp.yh:locationservice myPid:2783
+11-04 10:29:09.533  2783  2783 D MapApplication:  load=Name:	mapautp.yh:push
+11-04 10:29:09.533  2783  2783 D PathUtils: getAutoLogRootPath loadLogPathFromAssets start
+11-04 10:29:09.536  2783  2783 D PathUtils: getAutoLogRootPath loadLogPathFromAssets end
+11-04 10:29:09.536  2783  2783 D PathUtils: isAdapterAndroidR targetSdkVersion = 24
+11-04 10:29:09.536  2783  2783 I PathUtils: getAvailableSdcardPath, isNeedFrontMemory:0
+11-04 10:29:09.537  2783  2783 I PathUtils: getAvailableSdcardPath, spUsedInnerPath = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files
+11-04 10:29:09.537  2783  2783 I PathUtils: getAvailableSdcardPath, isExternalFilesDir
+11-04 10:29:09.537  2783  2783 I PathUtils: getAvailableSdcardPath, mAutoUsedSdcardPath = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files
+11-04 10:29:09.537  2783  2783 D PathUtils: getAutoLogRootPath loadLogPathFromAssets start
+11-04 10:29:09.537  2783  2783 D PathUtils: getAutoLogRootPath loadLogPathFromAssets end
+11-04 10:29:09.537  2783  2783 D PathUtils: isAdapterAndroidR targetSdkVersion = 24
+11-04 10:29:09.537  2783  2783 D PathUtils: getAutoLogRootPath path = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files/amapauto9/Log//
+11-04 10:29:09.537  2783  2783 D PathUtils: getAutoLogRootPath path = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files/amapauto9/Log//
+11-04 10:29:09.537  2783  2783 D AutoLibraryLoader: addLibrary priority = -1,path = /data/user/0/com.autonavi.amapautp.yh/cpplibs/
+11-04 10:29:09.540  2783  2783 D SelfUpdate: isErrorMatchScense enter 
+11-04 10:29:09.540  2783  2783 D SelfUpdate: isErrorMatchScense package version code: 9.5.0.600013
+11-04 10:29:09.540  2783  2783 D SelfUpdate: little endian
+11-04 10:29:09.540  2783  2783 D SelfUpdate: /data/user/0/com.autonavi.amapautp.yh/UpdateVerInfo.dat: open failed: ENOENT (No such file or directory)
+11-04 10:29:09.540  2783  2783 D SelfUpdate: isErrorMatchScense: availVerCnt:0 errSceneCnt:0
+11-04 10:29:09.540  2783  2783 D SelfUpdate: getLibPathWithVerCheck: return getLibPath
+11-04 10:29:09.540  2783  2783 D SelfUpdate: getLibPath libpath :/data/user/0/com.autonavi.amapautp.yh/AutoUpdate/run/lib/
+11-04 10:29:09.540  2783  2783 D SelfUpdate: getLibPath return :null
+11-04 10:29:09.540  2783  2783 D AutoLibraryLoader: addLibrary priority = 1,path = null
+11-04 10:29:09.540  2783  2783 D SelfUpdate: isErrorMatchScense enter 
+11-04 10:29:09.540  2783  2783 D SelfUpdate: isErrorMatchScense package version code: 9.5.0.600013
+11-04 10:29:09.540  2783  2783 D SelfUpdate: isErrorMatchScense: availVerCnt:0 errSceneCnt:0
+11-04 10:29:09.540  2783  2783 D SelfUpdate: getGframePathWithVerCheck return getGframePath
+11-04 10:29:09.540  2783  2783 D SelfUpdate: getGframePath return :null
+11-04 10:29:09.540  2783  2783 D AutoLibraryLoader: addLibrary priority = 2,path = null
+11-04 10:29:09.540  2783  2783 D AutoLibraryLoader: addLibrary priority = 3,path = /data/user/0/com.autonavi.amapautp.yh/app_version/9.5.0.600013
+11-04 10:29:09.540  2783  2783 D AutoLibraryLoader: addLibrary priority = 4,path = /data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/
+11-04 10:29:09.540  2783  2783 D AutoLibraryLoader: addLibrary priority = 6,path = /system/lib64
+11-04 10:29:09.543  2783  2783 I System.out: MQTT LOG PATH:/storage/emulated/0/amapauto9/Log/log_mqtt_jni.log
+11-04 10:29:09.543  2783  2783 I System.out: MQTT LOG PATH:/storage/emulated/0/Android/data/com.autonavi.amapauto/files/amapauto9/Log/log_mqtt_jni.log
+11-04 10:29:09.543  2783  2783 D MapApplication: start checkSign
+11-04 10:29:09.543  2783  2783 D MapApplication: start installDumpCrash
+11-04 10:29:09.544  2783  2783 E DumpCrash: dumpcrash loadLibrary
+11-04 10:29:09.544  2783  2783 D AutoLibraryLoader: loadLibrary libname:/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libopenssl.so
+11-04 10:29:09.546  2783  2783 D AutoLibraryLoader: loadLibrary libname:/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libdumpcrash.so
+11-04 10:29:09.546  2783  2783 E DumpCrash: dumpcrash loadLibrary hasLoadLibrary = true
+11-04 10:29:09.558  2783  2783 E DumpCrash: getLocalCrashDir filePath = /storage/emulated/0/Android/data/com.autonavi.amapautp.yh/files/amapauto9/Log/dumpcrash/
+11-04 10:29:09.558  2783  2783 E DumpCrash: dumpcrash.install workMode:2
+11-04 10:29:09.558  2783  2783 E DumpCrash: extractNativeLibs:true
+11-04 10:29:09.558  2783  2783 E DumpCrash: execlType:0
+11-04 10:29:09.558  2783  2783 E DumpCrash: dumpcrash.install useAes256:false libPath:/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/
+11-04 10:29:09.558  2783  2783 E CrashLog: [dumpcrash.cpp].jni_install(157): jni_install sdkVersion:29, execlType:0, workMode:2, useAes256:0
+11-04 10:29:09.558  2783  2783 E CrashLog: CrashSaver_install
+11-04 10:29:09.558  2783  2783 D CrashLog: [dly.cpp].initApplicationInitalTime(692): initApplicationInitalTime
+11-04 10:29:09.563  2783  2783 D MapApplication: child app
+11-04 10:29:09.569  2467  2508 D SelfUpdate: getLibPath return :null
+11-04 10:29:09.582  2783  2802 D AutoLibraryLoader: loadLibrary libname:/data/app/com.autonavi.amapautp.yh-ahjRcmfq8uniI7zJwwxosw==/lib/arm64/libmqtt_jni.so
+11-04 10:29:09.703  2467  2467 I auditd  : type=1400 audit(0.0:214): avc: denied { search } for comm="Thread-26" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:09.703  2467  2467 W Thread-26: type=1400 audit(0.0:214): avc: denied { search } for name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:09.798  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:09.800  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:09.840  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:09.851  2467  2467 W Thread-26: type=1400 audit(0.0:216): avc: denied { search } for name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:09.846  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:09.851  2467  2467 I chatty  : uid=10119(com.autonavi.amapautp.yh) identical 2 lines
+11-04 10:29:09.851  2467  2467 I auditd  : type=1400 audit(0.0:217): avc: denied { search } for comm="Thread-26" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:09.939  2467  2467 I auditd  : type=1400 audit(0.0:218): avc: denied { search } for comm="bl_thd_pool_wor" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:09.939  2467  2467 W bl_thd_pool_wor: type=1400 audit(0.0:218): avc: denied { search } for name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:10.119  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:10.122  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:10.522  2467  2467 I AutoActivityLifecycle: com.autonavi.auto.remote.fill.UsbFillActivity@8cbbe19-->destroyed
+11-04 10:29:10.522  2467  2467 D floatapp.LifecycleCallbacks: onActivityDestroyed:  activityName = UsbFillActivity
+11-04 10:29:10.522  2467  2467 I AutoActivityLifecycle: com.autonavi.auto.remote.fill.UsbFillActivity@8cbbe19-->destroyed
+11-04 10:29:10.523  2467  2467 I am_on_destroy_called: [0,com.autonavi.auto.remote.fill.UsbFillActivity,performDestroy]
+11-04 10:29:10.759  2467  2467 I auditd  : type=1400 audit(0.0:220): avc: denied { search } for comm="hsl_async" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:10.759  2467  2467 W hsl_async: type=1400 audit(0.0:220): avc: denied { search } for name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:10.783  2467  2467 W hsl_io  : type=1400 audit(0.0:224): avc: denied { search } for name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:10.838  2467  2779 W gatrace : #App;#CGResFileReader;LoadRes file libcmb_AGroupPackage.so success, eCode = 0, path=/system/lib64
+11-04 10:29:10.845  2467  2818 W gatrace : #App;#CGResFileReader;LoadRes file libcmb_MyTrackPackage.so success, eCode = 0, path=/system/lib64
+11-04 10:29:10.858  2467  2819 W gatrace : #App;#CGResFileReader;LoadRes file libcmb_SwitchCardPackage.so success, eCode = 0, path=/system/lib64
+11-04 10:29:10.955  2467  2609 E sliver  : value:channel&diu&div
+11-04 10:29:11.066  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:11.084  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:11.121  2669  2707 E BluetoothAdapter: Bluetooth binder is null
+11-04 10:29:11.440  2467  2779 E sliver  : value:channel&tid
+11-04 10:29:11.442  2467  2543 I turbo   : load BlueBird begin state=0
+11-04 10:29:11.443  2467  2543 I turbo   : path=libBlueBird.so, name=BlueBird
+11-04 10:29:11.444  2467  2543 E turbo   : pItem->handle is null
+11-04 10:29:11.444  2467  2543 E turbo   : dlopen libBlueBird.so error dlopen failed: library "libBlueBird.so" not found
+11-04 10:29:11.444  2467  2543 I turbo   : load libBlueBird.so ret=0
+11-04 10:29:11.444  2467  2543 E turbo   : load BlueBird end state=2
+11-04 10:29:11.447  2467  2838 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:11.448  2467  2838 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:11.448  2467  2838 I PermissionUtils: checkPermissions, permission:android.permission.WRITE_EXTERNAL_STORAGE,op:android:write_external_storage
+11-04 10:29:11.448  2467  2838 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:11.448  2467  2838 I PermissionUtils: checkPermissions, permission:android.permission.READ_PHONE_STATE,op:android:read_phone_state
+11-04 10:29:11.448  2467  2838 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:11.449  2467  2838 I PermissionUtils: checkPermissions, permission:android.car.permission.CAR_ENERGY,op:null
+11-04 10:29:11.449  2467  2838 I PermissionUtils: checkPermissions, permission:android.permission.POST_NOTIFICATIONS,op:null
+11-04 10:29:10.759  2467  2467 I chatty  : uid=10119(com.autonavi.amapautp.yh) identical 1 line
+11-04 10:29:10.783  2467  2467 I auditd  : type=1400 audit(0.0:224): avc: denied { search } for comm="hsl_io" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:11.533  2467  2543 I service_manager_slow: [52,phone]
+11-04 10:29:11.677  2669  2669 W locationservic: Class com.autonavi.amapauto.multiscreen.presentation.SecondaryGuideOverlay failed lock verification and will run slower.
+11-04 10:29:11.677  2669  2669 W locationservic: Common causes for lock verification issues are non-optimized dex code
+11-04 10:29:11.677  2669  2669 W locationservic: and incorrect proguard optimizations.
+11-04 10:29:11.678  2669  2669 E locationservic: No implementation found for boolean com.autonavi.amapauto.jni.AndroidDriveNavigation.isInNavi() (tried Java_com_autonavi_amapauto_jni_AndroidDriveNavigation_isInNavi and Java_com_autonavi_amapauto_jni_AndroidDriveNavigation_isInNavi__)
+11-04 10:29:11.681  2669  2669 D MultiScreen:MultiScreenMotionHandler: bindService
+11-04 10:29:11.848  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:11.851  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:11.853  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:11.861  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:11.929  2467  2543 E sliver  : value:channel
+11-04 10:29:11.927  2467  2467 I auditd  : type=1400 audit(0.0:254): avc: denied { search } for comm="MainScreen" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:11.927  2467  2467 W MainScreen: type=1400 audit(0.0:254): avc: denied { search } for name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:11.943  2467  2467 W dl_theme_main: type=1400 audit(0.0:256): avc: denied { search } for name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:11.963  2467  2467 W hsl_io  : type=1400 audit(0.0:258): avc: denied { search } for name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:12.227  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:12.231  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:12.771  2467  2667 I service_manager_stats: [200,421,501926]
+11-04 10:29:13.511  2783  2783 W mapautp.yh:pus: Class com.autonavi.amapauto.multiscreen.presentation.SecondaryGuideOverlay failed lock verification and will run slower.
+11-04 10:29:13.511  2783  2783 W mapautp.yh:pus: Common causes for lock verification issues are non-optimized dex code
+11-04 10:29:13.511  2783  2783 W mapautp.yh:pus: and incorrect proguard optimizations.
+11-04 10:29:13.519  2783  2783 E mapautp.yh:pus: No implementation found for boolean com.autonavi.amapauto.jni.AndroidDriveNavigation.isInNavi() (tried Java_com_autonavi_amapauto_jni_AndroidDriveNavigation_isInNavi and Java_com_autonavi_amapauto_jni_AndroidDriveNavigation_isInNavi__)
+11-04 10:29:13.547  2783  2783 D MultiScreen:MultiScreenMotionHandler: bindService
+11-04 10:29:13.863  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:13.865  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:13.866  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:13.869  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:14.050  2467  2649 V UpdateManage: GetVerReq
+11-04 10:29:14.050  2467  2649 E sliver  : value:dic&div
+11-04 10:29:14.055  2467  2467 I auditd  : type=1400 audit(0.0:264): avc: denied { search } for comm="UpdateMsgThread" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:14.055  2467  2467 W UpdateMsgThread: type=1400 audit(0.0:264): avc: denied { search } for name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:14.075  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:14.086  2467  2649 V UpdateManage: Send Version Req
+11-04 10:29:14.086  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:14.555  2467  2781 V UpdateManage: Version Response Success
+11-04 10:29:15.077  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:15.083  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:15.886  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:15.891  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:15.893  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:15.899  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:16.113  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:16.129  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:16.151  2669  2707 E BluetoothAdapter: Bluetooth binder is null
+11-04 10:29:17.087  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:17.089  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:17.906  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:17.909  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:17.909  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:17.909  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:18.105  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:18.110  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:19.161  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:19.162  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:19.909  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:19.911  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:19.914  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:19.914  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:20.095  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:20.097  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:20.921  2467  2508 D SelfUpdate: getLibPath return :null
+11-04 10:29:21.104  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:21.104  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:21.156  2669  2707 E BluetoothAdapter: Bluetooth binder is null
+11-04 10:29:21.921  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:21.981  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:21.982  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:21.984  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:22.105  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:22.106  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:23.110  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:23.112  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:23.984  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:24.019  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:24.024  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:24.033  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:24.124  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:24.124  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:25.146  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:25.146  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:25.830  2467  2870 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:25.831  2467  2870 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:26.034  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:26.034  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:26.034  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:26.034  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:26.143  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:26.146  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:26.187  2669  2707 E BluetoothAdapter: Bluetooth binder is null
+11-04 10:29:27.126  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:27.144  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:28.035  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:28.037  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:28.037  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:28.037  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:28.145  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:28.154  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:29.129  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:29.130  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:30.042  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:30.047  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:30.048  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:30.050  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:30.138  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:30.141  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:31.153  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:31.165  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:31.198  2669  2707 E BluetoothAdapter: Bluetooth binder is null
+11-04 10:29:32.052  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:32.057  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:32.057  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:32.057  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:32.145  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:32.145  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:32.172  2467  2873 D 天气  : GPS定位成功:39.237255,-123.15003166666665
+11-04 10:29:32.172  2467  2873 D 天气  : 请求URL(备用API): http://api.bigdatacloud.net/data/reverse-geocode-client?latitude=39.237255&longitude=-123.15003166666665&localityLanguage=zh-Hans&extensions=base
+11-04 10:29:32.526  2467  2873 D 天气  : HTTP响应码(备用): 200
+11-04 10:29:32.526  2467  2873 D 调试  : API响应(备用): {  "latitude": 39.237255,  "lookupSource": "coordinates",  "longitude": -123.15003166666665,  "localityLanguageRequested": "zh-hans",  "continent": "北美洲",  "continentCode": "NA",  "countryName": "美国",  "countryCode": "US",  "principalSubdivision": "加利福尼亚州",  "principalSubdivisionCode": "US-CA",  "city": "Redwood Valley-Potter Valley",  "locality": "尤奇亚",  "postcode": "95482",  "plusCode": "84FR6RPX+WX",  "fips": {    "state": "06",    "county": "045",    "countySubdivision": "93490"  },  "localityInfo": {    "administrative": [      {        "name": "美国",        "description": "北美洲国家",        "isoName": "United States of America",        "order": 2,        "adminLevel": 2,        "isoCode": "US",        "wikidataId": "Q30",        "geonameId": 6252001      },      {        "name": "加利福尼亚州",        "description": "美国州份",        "isoName": "California",        "order": 5,        "adminLevel": 4,        "isoCode": "US-CA",        "wikidataId": "Q99",        "geonameId": 5332921      },      {        "name": "门多西诺县",        "description": "county in northwestern California, United States",        "order": 6,        "adminLevel": 6,        "wikidataId": "Q108087",        "geonameId": 5372163      },      {        "name": "尤奇亚",        "description": "city in and county seat of Mendocino County, California, United States",        "order": 10,        "adminLevel": 8,        "wikidataId": "Q837105",        "geonameId": 5404476      }    ],    "informative": [      {        "name": "北美洲",        "description": "七大洲之一",        "isoName": "North America",        "order": 1,        "isoCode": "NA",        "wikidataId": "Q49",        "geonameId": 6255149      },      {        "name": "美国本土",        "description": "the 48 states of the United States (all but Alaska and Hawaii) and the District of Columbia",        "order": 3,        "wikidataId": "Q578170"      },      {        "name": "America/Los_Angeles",        "description": "时区",        "order": 4      },      {        "name": "Redwood Valley-Potter Valley",        "order": 7,        "geonameId": 12523212      },      {        "name": "95482",        "description": "邮政编码",        "order": 8      },      {        "name": "06-045-93490",        "description": "FIPS code",        "order": 9      }    ]  }}
+11-04 10:29:32.527  2467  2873 D 天气  : 逆地理编码成功，保存城市信息
+11-04 10:29:32.527  2467  2873 D 天气  : 开始更新城市信息
+11-04 10:29:32.527  2467  2873 D 天气  : 城市信息未变化，无需更新城市信息
+11-04 10:29:32.527  2467  2873 D 天气  : 执行成功
+11-04 10:29:33.146  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:33.146  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:34.062  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:34.068  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:34.070  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:34.072  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:34.147  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:34.150  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:35.187  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:35.187  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:36.073  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:36.073  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:36.073  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:36.074  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:36.180  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:36.183  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:36.219  2669  2707 E BluetoothAdapter: Bluetooth binder is null
+11-04 10:29:37.099  2669  2669 W locationservic: Accessing hidden method Landroid/view/Display;->getUniqueId()Ljava/lang/String; (blacklist, linking, denied)
+11-04 10:29:37.164  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:37.167  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:14.055  2467  2467 I auditd  : type=1400 audit(0.0:265): avc: denied { search } for comm="UpdateMsgThread" name="net" dev="sysfs" ino=2889 scontext=u:r:untrusted_app_25:s0:c512,c768 tcontext=u:object_r:sysfs_net:s0 tclass=dir permissive=0 app=com.autonavi.amapautp.yh
+11-04 10:29:37.930  2669  2737 I service_manager_stats: [200,180,527085]
+11-04 10:29:38.075  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:38.076  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:38.077  2467  2545 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:38.086  2467  2545 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:38.160  2467  2657 I PermissionUtils: checkPermissions, permission:android.permission.ACCESS_FINE_LOCATION,op:android:fine_location
+11-04 10:29:38.168  2467  2657 I PermissionUtils: checkPermissions, noteProxyOp,result:0
+11-04 10:29:38.940  2783  2783 W mapautp.yh:pus: Accessing hidden method Landroid/view/Display;->getUniqueId()Ljava/lang/String; (blacklist, linking, denied)

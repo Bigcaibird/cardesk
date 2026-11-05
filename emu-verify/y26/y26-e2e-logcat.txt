@@ -1,0 +1,9 @@
+11-04 10:32:37.987  3471  3492 D TLightBC: selftest: dispatch synthetic light state
+11-04 10:32:37.992  3328  3328 I CarDesk/NavUI: 收到巡航多方向红绿灯 count=2 dirs=1,2
+11-04 10:32:37.993  3328  3328 I CarDesk/NavUI: 收到红绿灯数据（巡航协议） lamp=GREEN countdown=7 rawStatus=1 rawDir=2
+11-04 10:32:37.994  3328  3328 I CarDesk/NavUI: 收到巡航多方向红绿灯 count=2 dirs=1,2
+11-04 10:32:37.995  3328  3328 I CarDesk/NavUI: 收到红绿灯数据（巡航协议） lamp=GREEN countdown=7 rawStatus=1 rawDir=2
+
+# 方法：在 AVD 上安装打补丁高德 9.5，运行作者自带 work/test_light_broadcast.sh
+# （标志文件 + UsbFillActivity + 真实注入点 notifyCameraLightInfosImpl）
+# 结果：selftest dispatch → 桌面（4207）动态接收器收到并显示巡航卡。
