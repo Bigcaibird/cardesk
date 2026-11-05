@@ -54,4 +54,40 @@ object OverlaySpec {
     const val INTERPOLATOR_Y1 = 0.8f
     const val INTERPOLATOR_X2 = 0.2f
     const val INTERPOLATOR_Y2 = 1f
+
+    // ---------------------------------------------------------------
+    // 第 124 轮：背景板「透出桌面」
+    // ---------------------------------------------------------------
+
+    /**
+     * 透出桌面时，`.bgwash` 底色保留的 **alpha**（`0x4D` ≈ 30%）。
+     *
+     * 原来 `.bgwash` 是**不透明**纯色底（`0xFF…`），桌面被完全盖死。
+     * 透出模式下底色改成半透明，保留顶部那道椭圆径向渐变的质感，
+     * 但不再把下面的桌面挡得一丝不露。
+     */
+    const val THROUGH_BG_ALPHA = 0x4D
+
+    /**
+     * 透出桌面时，`.scrim` 遮罩保留的**比例**（原来的一半）。
+     *
+     * `.scrim` 的作用是「压暗浮层自己的背景」。
+     * 背景板变透明之后它就变成「压暗桌面」了 —— 不减弱的话，
+     * 桌面透上来了也还是被压得死黑，等于没透。
+     */
+    const val THROUGH_SCRIM_SCALE = 0.5f
+
+    /**
+     * 两层半透明叠加之后，下面的桌面还能透出**多少**（0..1）。
+     *
+     * 先过 `.bgwash`（保留 [bgAlpha]/255），再过 `.scrim`（保留 [scrimAlpha]/255）：
+     * 桌面剩下的比例 = `(1 - bg) × (1 - scrim)`。
+     *
+     * 纯 Kotlin（不碰 `android.graphics`），保证能 JVM 单测。
+     */
+    fun throughRate(bgAlpha: Int, scrimAlpha: Int): Float {
+        val bg = bgAlpha.coerceIn(0, 255) / 255f
+        val scrim = scrimAlpha.coerceIn(0, 255) / 255f
+        return (1f - bg) * (1f - scrim)
+    }
 }

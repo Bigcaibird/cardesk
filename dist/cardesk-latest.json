@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1126",
-  "versionCode": 4222,
-  "tag": "v1.0.1126",
-  "name": "CarDesk 4222 / 1.0.1126-system",
-  "notes": "## 第 123 轮：左上角设置入口 —— 字母「C」改成设置齿轮图标\n\n- 状态栏左上角原来的字母「C」改成 **Canvas 现画的齿轮（设置图标）**。\n- 强调色圆角方块底板、命中区（`avatarRect`）、点击行为一律不动 —— 只换里面那一格图形。\n- 齿轮外径 23px（齿尖半径 11.5），跟原来 21px 粗体字母的视觉大小接近，这一格在状态栏里的分量不变。\n- 8 个梯形齿 + 齿轮身 + `Path.FillType.EVEN_ODD` 挖出的中心孔（换任何背景都还是透明的）。\n- 新增 2 条像素级单测钉死形状；反向验证过：换回字母「C」断言必红。\n- 全量 1622 个单测全绿。",
-  "publishedAt": "2026-11-05T06:45:55Z",
+  "version": "1.0.1127",
+  "versionCode": 4223,
+  "tag": "v1.0.1127",
+  "name": "CarDesk 4223 / 1.0.1127-system",
+  "notes": "## 第 124 轮：设置页主体外的留白改成透出桌面\n\n- 设置页面板（主体）之外的那圈留白，从一整块不透明的 `.bgwash + .scrim` 改成半透明，桌面透得出来。\n- 面板主体那张卡仍是不透明（`palette.surface`），里面的字照旧清楚。\n- 只改设置页；空调 / 应用抽屉 / 最近任务等其它浮层维持原样。\n- 新增 5 条单测（像素级 + 纯 Kotlin 透出率），并做了两轮反向验证。\n- 全量 1627 个单测全绿。",
+  "publishedAt": "2026-11-05T07:11:51Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4222.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4222.apk",
-    "size": 2222082,
-    "sha256": "2725cbf9f5a2f615b4d5705cb8a71b9973c91003eefee82c413546ef0a696f3a"
+    "name": "CarDesk-platform-ecarx-cardesk-4223.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4223.apk",
+    "size": 2222518,
+    "sha256": "d64931670507465d606da1eb46f7a74e77d9d2e21613386c6df46741382480b7"
   }
 }

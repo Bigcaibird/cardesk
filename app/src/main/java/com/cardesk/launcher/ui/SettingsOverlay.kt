@@ -366,9 +366,12 @@ class SettingsOverlay(
 
     private fun build() {
         val scrim = OverlayBackdrop(context).apply {
-            // 第五十轮：背景板 = `.bgwash` + `.scrim`（不透明），与设计板 `s05-settings` 一致。
+            // 第五十轮：背景板 = `.bgwash` + `.scrim`，与设计板 `s05-settings` 一致。
+            // 第124轮：改成**半透明** —— 面板主体（那张不透明卡片）之外的那圈留白
+            // 能透出下面的桌面，不再是一整块死色。
             palette = this@SettingsOverlay.pal
             withScrim = true
+            seeThrough = true
             isClickable = true
             setOnClickListener { onClose?.invoke() }
         }
