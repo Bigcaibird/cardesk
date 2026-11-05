@@ -1,0 +1,41 @@
+11-05 09:07:41.115 I/CarDesk/App( 7473): 启动分段：onCreate processMs=2059 onCreateMs=0 bootMs=47501091
+11-05 09:07:41.134 I/CarDesk-Startup( 7473): onCreate process=2059ms onCreate=0ms boot=47501091ms
+11-05 09:07:41.139 I/CarDesk/App( 7473): 桌面启动 sdk=29 pid=7473 restored=false
+11-05 09:07:41.147 I/CarDesk/App( 7473): 启动分段：window processMs=2091 onCreateMs=32 bootMs=47501123
+11-05 09:07:41.147 I/CarDesk-Startup( 7473): window process=2091ms onCreate=32ms boot=47501123ms
+11-05 09:07:41.273 I/CarDesk/App( 7473): 启动分段：splashFirstFrame processMs=2217 onCreateMs=158 bootMs=47501249
+11-05 09:07:41.274 I/CarDesk-Startup( 7473): splashFirstFrame process=2217ms onCreate=158ms boot=47501249ms
+11-05 09:07:41.894 D/CarDesk/NavUI( 7473): 画中画比例读取 dual=false key=desk_primary_ratio_normal_v1 raw=0.71030045 value=0.71030045 default=0.71030045
+11-05 09:07:41.902 I/CarDesk/NavUI( 7473): 画中画内容留白 top=0 bottom=0 fullscreen=false
+11-05 09:07:41.903 D/CarDesk/NavUI( 7473): 画中画比例读取 dual=false key=desk_primary_ratio_normal_v1 raw=0.71030045 value=0.71030045 default=0.71030045
+11-05 09:07:41.914 D/CarDesk/NavUI( 7473): 画中画分屏比例变化 ratio=0.71030045 dual=false
+11-05 09:07:42.197 I/CarDesk/App( 7473): 启动分段：uiBuilt processMs=3141 onCreateMs=1082 bootMs=47502173
+11-05 09:07:42.198 I/CarDesk-Startup( 7473): uiBuilt process=3141ms onCreate=1082ms boot=47502173ms
+11-05 09:07:42.222 I/CarDesk/App( 7473): 启动分段：launcherCreated processMs=3166 onCreateMs=1107 bootMs=47502198
+11-05 09:07:42.223 I/CarDesk-Startup( 7473): launcherCreated process=3166ms onCreate=1107ms boot=47502198ms
+11-05 09:07:42.244 I/CarDesk/App( 7473): 启动分段：launcherFirstFrame processMs=3188 onCreateMs=1129 bootMs=47502220
+11-05 09:07:42.244 I/CarDesk-Startup( 7473): launcherFirstFrame process=3188ms onCreate=1129ms boot=47502220ms
+11-05 09:07:42.502 I/CarDesk/App( 7473): 启动分段：launcherReady processMs=3446 onCreateMs=1387 bootMs=47502478
+11-05 09:07:42.502 I/CarDesk-Startup( 7473): launcherReady process=3446ms onCreate=1387ms boot=47502478ms
+11-05 09:07:42.506 I/CarDesk/App( 7473): 启动分段：servicesBegin processMs=3446 onCreateMs=1387 bootMs=47502479
+11-05 09:07:42.506 I/CarDesk-Startup( 7473): servicesBegin process=3446ms onCreate=1387ms boot=47502479ms
+11-05 09:07:42.659 I/CarDesk/App( 7473): 启动分段：servicesDone processMs=3602 onCreateMs=1543 bootMs=47502635
+11-05 09:07:42.680 I/CarDesk-Startup( 7473): servicesDone process=3602ms onCreate=1543ms boot=47502635ms
+11-05 09:07:42.681 I/CarDesk/App( 7473): 启动分段：servicesStarted processMs=3624 onCreateMs=1565 bootMs=47502656
+11-05 09:07:42.681 I/CarDesk-Startup( 7473): servicesStarted process=3624ms onCreate=1565ms boot=47502656ms
+11-05 09:07:42.771 I/CarDesk/App( 7473): 启动分段：launchServicesStarted processMs=3715 onCreateMs=1656 bootMs=47502747
+11-05 09:07:42.771 I/CarDesk-Startup( 7473): launchServicesStarted process=3715ms onCreate=1656ms boot=47502747ms
+11-05 09:07:43.105 I/CarDesk/App( 7473): 启动分段：desktopReady processMs=4049 onCreateMs=1990 bootMs=47503081
+11-05 09:07:43.105 I/CarDesk-Startup( 7473): desktopReady process=4049ms onCreate=1990ms boot=47503081ms
+11-05 09:07:43.105 I/CarDesk/App( 7473): 启动完成 totalMs=4049 bootMs=47503081 startSource=process fromCreateMs=onCreate=0 window=32 splashFirstFrame=158 uiBuilt=1082 launcherCreated=1107 launcherFirstFrame=1129 launcherReady=1387 servicesBegin=1387 servicesDone=1543 servicesStarted=1565 launchServicesStarted=1656 desktopReady=1990
+11-05 09:07:43.105 I/CarDesk-Startup( 7473): done total=4049ms boot=47503081ms start=process fromCreate onCreate=0 window=32 splashFirstFrame=158 uiBuilt=1082 launcherCreated=1107 launcherFirstFrame=1129 launcherReady=1387 servicesBegin=1387 servicesDone=1543 servicesStarted=1565 launchServicesStarted=1656 desktopReady=1990
+11-05 09:07:43.106 I/CarDesk/App( 7473): 桌面就绪后开始唤起高德相关动作
+11-05 09:07:43.106 I/CarDesk/App( 7473): 开始承载画中画 reason=桌面就绪
+11-05 09:07:43.106 D/CarDesk/NavUI( 7473): 刷新画中画 pkg=com.autonavi.amapautp.yh pkg2= dual=false
+11-05 09:07:43.140 I/CarDesk/NavUI( 7473): 尝试 ActivityView 嵌入 pkg=com.autonavi.amapautp.yh sdk=29
+11-05 09:07:43.157 D/CarDesk/NavUI( 7473): ActivityView 回调是抽象类，改用轮询探测承载面 cb=android.app.ActivityView$StateCallback
+11-05 09:07:43.157 I/CarDesk/NavUI( 7473): ActivityView 嵌入成功 pkg=com.autonavi.amapautp.yh
+11-05 09:07:43.161 I/CarDesk/NavUI( 7473): [EVT] 画中画显示 pkg=com.autonavi.amapautp.yh app=Amap Auto mode=embedded role=主画
+11-05 09:07:43.163 D/CarDesk/NavUI( 7473): 画中画清空（原本没有承载应用） role=副画
+11-05 09:07:43.365 D/CarDesk/NavUI( 7473): ActivityView 同步 VirtualDisplay 尺寸 w=1287 h=867
+11-05 09:07:43.460 I/CarDesk/NavUI( 7473): ActivityView 启动承载应用 pkg=com.autonavi.amapautp.yh api=pendingIntent

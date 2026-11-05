@@ -28,11 +28,17 @@ class AdaptapiDayNightTest {
     @Before
     fun setUp() {
         AdaptapiDayNight.resetForTest()
+        // 第116轮：假实现的回调列表是**进程内静态**的，别的测试类（比如起完整桌面的
+        // 启动测试）也会真的 attach 一次昼夜通道，把回调注册进来。
+        // 这个用例断言的是「**一次 attach 流程里**只注册一次」，
+        // 所以先把上一位留下的清干净，别把别的测试的残留算到自己头上。
+        FakeDayNightMode.callbacks.clear()
     }
 
     @After
     fun tearDown() {
         AdaptapiDayNight.resetForTest()
+        FakeDayNightMode.callbacks.clear()
     }
 
     private fun idle(ms: Long = 600L) {

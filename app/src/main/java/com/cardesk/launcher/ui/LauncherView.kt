@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -288,7 +289,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
     private var servicesStarted = false
 
     /**
-     * 画中画承载（**= 唤起高德**）是否已经开始过。
+     * 画中画承载（**= 唤起高德**）的闸门（第116轮）。
      *
      * 第112轮：桌面启动时**不**承载画中画。
      *
@@ -297,8 +298,16 @@ class LauncherView(context: Context) : FrameLayout(context) {
      * 于是「开机时高德先跳出来」，跟桌面自己的首帧抢 CPU / 抢焦点。
      *
      * 现在推迟到桌面**完全启动之后**（[startDeferredAmapActions]）。
+     *
+     * 第116轮：那条链**静默断过一次** ——
+     * `MainActivity` 淡出启动页时在**已脱离窗口**的视图上 `post`，
+     * Runnable 永远不会执行 → `onDesktopReady()` 永不执行 → 承载永不开始 →
+     * 用户看到「导航页画中画不显示应用」（只有占位图），而且**没有任何报错**。
+     *
+     * 所以「承载该开始了」这件事改由 [com.cardesk.launcher.core.DesktopReadyGate]
+     * 判定：正常路径是 `markDesktopReady()`，兜底路径是「首帧之后等满 3 秒」。
      */
-    private var pipHostingStarted = false
+    private val pipHostingGate = com.cardesk.launcher.core.DesktopReadyGate()
 
     /**
      * 「桌面完全启动后的跨进程动作」是否已经做过（第112轮）。
@@ -555,8 +564,11 @@ class LauncherView(context: Context) : FrameLayout(context) {
         Logx.i(LogTags.APP, "桌面就绪后开始唤起高德相关动作")
 
         // —— 1) 画中画承载（= 启动高德 Activity）——
-        pipHostingStarted = true
-        refreshPip()
+        //
+        // 走闸门：正常路径（桌面完全就绪）立刻开始；
+        // 如果这条链断了，兜底看门狗会在首帧之后 3 秒接手。
+        pipHostingGate.markDesktopReady()
+        startPipHosting("桌面就绪")
 
         // —— 2) 向高德索要区域信息 ——
         //
@@ -573,6 +585,75 @@ class LauncherView(context: Context) : FrameLayout(context) {
             }
         }.onFailure { Logx.w(LogTags.WEATHER, "向高德索要区域信息失败", it) }
     }
+
+    // ------------------------------------------------------------------ 画中画承载的闸门（第116轮）
+
+    /**
+     * 桌面首帧画出来了（第116轮）。
+     *
+     * 由 `MainActivity.onLauncherFirstFrame()` 调用。
+     *
+     * ## 它解决什么
+     *
+     * 画中画承载的触发链是
+     * `MainActivity.onDesktopReady()` → [startDeferredAmapActions]。
+     * 第112轮到第115轮之间，这条链**静默断过一次**：
+     * 启动页淡出时在**已脱离窗口**的视图上 `post`，
+     * 那个 Runnable 永远不会执行 → 承载永远不开始 →
+     * 用户看到「导航页画中画不显示应用」，而且没有任何报错。
+     *
+     * 光修那一行不够 —— 下次换个地方再断一次还是得靠用户报障。
+     * 所以这里记下「桌面第一帧已经上屏」的时刻，
+     * 兜底看门狗从这一刻开始计时（见 [pipHostingWatchdog]）：
+     * 3 秒内没等到 desktopReady，就自己把承载启动起来。
+     */
+    fun notifyFirstFrame() {
+        pipHostingGate.markLauncherReady(SystemClock.uptimeMillis())
+        handler.removeCallbacks(pipHostingWatchdog)
+        handler.postDelayed(
+            pipHostingWatchdog,
+            com.cardesk.launcher.core.DesktopReadyGate.DEFAULT_WATCHDOG_MS,
+        )
+    }
+
+    /**
+     * 兜底看门狗：`desktopReady` 迟迟不来时，自己开始承载。
+     *
+     * 正常情况下它什么也不做（承载早就开始了，闸门的幂等锁会挡住）。
+     * 只有「就绪链断了」时它才真正接管 —— 这正是第116轮要防的静默失效。
+     */
+    private val pipHostingWatchdog = Runnable {
+        val reason = "兜底看门狗（桌面就绪未到达）"
+        if (startPipHosting(reason)) {
+            Logx.w(
+                LogTags.APP,
+                "画中画承载由兜底看门狗启动",
+                "waitMs" to com.cardesk.launcher.core.DesktopReadyGate.DEFAULT_WATCHDOG_MS,
+            )
+        }
+    }
+
+    /**
+     * 开始承载画中画（幂等）。
+     *
+     * @param reason 触发原因（只进日志，便于事后对账：
+     *               「桌面就绪」= 正常路径，「兜底看门狗…」= 就绪链断了）。
+     * @return true 表示这一次真的开始了。
+     */
+    private fun startPipHosting(reason: String): Boolean {
+        if (!pipHostingGate.consume(SystemClock.uptimeMillis())) return false
+        Logx.i(LogTags.APP, "开始承载画中画", "reason" to reason)
+        refreshPip()
+        return true
+    }
+
+    /**
+     * 画中画承载是否已经开始（诊断 / 单测用）。
+     *
+     * 第116轮新增：以前这个状态是私有的布尔，
+     * 外面既看不到、也测不了 —— 「画中画不显示」这种问题在车上只能靠日志猜。
+     */
+    fun isPipHostingStarted(): Boolean = pipHostingGate.isStarted()
 
     // ------------------------------------------------------------------ 启动更新检测（第九十八轮）
 
@@ -945,7 +1026,12 @@ class LauncherView(context: Context) : FrameLayout(context) {
         // 以前这一步在 `build()` 里（桌面还在搭骨架）就做了，
         // 结果开机时高德先跳出来，跟桌面首帧抢 CPU / 抢焦点。
         // 现在推迟到桌面完全启动之后（[startDeferredAmapActions]）。
-        if (!pipHostingStarted) return
+        //
+        // 第116轮：这个闸门改由 [pipHostingGate] 判 ——
+        // 除了「桌面就绪」这条正常路径，还多了一条兜底：
+        // 桌面首帧之后 3 秒还没等到就绪信号，就自己开始承载。
+        // （之前这里只有正常路径，而那条路径曾经静默断过 → 画中画永远停在占位。）
+        if (!pipHostingGate.isStarted()) return
         val dual = prefs.dualPip
         val mainPkg = prefs.pipApp
         val subPkg = prefs.pip2App

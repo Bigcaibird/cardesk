@@ -4,6 +4,8 @@ import android.app.Activity
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.Process
 import android.view.KeyEvent
 import android.view.View
@@ -51,6 +53,43 @@ class MainActivity : Activity() {
 
     /** 启动页（桌面首帧后淡出移除）。 */
     private var splash: LaunchSplashView? = null
+
+    /**
+     * 主线程 Handler。
+     *
+     * ## 为什么不能拿视图来 post（第116轮踩过的坑）
+     *
+     * 启动页淡出那一步以前写的是：
+     *
+     * ```kotlin
+     * (current.parent as? ViewGroup)?.removeView(current)
+     * current.post { onDesktopReady() }
+     * ```
+     *
+     * `View.post(Runnable)` 在视图**没有 attach 到窗口**时，
+     * 会把 Runnable 塞进这个视图自己的 `HandlerActionQueue`；
+     * 而那个队列只在视图**重新 attach 到窗口**时才会被执行
+     * （`View.dispatchAttachedToWindow` 里才会 `executeActions`）。
+     *
+     * 启动页刚被 `removeView` 摘掉 → 已经脱离窗口 → 永远不会重新 attach →
+     * **那个 Runnable 永远不会跑**。
+     *
+     * 后果（用户报「导航页画中画不显示应用」）：
+     * `onDesktopReady()` 永不执行 → 第112轮把画中画承载挂在它后面 →
+     * 画中画永远停在占位图。而且它**一声不响**：没有异常、没有日志，
+     * 只有 `StartupTrace` 里少了 `desktopReady` 一个分段。
+     *
+     * 用 Activity 自己的主线程 Handler：跟视图的 attach 状态无关，一定跑得到。
+     */
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    /**
+     * 「桌面完全就绪」这件事是否已经做过（第116轮）。
+     *
+     * 幂等：启动页淡出的动画 end action 与「没有启动页」的兜底分支
+     * 都可能走到 [onDesktopReady]，承载只该做一次。
+     */
+    private var desktopReadyDone = false
 
     /**
      * 桌面。第九十三轮改成可空：
@@ -194,6 +233,13 @@ class MainActivity : Activity() {
         val view = launcher ?: return
         StartupTrace.mark("launcherReady")
 
+        // 桌面首帧已经上屏 —— 通知桌面自己：画中画承载的兜底看门狗从此刻起算。
+        //
+        // 第116轮：承载本来只等 `onDesktopReady()`，那条链一旦断掉就静默失效；
+        // 这里给桌面一个「我第一帧画出来了」的信号，好让它自己能兜底启动承载。
+        runCatching { view.notifyFirstFrame() }
+            .onFailure { Logx.w(LogTags.APP, "通知桌面首帧失败", it) }
+
         // 天气 / 定时刷新 / 导航引导（见 LauncherView.startServices）。
         runCatching { view.startServices() }
             .onFailure { Logx.w(LogTags.APP, "启动桌面服务失败", it) }
@@ -275,7 +321,10 @@ class MainActivity : Activity() {
             .setDuration(SPLASH_FADE_MS)
             .withEndAction {
                 (current.parent as? ViewGroup)?.removeView(current)
-                current.post { onDesktopReady() }
+                // 关键：不能写 `current.post { ... }` ——
+                // 启动页刚被摘掉，已经脱离窗口，那个 Runnable 永远不会执行
+                // （见 [mainHandler] 的注释）。
+                mainHandler.post { onDesktopReady() }
             }
             .start()
     }
@@ -287,12 +336,31 @@ class MainActivity : Activity() {
      * （那个广播带 `FLAG_INCLUDE_STOPPED_PACKAGES`）以前都在桌面还没画完时做，
      * 结果开机时高德先跳出来、跟桌面首帧抢 CPU。
      * 现在统一推迟到这里。
+     *
+     * 第116轮：幂等（[desktopReadyDone]）。
+     * 这条链的第112轮版本靠「启动页脱离窗口后 post」触发，
+     * 那个 Runnable 永远不会执行 —— 画中画因此永远停在占位图。
+     * 现在既换了可靠的 post 目标，又加了幂等 + [LauncherView] 侧的兜底看门狗，
+     * 三道保险，任何一道单独生效都能把承载启动起来。
      */
     private fun onDesktopReady() {
+        if (desktopReadyDone) return
+        desktopReadyDone = true
         StartupTrace.mark("desktopReady")
         StartupTrace.summary()
-        runCatching { launcher?.startDeferredAmapActions() }
-            .onFailure { Logx.w(LogTags.APP, "桌面就绪后的动作失败", it) }
+        // 桌面就绪 → 开始「会唤起高德」的动作（画中画承载 + 向高德索要区域信息）。
+        //
+        // 用 [whenLauncherReady] 而不是 `launcher?`：桌面万一还没造出来，
+        // 就先排队等它，别把这个情况悄悄吞掉。
+        whenLauncherReady { view ->
+            runCatching { view.startDeferredAmapActions() }
+                .onFailure { Logx.w(LogTags.APP, "桌面就绪后的动作失败", it) }
+        }
+        // 桌面已经在的话，把排队里的动作也一并清掉（正常路径此时是空的）。
+        //
+        // 注意：桌面**不在**时不能清 —— `runPendingReadyActions` 会把队列清空，
+        // 而队列里的动作要求桌面存在，清了就等于把动作丢了。
+        if (launcher != null) runPendingReadyActions()
     }
 
     /**

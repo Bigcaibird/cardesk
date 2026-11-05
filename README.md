@@ -955,6 +955,109 @@ Dock 内部布局本来就是左右两端锚定的（`DockLayout.sections(dockWi
 
 效果图：`preview/y30-settings-lyric-preview.png`。
 
+## 导航页画中画不显示应用（第 116 轮）
+
+4213 反馈：**导航页的画中画不显示应用**（只有一块「请选择应用」占位图）。
+
+### 根因：一条静默断掉的启动链
+
+第 112 轮把画中画承载（= 真的启动高德这个 Activity）推迟到了「桌面完全就绪」之后，
+链路是：
+
+```
+MainActivity.onDesktopReady()
+  → LauncherView.startDeferredAmapActions()
+    → pipHostingStarted = true
+      → refreshPip() → PipSurface.show(pkg)
+```
+
+而触发 `onDesktopReady()` 的，是启动页淡出那一步 —— 当时写的是：
+
+```kotlin
+(current.parent as? ViewGroup)?.removeView(current)
+current.post { onDesktopReady() }
+```
+
+`View.post(Runnable)` 在视图**没有 attach 到窗口**时，会把 Runnable 塞进这个视图自己的
+`HandlerActionQueue`；而那个队列只在视图**重新 attach 到窗口**时才会被执行
+（`View.dispatchAttachedToWindow` 里才 `executeActions`）。
+
+启动页刚被 `removeView` 摘掉 → 已经脱离窗口 → 永远不会重新 attach →
+**那个 Runnable 永远不会跑**。
+
+于是：
+
+- `onDesktopReady()` 永不执行；
+- `StartupTrace` 里少了 `desktopReady` 这一个分段
+  （4213 诊断包 `summary.txt` 的「本次启动」里**确实查不到它**，
+  而 `launcherCreated` / `launcherReady` / `servicesStarted` / `launchServicesStarted` 都在
+  —— 说明桌面自己跑完了，就差最后这一步）；
+- `pipHostingStarted` 永远是 false → `refreshPip()` 直接 return →
+  `PipSurface.show()` **一次都没被调用** → 画中画只剩占位图。
+
+诊断包佐证：只有「画中画占位点击（选应用）」，
+没有「画中画显示」，也没有「刷新画中画」。
+
+它**一声不响**：没有异常、没有崩溃、没有日志。
+第 112 轮到第 115 轮整整四轮都没发现。
+
+### 修法：三道保险
+
+1. **修根因** —— `MainActivity` 改用 Activity 自己的主线程 Handler
+   （`mainHandler.post { onDesktopReady() }`）：跟视图的 attach 状态无关，一定跑得到；
+   同时 `onDesktopReady()` 改成幂等（只做一次）。
+
+2. **加兜底闸门** —— 新增纯 Kotlin 的 `core/DesktopReadyGate.kt`，
+   把「承载该开始了」这件事的判定单独拆出来：
+   正常路径是「桌面完全就绪」，兜底路径是「桌面首帧之后等满 3 秒」。
+   任何一条先到，承载都会开始，且**只开始一次**。
+
+3. **桌面侧看门狗** —— `LauncherView.notifyFirstFrame()` 记下首帧时刻，
+   3 秒内没等到就绪信号就自己把承载启动起来
+   （日志「画中画承载由兜底看门狗启动」）。
+
+第 2、3 条的意义：光修那一行不够 —— 下次换个地方再断一次，还是得靠用户报障才发现。
+
+### 单测
+
+- `DesktopReadyGateTest`（纯 Kotlin，7 例）：闸门每条分支
+  （首帧之前绝不开始、就绪即开始、兜底窗口、两条路径只生效一次、重建不刷新计时起点）。
+- `DetachedViewPostTest`（Robolectric，3 例）：把平台的坑钉死 ——
+  **脱离窗口的 `View.post` 永远不会执行**，而主线程 Handler 一定执行。
+- `PipHostingStartupTest`（Robolectric，3 例）：端到端 ——
+  桌面启动后承载一定开始、承载一定真的落到主画上、
+  以及「桌面就绪这条正常路径自己能启动承载（不能只靠兜底看门狗）」。
+  最后这条做过**反向验证**：把修复临时改回旧写法，它会变红。
+- 顺带修了一处测试隔离：`AdaptapiDayNightTest` 的假实现回调列表是进程内静态的，
+  别的测试类起完整桌面时会真的注册一次昼夜回调，把它顶红。
+  现在它在自己的 `setUp` 里先清干净。
+- 全量单测 **1595 全绿**（上一轮 1582 → 本轮 1595）。
+
+### 模拟器验证（AOSP 29，1920×968，对齐车机分辨率）
+
+装 4214 后冷启动，日志里能直接看到这条链走通了：
+
+```
+启动分段：desktopReady processMs=4031 onCreateMs=1968
+桌面就绪后开始唤起高德相关动作
+开始承载画中画 reason=桌面就绪
+刷新画中画 pkg=com.autonavi.amapautp.yh
+ActivityView 嵌入成功 pkg=com.autonavi.amapautp.yh
+[EVT] 画中画显示 pkg=com.autonavi.amapautp.yh app=Amap Auto mode=embedded role=主画
+ActivityView 启动承载应用 pkg=com.autonavi.amapautp.yh api=pendingIntent
+```
+
+**A/B 对照**：用同一台模拟器装 4213（有 bug 版）冷启动，
+`desktopReady` 不出现、`画中画显示` 不出现，画中画停在占位图；
+装 4214 后同一台机器、同一份 `pip_app`（高德），画中画里**高德在真实渲染**
+（地图、搜索框、罗盘、比例尺都在）。
+
+证据：`emu-verify/y29/`（报告 `emu-verify/y29/REPORT.md`）。
+
+产物：`dist/CarDesk-platform-ecarx-cardesk-4214.apk`
+（4214 / 1.0.1118-system，平台证书 SHA-256 `c8a2e9bc…92ab8`，
+APK SHA-256 `1085fb4a7711df2217b7aaef5cea77a142f7e4ef3d5e88c1c0c575ac41a816e1`）。
+
 ## 巡航红绿灯数据源排查（第 107 轮）
 
 4202 的诊断包确认：巡航时高德只发 `12205/10001/10077` 三类广播，**没有任何灯态字段**

@@ -1,0 +1,27 @@
+11-05 09:02:13.875 I/CarDesk/App( 7238): 启动分段：onCreate processMs=2167 onCreateMs=0 bootMs=47173851
+11-05 09:02:13.898 I/CarDesk-Startup( 7238): onCreate process=2167ms onCreate=0ms boot=47173851ms
+11-05 09:02:13.904 I/CarDesk/App( 7238): 桌面启动 sdk=29 pid=7238 restored=false
+11-05 09:02:13.911 I/CarDesk/App( 7238): 启动分段：window processMs=2203 onCreateMs=36 bootMs=47173887
+11-05 09:02:13.911 I/CarDesk-Startup( 7238): window process=2203ms onCreate=36ms boot=47173887ms
+11-05 09:02:14.074 I/CarDesk/App( 7238): 启动分段：splashFirstFrame processMs=2366 onCreateMs=199 bootMs=47174050
+11-05 09:02:14.075 I/CarDesk-Startup( 7238): splashFirstFrame process=2366ms onCreate=199ms boot=47174050ms
+11-05 09:02:14.713 D/CarDesk/NavUI( 7238): 画中画比例读取 dual=false key=desk_primary_ratio_normal_v1 raw=0.71030045 value=0.71030045 default=0.71030045
+11-05 09:02:14.729 I/CarDesk/NavUI( 7238): 画中画内容留白 top=0 bottom=0 fullscreen=false
+11-05 09:02:14.732 D/CarDesk/NavUI( 7238): 画中画比例读取 dual=false key=desk_primary_ratio_normal_v1 raw=0.71030045 value=0.71030045 default=0.71030045
+11-05 09:02:14.732 D/CarDesk/NavUI( 7238): 画中画分屏比例变化 ratio=0.71030045 dual=false
+11-05 09:02:15.030 I/CarDesk/App( 7238): 启动分段：uiBuilt processMs=3322 onCreateMs=1155 bootMs=47175006
+11-05 09:02:15.030 I/CarDesk-Startup( 7238): uiBuilt process=3322ms onCreate=1155ms boot=47175006ms
+11-05 09:02:15.043 I/CarDesk/App( 7238): 启动分段：launcherCreated processMs=3335 onCreateMs=1168 bootMs=47175019
+11-05 09:02:15.043 I/CarDesk-Startup( 7238): launcherCreated process=3335ms onCreate=1168ms boot=47175019ms
+11-05 09:02:15.051 I/CarDesk/App( 7238): 启动分段：launcherFirstFrame processMs=3343 onCreateMs=1176 bootMs=47175027
+11-05 09:02:15.051 I/CarDesk-Startup( 7238): launcherFirstFrame process=3343ms onCreate=1176ms boot=47175027ms
+11-05 09:02:15.184 I/CarDesk/App( 7238): 启动分段：launcherReady processMs=3476 onCreateMs=1309 bootMs=47175160
+11-05 09:02:15.184 I/CarDesk-Startup( 7238): launcherReady process=3476ms onCreate=1309ms boot=47175160ms
+11-05 09:02:15.185 I/CarDesk/App( 7238): 启动分段：servicesBegin processMs=3476 onCreateMs=1309 bootMs=47175160
+11-05 09:02:15.185 I/CarDesk-Startup( 7238): servicesBegin process=3476ms onCreate=1309ms boot=47175160ms
+11-05 09:02:15.246 I/CarDesk/App( 7238): 启动分段：servicesDone processMs=3538 onCreateMs=1371 bootMs=47175222
+11-05 09:02:15.246 I/CarDesk-Startup( 7238): servicesDone process=3538ms onCreate=1371ms boot=47175222ms
+11-05 09:02:15.246 I/CarDesk/App( 7238): 启动分段：servicesStarted processMs=3538 onCreateMs=1371 bootMs=47175222
+11-05 09:02:15.246 I/CarDesk-Startup( 7238): servicesStarted process=3538ms onCreate=1371ms boot=47175222ms
+11-05 09:02:15.284 I/CarDesk/App( 7238): 启动分段：launchServicesStarted processMs=3576 onCreateMs=1409 bootMs=47175260
+11-05 09:02:15.284 I/CarDesk-Startup( 7238): launchServicesStarted process=3576ms onCreate=1409ms boot=47175260ms
