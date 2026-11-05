@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1119",
-  "versionCode": 4215,
-  "tag": "v1.0.1119",
-  "name": "CarDesk 4215 / 1.0.1119-system",
-  "notes": "# CarDesk 4215 / 1.0.1119-system\n\n## 这一版改什么\n\n首页中央那坨**大字歌词**：两种排法，**可以在设置里切**。\n\n1. 从**五行**改成**三行**（上一句 / 当前句 / 下一句），**字号保持不变**\n   （沿用原来的 40 / 56 / 40）；\n2. 新增一种 **KTV 式两行**布局：**当前句在上、下一句在下**，两行之间**明显分隔**\n   （行距放大到 1.8 倍）—— 唱过的那句直接往上走掉，屏幕上永远是\n   「正在唱的大字 + 马上要唱的小字」这一对，跟 KTV 字幕一样；\n3. 两种布局**可在设置里切**：设置 → 桌面设置 → 仪表歌词 → 首页中央歌词 → 歌词布局。\n\n## 实现口径\n\n- 新增纯 Kotlin 的 `core/media/LyricLayout.kt`：一个布局 = 「行数 + 当前行下标 +\n  行序 + 每行字号档 + 行距倍数」。这几样缺一不可 —— **当前行不总在中间**\n  （三行在中间、KTV 在最上），差一个就画错位置。\n- 字号档单独放在文件级的 `LyricSizeTier` 对象里：Kotlin 的**伴生对象在枚举项之后\n  才初始化**，枚举构造参数引用伴生常量会直接编译失败。\n- `core/media/LyricBlockLayout.kt` 的基线算法改成**按行数算**（原来写死 5 行），\n  当前行不再固定在中间。\n- `core/media/LyricWindow.kt` 加了按**显式行序**取句的重载 —— `split(n)` 是按\n  「上下均分」算的，它假设当前句在中间；KTV 的「当前句在最上」得由布局自己给行序。\n- `ScenePage.drawCenterLyric` 与设置页的预览条都按**同一份清单**画，\n  所以「预览里看到的」就是「桌面上会出现的」。\n- 首页中央原来的**五行**布局被三行取代，`ScenePage.lyricPrev2` / `lyricNext2`\n  一并删掉；**导航页组合卡仍是 5 句**（`NavPage` 自己的字段，没动）。\n- 设置入口：设置 → 桌面设置 → 仪表歌词 → 首页中央歌词 → 歌词布局。\n  换布局时**预览条立刻跟着变**，下方的**说明文案也跟着换**\n  （三行说「上一句 / 当前句 / 下一句」，KTV 两行说「当前句在上、下一句在下」）。\n\n## 单测\n\n- `LyricBlockLayoutTest`（10 例）：三行 / KTV 两行各自的基线、间距、居中、越界保护。\n- `SceneLyricWindowTest`（12 例）：取句映射、两种布局的行序与字号档、布局键的容错、\n  偏好落盘。\n- `LyricScalePreviewRenderTest`（4 例）：预览条按布局出行数、放大后仍居中。\n- `LyricsPreviewRenderTest`（3 例）：**像素级**差分断言 —— 三行必须正好 3 条行带、\n  KTV 正好 2 条且**当前句在上面**；当前句 > 衬句；整块居中在 500 附近；\n  不压到底部卡片区；有引导卡时不画到引导卡上。\n- `SettingsLyricLayoutTest`（2 例）：真点设置页里的「KTV 两行」，验偏好落盘 +\n  预览条 + 桌面 + 说明文案四处联动。\n  （说明文案那条做过**反向验证**：临时去掉那行更新，用例立刻变红。）\n- 全量 1608 个单测全绿（上一轮 1595 → 本轮 1608）。",
-  "publishedAt": "2026-11-05T02:32:30Z",
+  "version": "1.0.1120",
+  "versionCode": 4216,
+  "tag": "v1.0.1120",
+  "name": "CarDesk 4216 / 1.0.1120-system",
+  "notes": "# CarDesk 4216 / 1.0.1120-system\n\n## 这一版改什么\n\n首页中央歌词的 **KTV 式两行**：两句**一样大**、一样字重。\n\n用户看图后提的：「对于两句歌词我的意思是这样布局，**前后句保持大小一样，\n不需要区分前后句大小**」。\n\n4215 那版是「当前句 56px 粗体 + 下一句 40px 常规」，一粗一细。\n这一版：\n\n- 两行都是 **40px**（跟衬句那一档一样）；\n- **当前句不加粗** —— 40px 的粗体中文字视觉上比常规字大一号，\n  加粗等于又变成「上下不一样大」；\n- 当前句靠**颜色 + 位置**认出来：**青色逐字擦除**（已唱到的部分是青色）\n  + 它在**上面**那一行；下面那行是暗灰。\n\n**三行布局没动**（40 / 56 / 40，当前句加粗）。\n\n## 实现口径\n\n- `LyricLayout` 加了 `boldCurrent` 字段：当前行要不要加粗，**由布局决定**。\n  绘制代码原来写死「当前行 = 粗体」，现在改成看布局 ——\n  不然「字号一样」只能做到一半（粗体看着还是大一号）。\n- `LyricLayout.KTV` 的字号档从 `[MAIN, NEAR]` 改成 `[NEAR, NEAR]`。\n- 落盘键 `scene_lyric_layout` 不变（还是 `three` / `ktv`），\n  **升级后不用重设设置**，切到 KTV 两行就是新效果。\n\n## 单测\n\n- `SceneLyricWindowTest` 新增 2 条：\n  - 「KTV 两行不加粗、三行当前句加粗」；\n  - 「KTV 两行用同一个字号档，且都是近档」。\n- 原「两种布局的当前句都是最大字号」这条**不变式改了**：\n  从「必须**大于**其它行」改成「**不小于**其它行」——\n  KTV 两行就是要一样大，原来那条断言跟用户要求是冲突的。\n- `LyricsPreviewRenderTest` / `LyricScalePreviewRenderTest` 的 KTV 用例\n  从「当前句比下一句大」改成「**两行一样高**」。\n- 全量 1610 个单测全绿（上一轮 1608 → 本轮 1610）。",
+  "publishedAt": "2026-11-05T03:01:10Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4215.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4215.apk",
-    "size": 2217642,
-    "sha256": "f7cae1a904187c31dc1b8f4413f1bf27b1f64c7d49255ef58ccf9115f43d314e"
+    "name": "CarDesk-platform-ecarx-cardesk-4216.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4216.apk",
+    "size": 2217858,
+    "sha256": "719bebb2d182ebd51598aacc2f34adb86066e10676d8bfcb0b1d0304b27fa6f4"
   }
 }

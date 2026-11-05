@@ -6,7 +6,7 @@
 
 | 文件 | 包名 | versionCode | versionName | 签名 | SHA-256 |
 | --- | --- | --- | --- | --- | --- |
-| `CarDesk-platform-ecarx-cardesk-4215.apk` | `com.ecarx.cardesk` | **4215** | `1.0.1119-system` | AOSP platform 签名 | `f7cae1a904187c31dc1b8f4413f1bf27b1f64c7d49255ef58ccf9115f43d314e` |
+| `CarDesk-platform-ecarx-cardesk-4216.apk` | `com.ecarx.cardesk` | **4216** | `1.0.1120-system` | AOSP platform 签名 | `719bebb2d182ebd51598aacc2f34adb86066e10676d8bfcb0b1d0304b27fa6f4` |
 
 > 这是**唯一需要安装**的包。装到 `/system/priv-app/<dir>/` 后重启。
 
@@ -107,5 +107,6 @@
 | `CarDesk-platform-ecarx-cardesk-4212.apk` | 旧包（com.ecarx.cardesk /4212），**不要装** |
 | `CarDesk-platform-ecarx-cardesk-4213.apk` | 旧包（com.ecarx.cardesk /4213），**不要装** |
 | `CarDesk-platform-ecarx-cardesk-4214.apk` | 旧包（com.ecarx.cardesk /4214），**不要装** |
+| `CarDesk-platform-ecarx-cardesk-4215.apk` | 旧包（com.ecarx.cardesk /4215），**不要装** |
 | `CarDesk-replace-ecarx-4123.apk` | 旧包（com.ecarx.qq.tool /4354），**不要装** |
 | `probe-app.apk` | 旧包（com.cardesk.mediaprobe /1），**不要装** |

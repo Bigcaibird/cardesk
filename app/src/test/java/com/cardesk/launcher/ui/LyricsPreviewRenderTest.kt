@@ -142,7 +142,7 @@ class LyricsPreviewRenderTest {
     }
 
     /**
-     * 第 117 轮：**KTV 式两行** —— **当前句在上、下一句在下**。
+     * 第 117 轮：**KTV 式两行** —— **当前句在上、下一句在下，两句一样大**。
      */
     @Test
     fun 渲染KTV两行大字歌词() {
@@ -172,10 +172,12 @@ class LyricsPreviewRenderTest {
         assertTrue("当前句应该在上面那一行", main.first < next.first)
         assertTrue("当前句应该在上面那一行", main.last < next.last)
 
-        // —— 字号：当前句 > 下一句 ——
+        // —— 两句一样大（用户要求：不靠字号区分前后句）——
+        val mainH = main.last - main.first
+        val nextH = next.last - next.first
         assertTrue(
-            "当前句(${main.last - main.first}) 应该比下一句(${next.last - next.first}) 大",
-            (main.last - main.first) > (next.last - next.first),
+            "KTV 两行应该一样高（上行 $mainH / 下行 $nextH）",
+            abs(mainH - nextH) <= 2,
         )
 
         // —— 两行是**分开**的两块：中间的空档要比三行布局里的大 ——

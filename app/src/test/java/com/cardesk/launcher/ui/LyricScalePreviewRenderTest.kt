@@ -33,9 +33,10 @@ class LyricScalePreviewRenderTest {
         "第三句 我们都曾勇敢地往前走",
     )
 
+    /** KTV 两行的行序 = 当前句在上、下一句在下。 */
     private val lines2 = listOf(
-        "上一句 风雨里追赶",
         "当前句 我们都曾勇敢地往前走",
+        "下一句 直到看见远方的灯火",
     )
 
     @Test
@@ -52,6 +53,14 @@ class LyricScalePreviewRenderTest {
         val bands = bands(preview(1f, LyricLayout.KTV, lines2), blank())
         println("[117轮] KTV 两行预览行带: $bands")
         assertEquals("KTV 布局的预览应该正好 2 行", 2, bands.size)
+
+        // —— 两句一样大（用户要求：不靠字号区分前后句）——
+        val top = bands[0].last - bands[0].first
+        val bottom = bands[1].last - bands[1].first
+        assertTrue(
+            "KTV 两行应该一样高（上行 $top / 下行 $bottom）",
+            abs(top - bottom) <= 2,
+        )
     }
 
     @Test

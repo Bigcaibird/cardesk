@@ -646,14 +646,18 @@ class ScenePage(context: Context) : View(context) {
      *
      * ```
      * 三行（默认）              KTV 式两行
-     *   上 1 句（40px，SOFT）      当前 句（56px 粗体）  ←
+     *   上 1 句（40px，SOFT）      当前 句（40px 粗体）  ←
      *   当前 句（56px 粗体）  ←    下 1 句（40px，SOFT）
      *   下 1 句（40px，SOFT）
      * ```
      *
+     * **KTV 两行两句一样大**（都是 40px）——
+     * 用户要求「前后句保持大小一样，不需要区分前后句大小」。
+     * 当前句靠**粗体 + 青色逐字擦除**认出来，不靠字号。
+     *
      * **为什么当前行不总在中间**：三行是「上 1 / 当前 / 下 1」（当前句夹在中间），
      * KTV 式是「**当前句在上、下一句在下**」（唱过的那句往上走掉，
-     * 屏幕上永远是「正在唱的大字 + 马上要唱的小字」这一对）。
+     * 屏幕上永远是「正在唱的 + 马上要唱的」这一对）。
      * 所以当前行下标由布局给（三种含义互不相同：三行 = 1 且在中间、
      * KTV = 0 且在最上）。
      *
@@ -661,6 +665,11 @@ class ScenePage(context: Context) : View(context) {
      * 现在「字号越大越靠近当前句 + 颜色越亮越靠近当前句」，
      * 两层线索叠在一起，视线自然落到当前那一句。
      * （第117轮按用户要求**只减行数、不改字号**：三行沿用原来的 40 / 56 / 40。）
+     *
+     * **为什么当前行不一定用最大档**：KTV 两行是用户明确要求
+     * 「前后句保持大小一样」的 —— 那种布局里**不靠字号区分前后句**，
+     * 改靠颜色（当前句亮 / 衬句暗）+ 逐字擦除。
+     * 所以字号档也由布局清单给，绘制代码不假设「当前行最大」。
      *
      * **为什么整块居中而不是写死某一行**：第 114 轮把字号做成了设置里可调，
      * 字号一变，整块的高度就变 —— 如果锚在「当前行基线」上，
@@ -714,7 +723,7 @@ class ScenePage(context: Context) : View(context) {
         val asc = FloatArray(rows)
         val desc = FloatArray(rows)
         for (i in 0 until rows) {
-            text.typeface = if (i == current) {
+            text.typeface = if (i == current && layout.boldCurrent) {
                 Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             } else {
                 Typeface.DEFAULT
@@ -762,7 +771,11 @@ class ScenePage(context: Context) : View(context) {
         // —— 当前句（视觉焦点）—— 带**擦除高亮** ——
         // 已唱到的部分用强调色，还没唱到的部分保持暗色，比例随播放位置往前推。
         if (used[current].isNotEmpty()) {
-            text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            text.typeface = if (layout.boldCurrent) {
+                Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            } else {
+                Typeface.DEFAULT
+            }
             text.textSize = sizes[current]
             val mainText = clipLabel(used[current], LYRIC_MAX_W)
             com.cardesk.launcher.ui.widget.LyricWipeText.draw(
@@ -3264,7 +3277,8 @@ class ScenePage(context: Context) : View(context) {
          * 现在衬句有四行，**近的两行给 40**（比原来大 1/3）。
          *
          * 第 117 轮：首页中央只剩「上一句 / 下一句」两行衬句
-         * （三行布局）或一行（KTV 两行布局），这一档就是它们的字号。
+         * （三行布局）；KTV 两行布局**两行都用这一档**
+         * （用户要求「前后句保持大小一样」）。
          */
         const val LYRIC_NEAR_SIZE = 40f
 

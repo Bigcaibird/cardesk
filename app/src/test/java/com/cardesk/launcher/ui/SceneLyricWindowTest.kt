@@ -1,8 +1,10 @@
 package com.cardesk.launcher.ui
 
 import com.cardesk.launcher.core.media.LyricLayout
+import com.cardesk.launcher.core.media.LyricSizeTier
 import com.cardesk.launcher.ui.pages.ScenePage
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -79,15 +81,32 @@ class SceneLyricWindowTest {
     }
 
     @Test
-    fun `两种布局的当前句都是最大字号`() {
+    fun `当前句字号不小于其它行`() {
         for (layout in LyricLayout.values()) {
             val cur = layout.sizeTiers[layout.currentIndex]
             val others = layout.sizeTiers.filterIndexed { i, _ -> i != layout.currentIndex }
             assertTrue(
-                "${layout.name} 布局的当前句字号必须是最大的",
-                others.all { it < cur },
+                "${layout.name} 布局的当前句字号不能比其它行小",
+                others.all { it <= cur },
             )
         }
+    }
+
+    @Test
+    fun `KTV两行不加粗_三行当前句加粗`() {
+        // 40px 的粗体中文字视觉上比常规字大一号 ——
+        // KTV 两行要求「一样大」，所以当前行**不能**加粗，
+        // 只靠颜色（青色逐字擦除）+ 位置（在上面）区分。
+        assertFalse("KTV 两行的当前句不该加粗", LyricLayout.KTV.boldCurrent)
+        assertTrue("三行布局的当前句该加粗（它是唯一的大字号）", LyricLayout.THREE.boldCurrent)
+    }
+
+    @Test
+    fun `KTV两行两句一样大`() {
+        // 用户要求：「前后句保持大小一样，不需要区分前后句大小」。
+        val layout = LyricLayout.KTV
+        assertEquals("KTV 两行必须用同一个字号档", layout.sizeTiers[0], layout.sizeTiers[1])
+        assertEquals("两行都该是「近档」（衬句那一档）", LyricSizeTier.NEAR, layout.sizeTiers[0])
     }
 
     @Test

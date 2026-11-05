@@ -91,7 +91,7 @@ class LyricScalePreviewView(context: Context) : View(context) {
         val asc = FloatArray(rows)
         val desc = FloatArray(rows)
         for (i in 0 until rows) {
-            paint.typeface = if (i == current) {
+            paint.typeface = if (i == current && lay.boldCurrent) {
                 Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             } else {
                 Typeface.DEFAULT
@@ -117,7 +117,7 @@ class LyricScalePreviewView(context: Context) : View(context) {
         for (i in 0 until rows) {
             val s = lyricLines.getOrNull(i) ?: continue
             if (s.isEmpty()) continue
-            paint.typeface = if (i == current) {
+            paint.typeface = if (i == current && lay.boldCurrent) {
                 Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             } else {
                 Typeface.DEFAULT
