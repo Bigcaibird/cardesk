@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1128",
-  "versionCode": 4224,
-  "tag": "v1.0.1128",
-  "name": "CarDesk 4224 / 1.0.1128-system",
-  "notes": "## 第 125 轮：默认媒体源可设 + 音乐卡片媒体源加图标\n\n- **默认媒体源可设**：设置页 → 系统诊断 → 「默认媒体源」一栏，9 个来源横排 chip 可选。\n  桌面启动时自动锁定它（只锁定，不拉起 App）；卡片上的来源行仍可临时切换。\n  默认值是「通用音乐」= 跟随当前会话，所以不选时行为跟以前一模一样。\n- **音乐卡片媒体源加图标**：原来只有一个品牌色小圆点，现在换成真正的图标 ——\n  装了对应 App 就取它的**真实图标**（QQ音乐绿色音符、网易云红色音符…），\n  蓝牙 / USB / 通用音乐没有对应 App，用 Canvas 自绘的专属符号（音符 / 蓝牙 / USB）。\n- 全量 1643 个单测全绿（新增 16 条，含像素级断言与两轮反向验证）。",
-  "publishedAt": "2026-11-05T09:09:31Z",
+  "version": "1.0.1129",
+  "versionCode": 4225,
+  "tag": "v1.0.1129",
+  "name": "CarDesk 4225 / 1.0.1129-system",
+  "notes": "- 修复：打开方控后控不到 QQ 音乐（方向盘按下去还是在控制爱趣听）\n- 修复：拿不到 QQ 音乐当前播放的歌名/歌手，也没有歌词（原因：从未让 QQ 音乐打开「允许对外发送」开关）\n- 修复：默认媒体源设为 QQ 音乐时桌面启动崩溃（第125轮遗留）\n- 修复：默认媒体源设为 QQ 音乐时音乐页被清空（第125轮遗留）",
+  "publishedAt": "2026-11-05T12:20:15Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4224.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4224.apk",
-    "size": 2229706,
-    "sha256": "111731e1727fdfa86f76c4a6512040ecd87f7a72d2b1dd01715b34b53f778bdd"
+    "name": "CarDesk-platform-ecarx-cardesk-4225.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4225.apk",
+    "size": 2244442,
+    "sha256": "38dfe683df27ff4977843cccdbab2508710cae9918109789a72fa7bab364881f"
   }
 }

@@ -2530,3 +2530,187 @@ echo "sdk.dir=/path/to/android-sdk" > local.properties
 即：自定义壁纸相比预设只多约 **0.5 MB（在噪声内）**，因为两者都只持有一张 1920×1080 全屏位图（8.3 MB）；多出来的是缩略图/测量抖动。导入那张 53 KB 的 JPEG 落盘，不占内存。
 
 **已知限制**：导入按 16:9 裁切，竖图两侧会被裁掉；EXIF 方向只处理 JPEG 的 1/3/6/8；单张照片上限 64 MB。
+
+## QQ 音乐车机版接入：方向盘方控 + 歌名/歌词（第 126 轮）
+
+用户报的两个问题：
+
+1. 设置里打开「方控」后，**方向盘按下去还是在控制爱趣听**（`com.tencent.wecarflow`），控不到 QQ 音乐；
+2. **拿不到 QQ 音乐当前播放的歌**，也**没有歌词**。
+
+这一轮把两件事都查到了底，而且**根因跟一开始猜的不一样** —— 不是「AOSP 会话可见性规则」，也不是「歌词格式认错了」。
+
+### 诊断包给出的第一层线索
+
+用户上传的真车诊断包（领克 dcy11 / Android 9 / 1920×968）里有两条关键信息：
+
+- `default_music_source_v1 = qq`、`design_music_source_v1 = qq` —— 用户已经把默认媒体源设成 QQ 音乐了；
+- 媒体段全是空：歌名空、歌手空、时长 0、歌词状态空。
+
+而 `CarDesk/Media` 的日志（覆盖 18:25:43–18:27:19，约 24 分钟连续扫描，每 2.5s 一次）里：
+
+```
+周期重扫 count=569 sessions=2
+会话选择 candidates=com.android.bluetooth#…,com.tencent.wecarflow#… locked=com.tencent.qqmusiccar selected= picked=无
+没有选中任何会话（界面将清空） reason=reconcile candidates=2 locked=com.tencent.qqmusiccar
+```
+
+两件事同时成立：
+
+- **QQ 音乐 24 分钟里一次都没进过会话枚举**；
+- `locked=com.tencent.qqmusiccar` —— 这是第 125 轮「默认媒体源 → 桌面启动时锁包」加的**硬锁**，
+  锁定分支里选不出可用会话就 `return null` → **每 2.5s 选一次都选不中 → 界面被清空** →
+  OEM 媒体桥也拿不到 controller → 原车不把方控交给我们 → **方向盘还在爱趣听上**。
+
+所以第 126 轮先修了这个**回归**：锁定包选不出可用会话时**不再返回 null**，而是继续走正常选择。
+「默认媒体源」是**优先**，不是**一票否决**（`SessionChooser` / `MediaCoreTest` / `SessionChooserTest`）。
+
+### 真正的第一因：QQ 音乐车机版**不发可用会话**，而且我们**从来没让它开口**
+
+第 126 轮把 `com.tencent.qqmusiccar` 1.9.8.22 的真包下下来反编译，并在**模拟器上装真包实测**
+（去掉 native 库重签后安装，Android 10 / arm64）。结论：
+
+**① 它发布的 MediaSession 是个空壳。** `dumpsys media_session`：
+
+```
+mbr com.tencent.qqmusiccar/mbr
+  state=PlaybackState {state=0, position=0, ..., actions=631}
+  metadata: null
+MediaSessionHelper-com.tencent.qqmusiccar …
+  state=PlaybackState {state=0, position=0, ..., actions=1022}
+  metadata: null
+```
+
+`metadata: null`（歌名只塞进了老式 `RemoteControlClient`）+ `state=0`（从不更新播放态）
++ 没有 `setCallback`（`transportControls` 发过去没人接）—— **标准 MediaSession 这条路对它是死的**。
+
+**② 但它有一整套专门给第三方的广播协议**，而且我们**从来没发过最关键的那一条**。
+
+`BroadcastSenderCenterForThird` 里每个 `updateXxx()` 的第一句都是 `if (this.allowSendOutside)` ——
+**QQ 音乐默认不往外挂广播**，而这个开关只有第三方发 `action = 100` 才能打开。
+我们以前**从来没发过** → QQ 音乐一个字都不往外广播 → **「没歌词」「没歌名」就是这么来的**
+（不是歌词格式认错了，是**根本没收到**）。
+
+模拟器上实测（模拟器上装了真包，`adb logcat` 原文）：
+
+```
+# 发 action=100（打开「允许对外发送」）
+$ adb shell am broadcast -a com.tencent.qqmusiccar.action --ei action 100 \
+      --el pull_from 45124 -p com.tencent.qqmusiccar
+D BroadcastReceiverCenterForThird: dispacherAction and action is:100
+I BroadcastSenderCenterForThird: setAllowSendOutside, allow=true
+D BroadcastSenderCenterForThird: updatePlayState commandString :{"module":"play","command":
+  {"method":"update_state","data":{"state":0,"curr_time":0,"total_time":0,"key_title":"",
+  "key_artist":[{"singer":""}],"key_album":"","key_is_fav":0}}}
+```
+
+→ 开门后 QQ 音乐**立刻**回一条 `update_state`，JSON 结构和我们解析器完全对得上。
+**关键细节**：`key_artist` 是**数组** `[{"singer":"…"}]` —— 以前按字符串解析，**永远取不到歌手**。
+
+而我们的接收器其实**早就收到**了，只是被自己的一道门挡掉了（模拟器实测原文）：
+
+```
+CarDesk/Media: 忽略 QQ 歌词广播（当前会话不是 QQ 音乐） boundPkg=
+```
+
+那道门是「当前绑定的会话必须是 QQ 音乐」—— 而 QQ 音乐**根本不发可用会话** → 桌面永远绑不到它
+→ **循环死锁**。现在改成两条通路：绑定的就是 QQ 音乐（老规矩），**或者**当前没绑定任何会话
+且用户把默认媒体源选成了 QQ 音乐（真车的实际情况）。
+
+### 方向控制：走 `qqmusiccar://?action=20&m0=…`，不走广播
+
+反编译时最容易踩的坑是：**广播通道的 `action=0/2/3` 并不是播放/上一首/下一首**，
+在 QQ 音乐那边是 `openQQMusic()` —— **只会把界面打开，不会切歌**。
+真正下发到播放器的是 `controlPlay(m0)`，而它只从 URI 的 `action=20` 进来：
+
+| m0 | 含义 | 出处 |
+|---|---|---|
+| 0 / 1 | 播放 / 暂停 | `controlPlay()` → `setPlay()` |
+| 2 | 上一首 | `controlPlay()` → `prevPlay()` → `MusicPlayer.playPrev` |
+| 3 | 下一首 | `controlPlay()` → `backPlay()` → `MusicPlayer.playNext` |
+
+实测（`m0=3`）：
+
+```
+I BroadcastReceiverCenterForThird: onReceive： uri:qqmusiccar://?action=20&m0=3
+D BroadcastReceiverCenterForThird: ACTION : 20
+E MusicPlayerHelper: eventType = 2what = 10, subwhat = 0, ex = gotoNextSong
+```
+
+`gotoNextSong` 真的下发到播放器了（模拟器上没登录，所以后面报
+`PLAY_ERR_CANNT_PLAY_OTHER` —— 那是没有播放列表，不是命令没到）。
+
+URI 对应的是 QQ 音乐清单里 **`DispacherActivityForThird` 这个 exported Activity**，
+它内部再转成广播给接收器。所以我们用 `startActivity` 走 Activity 这条路 ——
+**不受 Android 8 起「隐式广播不再投递给清单接收器」的限制**，一定能送到。
+
+### 这一轮改了什么
+
+- **`core/media/QqBroadcast.kt`（重写）** —— QQ 三方协议的完整封装：
+  解析（`key_title` / `key_artist` 数组 / `key_album` / `total_time` / `curr_time` / `state` / `lyric`）、
+  开门（`action=100`）、传输控制（`qqmusiccar://?action=20&m0=…`）、采纳门。
+- **`core/media/MusicController.kt`** —— 收广播 → 合成曲目（歌名/歌手/时长/进度/播放态）→ 解析歌词；
+  默认源是 QQ 音乐时**主动开门**（收到广播 = 门开了的凭据，没收到就 30s 重试）；
+  把合成的曲目**喂给原车媒体桥**。
+- **`core/media/OfficialMediaBridge.kt`** —— 桥的采样来源从 1 个变成 2 个（**会话** + **广播**），
+  合并规则是**会话优先**（`MediaBridgePolicy.pickSource`）。没有这一条，桥拿不到 QQ 音乐的样本
+  → 不注册到原车 → **方控还在爱趣听上**。
+- **`core/media/MusicSessionTracker.kt`** —— 原车把方控交给我们之后，按键要真的作用到 QQ 音乐上：
+  没有会话时改走 QQ 自己的三方协议（`broadcastControl`）。
+- **`core/media/SessionChooser.kt`** —— 锁定包选不出可用会话时**回落**，不再清空界面（第 125 轮回归）。
+- **`core/media/MediaSessionDump.kt` / `PackageBroadcastProbe.kt`（新）** —— 诊断包新增
+  `dumpsys media_session` 全量会话、各音乐 App **注册了哪些广播接收器**（不用拿 APK 就能问出 action）。
+- **`core/log/Diagnostics.kt`** —— 诊断包新增「媒体诊断（第126轮）」「系统媒体会话」「音乐 App 广播接收器」三段，
+  以及 `qqDoor(允许对外发送)` / `qqControl(已发方控命令)` 两个新字段。
+
+### 顺带挖出来一个第 125 轮遗留的**致命崩溃**（桌面进程直接挂掉）
+
+在模拟器上装新包、把默认媒体源设成 QQ 音乐再启动，桌面**起不来**：
+
+```
+E AndroidRuntime: FATAL EXCEPTION: Thread-3
+E AndroidRuntime: Process: com.ecarx.cardesk, PID: 17384
+E AndroidRuntime: java.lang.NullPointerException: Attempt to invoke virtual method
+    'boolean android.os.Handler.post(java.lang.Runnable)' on a null object reference
+E AndroidRuntime:     at com.cardesk.launcher.ui.LauncherView.updateMediaSourceIcon$lambda(LauncherView.kt:1765)
+```
+
+原因是第 125 轮加「媒体源图标」时写的两行：
+
+```kotlin
+private var iconLoadingFor: String? = null
+private val iconHandler = Handler(Looper.getMainLooper())   // ← 声明在 init{} 之后
+```
+
+Kotlin 的初始化顺序 = **声明顺序**，而 `init{}` 块（**构造期**）里就会
+`build()` → `refresh()` → `updateMediaSourceIcon()` → **起后台线程去取图标**。
+于是构造期起的后台线程读到的 `iconHandler` 还是 **null** →
+`iconHandler.post{}` 抛 NPE → **整个桌面进程挂掉**。
+
+改成 `by lazy` **也救不了** —— Kotlin 的 `lazy` 委托本身也是一个字段，
+一样按声明顺序初始化，构造期读到的会是「委托是 null」。
+唯一的办法是：**把这两个字段挪到 `init{}` 之前**。
+
+这个崩溃只在「默认媒体源 = QQ音乐 / 网易云 / 酷狗 / 酷我 / 汽水 / 多媒体」时出现
+（这些来源要走「真实 App 图标」那条路；蓝牙 / USB / 通用音乐是自绘符号，不起线程），
+所以第 125 轮没被发现 —— 而它恰好命中了用户这次的配置。
+
+回归测试：`LauncherSmokeTest.qqDefaultMediaSourceDoesNotCrashTheLauncher`
+（把字段挪回去，这条必红）。
+
+### 怎么验证
+
+设置 → 媒体来源 → 默认来源选「QQ音乐」。此后：
+
+- 日志里出现 `请求 QQ 音乐打开「允许对外发送」`，QQ 音乐侧出现 `setAllowSendOutside, allow=true`；
+- 我们这边出现 `QQ 广播合成曲目`（歌名/歌手），有歌词时出现 `收到 QQ 歌词广播`；
+- 诊断包里 `qqDoor(允许对外发送): 已开`、`qqBroadcast: 收到=N 采纳=N`。
+
+**已知限制**：
+
+- 真车上的 QQ 音乐版本可能比 1.9.8.22 新，协议字段是否一致**尚未验证** ——
+  所以诊断包里带了 `qqBroadcastRaw`（最近一条广播原文）和各 App 的接收器 action 清单，
+  出问题一看就知道是哪一环对不上。
+- 「允许对外发送」是 QQ 音乐自己的**全局**开关，打开后 QQ 音乐会向系统广播播放信息。
+  我们**只在用户把默认媒体源显式选成 QQ 音乐时才开**它。
+- QQ 音乐没在运行时，按方控会把它拉起来（它的 `DispacherActivityForThird` 的既定行为）。

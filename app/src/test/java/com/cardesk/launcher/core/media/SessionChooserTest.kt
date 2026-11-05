@@ -120,10 +120,20 @@ class SessionChooserTest {
     }
 
     @Test
-    fun choose_lockedPackageOnlyPicksInsideLockedPackage() {
+    fun choose_lockedPackageFallsBackWhenNoUsableSession() {
         val other = SessionCandidate("com.a", playing = true, hasMetadata = true, updatedAt = 100)
-        assertNull(SessionChooser.choose(listOf(other), lockedPkg = "com.b", now = 200))
+        // 第126轮：锁定包不在候选里时**不再返回 null**（那会把界面清空），
+        // 而是继续走正常选择。
+        //
+        // 真实故障：默认媒体源 = QQ音乐，但车机上 QQ音乐不发布可枚举的
+        // MediaSession → 锁定包永远选不中 → 界面被清空 + 方控还在爱趣听上。
+        // 「默认媒体源」是**优先**，不是**一票否决**。
+        assertEquals(
+            "com.a",
+            SessionChooser.choose(listOf(other), lockedPkg = "com.b", now = 200)?.pkg,
+        )
 
+        // 锁定包自己有元数据（只是没在播）时，它依然优先。
         val lockedIdle = SessionCandidate("com.b", playing = false, hasMetadata = true, updatedAt = 100)
         assertEquals(
             "com.b",

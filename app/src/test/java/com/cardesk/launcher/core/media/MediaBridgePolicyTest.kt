@@ -100,6 +100,9 @@ class MediaBridgePolicyTest {
                 "playClaimed",
                 "bound",
                 "sourceType",
+                "sourceKind",
+                "source",
+                "title",
                 "callbackCount",
                 "lastCallback",
                 "reason",
@@ -128,5 +131,35 @@ class MediaBridgePolicyTest {
     fun onlineSourceType_isSix() {
         // 原车协议常量：在线音乐 = 6（UNI 的 ONLINE）
         assertEquals(6, MediaBridgePolicy.ONLINE_SOURCE_TYPE)
+    }
+
+    // ------------------------------------------------------------ 来源合并（第126轮）
+
+    @Test
+    fun pickSource_sessionWinsOverBroadcast() {
+        // 真的有别的 App 接管了会话 → 广播那份让位。
+        // 否则仪表上会一直挂着上一首 QQ 音乐的歌。
+        assertEquals(
+            MediaBridgePolicy.BridgeSource.SESSION,
+            MediaBridgePolicy.pickSource(sessionAvailable = true, broadcastAvailable = true),
+        )
+    }
+
+    @Test
+    fun pickSource_broadcastUsedWhenNoSession() {
+        // QQ 音乐车机版没有可用会话 → 只能用广播那份。
+        // 不然桥拿不到样本 → 不注册到原车 → 方控还在爱趣听上（真车现象）。
+        assertEquals(
+            MediaBridgePolicy.BridgeSource.BROADCAST,
+            MediaBridgePolicy.pickSource(sessionAvailable = false, broadcastAvailable = true),
+        )
+    }
+
+    @Test
+    fun pickSource_noneWhenBothMissing() {
+        assertEquals(
+            MediaBridgePolicy.BridgeSource.NONE,
+            MediaBridgePolicy.pickSource(sessionAvailable = false, broadcastAvailable = false),
+        )
     }
 }

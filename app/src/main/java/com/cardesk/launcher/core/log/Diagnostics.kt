@@ -333,6 +333,60 @@ object Diagnostics {
             sb.append("歌词状态: ").append(mc.lyricState).append('\n')
         }.onFailure { sb.append("媒体状态读取失败: ").append(it.message).append('\n') }
 
+        // 第126轮：媒体诊断。
+        //
+        // 「QQ 音乐拿不到歌 / 方控控不到 QQ 音乐」这类问题，光看「歌名: 空」是没用的 ——
+        // 要能看到：系统里**到底有哪些会话**、我们**锁了谁**、桥**注册上没有**、
+        // QQ 的广播**来了没有、被谁挡掉的**。
+        //
+        // 上一版诊断包只有最后 100 秒的日志，启动段的「OEM 媒体桥启动 / 会话候选变化」
+        // 全被截断掉了 —— 这一段就是来补这个洞的。
+        sb.append("\n---- 媒体诊断（第126轮）----\n")
+        runCatching {
+            val snap = com.cardesk.launcher.core.media.MusicSessionTracker.get().snapshot()
+            for ((k, v) in snap) {
+                sb.append(k).append(": ").append(v).append('\n')
+            }
+            val mc = MusicController.get()
+            sb.append("qqBroadcast: 收到=").append(mc.qqBroadcastCount)
+                .append(" 采纳=").append(mc.qqBroadcastAccepted)
+                .append(" 丢弃=").append(mc.qqBroadcastDropped).append('\n')
+            // 第126轮：「允许对外发送」那扇门开了没有（没开 = QQ 音乐一个字节都不往外广播）。
+            sb.append("qqDoor(允许对外发送): ").append(if (mc.qqDoorOpened) "已开" else "未开")
+                .append('\n')
+            sb.append("qqControl(已发方控命令): ").append(mc.qqControlCount).append('\n')
+            if (mc.lastQqBroadcastRaw.isNotEmpty()) {
+                sb.append("qqBroadcastRaw: ").append(mc.lastQqBroadcastRaw).append('\n')
+            }
+            runCatching {
+                val p = com.cardesk.launcher.core.Prefs(app)
+                sb.append("默认媒体源: ").append(p.defaultMusicSource).append('\n')
+                sb.append("当前媒体源: ").append(p.musicSource).append('\n')
+            }
+        }.onFailure { sb.append("媒体诊断读取失败: ").append(it.message).append('\n') }
+
+        // 系统里的**全部**媒体会话（`dumpsys media_session`）。
+        // 这一条能一击分清「QQ 音乐压根没会话」和「有会话但没发布播放态」。
+        sb.append("\n---- 系统媒体会话（dumpsys media_session）----\n")
+        runCatching {
+            val d = com.cardesk.launcher.core.media.MediaSessionDump.dump()
+            sb.append("有会话的包: ")
+                .append(com.cardesk.launcher.core.media.MediaSessionDump.summarizePackages(d))
+                .append('\n')
+            sb.append(d).append('\n')
+        }.onFailure { sb.append("dumpsys media_session 失败: ").append(it.message).append('\n') }
+
+        // 各音乐 App **注册了哪些广播接收器**。
+        // 方控命令要送到 QQ音乐，必须知道它收哪些 action ——
+        // 这个信息不用拿到 APK，问 PackageManager 就行。
+        sb.append("\n---- 音乐 App 注册的广播接收器（第126轮）----\n")
+        for (pkg in listOf("com.tencent.qqmusiccar", "com.tencent.wecarflow", "com.netease.cloudmusic.iot")) {
+            runCatching {
+                sb.append(com.cardesk.launcher.core.media.PackageBroadcastProbe.describeReceivers(app, pkg))
+                    .append('\n')
+            }.onFailure { sb.append(pkg).append(" 读取失败: ").append(it.message).append('\n') }
+        }
+
         // 车辆信号 / 通知使用权：这两项之前只在设置页里看得到，
         // 诊断包里没有 → 每次都要翻几百行日志才能确认「续航到底读没读到」。
         sb.append("\n---- 车辆信号 ----\n")

@@ -61,6 +61,9 @@ object MediaSources {
     /** 「通用音乐」：不锁定包、不启动 App，只跟随系统当前会话。 */
     const val GENERIC_ID = "generic"
 
+    /** QQ 音乐这个来源的 id（第126轮：QQ 广播的采纳条件要用）。 */
+    const val QQ_ID = "qq"
+
     /** `multimediaPackage(false)`：多媒体来源的候选包（按序取第一个已安装的）。 */
     val MULTIMEDIA_CANDIDATES = listOf("com.tencent.wecarflow", "com.ecarx.multimedia")
 

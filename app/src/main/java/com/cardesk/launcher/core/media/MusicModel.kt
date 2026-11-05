@@ -210,8 +210,7 @@ object LrcParser {
         // ① 剥掉元数据标签（含 offset，口径：**不应用偏移**）
         // ② 逐字时间标签**不再直接剥掉** —— 第八十一轮起要拿它做逐字擦除，
         //    语义由 [LyricWordTiming] 用数据自证（详见那里的 KDoc）。
-        val cleaned = META_TAG.replace(raw, "")
-        // 行与它的逐字片段要**成对**排序，所以先存 pair。
+        val cleaned = META_TAG.replace(raw, "")        // 行与它的逐字片段要**成对**排序，所以先存 pair。
         val pairs = ArrayList<Pair<LyricLine, LyricWordTiming.Parsed?>>(64)
         for (line in cleaned.split('\n')) {
             val trimmed = line.trim()
@@ -241,6 +240,45 @@ object LrcParser {
         val sortedLines = pairs.map { it.first }
         val sortedParsed = pairs.map { it.second }
         return LyricTimeline(LyricWordTiming.attach(sortedLines, sortedParsed))
+    }
+
+    /**
+     * LRC 头里的**元数据**（第126轮新增）。
+     *
+     * `[ti:歌名]` / `[ar:歌手]` / `[al:专辑]` —— 这三个标签是**歌名 / 歌手最可靠的来源**：
+     * 它们一定跟着歌词一起来，而各家音乐 App 在 `data` 里用的字段名各不相同。
+     *
+     * 之前 [parse] 只是把元数据标签**剥掉**（当垃圾），内容没留下来 ——
+     * 于是「只有歌词、没有会话元数据」的场景下，歌名/歌手就丢了。
+     */
+    data class Meta(
+        /** `[ti:]` 歌名。 */
+        val title: String = "",
+        /** `[ar:]` 歌手。 */
+        val artist: String = "",
+        /** `[al:]` 专辑。 */
+        val album: String = "",
+    )
+
+    /** 元数据标签（`ti` / `ar` / `al`）。 */
+    private val META_VALUE_TAG = Regex("""\[(ti|ar|al):([^\]]*)]""", RegexOption.IGNORE_CASE)
+
+    /** 解析 LRC 头里的元数据；没有就返回空 [Meta]。 */
+    fun parseMeta(raw: String?): Meta {
+        if (raw.isNullOrBlank()) return Meta()
+        var title = ""
+        var artist = ""
+        var album = ""
+        for (m in META_VALUE_TAG.findAll(raw)) {
+            val value = m.groupValues[2].trim()
+            if (value.isEmpty()) continue
+            when (m.groupValues[1].lowercase()) {
+                "ti" -> if (title.isEmpty()) title = value
+                "ar" -> if (artist.isEmpty()) artist = value
+                "al" -> if (album.isEmpty()) album = value
+            }
+        }
+        return Meta(title = title, artist = artist, album = album)
     }
 }
 

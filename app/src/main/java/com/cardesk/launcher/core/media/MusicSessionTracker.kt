@@ -1381,27 +1381,57 @@ class MusicSessionTracker private constructor() {
     private val mediaBridgeCommands = object : OfficialMediaBridge.Commands {
         override fun send(action: String, source: String): Boolean {
             val c = controller
-            if (c == null || c.packageName != source) {
+            if (c != null && c.packageName == source) {
+                return when (action) {
+                    MediaButtonTransport.ACTION_PLAY -> setPlaying(true)
+                    MediaButtonTransport.ACTION_PAUSE -> setPlaying(false)
+                    MediaButtonTransport.ACTION_NEXT -> {
+                        next(); true
+                    }
+                    MediaButtonTransport.ACTION_PREVIOUS -> {
+                        previous(); true
+                    }
+                    else -> false
+                }
+            }
+            // —— 第126轮：来源不是当前会话（QQ 音乐那种「只有广播、没有会话」的）——
+            //
+            // 真车现象：开了方控后，方向盘按下去**控制的还是爱趣听**。
+            // 原因是桥拿不到 QQ 音乐的会话 → 拿不到样本 → 原车不把方控交给我们。
+            // 第126轮桥已经能吃「广播合成」的样本了，所以这里要把方控动作
+            // **转给 QQ 音乐自己的三方协议**（`QqBroadcast.sendControl`），
+            // 否则原车把方控交给我们之后，按键又落进了空里。
+            val handler = broadcastControl
+            if (handler != null && source == QqBroadcast.PACKAGE) {
+                val ok = runCatching { handler(action) }.getOrDefault(false)
                 Logx.i(
-                    LogTags.MEDIA, "OEM 方控回调已过期，忽略",
-                    "action" to action, "source" to source,
-                    "current" to (c?.packageName ?: ""),
+                    LogTags.MEDIA, "OEM 方控回调走广播通道",
+                    "action" to action, "source" to source, "ok" to ok,
                 )
-                return false
+                return ok
             }
-            return when (action) {
-                MediaButtonTransport.ACTION_PLAY -> setPlaying(true)
-                MediaButtonTransport.ACTION_PAUSE -> setPlaying(false)
-                MediaButtonTransport.ACTION_NEXT -> {
-                    next(); true
-                }
-                MediaButtonTransport.ACTION_PREVIOUS -> {
-                    previous(); true
-                }
-                else -> false
-            }
+            Logx.i(
+                LogTags.MEDIA, "OEM 方控回调已过期，忽略",
+                "action" to action, "source" to source,
+                "current" to (c?.packageName ?: ""),
+            )
+            return false
         }
     }
+
+    /**
+     * **广播来源**的方控落点（第126轮）。
+     *
+     * QQ 音乐车机版不发布可用的 MediaSession，所以原车把方控交给我们之后，
+     * 不能再走 `MediaController.transportControls`（那是给「有会话的来源」用的），
+     * 得改走 QQ 音乐自己的三方广播协议。
+     *
+     * 由 [MusicController] 注入（它才是收 QQ 广播的那个）。
+     *
+     * @param action `play` / `pause` / `next` / `previous`
+     * @return 是否真的把命令发出去了
+     */
+    var broadcastControl: ((String) -> Boolean)? = null
 
     /** 按设置页开关启动 OEM 媒体桥（`session_bridge_enabled`，默认 false）。 */
     private fun startBridgeIfEnabled() {
@@ -1491,6 +1521,12 @@ class MusicSessionTracker private constructor() {
         out["sessionState"] = state
         out["sessionPlaying"] = state == PlaybackState.STATE_PLAYING
         out["sessionTitle"] = current?.title.orEmpty()
+        // 第126轮：把「锁到哪个包」和「候选清单」也带出来 ——
+        // 真车排查「为什么没接管到 QQ 音乐」时，光看当前会话不够，
+        // 要能看到**系统里到底有哪些会话**、我们**锁了谁**。
+        out["lockedPkg"] = lockedPkg.orEmpty()
+        out["candidateCount"] = buildCandidates().size
+        out["candidatePkgs"] = buildCandidates().joinToString(",") { "${it.pkg}(meta=${it.hasMetadata})" }
         out["bridgeEnabled"] = bridgeEnabled
         for ((key, value) in OfficialMediaBridge.snapshot()) {
             out["bridge.$key"] = value

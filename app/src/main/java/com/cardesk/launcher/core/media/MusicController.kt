@@ -47,8 +47,78 @@ class MusicController private constructor() {
     /** 上次歌曲状态的持久化（MMKV 那 5 个键）。 */
     private var store: LastTrackStore? = null
 
-    var track: TrackInfo? = null
+    /** 设置项（读「默认媒体源」用；第126轮）。 */
+    private var prefs: com.cardesk.launcher.core.Prefs? = null
+
+    // ---------------------------------------------------- QQ 广播统计（第126轮）
+
+    /** 收到的 QQ 车机广播总条数。 */
+    var qqBroadcastCount: Int = 0
         private set
+
+    /** 其中**被采纳**的条数。 */
+    var qqBroadcastAccepted: Int = 0
+        private set
+
+    /** 其中**被门挡掉**的条数。 */
+    var qqBroadcastDropped: Int = 0
+        private set
+
+    /** 最近一条广播的原始内容（截断到 600 字，给诊断包看）。 */
+    var lastQqBroadcastRaw: String = ""
+        private set
+
+    /**
+     * QQ 音乐的「允许对外发送」开关**是不是已经开了**（第126轮）。
+     *
+     * 判据是**收到过广播** —— QQ 音乐一旦收到 `action=100`，
+     * 就会**立刻**回一条 `update_state`（实测：
+     * `setAllowSendOutside, allow=true` 后面紧跟着一条 `update_state`）。
+     * 所以「收到广播」就是「门开了」的凭据，比我们自己记一个标志可靠。
+     */
+    var qqDoorOpened: Boolean = false
+        private set
+
+    /**
+     * 已发出的 QQ 音乐方控命令条数（第126轮）。
+     *
+     * 原车把方向盘方控交给我们之后，按键要靠它才能作用到 QQ 音乐上；
+     * 这条计数能看出「方控有没有真的落到 QQ 音乐」。
+     */
+    var qqControlCount: Int = 0
+        private set
+
+    /** 上次发「开门」命令的时刻（用于重试节流）。 */
+    private var qqDoorSentAt = 0L
+
+    /** 缓存的「默认媒体源」id（避免 16ms 一次的 tick 里反复读 prefs）。 */
+    private var qqSourceCache: String = ""
+
+    /** 上次读「默认媒体源」的时刻。 */
+    private var qqSourceCheckedAt = 0L
+
+    var track: TrackInfo?
+        get() = sessionTrack ?: broadcastTrack
+        private set(value) {
+            sessionTrack = value
+        }
+    /** 会话推来的曲目（权威来源）。 */
+    private var sessionTrack: TrackInfo? = null
+
+    /**
+     * 从 **QQ 车机广播**合成的曲目（第126轮）。
+     *
+     * ## 为什么需要它
+     *
+     * 真车实测：QQ 音乐车机版**不发布可枚举的 MediaSession**（连续 24 分钟的
+     * 会话枚举里一次都没出现过）。所以它**只能**通过广播
+     * （[QqBroadcast.ACTION]）把歌名 / 歌手 / 歌词告诉我们。
+     *
+     * 没有它，QQ 音乐在桌面上就是「暂无播放」，歌词也永远不来。
+     *
+     * 优先级：**会话优先**（有会话就以会话为准），会话没有才用广播合成的。
+     */
+    private var broadcastTrack: TrackInfo? = null
     var lyric: LyricTimeline? = null
         private set
     var lyricIndex: Int = -1
@@ -123,6 +193,8 @@ class MusicController private constructor() {
         override fun run() {
             if (!tickerRunning) return
             recomputeLyric()
+            // 第126轮：开门重试（只在「默认源是 QQ 且门还没开」时才真的发广播）
+            maybeOpenQqDoor()
             main.postDelayed(this, LYRIC_TICK_MS)
         }
     }
@@ -144,10 +216,19 @@ class MusicController private constructor() {
         started = true
         // 上次歌曲状态：启动时恢复
         store = LastTrackStore(app)
+        // 第126轮：读「默认媒体源」—— QQ 广播的采纳条件之一。
+        runCatching { prefs = com.cardesk.launcher.core.Prefs(app) }
         restoreLastSongState()
         MusicSessionTracker.get().addListener(trackerListener)
         MusicSessionTracker.get().start(context)
+        // 第126轮：把「广播来源的方控」落点交给 tracker ——
+        // 原车把方向盘方控交给我们之后，按键要能真的作用到 QQ 音乐上
+        //（它没有可用会话，`transportControls` 发过去没人接）。
+        MusicSessionTracker.get().broadcastControl = { action -> sendQqControl(action) }
         registerQqReceiver(app)
+        // 第126轮：默认源是 QQ 音乐的话，先把「允许对外发送」这扇门打开 ——
+        // 不开门，QQ 音乐一个字节都不会往外广播（歌名、歌词全都没有）。
+        maybeOpenQqDoor(force = true)
         tickerRunning = true
         main.post(ticker)
         Logx.i(
@@ -166,6 +247,8 @@ class MusicController private constructor() {
         main.removeCallbacksAndMessages(null)
         MusicSessionTracker.get().removeListener(trackerListener)
         MusicSessionTracker.get().stop()
+        // 第126轮：广播来源的方控落点也要一起摘掉。
+        MusicSessionTracker.get().broadcastControl = null
         runCatching { context?.unregisterReceiver(qqReceiver) }
     }
 
@@ -198,6 +281,16 @@ class MusicController private constructor() {
             main.removeCallbacks(nullClearRunnable)
             val prev = track
             val changed = isTrackChanged(track, t)
+            // 第126轮：**会话优先** —— 真的有会话了，就把广播合成的曲目让位。
+            //
+            // QQ 音乐车机版那种「只有广播、没有会话」的来源，全靠广播撑着；
+            // 一旦有别的 App（爱趣听 / 网易云…）真的接管了会话，
+            // 广播那份就必须让位，否则仪表上会一直挂着上一首 QQ 音乐的歌。
+            if (broadcastTrack != null) {
+                broadcastTrack = null
+                OfficialMediaBridge.clearBroadcast()
+                Logx.i(LogTags.MEDIA, "会话接管，放弃 QQ 广播曲目", "pkg" to t.pkg)
+            }
             // 会话推来的 metadata 里没有 bitmap 时，用已经取到的封面补回去 ——
             // 否则会话每 200ms~2.5s 推一次 metadata，会把刚取到的封面又抹掉。
             val merged = mergeCachedCover(t)
@@ -466,24 +559,39 @@ class MusicController private constructor() {
         // 排障场景：界面变成「暂无播放 / 等待播放」时，这里能看到清空时机
         Logx.i(LogTags.MEDIA, "清空媒体状态（回到暂无播放）")
         track = null
-        lyric = null
-        lyricIndex = -1
-        lyricWipe = 0f
-        lyricLiveText = ""
-        playerCurrentLine = ""
-        lyricState = LYRIC_IDLE
-        lyricNotFound = false
-        lyricFetchInFlightKey = null
-        lyricSourceDurationMs = 0L
-        lastLyricSongKey = ""
-        lastFailKey = ""
-        coverBitmap = null
-        coverBitmapKey = ""
-        coverRequestKey = ""
-        coverRequestGen++
-        OnlineLyricCatalog.invalidate()
-        listeners.forEach { it.onMediaChanged(null) }
-        listeners.forEach { it.onLyricChanged(null, -1, 0f) }
+        // ——第126轮：广播那份**不能**被会话清空带走——
+        //
+        // QQ 音乐车机版没有可用会话，它的歌名/歌词只能来自广播；
+        // 会话追踪器每 2.5s 扫一次、每 2.5s 发一次 null → 清空每 3 秒触发一次。
+        // 全清的话，卡片上的歌名和歌词就每 3 秒跳一次（第97轮修过的老毛病）。
+        // 规则见 [SessionClearPolicy]。
+        val keep = SessionClearPolicy.afterSessionClear(broadcastTrack, lyric != null)
+        if (!keep.keepLyric) {
+            lyric = null
+            lyricIndex = -1
+            lyricWipe = 0f
+            lyricLiveText = ""
+            playerCurrentLine = ""
+            lyricState = LYRIC_IDLE
+            lyricNotFound = false
+            lyricFetchInFlightKey = null
+            lyricSourceDurationMs = 0L
+            lastLyricSongKey = ""
+            lastFailKey = ""
+        }
+        if (!keep.keepCover) {
+            coverBitmap = null
+            coverBitmapKey = ""
+            coverRequestKey = ""
+            coverRequestGen++
+            OnlineLyricCatalog.invalidate()
+        }
+        // 通知时给**有效曲目**（广播那份），不能给 null ——
+        // 否则界面会被清成「暂无播放」，歌名每 3 秒闪一次。
+        listeners.forEach { it.onMediaChanged(keep.track) }
+        listeners.forEach {
+            it.onLyricChanged(if (keep.keepLyric) lyric else null, lyricIndex, lyricWipe)
+        }
     }
 
     /** 切歌：丢弃旧歌词结果，走多级回退重新取词。 */
@@ -820,31 +928,95 @@ class MusicController private constructor() {
     }
 
     /**
-     * QQ 车机歌词广播。
+     * QQ 车机广播（第126轮重写）。
      *
-     * 只认一个固定 extra（`QQ_LYRIC_EXTRA`）、只认 `command.method == "update_lyric"`
-     * 且要求当前绑定的是 QQ 音乐 —— 旧实现「扫描所有 extra 找带 '[' 的字符串」过宽，
-     * 会把无关广播当歌词，这里按收紧。
+     * ## 旧实现错在哪
+     *
+     * 旧实现只认 `command.method == "update_lyric"` **且**要求「当前绑定的会话是
+     * QQ 音乐」。但 QQ 音乐车机版**根本不发可用的 MediaSession** ——
+     * 第126轮在模拟器上装了真的 `com.tencent.qqmusiccar` 1.9.8.22，
+     * `dumpsys media_session` 实测：
+     *
+     * ```
+     * mbr com.tencent.qqmusiccar/mbr
+     *   state=PlaybackState {state=0, position=0, ..., actions=631}
+     *   metadata: null
+     * ```
+     *
+     * `metadata: null` + `state=0` + 没有 `setCallback` —— 这个会话**等于没有**：
+     * 桌面绑不到它、拿不到歌名、也发不动 transport。
+     *
+     * 于是形成**循环死锁**：
+     *
+     * ```
+     * QQ 音乐不发可用会话 → 桌面绑不到 QQ 音乐 → 广播被「当前不是 QQ 音乐」挡掉
+     *                       → 歌词永远不来 → 歌名也拿不到
+     * ```
+     *
+     * 模拟器上实测到的那一行就是这个死锁的现场：
+     * `CarDesk/Media: 忽略 QQ 歌词广播（当前会话不是 QQ 音乐） boundPkg=`
+     *
+     * ## 现在的采纳条件
+     *
+     * 1. **当前绑定的会话就是 QQ 音乐** —— 原来就有，保持；
+     * 2. **当前没有绑定任何会话**，而且**用户在设置里把默认媒体源选成了 QQ 音乐**
+     *    —— 真车上的实际情况（`default_music_source_v1=qq`）。
+     *
+     * 条件 2 不会误伤：一旦有别的播放器在播（比如爱趣听），绑定包就不是空了，
+     * 条件 2 不成立 → QQ 的广播不会盖掉正在播的歌。
+     *
+     * ## 采纳之后做什么
+     *
+     * - **歌名 / 歌手 / 时长 / 进度 / 播放态**：合成一张 [TrackInfo]（[broadcastTrack]）；
+     * - **歌词**：[QqBroadcast.parse] 拿 `data.lyric` → 解析成时间轴；
+     * - **原车媒体桥**：把合成的曲目喂给 [OfficialMediaBridge] ——
+     *   没有这一条，原车不会把**方向盘方控**交给我们（真车现象：方控还在爱趣听上）。
      */
     private fun handleQqLyricBroadcast(intent: Intent) {
         if (intent.action != QQ_LYRIC_ACTION) return
         val raw = intent.getStringExtra(QQ_LYRIC_EXTRA)?.takeIf { it.isNotEmpty() } ?: return
-        // —— 只有绑定 QQ 音乐时才采纳广播歌词
-        val boundPkg = track?.pkg.orEmpty()
-        if (!QqLyric.isQqMusicPackage(boundPkg)) {
-            // 排障场景：QQ 广播来了却被丢掉（当前绑定不是 QQ 音乐）
-            Logx.d(
-                LogTags.MEDIA, "忽略 QQ 歌词广播（当前会话不是 QQ 音乐）",
+        qqBroadcastCount++
+        // 收到广播 = 「允许对外发送」那扇门确实开了（第126轮新增的判据）。
+        qqDoorOpened = true
+        // 原始内容留一份（截断）—— 下次诊断包就能看到 QQ 音乐到底发了什么字段。
+        lastQqBroadcastRaw = if (raw.length > 600) raw.take(600) + "…" else raw
+
+        val boundPkg = sessionTrack?.pkg.orEmpty()
+        if (!acceptQqBroadcast(boundPkg)) {
+            qqBroadcastDropped++
+            Logx.i(
+                LogTags.MEDIA, "忽略 QQ 广播（当前会话不是 QQ 音乐）",
                 "boundPkg" to boundPkg,
+                "defaultSrc" to (prefs?.defaultMusicSource ?: ""),
             )
             return
         }
-        val lyricText = QqLyric.parseLyric(raw)
-        if (lyricText.isEmpty()) {
-            Logx.d(LogTags.MEDIA, "忽略 QQ 歌词广播（内容无法解析）", "boundPkg" to boundPkg)
+
+        val payload = QqBroadcast.parse(raw)
+        if (payload == null) {
+            qqBroadcastDropped++
+            Logx.i(LogTags.MEDIA, "忽略 QQ 广播（内容无法解析）", "boundPkg" to boundPkg)
             return
         }
-        val timeline = LrcParser.parse(lyricText)
+        qqBroadcastAccepted++
+
+        // ——歌名 / 歌手 / 进度：合成曲目（没有会话时，这是唯一的来源）——
+        if (payload.hasSong) {
+            applyQqBroadcastTrack(payload)
+        }
+
+        // ——喂给原车媒体桥：方控要靠它才能被原车接管——
+        pushBroadcastToBridge(payload)
+
+        if (!payload.hasLyric) {
+            Logx.d(
+                LogTags.MEDIA, "QQ 广播（本次不含歌词）",
+                "boundPkg" to boundPkg, "method" to payload.method,
+                "title" to payload.title, "artist" to payload.artist,
+            )
+            return
+        }
+        val timeline = LrcParser.parse(payload.lyric)
         if (timeline.isEmpty) {
             Logx.i(LogTags.MEDIA, "QQ 歌词广播解析后为空", "boundPkg" to boundPkg)
             return
@@ -857,8 +1029,150 @@ class MusicController private constructor() {
         Logx.i(
             LogTags.MEDIA, "收到 QQ 歌词广播",
             "boundPkg" to boundPkg, "lines" to timeline.lines.size,
+            "title" to payload.title, "artist" to payload.artist,
         )
         recomputeLyric()
+    }
+
+    /**
+     * 这条 QQ 广播要不要采纳（第126轮）。
+     *
+     * 判定规则在 [QqBroadcast.shouldAccept]（纯 Kotlin，可单测）；
+     * 这里只负责把「设置里的默认媒体源」塞进去。
+     */
+    private fun acceptQqBroadcast(boundPkg: String): Boolean =
+        QqBroadcast.shouldAccept(boundPkg, prefs?.defaultMusicSource)
+
+    /**
+     * 把「允许对外发送」的门打开（第126轮）。
+     *
+     * ## 为什么这一步是**第一因**
+     *
+     * `BroadcastSenderCenterForThird` 里每个 `updateXxx()` 的第一句都是
+     * `if (this.allowSendOutside)` —— **QQ 音乐默认不往外挂广播**，
+     * 而这个开关只有第三方发 `action=100` 才能打开。
+     *
+     * 我们以前**从来没发过这一条** → QQ 音乐一个字都不往外广播 →
+     * 「拿不到歌名、没有歌词」就是这么来的（不是歌词格式认错了，是**根本没收到**）。
+     *
+     * ## 什么时候发
+     *
+     * 只在**用户把默认媒体源选成 QQ 音乐**时发（这是用户的显式选择，
+     * 不是我们替用户开的）；门开过一次之后就不再发（QQ 那边把开关持久化了）。
+     * 没收到广播就按 [QQ_DOOR_RETRY_MS] 重试。
+     */
+    private fun maybeOpenQqDoor(force: Boolean = false) {
+        val ctx = context ?: return
+        val now = System.currentTimeMillis()
+        // 默认媒体源读得便宜但也别 16ms 一次地读 —— 缓存 5 秒。
+        if (force || now - qqSourceCheckedAt > QQ_SOURCE_CACHE_MS) {
+            qqSourceCheckedAt = now
+            qqSourceCache = runCatching { prefs?.defaultMusicSource }.getOrNull().orEmpty()
+        }
+        if (qqSourceCache != MediaSources.QQ_ID) return
+        if (qqDoorOpened && !force) return
+        if (!force && now - qqDoorSentAt < QQ_DOOR_RETRY_MS) return
+        val sent = QqBroadcast.openSendDoor(ctx)
+        qqDoorSentAt = now
+        Logx.i(
+            LogTags.MEDIA, "请求 QQ 音乐打开「允许对外发送」",
+            "sent" to sent, "doorOpened" to qqDoorOpened,
+            "defaultSrc" to qqSourceCache,
+        )
+    }
+
+    /**
+     * 把 QQ 音乐的传输控制命令发出去（第126轮）。
+     *
+     * 走 QQ 音乐自己的三方协议（`qqmusiccar://?action=20&m0=…`）——
+     * 广播通道的 `action=0/2/3` 只会把 QQ 音乐的界面打开，**不会**切歌。
+     */
+    private fun sendQqControl(action: String): Boolean {
+        val ctx = context ?: return false
+        val ok = QqBroadcast.sendControl(ctx, action)
+        qqControlCount++
+        Logx.i(LogTags.MEDIA, "QQ 音乐方控命令", "action" to action, "ok" to ok)
+        return ok
+    }
+
+    /**
+     * 用户换了「默认媒体源」（第126轮）。
+     *
+     * 换成 QQ 音乐的话，**立刻**把「允许对外发送」的门打开 ——
+     * 不开门，QQ 音乐不会往外挂任何广播（歌名、歌词、方控全都没有）。
+     */
+    fun onDefaultMediaSourceChanged(sourceId: String) {
+        qqSourceCache = sourceId
+        qqSourceCheckedAt = System.currentTimeMillis()
+        if (sourceId == MediaSources.QQ_ID) maybeOpenQqDoor(force = true)
+    }
+
+    /**
+     * 把广播里的曲目喂给原车媒体桥（第126轮）。
+     *
+     * 没有这一条，桥拿不到 QQ 音乐的样本 → 不会注册到原车 →
+     * **方向盘方控还在原车音源（爱趣听）上**（真车实测的现象）。
+     */
+    private fun pushBroadcastToBridge(payload: QqBroadcast.Payload) {
+        val t = broadcastTrack ?: return
+        OfficialMediaBridge.updateBroadcast(
+            source = QqBroadcast.PACKAGE,
+            title = t.title,
+            artist = t.artist,
+            album = t.album,
+            positionMs = payload.positionMs,
+            durationMs = if (t.durationMs > 0) t.durationMs else payload.durationMs,
+            playing = payload.playing,
+        )
+    }
+
+    /**
+     * 把广播里的歌名 / 歌手合成成曲目。
+     *
+     * 只有**当前没有会话曲目**时才合成 —— 有会话的话以会话为准。
+     */
+    private fun applyQqBroadcastTrack(payload: QqBroadcast.Payload) {
+        if (sessionTrack != null) return
+        val title = payload.title
+        val artist = payload.artist
+        if (title.isEmpty() && artist.isEmpty()) return
+        val prev = broadcastTrack
+        if (prev != null && prev.title == title && prev.artist == artist &&
+            prev.durationMs == payload.durationMs
+        ) {
+            // ——同一首歌：只更新进度 / 播放态——
+            //
+            // QQ 音乐的 `update_state` 是**反复**发的（每次状态变化都发一条），
+            // 这里必须把 position / playing 一起更新，否则卡片上的进度条永远不动。
+            val updated = prev.copy(
+                positionMs = payload.positionMs,
+                playing = payload.playing,
+            )
+            if (updated != prev) {
+                broadcastTrack = updated
+                listeners.forEach { it.onMediaChanged(track) }
+            }
+            return
+        }
+        val synthetic = TrackInfo(
+            pkg = QqBroadcast.PACKAGE,
+            title = title,
+            artist = artist,
+            album = payload.album,
+            durationMs = payload.durationMs,
+            positionMs = payload.positionMs,
+            playing = payload.playing,
+            sourceId = MediaSources.QQ_ID,
+        )
+        broadcastTrack = synthetic
+        Logx.i(
+            LogTags.MEDIA, "QQ 广播合成曲目",
+            "title" to title, "artist" to artist,
+            "durationMs" to payload.durationMs, "method" to payload.method,
+            "positionMs" to payload.positionMs, "playing" to payload.playing,
+        )
+        listeners.forEach { it.onMediaChanged(track) }
+        requestCover(synthetic)
     }
 
     // ---------------------------------------------------------------- 取值入口
@@ -1041,6 +1355,17 @@ class MusicController private constructor() {
         const val QQ_LYRIC_ACTION = "com.tencent.qqmusiccar.action.PLAY_COMMAND_SEND_FOR_THIRD"
 
         const val QQ_LYRIC_EXTRA = "com.tencent.qqmusiccar.EXTRA_COMMAND_DATA"
+
+        /**
+         * 「允许对外发送」的重试间隔（第126轮）。
+         *
+         * QQ 音乐没在运行 / 没装 / 版本不同协议时，开门广播会**没人接**，
+         * 于是歌名、歌词、方控全都拿不到 —— 这条重试就是给这种情况兜底。
+         */
+        const val QQ_DOOR_RETRY_MS = 30_000L
+
+        /** 「默认媒体源」的缓存时长（第126轮；ticker 是 16ms 一次，别每次都读 prefs）。 */
+        const val QQ_SOURCE_CACHE_MS = 5_000L
 
         fun songKey(title: String, artist: String): String =
             LyricMatch.buildSongKey(null, LyricMatch.clean(title, artist).title)

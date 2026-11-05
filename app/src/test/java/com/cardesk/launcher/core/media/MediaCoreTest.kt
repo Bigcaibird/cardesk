@@ -135,12 +135,23 @@ class MediaCoreTest {
      * 锁定包既不活跃又没有元数据就「没有可显示的会话」。
      */
     @Test
-    fun chooser_lockedPackageWinsOnlyWithinLockedPackage() {
+    fun chooser_lockedPackageFallsBackWhenItHasNoUsableSession() {
         val now = 1_000_000L
         val playing = SessionCandidate("com.a", playing = true, hasMetadata = true, updatedAt = now, title = "a")
+        // 第126轮：锁定包**没有可用会话**时不再返回 null（那会把界面清空），
+        // 而是继续走正常选择。
+        //
+        // 真车翻车的现场：用户把默认媒体源设成 QQ音乐，但车机上 QQ音乐
+        // **不发布可枚举的 MediaSession** → 锁定包永远不在候选里 →
+        // 每 2.5s 选一次都选不中 → 界面被清空（没歌名、没歌词），
+        // 而且 OEM 媒体桥拿不到 controller → 方向盘方控还在爱趣听上。
         val lockedDead = SessionCandidate("com.c", playing = false, hasMetadata = false, updatedAt = 0L)
-        assertNull(SessionChooser.choose(listOf(playing, lockedDead), lockedPkg = "com.c", now = now))
+        assertEquals(
+            "com.a",
+            SessionChooser.choose(listOf(playing, lockedDead), lockedPkg = "com.c", now = now)?.pkg,
+        )
 
+        // 锁定包自己能用（活跃）时，它依然优先。
         val lockedAlive = SessionCandidate("com.c", playing = true, hasMetadata = true, updatedAt = now, title = "c")
         assertEquals(
             "com.c",

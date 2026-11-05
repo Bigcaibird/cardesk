@@ -71,6 +71,45 @@ object MediaBridgePolicy {
     fun wirePlayback(playing: Boolean): Int = if (playing) 1 else 0
 
     /**
+     * 原车媒体桥的**来源合并**结果（第126轮）。
+     */
+    enum class BridgeSource {
+        /** 用会话来源。 */
+        SESSION,
+
+        /** 用广播来源（QQ 音乐那种没有可用会话的）。 */
+        BROADCAST,
+
+        /** 都没有 → 不给原车任何来源。 */
+        NONE,
+    }
+
+    /**
+     * 会话与广播两个来源里，谁喂给原车（纯逻辑，可单测）。
+     *
+     * ## 为什么第126轮起桥有了两个来源
+     *
+     * - **会话**：网易云 / QQ 音乐手机版这种正常发布会话的；
+     * - **广播**：QQ 音乐车机版这种**不发布可用会话**的 ——
+     *   第126轮在模拟器上装了真包，`dumpsys media_session` 实测
+     *   `metadata: null` + `state=0` + 没有 `setCallback`，
+     *   它只能靠自己的三方广播把曲目告诉我们（[QqBroadcast]）。
+     *
+     * ## 规则：**会话优先**
+     *
+     * - 真的有别的 App 接管了会话 → 广播那份**让位**
+     *   （否则仪表上会一直挂着上一首 QQ 音乐的歌）；
+     * - 没有会话 → 才用广播那份 ——
+     *   不然桥拿不到样本 → 不注册到原车 → 原车不把**方向盘方控**交给我们
+     *   （真车现象：方控按下去还是在控制爱趣听）。
+     */
+    fun pickSource(sessionAvailable: Boolean, broadcastAvailable: Boolean): BridgeSource = when {
+        sessionAvailable -> BridgeSource.SESSION
+        broadcastAvailable -> BridgeSource.BROADCAST
+        else -> BridgeSource.NONE
+    }
+
+    /**
      * 设置页诊断要展示的字段名（顺序即展示顺序）。
      *
      * Lead 会把这些塞进设置页说明与 emu-verify 报告；字段必须来自
@@ -82,6 +121,9 @@ object MediaBridgePolicy {
         "playClaimed",
         "bound",
         "sourceType",
+        "sourceKind",
+        "source",
+        "title",
         "callbackCount",
         "lastCallback",
         "reason",
@@ -94,6 +136,9 @@ object MediaBridgePolicy {
         "playClaimed" -> "已接管播放入口"
         "bound" -> "服务已绑定"
         "sourceType" -> "在线音乐源类型"
+        "sourceKind" -> "当前来源类型"
+        "source" -> "当前来源包名"
+        "title" -> "当前歌名"
         "callbackCount" -> "方控/仪表回调次数"
         "lastCallback" -> "最近一次回调"
         "reason" -> "当前状态说明"

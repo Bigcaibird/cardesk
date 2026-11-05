@@ -13,6 +13,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
@@ -152,5 +153,64 @@ class LauncherSmokeTest {
             }
         }
         return null
+    }
+
+    /**
+     * 第126轮：默认媒体源是 **QQ 音乐**时，桌面**不能崩**。
+     *
+     * ## 这条测的是第125轮留下的一个致命崩溃
+     *
+     * 媒体源图标（第125轮加的）在 `LauncherView` 里是这样写的：
+     *
+     * ```kotlin
+     * private var iconLoadingFor: String? = null
+     * private val iconHandler = Handler(Looper.getMainLooper())   // ← 声明在 init{} 之后
+     * ```
+     *
+     * 而 `init{}` 块（**构造期**）里就会 `build()` → `refresh()` →
+     * `updateMediaSourceIcon()` → **起后台线程去取图标**。
+     *
+     * Kotlin 的初始化顺序 = **声明顺序** → 构造期起的后台线程读到的
+     * `iconHandler` 还是 **null** → `iconHandler.post{}` 抛
+     * NullPointerException → **整个桌面进程挂掉**。
+     *
+     * 真机 / 模拟器实测（把 `default_music_source_v1` 设成 `qq` 再启动）：
+     *
+     * ```
+     * E AndroidRuntime: FATAL EXCEPTION: Thread-3
+     * E AndroidRuntime: java.lang.NullPointerException: Attempt to invoke virtual method
+     *     'boolean android.os.Handler.post(java.lang.Runnable)' on a null object reference
+     * E AndroidRuntime:     at com.cardesk.launcher.ui.LauncherView.updateMediaSourceIcon$lambda(LauncherView.kt:1765)
+     * ```
+     *
+     * 这正是用户「把默认媒体源设成 QQ音乐」之后桌面起不来的原因。
+     */
+    @Test
+    fun qqDefaultMediaSourceDoesNotCrashTheLauncher() {
+        val errors = java.util.Collections.synchronizedList(ArrayList<Throwable>())
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { _, e -> errors.add(e) }
+        try {
+            val prefs = com.cardesk.launcher.core.Prefs(RuntimeEnvironment.getApplication())
+            // 和真机一致：默认源 = QQ音乐 → 启动时 `prefs.musicSource` 也被设成 qq
+            prefs.defaultMusicSource = com.cardesk.launcher.core.media.MediaSources.QQ_ID
+            prefs.musicSource = com.cardesk.launcher.core.media.MediaSources.QQ_ID
+
+            val launcher = setup()
+            assertNotNull("桌面应该正常起来", launcher)
+
+            // 图标是在**后台线程**取的，要等它跑完（取 APK 图标要读资源，比较慢）。
+            val deadline = System.currentTimeMillis() + 3_000L
+            while (System.currentTimeMillis() < deadline && errors.isEmpty()) {
+                Thread.sleep(50)
+                shadowOf(Looper.getMainLooper()).idle()
+            }
+            assertTrue(
+                "取媒体源图标的后台线程抛了异常：${errors.firstOrNull()}",
+                errors.isEmpty(),
+            )
+        } finally {
+            Thread.setDefaultUncaughtExceptionHandler(previous)
+        }
     }
 }

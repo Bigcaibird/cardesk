@@ -153,6 +153,27 @@ object OfficialMediaBridge {
     @Volatile
     private var sample = Sample.EMPTY
 
+    /**
+     * **会话**来源的采样（第126轮：桥有两个来源了）。
+     *
+     * 以前只有一个 [sample]，会话没了就 2.5s 后清空。
+     * 现在拆成两个：**会话** 与 **广播**（QQ 音乐那种不发布会话的），
+     * 谁有内容谁上 —— 见 [applySample]。
+     */
+    @Volatile
+    private var sessionSample = Sample.EMPTY
+
+    /**
+     * **广播**来源的采样（第126轮）。
+     *
+     * QQ 音乐车机版不发布可用的 MediaSession（`metadata: null` + `state=0`），
+     * 它只能靠自己的三方广播把歌名 / 歌手 / 进度告诉我们。
+     * 没有这条，桥就拿不到 QQ 音乐的曲目 → 原车不会把方控交给我们 →
+     * **方向盘按下去还是在控制爱趣听**（真车实测的现象）。
+     */
+    @Volatile
+    private var broadcastSample = Sample.EMPTY
+
     // ---------------------------------------------------------------- 以下只在 worker 线程访问
 
     private var api: Any? = null
@@ -180,6 +201,8 @@ object OfficialMediaBridge {
     /** 防误清空：选中会话消失后延迟清来源（暂停时车机 App 会销毁会话）。 */
     private val emptySource = Runnable {
         waitingForSource = false
+        sessionSample = Sample.EMPTY
+        broadcastSample = Sample.EMPTY
         sample = Sample.EMPTY
         if (running) worker.execute { publish(Sample.EMPTY) }
     }
@@ -222,6 +245,8 @@ object OfficialMediaBridge {
         cancelEmptySource()
         waitingForSource = false
         sample = Sample.EMPTY
+        sessionSample = Sample.EMPTY
+        broadcastSample = Sample.EMPTY
         worker.execute {
             release()
             val conn = connection
@@ -251,7 +276,87 @@ object OfficialMediaBridge {
      */
     fun update(controller: MediaController?) {
         val ctx = context ?: return
-        val next = Sample.from(ctx, controller)
+        sessionSample = Sample.from(ctx, controller)
+        applySample()
+    }
+
+    /**
+     * 用**广播**同步给原车（第126轮）。
+     *
+     * ## 为什么要多这一条路
+     *
+     * QQ 音乐车机版**不发布可用的 MediaSession**（模拟器上 `dumpsys media_session`
+     * 实测：`metadata: null`、`state=0`、`actions=631`、没有 `setCallback`），
+     * 所以 [update] 拿不到它的任何东西 —— 桥拿不到样本就不会注册，
+     * 原车也就不会把**方向盘方控**交给我们，方控一直还在原车音源（爱趣听）上。
+     *
+     * QQ 音乐只能靠它自己的三方广播把曲目告诉我们（[QqBroadcast]），
+     * 于是这里给广播一条独立的入口。
+     *
+     * @param source 来源包名（必须是 [MediaBridgePolicy.isEligible] 的三方播放器）
+     * @param playing 是否在放（决定要不要向原车抢播放权）
+     */
+    fun updateBroadcast(
+        source: String,
+        title: String,
+        artist: String,
+        album: String,
+        positionMs: Long,
+        durationMs: Long,
+        playing: Boolean,
+    ) {
+        if (!MediaBridgePolicy.isEligible(source)) {
+            // 不是三方在线播放器 —— 我们不冒充它的 owner（见 MediaBridgePolicy 的红线）。
+            broadcastSample = Sample.EMPTY
+            applySample()
+            return
+        }
+        if (title.isEmpty() && artist.isEmpty()) {
+            broadcastSample = Sample.EMPTY
+            applySample()
+            return
+        }
+        val ctx = context
+        broadcastSample = Sample(
+            available = true,
+            playing = playing,
+            source = source,
+            title = title,
+            artist = artist,
+            album = album,
+            position = positionMs.coerceAtLeast(0L),
+            duration = durationMs.coerceAtLeast(0L),
+            launch = launchIntentFor(ctx, source),
+        )
+        applySample()
+    }
+
+    /**
+     * 清掉广播来源的采样（第126轮）。
+     *
+     * 场景：QQ 音乐已经停了 / 切走了，但广播样本还留着 → 仪表上一直显示
+     * 上一首 QQ 音乐的歌名，而且原车的播放权可能还被我们占着。
+     */
+    fun clearBroadcast() {
+        if (!broadcastSample.available) return
+        broadcastSample = Sample.EMPTY
+        applySample()
+    }
+
+    /**
+     * 合并两个来源的采样，推给原车。
+     *
+     * **会话优先**：有会话就以会话为准；会话没有才用广播（QQ 音乐）。
+     * 两个都没有时，才走「2.5s 后清空」那条防闪的延迟路径。
+     */
+    private fun applySample() {
+        val next = when (
+            MediaBridgePolicy.pickSource(sessionSample.available, broadcastSample.available)
+        ) {
+            MediaBridgePolicy.BridgeSource.SESSION -> sessionSample
+            MediaBridgePolicy.BridgeSource.BROADCAST -> broadcastSample
+            MediaBridgePolicy.BridgeSource.NONE -> Sample.EMPTY
+        }
         if (!next.available && running && sample.available) {
             if (!waitingForSource) {
                 waitingForSource = true
@@ -263,6 +368,16 @@ object OfficialMediaBridge {
         waitingForSource = false
         sample = next
         if (running) worker.execute { publish(next) }
+    }
+
+    /** 启动 Intent 的 PendingIntent（拿不到就 null）。 */
+    private fun launchIntentFor(ctx: Context?, pkg: String): PendingIntent? {
+        if (ctx == null) return null
+        return runCatching {
+            val intent = ctx.packageManager.getLaunchIntentForPackage(pkg) ?: return null
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            PendingIntent.getActivity(ctx, 1, intent, PendingIntent.FLAG_UPDATE_CURRENT)
+        }.getOrNull()
     }
 
     /**
@@ -287,6 +402,17 @@ object OfficialMediaBridge {
         "playClaimed" to playClaimed,
         "bound" to bound,
         "sourceType" to if (sample.available) ONLINE else -1,
+        // 第126轮：原车现在看到的到底是**哪个来源**的曲目。
+        // 「方控控不到 QQ 音乐」时，这一行能一眼看出是广播来源还是会话来源。
+        "sourceKind" to when (
+            MediaBridgePolicy.pickSource(sessionSample.available, broadcastSample.available)
+        ) {
+            MediaBridgePolicy.BridgeSource.SESSION -> "session"
+            MediaBridgePolicy.BridgeSource.BROADCAST -> "broadcast"
+            MediaBridgePolicy.BridgeSource.NONE -> "none"
+        },
+        "source" to sample.source,
+        "title" to sample.title,
         "callbackCount" to callbackCount,
         "lastCallback" to lastCallback,
         "reason" to reason,
@@ -677,11 +803,6 @@ object OfficialMediaBridge {
                 return runCatching {
                     val meta = c.metadata
                     val state = c.playbackState
-                    val intent = ctx.packageManager.getLaunchIntentForPackage(pkg)
-                    val launch = intent?.let {
-                        it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        PendingIntent.getActivity(ctx, 1, it, PendingIntent.FLAG_UPDATE_CURRENT)
-                    }
                     Sample(
                         available = state != null,
                         playing = state?.state == PlaybackState.STATE_PLAYING,
@@ -691,7 +812,7 @@ object OfficialMediaBridge {
                         album = text(meta, MediaMetadata.METADATA_KEY_ALBUM),
                         position = maxOf(0L, state?.position ?: 0L),
                         duration = maxOf(0L, meta?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L),
-                        launch = launch,
+                        launch = launchIntentFor(ctx, pkg),
                     )
                 }.getOrElse {
                     // 采样失败不能把桥打挂：退回 EMPTY，下一 tick 再来

@@ -7,7 +7,8 @@ import com.cardesk.launcher.core.log.Logx
  * 会话候选与选择规则。
  *
  * 全部
- * - 锁定包：优先「活跃」的锁定会话，其次「有元数据」的锁定会话，都没有则不选；
+ * - 锁定包：优先「活跃」的锁定会话，其次「有元数据」的锁定会话；
+ *   **锁定包一个可用会话都没有时不算数** —— 继续走下面的正常选择（第126轮）；
  * - 非锁定：活跃的非 mediacenter 会话直接胜出；
  * - 其次是活跃的 mediacenter 会话；
  * - 再看「最近被 touch 过且有元数据」的会话；
@@ -71,7 +72,7 @@ object SessionChooser {
     /**
      * 选出一个会话。
      *
-     * @param lockedPkg 用户显式锁定的包（切来源时）
+     * @param lockedPkg 用户显式锁定的包（切来源 / 默认媒体源）
      * @param now 当前时刻（同一时钟域即可，仅用于日志）
      * @param selectedTokenKey 当前已绑定的**会话**（用于 80ms 稳定判定）
      * @param lastMusicPkg 上次记住的音乐包（MMKV `last_music_package`，touch 时 +1ms 加权）
@@ -109,6 +110,19 @@ object SessionChooser {
         // 锁定包：活跃优先，其次有元数据（:197-213）
         // 遍历的是**会话列表** —— 同一个包的多个会话都会被考虑
         // 谁活跃 / 谁有 metadata 就选谁。
+        //
+        // ——第126轮：锁定包**没有可用会话**时不再清空界面 ——
+        //
+        // 以前这里是 `return fallback`（锁定包没会话就返回 null）。配上第125轮的
+        // 「默认媒体源 → 启动时锁包」，真车就翻车了：
+        // 用户把默认媒体源设成 QQ音乐，但车机上 QQ音乐**不发布可枚举的
+        // MediaSession**（真车日志：24 分钟里 `getActiveSessions` 只有
+        // bluetooth + wecarflow 两个）→ 锁定包永远不在候选里 →
+        // 每 2.5s 选一次都选不中 → **界面被清空**（没歌名、没歌手、没歌词），
+        // 而且 OEM 媒体桥拿不到 controller → **方向盘方控还在原车音源（爱趣听）上**。
+        //
+        // 现在：锁定包**选不出可用会话**时，**继续走下面的正常选择** ——
+        // 锁定仍然是「优先用这个源」，但它不再有「一票否决」把界面清空的权力。
         if (!lockedPkg.isNullOrEmpty()) {
             var fallback: SessionCandidate? = null
             for (c in candidates) {
@@ -116,7 +130,7 @@ object SessionChooser {
                 if (c.active) return c
                 if (fallback == null && c.hasMetadata) fallback = c
             }
-            return fallback
+            if (fallback != null) return fallback
         }
 
         var activeNormal: SessionCandidate? = null

@@ -354,6 +354,33 @@ class LauncherView(context: Context) : FrameLayout(context) {
         desk.requestFresh()
     }
 
+    // ------------------------------------------------------------------
+    // 媒体源图标（第125轮）的字段（第126轮：**必须声明在 init{} 之前**）
+    //
+    // ## 为什么位置这么重要
+    //
+    // Kotlin 的初始化顺序 = **声明顺序**。而 `init{}` 块（构造期）里就会
+    // `build()` → `refresh()` → `updateMediaSourceIcon()` → **起后台线程取图标**。
+    //
+    // 这两个字段以前声明在 `init{}` **之后** → 构造期起的后台线程读到的
+    // `iconHandler` 还是 **null** → 取完图标回来 `iconHandler.post{}` →
+    // NullPointerException → **整个桌面进程挂掉**。
+    //
+    // 真机 / 模拟器实测（默认媒体源 = QQ音乐 时启动必崩）：
+    // `FATAL EXCEPTION: Thread-3 … at LauncherView.updateMediaSourceIcon$lambda(LauncherView.kt:1765)`
+    //
+    // 改成 `by lazy` **也救不了**：Kotlin 的 `lazy` 委托本身也是一个字段，
+    // 一样按声明顺序初始化 —— 构造期读到的会是「委托是 null」。
+    // 所以唯一的办法是：**把声明挪到 `init{}` 之前**。
+    // （回归测试：`LauncherSmokeTest.qqDefaultMediaSourceDoesNotCrashTheLauncher`）
+    // ------------------------------------------------------------------
+
+    /** 正在后台加载图标的来源 id（防重复加载：refresh 每秒都会调）。 */
+    private var iconLoadingFor: String? = null
+
+    /** 图标加载完回主线程用。 */
+    private val iconHandler = Handler(Looper.getMainLooper())
+
     init {
         // 第五十八轮：卡片圆角是**全局可变 token**，启动时先按偏好摆好。
         com.cardesk.launcher.core.CardStyle.applyRadius(prefs.cardRadius)
@@ -1731,12 +1758,6 @@ class LauncherView(context: Context) : FrameLayout(context) {
 
     // --------------------------------------------------------------- 媒体源图标（第125轮）
 
-    /** 正在后台加载图标的来源 id（防重复加载：refresh 每秒都会调）。 */
-    private var iconLoadingFor: String? = null
-
-    /** 图标加载完回主线程用。 */
-    private val iconHandler = Handler(Looper.getMainLooper())
-
     /**
      * 媒体源图标：真 App 图标优先，取不到用自绘符号。
      *
@@ -1781,6 +1802,11 @@ class LauncherView(context: Context) : FrameLayout(context) {
      * @return 实际锁定的包（null = 没锁定）
      */
     fun applyDefaultMediaSource(sourceId: String): String? {
+        // 第126轮：默认源换成 QQ 音乐时，**立刻**把「允许对外发送」的门打开 ——
+        // 不开门，QQ 音乐不会往外挂广播（歌名、歌词、方控全都拿不到）。
+        runCatching {
+            com.cardesk.launcher.core.media.MusicController.get().onDefaultMediaSourceChanged(sourceId)
+        }
         val pkg = com.cardesk.launcher.core.media.MediaSources.resolveDefaultPackage(sourceId) { p ->
             runCatching { context.packageManager.getApplicationInfo(p, 0) != null }.getOrDefault(false)
         }
