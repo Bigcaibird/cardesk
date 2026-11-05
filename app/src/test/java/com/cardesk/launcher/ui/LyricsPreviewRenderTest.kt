@@ -163,9 +163,9 @@ class LyricsPreviewRenderTest {
             withLyric.compress(Bitmap.CompressFormat.PNG, 100, it)
         }
 
-        // 扫描范围要覆盖**整个错落块**：左边从 x=44（当前句的左边缘）起，
-        // 右边到车况卡左沿 1488 为止。
-        val bands = diffBands(base, withLyric, x0 = 44, x1 = 1488, y0 = 200, y1 = 764)
+        // 扫描范围要覆盖**整个错落块**：左边从 x=0 起（当前句贴屏幕左缘 x=10，
+        // 窗口要是从 44 开始就看不到它的左半截），右边到胎压卡右缘 1453 为止。
+        val bands = diffBands(base, withLyric, x0 = 0, x1 = 1453, y0 = 200, y1 = 764)
         println("[119轮] KTV 两行歌词行带: $bands")
 
         assertEquals("KTV 布局的歌词应该正好 2 行", 2, bands.size)
@@ -190,11 +190,11 @@ class LyricsPreviewRenderTest {
         assertTrue("KTV 两行之间应该留出明显的空档（实际 $gapKtv）", gapKtv >= 30)
 
         // —— 错落：当前句贴左边距，下一句往右下错开 ——
-        val mainLeft = leftInkX(base, withLyric, main, 44, 1488)
-        val nextLeft = leftInkX(base, withLyric, next, 44, 1488)
+        val mainLeft = leftInkX(base, withLyric, main, 0, 1453)
+        val nextLeft = leftInkX(base, withLyric, next, 0, 1453)
         println("[119轮] KTV 两行左边缘: 当前句=$mainLeft 下一句=$nextLeft")
         assertTrue(
-            "当前句应该贴桌面的左边距（实际左边缘 $mainLeft）",
+            "当前句应该贴屏幕左缘（实际左边缘 $mainLeft）",
             abs(mainLeft - KTV_CURRENT_LEFT_X) <= 6,
         )
         assertTrue(

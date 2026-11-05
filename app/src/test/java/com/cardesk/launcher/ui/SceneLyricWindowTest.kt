@@ -171,9 +171,9 @@ class SceneLyricWindowTest {
         assertNotNull("KTV 两行必须带锚点（位置是定死的）", anchors)
         val a = anchors!!
 
-        // ① 当前句贴桌面的左边距（跟导航引导卡同一条竖线）
+        // ① 当前句贴**屏幕左缘**（x=10，比内容左边距 44 还靠左 34px）
         assertEquals(KTV_CURRENT_LEFT_X, a[0].leftX, 0.001f)
-        assertEquals(44f, a[0].leftX, 0.001f)
+        assertEquals(10f, a[0].leftX, 0.001f)
 
         // ② 下一句往**右**错开
         assertTrue("下一句应该往右下错开", a[1].leftX > a[0].leftX)
@@ -193,7 +193,7 @@ class SceneLyricWindowTest {
         assertEquals(KTV_NEXT_LEFT_X, a[1].leftX, 0.001f)
         // 下一句要错得**够开**（用户示意图里两框之间有一大段空白）
         assertTrue("下一句应该错开足够远", a[1].leftX - a[0].leftX >= 600f)
-        // 下一句从屏幕**中线左边一点**起排（用户示意图：x≈776），
+        // 下一句从屏幕**中线左边一点**起排（x=742），
         // 但仍在桌面中央区域里 —— 不跑到最右（那里是车况卡）。
         assertTrue("下一句的起点不该跑到屏幕最右", a[1].leftX < 1000f)
     }
@@ -219,17 +219,19 @@ class SceneLyricWindowTest {
     }
 
     @Test
-    fun `KTV下一句不会钻到车况卡底下`() {
+    fun `KTV下一句的区域尾部对齐胎压卡右缘`() {
         val a = LyricLayout.KTV.anchors!!
         val maxW = LyricBlockLayout.rowMaxWidth(
             leftX = a[1].leftX,
             maxWidth = ScenePage.LYRIC_MAX_W,
             safeRight = ScenePage.LYRIC_SAFE_RIGHT,
         )
+        // 安全线 = 底排胎压卡的右缘（默认卡片布局下量的 1453）
+        assertEquals("安全线应该是胎压卡右缘 1453", 1453f, ScenePage.LYRIC_SAFE_RIGHT, 0.001f)
         assertTrue(
             "下一句的右边缘(${
                 a[1].leftX + maxW
-            }) 不能越过车况卡左沿(${ScenePage.LYRIC_SAFE_RIGHT})",
+            }) 不能越过胎压卡右缘(${ScenePage.LYRIC_SAFE_RIGHT})",
             a[1].leftX + maxW <= ScenePage.LYRIC_SAFE_RIGHT,
         )
         // 40px 一个汉字 → 这一行最多能放十来个字
