@@ -783,6 +783,10 @@ class LauncherView(context: Context) : FrameLayout(context) {
             applyWallpaper(index)
         }
         scenePage = ScenePage(context).apply {
+            // 第117轮：首页中央歌词的**布局**跟着偏好走。
+            // 在这里就设好（而不是等 refresh 的第一轮），免得开机头一秒
+            // 还画着默认的三行、过一会儿才跳成用户选的那一种。
+            lyricLayout = com.cardesk.launcher.core.media.LyricLayout.fromKey(prefs.sceneLyricLayout)
             onOpenVehicle = { toast("车辆详情（模拟）") }
             onOpenNav = { showPage(PAGE_NAV) }
             onOpenPhone = { toast("蓝牙电话（模拟）") }
@@ -2328,23 +2332,20 @@ private fun showCam() {
     }
 
     /**
-     * 设置页预览条用的**五行歌词**（顺序：上 2 / 上 1 / 当前 / 下 1 / 下 2）。
+     * 设置页预览条用的歌词（顺序 = 布局的行序：最上 → 最下）。
      *
      * 第 115 轮：桌面正在放歌时用**真实歌词**，用户看到的就是自己那首歌变大的效果；
      * 没在放歌 / 歌词还没加载 → 返回 null，预览条用自带的示例文案。
+     *
+     * 第 117 轮：**按布局取** —— 三行显示三句、KTV 两行显示两句，
+     * 预览必须跟桌面显示的那几行一致，否则预览就骗人了。
      */
-    private fun previewLyricLines(): List<String>? {
+    private fun previewLyricLines(layout: com.cardesk.launcher.core.media.LyricLayout): List<String>? {
         val timeline = mediaLyric ?: return null
         val index = mediaLyricIndex
         if (index < 0) return null
         val lines = timeline.lines.map { it.text }
-        return listOf(
-            com.cardesk.launcher.core.media.LyricWindow.lineAt(lines, index, -2),
-            com.cardesk.launcher.core.media.LyricWindow.lineAt(lines, index, -1),
-            com.cardesk.launcher.core.media.LyricWindow.lineAt(lines, index, 0),
-            com.cardesk.launcher.core.media.LyricWindow.lineAt(lines, index, 1),
-            com.cardesk.launcher.core.media.LyricWindow.lineAt(lines, index, 2),
-        )
+        return com.cardesk.launcher.core.media.LyricWindow.window(lines, index, layout.slots)
     }
 
     private fun showSettings() {
@@ -2355,12 +2356,15 @@ private fun showCam() {
         overlay.onApply = { onSettingsApplied() }
         overlay.onCardLayoutChanged = { reloadSceneCardLayout() }
         // 第114轮：拖「首页中央歌词字号」滑杆时，桌面立刻跟着变。
+        // 第117轮：改「歌词布局」时也一样立刻生效。
         overlay.onSceneLyricChanged = {
             scenePage.lyricScale = prefs.sceneLyricScalePct / 100f
+            scenePage.lyricLayout = com.cardesk.launcher.core.media.LyricLayout.fromKey(prefs.sceneLyricLayout)
             scenePage.invalidate()
         }
         // 第115轮：预览条优先用**真实歌词**（正在放的那首歌），没有才用示例文案。
-        overlay.lyricPreviewLines = { previewLyricLines() }
+        // 第117轮：按布局取句（预览要跟桌面显示的那几行一致）。
+        overlay.lyricPreviewLines = { layout -> previewLyricLines(layout) }
         overlay.onEditNavSlots = {
             closeSettings()
             showNavSlots()
@@ -2834,6 +2838,8 @@ private fun showCam() {
         // 第114轮：首页中央大字歌词的**整体缩放**跟着设置走
         // （设置页滑杆 → `prefs.sceneLyricScalePct` → 这里 → 场景页）。
         scenePage.lyricScale = prefs.sceneLyricScalePct / 100f
+        // 第117轮：布局同理（设置页「歌词布局」→ `prefs.sceneLyricLayout` → 场景页）。
+        scenePage.lyricLayout = com.cardesk.launcher.core.media.LyricLayout.fromKey(prefs.sceneLyricLayout)
         // 首页中央大字歌词 vs 导航栏歌词槽：**同一首歌只显示一处**。
         // 槽位条形态且槽位里确实配了歌词槽 → 歌词归导航栏，中央大字让位。
         scenePage.showCenterLyric = !slotBarShowsLyric()

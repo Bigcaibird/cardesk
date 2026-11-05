@@ -1058,6 +1058,128 @@ ActivityView 启动承载应用 pkg=com.autonavi.amapautp.yh api=pendingIntent
 （4214 / 1.0.1118-system，平台证书 SHA-256 `c8a2e9bc…92ab8`，
 APK SHA-256 `1085fb4a7711df2217b7aaef5cea77a142f7e4ef3d5e88c1c0c575ac41a816e1`）。
 
+## 首页中央歌词：三行 / KTV 两行 可切（第 117 轮）
+
+用户要求三件事：
+
+1. 首页大字歌词改成**三行**，**大小保持不变**；
+2. 再加一种**上下两行**、像 KTV/MTV 的排法；
+3. 两种**允许选**。
+
+### 两种布局
+
+```
+三行（默认）                    KTV 式两行
+  上一句（40px，SOFT）            当前句（56px 粗体）  ←
+  当前句（56px 粗体）  ←          下一句（40px，SOFT）
+  下一句（40px，SOFT）
+```
+
+- **三行**：沿用第 113 轮「近 / 当前 / 近」那三档字号（40 / 56 / 40）——
+  用户说「大小保持不变」，所以**只减行数、不动字号**。
+- **KTV 式两行**：**当前句在上、下一句在下**，两行之间**明显分隔**
+  （行距放大到 1.8 倍）。唱过的那句直接往上走掉，
+  屏幕上永远是「正在唱的大字 + 马上要唱的小字」这一对 —— 跟 KTV 字幕一样。
+
+> 用户中途更正过一次语义：「两行歌词应该分隔上下各一行；当前句在上」。
+> 之前按「上一句在上」做的那版已全部改成当前句在上。
+
+### 怎么做的
+
+- 新增纯 Kotlin 的 `core/media/LyricLayout.kt`：
+  一个布局 = 「行数 + 当前行下标 + 行序 + 每行字号档 + 行距倍数」。
+  这几样缺一不可 —— **当前行不总在中间**（三行在中间、KTV 在最上），
+  差一个就画错位置。判定逻辑可以直接 JVM 单测覆盖。
+- 字号档单独放在文件级的 `LyricSizeTier` 对象里 ——
+  Kotlin 的**伴生对象在枚举项之后才初始化**，
+  枚举构造参数引用伴生常量会直接编译失败
+  （"Companion object of enum class is uninitialized here"）。
+- `core/media/LyricBlockLayout.kt` 的基线算法从「写死 5 行」改成**按行数算**，
+  行距也只剩一档（原来 5 行时有「衬句与衬句」的更紧行距，现在用不上）。
+- `core/media/LyricWindow.kt` 加了按**显式行序**取句的重载 ——
+  `split(n)` 是按「上下均分」算的，它假设当前句在中间；
+  KTV 的「当前句在最上」得由布局自己给行序（`[0, 1]`）。
+- `ScenePage.drawCenterLyric` 与设置页的预览条都按**同一份清单**画 ——
+  预览里看到的必须是桌面上真会出现的。
+- 首页中央原来的**五行**布局被三行取代，
+  `ScenePage.lyricPrev2` / `lyricNext2` 一并删掉；
+  **导航页组合卡仍是 5 句**（`NavPage` 自己的字段，没动）。
+- 落盘键 `scene_lyric_layout`（`three` / `ktv`），默认 `three`；
+  认不出来的键一律回三行（脏键不该让歌词整块不显示）。
+  存的是**键**不是下标 —— 以后加布局下标会错位。
+- 设置入口：设置 → 桌面设置 → 仪表歌词 → **首页中央歌词 → 歌词布局**，
+  换布局时预览条立刻跟着变（预览条上方的提示文案也会说明当前布局长什么样）。
+
+### 像素级断言（不靠肉眼）
+
+`LyricsPreviewRenderTest` 拿「无歌词底图」跟「有歌词图」**逐像素差分**，
+数出文字行带：
+
+| 布局 | 实测行带 | 断言 |
+|---|---|---|
+| 三行 | `[405..442, 469..524, 554..591]` | 正好 3 条；上下衬句同高（37）；当前句最高（55）；块中心 498 ≈ 500 |
+| KTV 两行 | `[430..485, 529..566]` | 正好 2 条；**当前句在上面**（55）；下一句在下面（37）；中间空档 44px；块中心 498 ≈ 500 |
+| 三行 140% | `[367..420, 458..533, 575..628]` | 还是 3 条；块中心 497 ≈ 500；不压底部卡片区 |
+
+另外还断言「有导航引导卡时，歌词一个字都不画到引导卡上」。
+
+### 单测
+
+- `LyricBlockLayoutTest`（10 例，含 KTV 两行与「当前行下标越界要报错」）、
+  `SceneLyricWindowTest`（12 例）、`LyricScalePreviewRenderTest`（4 例）、
+  `LyricsPreviewRenderTest`（3 例）、
+  `SettingsLyricLayoutTest`（2 例，真点设置页里的「KTV 两行」，验偏好落盘 +
+  预览条 + 桌面三处联动）。
+- 全量单测 **1608 全绿**（上一轮 1595 → 本轮 1608）。
+
+效果图：`preview/y31-lyrics-3lines.png`、`preview/y31-lyrics-3lines-guide.png`、
+`preview/y31-lyrics-ktv2.png`、`preview/y32-lyrics-scale-140.png`。
+
+产物：`dist/CarDesk-platform-ecarx-cardesk-4215.apk`
+（4215 / 1.0.1119-system，平台证书 SHA-256 `c8a2e9bc…92ab8`，
+APK SHA-256 `f7cae1a904187c31dc1b8f4413f1bf27b1f64c7d49255ef58ccf9115f43d314e`，2217642 字节）。
+
+### 模拟器实机验证
+
+`emulator-5556`（Android 10 / SDK 29 / arm64-v8a，`wm size 1920x968` 对齐车机），
+探针 `com.cardesk.mediaprobe` 注入《怎么我睡不着你也不来救我》，
+桌面在线抓到歌词（`歌词竞速命中 provider=qq lines=54`）：
+
+| 截图 | 内容 |
+|---|---|
+| `emu-verify/y30/y30-lyric-three.png` | **三行**：上一句（40 灰）/ 当前句（56 粗 + 青色擦除）/ 下一句（40 灰） |
+| `emu-verify/y30/y30-lyric-ktv.png` | **KTV 两行**：**当前句在上**（56 粗 + 青色擦除）/ 下一句在下（40 灰），中间明显分隔 |
+| `emu-verify/y30/y30-settings-layout-three.png` | 设置页「歌词布局」：三行（选中）/ KTV 两行 + 说明 + 三行预览条 |
+| `emu-verify/y30/y30-settings-layout-ktv.png` | 点「KTV 两行」后：chip、预览条、说明文案全部跟着换 |
+
+两种布局是**同一首歌、同一帧歌词**截的，唯一变量就是布局。
+
+#### 验证时抓到并修掉的一个 bug
+
+第一版切到 KTV 两行时，预览条变了、桌面也变了，
+但 **chip 下面那句说明还是三行的「上一句 / 当前句 / 下一句」**。
+
+原因：那句说明是在**建页时**写死一次的（`note()` 只是往 body 里塞一个 TextView），
+chip 回调只更新了预览条和桌面，没回头改那行字。
+
+修法：`note()` 改成**返回它建的 TextView**，歌词布局那一节把返回值留在手里，
+chip 回调里就地改文案。补的断言**做过反向验证** ——
+临时去掉那行更新，用例立刻变红。
+
+#### 取证脚本
+
+`tools/emu_lyric_layout.sh`（三行 / KTV 两行各截一张）：
+
+```bash
+bash tools/emu_lyric_layout.sh three y30-lyric-three
+bash tools/emu_lyric_layout.sh ktv   y30-lyric-ktv
+```
+
+**为什么必须 `kill -9`**：CarDesk 是系统 HOME 应用，
+`am force-stop` 之后系统会立刻把它重新拉起来，旧实例带着内存里的 `page=1`；
+`am start` 复用那个已有实例 → 桌面一启动就停在导航页，
+还会把刚写好的 `last_page` 又写回 1、把偏好覆盖掉。
+
 ## 巡航红绿灯数据源排查（第 107 轮）
 
 4202 的诊断包确认：巡航时高德只发 `12205/10001/10077` 三类广播，**没有任何灯态字段**

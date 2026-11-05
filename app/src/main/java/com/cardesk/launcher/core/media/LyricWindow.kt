@@ -85,4 +85,24 @@ object LyricWindow {
         val past = sp[0]
         return List(past + 1 + sp[1]) { i -> lineAt(lines, index, i - past) }
     }
+
+    /**
+     * 按**显式行序**取窗口（第117轮）。
+     *
+     * 首页中央大字歌词有两种布局（[LyricLayout]）：
+     * 三行 = `[-1, 0, 1]`（当前句夹在中间）、KTV 两行 = `[0, 1]`（**当前句在上**）。
+     *
+     * **为什么不直接用 [window] 的 total 版**：`split(n)` 是按「上下均分」算的，
+     * 它假设当前句在中间 —— 三行刚好对上，KTV 的「当前句在最上」就说不清了
+     * （凑巧 `split(2)` 也返回 `[0, 1]`，但那是巧合，不是语义）。
+     * 这里让布局**显式给出行序**，取句只管照着取，
+     * 布局定义和取句实现就不会各说各话。
+     *
+     * @param lines 全部歌词行
+     * @param index 当前行下标
+     * @param slots 行序（相对当前句的偏移：负 = 上一句，正 = 下一句）
+     * @return 长度与 [slots] 相同、顺序一致的列表；越界 / 空行处是空串
+     */
+    fun window(lines: List<String>, index: Int, slots: IntArray): List<String> =
+        slots.map { lineAt(lines, index, it) }
 }

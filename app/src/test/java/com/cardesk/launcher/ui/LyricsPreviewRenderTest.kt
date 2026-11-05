@@ -6,6 +6,7 @@ import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import com.cardesk.launcher.MainActivity
+import com.cardesk.launcher.core.media.LyricLayout
 import com.cardesk.launcher.ui.pages.ScenePage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -22,15 +23,17 @@ import java.io.FileOutputStream
 import kotlin.math.abs
 
 /**
- * 首页中央大字歌词（第 113 轮：三行 → **五行**；第 114 轮：**块居中** + 字号可调）。
+ * 首页中央大字歌词（第 113 轮：三行 → 五行；第 114 轮：块居中 + 字号可调；
+ * **第 117 轮：五行 → 三行 / KTV 两行两种可切布局**）。
  *
- * 效果图：`preview/y27-lyrics-5lines.png`（桌面）、`preview/y27-lyrics-5lines-guide.png`（带导航引导卡）、
- * `preview/y28-lyrics-scale-140.png`（字号拉到 140%）。
+ * 效果图：`preview/y31-lyrics-3lines.png`（桌面·三行）、
+ * `preview/y31-lyrics-3lines-guide.png`（带导航引导卡）、
+ * `preview/y31-lyrics-ktv2.png`（KTV 两行）、
+ * `preview/y32-lyrics-scale-140.png`（字号拉到 140%）。
  *
  * **断言不靠肉眼**：拿一张「没有歌词」的底图跟「有歌词」的图**逐像素差分**，
- * 把差分出来的行带数出来 —— 必须正好 **5 条**，
- * 且字号关系是「当前句 > 紧邻衬句 > 远衬句」，
- * 整块**居中**在 [ScenePage.LYRIC_BLOCK_CENTER_Y]、
+ * 把差分出来的行带数出来 —— 三行布局必须正好 **3 条**、KTV 布局正好 **2 条**，
+ * 且字号关系是「当前句 > 衬句」，整块**居中**在 [ScenePage.LYRIC_BLOCK_CENTER_Y]、
  * 不压到底部卡片区，**有引导卡时歌词不画到引导卡上**。
  */
 @RunWith(RobolectricTestRunner::class)
@@ -46,7 +49,7 @@ class LyricsPreviewRenderTest {
         return null
     }
 
-    /** 五行歌词（上 2 / 上 1 / 当前 / 下 1 / 下 2）；第一句特意写长，用来测引导卡避让。 */
+    /** 歌词行；第一句特意写长，用来测引导卡避让。 */
     private val lines = listOf(
         "第一句 这是一句特别特别长的歌词用来测试会不会压到左上角的引导卡上面去",
         "第二句 风雨里追赶",
@@ -57,20 +60,20 @@ class LyricsPreviewRenderTest {
     )
 
     @Test
-    fun 渲染五行大字歌词() {
-        val (decor, scenePage) = launch()
+    fun 渲染三行大字歌词() {
+        val (decor, scenePage) = launch(LyricLayout.THREE)
         val dir = File("../preview").apply { mkdirs() }
 
         // ① 底图（无引导卡、无歌词）
         val base = shot(decor)
 
-        // ② 有歌词（仍无引导卡）→ 差分出 5 条行带
+        // ② 有歌词（仍无引导卡）→ 差分出 3 条行带
         scenePage.setLyricWindow(lines, 2)
         scenePage.setLyricWipeImmediate(0.42f)
         shadowOf(Looper.getMainLooper()).idle()
         decor.invalidate()
         val withLyric = shot(decor)
-        FileOutputStream(File(dir, "y27-lyrics-5lines.png")).use {
+        FileOutputStream(File(dir, "y31-lyrics-3lines.png")).use {
             withLyric.compress(Bitmap.CompressFormat.PNG, 100, it)
         }
 
@@ -81,46 +84,40 @@ class LyricsPreviewRenderTest {
         decor.invalidate()
         val baseGuide = shot(decor)
 
-        // ④ 引导卡 + 五行歌词（最挤的场景）
+        // ④ 引导卡 + 三行歌词（最挤的场景）
         scenePage.setLyricWindow(lines, 2)
         scenePage.setLyricWipeImmediate(0.42f)
         shadowOf(Looper.getMainLooper()).idle()
         decor.invalidate()
         val withGuide = shot(decor)
-        FileOutputStream(File(dir, "y27-lyrics-5lines-guide.png")).use {
+        FileOutputStream(File(dir, "y31-lyrics-3lines-guide.png")).use {
             withGuide.compress(Bitmap.CompressFormat.PNG, 100, it)
         }
 
         // ⑤ 差分出行带（只扫歌词区，避开状态栏时钟与右侧车况卡）
         val bands = diffBands(base, withLyric, x0 = 300, x1 = 1440, y0 = 200, y1 = 764)
-        println("[113/114轮] 歌词行带: $bands")
+        println("[117轮] 三行歌词行带: $bands")
 
-        assertEquals("首页中央大字歌词应该正好 5 行", 5, bands.size)
+        assertEquals("首页中央大字歌词应该正好 3 行", 3, bands.size)
 
-        val far = bands[0]
-        val near = bands[1]
-        val main = bands[2]
-        val near2 = bands[3]
-        val far2 = bands[4]
+        val prev = bands[0]
+        val main = bands[1]
+        val next = bands[2]
 
-        // —— 上下对称：上 2 / 上 1 与下 1 / 下 2 的高度应当一致 ——
-        assertEquals("上 2 与下 2 高度应一致", far.last - far.first, far2.last - far2.first)
-        assertEquals("上 1 与下 1 高度应一致", near.last - near.first, near2.last - near2.first)
+        // —— 上下对称：两行衬句同字号 ——
+        assertEquals("上一句与下一句高度应一致", prev.last - prev.first, next.last - next.first)
 
-        // —— 字号三档：当前句 > 紧邻衬句 > 远衬句 ——
+        // —— 字号：当前句 > 衬句 ——
         val mainH = main.last - main.first
-        val nearH = near.last - near.first
-        val farH = far.last - far.first
-        assertTrue("当前句($mainH) 应该比紧邻衬句($nearH) 大", mainH > nearH)
-        assertTrue("紧邻衬句($nearH) 应该比远衬句($farH) 大", nearH > farH)
+        val sideH = prev.last - prev.first
+        assertTrue("当前句($mainH) 应该比衬句($sideH) 大", mainH > sideH)
 
         // —— 比第 106 轮的 30px 衬句明显大了一档 ——
-        // （30px 中文字形的墨迹高度约 26px；这里远衬句是 34px → 墨迹 ≥ 28）
-        assertTrue("远衬句($farH) 应该比原来的 30px 衬句更大", farH >= 28)
-        assertTrue("紧邻衬句($nearH) 应该比原来的 30px 衬句更大", nearH >= 32)
+        // （30px 中文字形的墨迹高度约 26px；这里衬句是 40px → 墨迹 ≥ 32）
+        assertTrue("衬句($sideH) 应该比原来的 30px 衬句更大", sideH >= 32)
 
         // —— 位置：整块**居中**（第 114 轮）——
-        val center = (far.first + far2.last) / 2f
+        val center = (prev.first + next.last) / 2f
         assertTrue(
             "歌词块中心($center) 应该落在 ${ScenePage.LYRIC_BLOCK_CENTER_Y} 附近",
             abs(center - ScenePage.LYRIC_BLOCK_CENTER_Y) <= 14f,
@@ -128,8 +125,8 @@ class LyricsPreviewRenderTest {
 
         // —— 位置：不压到底部卡片区 ——
         assertTrue(
-            "最下面一行($far2) 不该压到底部卡片区（上沿 ${ScenePage.LYRIC_BOTTOM_CARD_TOP}）",
-            far2.last < ScenePage.LYRIC_BOTTOM_CARD_TOP,
+            "最下面一行($next) 不该压到底部卡片区（上沿 ${ScenePage.LYRIC_BOTTOM_CARD_TOP}）",
+            next.last < ScenePage.LYRIC_BOTTOM_CARD_TOP,
         )
 
         // —— 有引导卡时，歌词**不能画到引导卡上** ——
@@ -145,11 +142,66 @@ class LyricsPreviewRenderTest {
     }
 
     /**
+     * 第 117 轮：**KTV 式两行** —— **当前句在上、下一句在下**。
+     */
+    @Test
+    fun 渲染KTV两行大字歌词() {
+        val (decor, scenePage) = launch(LyricLayout.KTV)
+        val dir = File("../preview").apply { mkdirs() }
+
+        val base = shot(decor)
+
+        scenePage.setLyricWindow(lines, 2)
+        scenePage.setLyricWipeImmediate(0.42f)
+        shadowOf(Looper.getMainLooper()).idle()
+        decor.invalidate()
+        val withLyric = shot(decor)
+        FileOutputStream(File(dir, "y31-lyrics-ktv2.png")).use {
+            withLyric.compress(Bitmap.CompressFormat.PNG, 100, it)
+        }
+
+        val bands = diffBands(base, withLyric, x0 = 300, x1 = 1440, y0 = 200, y1 = 764)
+        println("[117轮] KTV 两行歌词行带: $bands")
+
+        assertEquals("KTV 布局的歌词应该正好 2 行", 2, bands.size)
+
+        val main = bands[0]
+        val next = bands[1]
+
+        // —— 当前句在**上面**（KTV 式：正在唱的那句压在上行）——
+        assertTrue("当前句应该在上面那一行", main.first < next.first)
+        assertTrue("当前句应该在上面那一行", main.last < next.last)
+
+        // —— 字号：当前句 > 下一句 ——
+        assertTrue(
+            "当前句(${main.last - main.first}) 应该比下一句(${next.last - next.first}) 大",
+            (main.last - main.first) > (next.last - next.first),
+        )
+
+        // —— 两行是**分开**的两块：中间的空档要比三行布局里的大 ——
+        val gapKtv = next.first - main.last
+        assertTrue("KTV 两行之间应该留出明显的空档（实际 $gapKtv）", gapKtv >= 30)
+
+        // —— 整块仍然居中 ——
+        val center = (main.first + next.last) / 2f
+        assertTrue(
+            "KTV 两行歌词块中心($center) 应该落在 ${ScenePage.LYRIC_BLOCK_CENTER_Y} 附近",
+            abs(center - ScenePage.LYRIC_BLOCK_CENTER_Y) <= 14f,
+        )
+
+        // —— 不压到底部卡片区 ——
+        assertTrue(
+            "最下面一行($next) 不该压到底部卡片区（上沿 ${ScenePage.LYRIC_BOTTOM_CARD_TOP}）",
+            next.last < ScenePage.LYRIC_BOTTOM_CARD_TOP,
+        )
+    }
+
+    /**
      * 第 114 轮：字号拉到 140% 之后，歌词块**仍然居中**（位置不跟着字号漂）。
      */
     @Test
     fun 字号放大后仍然居中() {
-        val (decor, scenePage) = launch()
+        val (decor, scenePage) = launch(LyricLayout.THREE)
         val dir = File("../preview").apply { mkdirs() }
 
         val base = shot(decor)
@@ -160,21 +212,21 @@ class LyricsPreviewRenderTest {
         shadowOf(Looper.getMainLooper()).idle()
         decor.invalidate()
         val big = shot(decor)
-        FileOutputStream(File(dir, "y28-lyrics-scale-140.png")).use {
+        FileOutputStream(File(dir, "y32-lyrics-scale-140.png")).use {
             big.compress(Bitmap.CompressFormat.PNG, 100, it)
         }
 
         val bands = diffBands(base, big, x0 = 300, x1 = 1440, y0 = 150, y1 = 764)
-        println("[114轮] 140% 行带: $bands")
-        assertEquals("放大后还是 5 行", 5, bands.size)
+        println("[117轮] 140% 行带: $bands")
+        assertEquals("放大后还是 3 行", 3, bands.size)
 
         val center = (bands.first().first + bands.last().last) / 2f
         assertTrue(
             "140% 时歌词块中心($center) 仍然应该落在 ${ScenePage.LYRIC_BLOCK_CENTER_Y} 附近",
             abs(center - ScenePage.LYRIC_BLOCK_CENTER_Y) <= 16f,
         )
-        // 放大后每行都更高
-        val mainH = bands[2].last - bands[2].first
+        // 放大后当前句更高
+        val mainH = bands[1].last - bands[1].first
         assertTrue("140% 的当前句($mainH) 应该比 100% 时更高", mainH >= 70)
         // 还是不能压到底部卡片区
         assertTrue(
@@ -186,7 +238,7 @@ class LyricsPreviewRenderTest {
     }
 
     /** 起一个 Activity，量好尺寸，拿回场景页。 */
-    private fun launch(): Pair<View, ScenePage> {
+    private fun launch(layout: LyricLayout): Pair<View, ScenePage> {
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
         shadowOf(Looper.getMainLooper()).idle()
         val decor = activity.window.decorView
@@ -202,6 +254,7 @@ class LyricsPreviewRenderTest {
         val field = LauncherView::class.java.getDeclaredField("scenePage").apply { isAccessible = true }
         val scenePage = field.get(launcher) as ScenePage
         scenePage.showCenterLyric = true
+        scenePage.lyricLayout = layout
         return decor to scenePage
     }
 

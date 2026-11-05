@@ -130,13 +130,9 @@ class ScenePage(context: Context) : View(context) {
     /** 上一句歌词（淡显）。 */
     var lyricPrev: String = ""
 
-    /**
-     * 上 2 句歌词（更淡）。
-     *
-     * 第 113 轮：首页中央大字歌词从**三行**改成**五行**
-     * （上 2 / 上 1 / 当前 / 下 1 / 下 2），所以多出这一句。
-     */
-    var lyricPrev2: String = ""
+    // 第117轮：首页中央从「五行」改成「三行 / KTV 两行」两种布局（见 [lyricLayout]），
+    // 所以原来「上 2 句 / 下 2 句」那两个字段连同它们的绘制一起去掉了。
+    // （导航页组合卡还是 5 句，那是 `NavPage` 自己的字段，没动。）
 
     /**
      * 车型编号。
@@ -216,12 +212,21 @@ class ScenePage(context: Context) : View(context) {
     /** 下一句歌词（淡显）。 */
     var lyricNext: String = ""
 
+    // 第117轮：「下 2 句」那个字段跟 [lyricPrev2] 一起删掉了（首页没有五行布局了）。
+
     /**
-     * 下 2 句歌词（更淡）。
+     * 首页中央大字歌词的**布局**（第117轮）。
      *
-     * 第 113 轮：配合 [lyricPrev2]，首页中央大字歌词凑成**五行**。
+     * 三行（默认，上 1 / 当前 / 下 1）或 KTV 式两行（**当前句在上、下一句在下**）。
+     * 清单在 [com.cardesk.launcher.core.media.LyricLayout]（纯 Kotlin，可单测）。
      */
-    var lyricNext2: String = ""
+    var lyricLayout: com.cardesk.launcher.core.media.LyricLayout =
+        com.cardesk.launcher.core.media.LyricLayout.THREE
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
 
     /**
      * 歌词**整体缩放**（0.7 ~ 1.4，1 = 设计原值）。
@@ -240,9 +245,14 @@ class ScenePage(context: Context) : View(context) {
         }
 
     /**
-     * 一次性刷入**五行**歌词窗口（上 2 / 上 1 / 当前 / 下 1 / 下 2）。
+     * 一次性刷入歌词窗口（**上一句 / 当前句 / 下一句**）。
      *
-     * 取句逻辑复用 [com.cardesk.launcher.core.media.LyricWindow.window] ——
+     * 第117轮：首页中央改成「三行 / KTV 两行」两种布局，
+     * 但**取句的口径不变**（还是「离当前句最近的三句」）——
+     * 布局只决定「画哪几行、画成多大」，
+     * 画不画下一句由 [lyricLayout] 决定，句子的来源仍然是同一份。
+     *
+     * 取句逻辑复用 [com.cardesk.launcher.core.media.LyricWindow.lineAt] ——
      * 跟导航页组合卡是同一份实现，两边不会出现「首页比导航页少两句」的错位。
      *
      * @param lines 全部歌词行
@@ -252,13 +262,11 @@ class ScenePage(context: Context) : View(context) {
         val w = com.cardesk.launcher.core.media.LyricWindow.window(
             lines,
             index,
-            com.cardesk.launcher.core.media.LyricWindow.TOTAL_LINES,
+            intArrayOf(-1, 0, 1),
         )
-        lyricPrev2 = w.getOrElse(0) { "" }
-        lyricPrev = w.getOrElse(1) { "" }
-        lyricCurrent = w.getOrElse(2) { "" }
-        lyricNext = w.getOrElse(3) { "" }
-        lyricNext2 = w.getOrElse(4) { "" }
+        lyricPrev = w.getOrElse(0) { "" }
+        lyricCurrent = w.getOrElse(1) { "" }
+        lyricNext = w.getOrElse(2) { "" }
     }
 
     // 天气（`WeatherDesk`）
@@ -634,24 +642,31 @@ class ScenePage(context: Context) : View(context) {
      * Dock 媒体槽 / 导航页组合卡 / 音乐页三处。这里按用户要求在首页加一处
      * 视觉重心。
      *
-     * 第 113 轮：从**三行**改成**五行**，并把当前行以外的四行整体放大：
+     * 第117轮：从**五行**改成**两种可切布局**（[lyricLayout]）：
+     *
      * ```
-     *            上 2 句（34px，TEXT_DIM）
-     *            上 1 句（40px，TEXT_SOFT）
-     *            当前 句（56px 粗体，TEXT + 强调色擦除） ← 视觉焦点
-     *            下 1 句（40px，TEXT_SOFT）
-     *            下 2 句（34px，TEXT_DIM）
+     * 三行（默认）              KTV 式两行
+     *   上 1 句（40px，SOFT）      当前 句（56px 粗体）  ←
+     *   当前 句（56px 粗体）  ←    下 1 句（40px，SOFT）
+     *   下 1 句（40px，SOFT）
      * ```
      *
-     * **为什么字号分三档**：五行同字号会糊成一片，扫一眼看不出哪句是「正在唱」。
+     * **为什么当前行不总在中间**：三行是「上 1 / 当前 / 下 1」（当前句夹在中间），
+     * KTV 式是「**当前句在上、下一句在下**」（唱过的那句往上走掉，
+     * 屏幕上永远是「正在唱的大字 + 马上要唱的小字」这一对）。
+     * 所以当前行下标由布局给（三种含义互不相同：三行 = 1 且在中间、
+     * KTV = 0 且在最上）。
+     *
+     * **为什么字号分档**：同字号会糊成一片，扫一眼看不出哪句是「正在唱」。
      * 现在「字号越大越靠近当前句 + 颜色越亮越靠近当前句」，
-     * 两层线索叠在一起，视线自然落到中间那一句。
+     * 两层线索叠在一起，视线自然落到当前那一句。
+     * （第117轮按用户要求**只减行数、不改字号**：三行沿用原来的 40 / 56 / 40。）
      *
      * **为什么整块居中而不是写死某一行**：第 114 轮把字号做成了设置里可调，
      * 字号一变，整块的高度就变 —— 如果锚在「当前行基线」上，
      * 放大时整块会往上顶、缩小时会往下坠，位置跟着字号漂。
      * 所以锚点改成**块中心**（[LYRIC_BLOCK_CENTER_Y]）：
-     * 先按字号算出 5 条基线的相对位置，再把整块平移到中心。
+     * 先按字号算出各条基线的相对位置，再把整块平移到中心。
      * 这样不管用户把字号调到 70% 还是 140%，歌词块都在同一个位置居中。
      *
      * **为什么基线算出来而不是写死**：行距是**像素**，但一行文字的上下留白
@@ -663,12 +678,18 @@ class ScenePage(context: Context) : View(context) {
      * 位置避开左上引导卡（x 44~664, y 73~387）、右上天气（y 75~223），
      * 也不压到底部卡片区（y 764~914）。
      *
-     * 五行都为空 → 整块不画（没有歌词时不占位、不显示占位文案）。
+     * 所有行都为空 → 整块不画（没有歌词时不占位、不显示占位文案）。
      */
     private fun drawCenterLyric(canvas: Canvas) {
         if (!showCenterLyric) return
-        val contents = arrayOf(lyricPrev2, lyricPrev, lyricCurrent, lyricNext, lyricNext2)
-        if (contents.all { it.isEmpty() }) return
+        val layout = lyricLayout
+        val rows = layout.rows
+        val current = layout.currentIndex
+        // 行序 = 最上 → 最下；每行是什么由布局的 slots 决定。
+        val contents = arrayOf(lyricPrev, lyricCurrent, lyricNext)
+        // 当前布局用不到的行不画（KTV 两行不用「上一句」）。
+        val used = Array(rows) { contents[layout.slots[it] + 1] }
+        if (used.all { it.isEmpty() }) return
         val cx = Design.W / 2f
         text.textAlign = Paint.Align.CENTER
 
@@ -678,26 +699,22 @@ class ScenePage(context: Context) : View(context) {
 
         // 字号与行距一起按设置里的缩放放大/缩小（第 114 轮）。
         val k = lyricScale
-        // 每行字号：远（上 2 / 下 2）小、近（上 1 / 下 1）大、当前行最大。
-        val sizes = floatArrayOf(
-            LYRIC_FAR_SIZE * k, LYRIC_NEAR_SIZE * k, LYRIC_MAIN_SIZE * k,
-            LYRIC_NEAR_SIZE * k, LYRIC_FAR_SIZE * k,
-        )
-        val gapMain = LYRIC_GAP_MAIN * k
-        val gapSide = LYRIC_GAP_SIDE * k
+        // 每行字号：按布局给的**档位**取（远 / 近 / 当前）。
+        val sizes = FloatArray(rows) { lyricSizeOf(layout.sizeTiers[it]) * k }
+        // 行距：基础行距 × 布局的行距倍数 × 用户的缩放。
+        // KTV 式两行是「分开的两块」，倍数大于 1（见 LyricLayout.gapScale）。
+        val gap = LYRIC_GAP_MAIN * layout.gapScale * k
         // 每行颜色：越靠近当前行越亮。
-        val colors = intArrayOf(
-            Skin.TEXT_DIM, Skin.TEXT_SOFT, Skin.TEXT, Skin.TEXT_SOFT, Skin.TEXT_DIM,
-        )
+        val colors = IntArray(rows) { lyricColorOf(layout.sizeTiers[it]) }
 
-        // —— 按真实字体度量推 5 条基线 ——
+        // —— 按真实字体度量推各行基线 ——
         // 相邻两行的基线间距 = 下行的 ascent + 行距 + 上行的 descent。
         // 每行按**自己**的 typeface 量（当前句是粗体，字形的上下边界略有不同），
         // 不能沿用上一次绘制残留的 typeface —— 否则量出来的间距会飘。
-        val asc = FloatArray(5)
-        val desc = FloatArray(5)
-        for (i in 0..4) {
-            text.typeface = if (i == 2) {
+        val asc = FloatArray(rows)
+        val desc = FloatArray(rows)
+        for (i in 0 until rows) {
+            text.typeface = if (i == current) {
                 Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             } else {
                 Typeface.DEFAULT
@@ -712,24 +729,27 @@ class ScenePage(context: Context) : View(context) {
         val base = com.cardesk.launcher.core.media.LyricBlockLayout.baselines(
             asc,
             desc,
-            gapMain,
-            gapSide,
+            gap,
+            rows,
+            current,
         )
         val shift = com.cardesk.launcher.core.media.LyricBlockLayout.centerShift(
             asc,
             desc,
             base,
             LYRIC_BLOCK_CENTER_Y,
+            rows,
         )
-        for (i in 0..4) base[i] += shift
+        for (i in 0 until rows) base[i] += shift
 
-        // —— 四行衬句（上 2 / 上 1 / 下 1 / 下 2）——
+        // —— 衬句（当前行以外的那些）——
         // 有导航引导卡时，**够高**（字顶在引导卡下沿之上）的行要收窄宽度：
         // 歌词居中在 x=960，太宽就会伸到引导卡底下、被卡片压住半行字。
         // 宁可截断加省略号，也不让两行字叠在一张卡上。
         val guideOn = navGuide != null
-        for (i in intArrayOf(0, 1, 3, 4)) {
-            val s = contents[i]
+        for (i in 0 until rows) {
+            if (i == current) continue
+            val s = used[i]
             if (s.isEmpty()) continue
             text.typeface = Typeface.DEFAULT
             text.textSize = sizes[i]
@@ -741,15 +761,15 @@ class ScenePage(context: Context) : View(context) {
 
         // —— 当前句（视觉焦点）—— 带**擦除高亮** ——
         // 已唱到的部分用强调色，还没唱到的部分保持暗色，比例随播放位置往前推。
-        if (lyricCurrent.isNotEmpty()) {
+        if (used[current].isNotEmpty()) {
             text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            text.textSize = sizes[2]
-            val mainText = clipLabel(lyricCurrent, LYRIC_MAX_W)
+            text.textSize = sizes[current]
+            val mainText = clipLabel(used[current], LYRIC_MAX_W)
             com.cardesk.launcher.ui.widget.LyricWipeText.draw(
                 canvas = canvas,
                 text = mainText,
                 cx = cx,
-                baseline = base[2],
+                baseline = base[current],
                 paint = text,
                 activeColor = Skin.ACCENT,
                 inactiveColor = Skin.TEXT,
@@ -764,6 +784,25 @@ class ScenePage(context: Context) : View(context) {
         text.typeface = Typeface.DEFAULT
         text.textSize = LYRIC_FAR_SIZE
         text.color = Skin.TEXT_DIM
+    }
+
+    /**
+     * 字号档 → 实际字号（设计原值，缩放由 [lyricScale] 统一乘）。
+     *
+     * 档位定义在 [com.cardesk.launcher.core.media.LyricLayout]（纯 Kotlin），
+     * 实际像素值留在这里 —— 布局清单不该知道 View 的设计坐标。
+     */
+    private fun lyricSizeOf(tier: Int): Float = when (tier) {
+        com.cardesk.launcher.core.media.LyricSizeTier.MAIN -> LYRIC_MAIN_SIZE
+        com.cardesk.launcher.core.media.LyricSizeTier.NEAR -> LYRIC_NEAR_SIZE
+        else -> LYRIC_FAR_SIZE
+    }
+
+    /** 字号档 → 颜色（越靠近当前句越亮）。 */
+    private fun lyricColorOf(tier: Int): Int = when (tier) {
+        com.cardesk.launcher.core.media.LyricSizeTier.MAIN -> Skin.TEXT
+        com.cardesk.launcher.core.media.LyricSizeTier.NEAR -> Skin.TEXT_SOFT
+        else -> Skin.TEXT_DIM
     }
 
     // ---------------------------------------------------------------- 导航引导
@@ -3219,17 +3258,22 @@ class ScenePage(context: Context) : View(context) {
         const val LYRIC_MAIN_SIZE = 56f
 
         /**
-         * 紧挨当前句的两行衬句字号（设计 px）—— 上 1 句 / 下 1 句。
+         * 紧挨当前句的衬句字号（设计 px）—— 上一句 / 下一句。
          *
          * 第 113 轮：原来只有「上一句 / 下一句」两行衬句，字号 30；
          * 现在衬句有四行，**近的两行给 40**（比原来大 1/3）。
+         *
+         * 第 117 轮：首页中央只剩「上一句 / 下一句」两行衬句
+         * （三行布局）或一行（KTV 两行布局），这一档就是它们的字号。
          */
         const val LYRIC_NEAR_SIZE = 40f
 
         /**
-         * 离当前句最远的两行衬句字号（设计 px）—— 上 2 句 / 下 2 句。
+         * 「更远」那一档衬句的字号（设计 px）。
          *
-         * 比 [LYRIC_NEAR_SIZE] 再小一档，做出「越远越小、越淡」的纵深。
+         * 第 117 轮：首页中央没有五行布局了，**这一档暂时没有布局在用**；
+         * 留着是因为 [com.cardesk.launcher.core.media.LyricLayout] 的档位定义里
+         * 仍然有「远档」，以后加更长的布局（比如回到五行）直接能用。
          */
         const val LYRIC_FAR_SIZE = 34f
 
@@ -3244,21 +3288,20 @@ class ScenePage(context: Context) : View(context) {
          * **为什么是 500**：桌面中间那段空区是「天气下沿 223」到
          * 「底部卡片区上沿 764」，中心 493；取 500 是为了跟第 106 轮
          * 那版三行歌词（墨迹 410~590，中心正好 500）对齐 ——
-         * 用户看惯了那个位置，五行版不该让他觉得「往下沉了」。
+         * 用户看惯了那个位置，后面几版不该让他觉得「往下沉了」。
          */
         const val LYRIC_BLOCK_CENTER_Y = 500f
 
         /**
-         * 当前句与相邻衬句之间的行距（设计 px）。
+         * 相邻两行之间的行距（设计 px）。
          *
-         * 比 [LYRIC_GAP_SIDE] 大：当前句是焦点，上下要留得住呼吸。
+         * 当前句是焦点，跟衬句之间要留得住呼吸。
+         *
+         * 第 117 轮：原来还有一档「衬句与衬句之间」的更紧行距（12px），
+         * 那是给五行布局用的；现在两种布局最多只有「当前句 + 一行衬句」，
+         * 全部用这一个行距，所以那一档删掉了。
          */
         const val LYRIC_GAP_MAIN = 18f
-
-        /**
-         * 衬句与衬句之间的行距（设计 px）。
-         */
-        const val LYRIC_GAP_SIDE = 12f
 
         /**
          * 歌词最大宽度（超出加省略号）。

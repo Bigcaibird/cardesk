@@ -1,7 +1,9 @@
 package com.cardesk.launcher.ui
 
+import com.cardesk.launcher.core.media.LyricLayout
 import com.cardesk.launcher.ui.pages.ScenePage
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -9,9 +11,9 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 /**
- * 第 113 轮：首页中央大字歌词的**五行**取句映射。
+ * 首页中央大字歌词的**取句映射 + 布局**（第 113 轮起；第 117 轮：两种布局）。
  *
- * 只测「整窗 → 五个属性」的映射关系；
+ * 只测「整窗 → 三个属性」的映射关系；
  * 像素级的版面断言在 [LyricsPreviewRenderTest] 里。
  */
 @RunWith(RobolectricTestRunner::class)
@@ -21,38 +23,90 @@ class SceneLyricWindowTest {
     private fun scene(): ScenePage = ScenePage(RuntimeEnvironment.getApplication())
 
     @Test
-    fun `整窗刷进五个歌词属性`() {
+    fun `整窗刷进三个歌词属性`() {
         val page = scene()
         val lines = listOf("一", "二", "三", "四", "五", "六", "七")
         page.setLyricWindow(lines, 3)
-        assertEquals("二", page.lyricPrev2)
         assertEquals("三", page.lyricPrev)
         assertEquals("四", page.lyricCurrent)
         assertEquals("五", page.lyricNext)
-        assertEquals("六", page.lyricNext2)
     }
 
     @Test
-    fun `没有歌词时五个属性全空`() {
+    fun `没有歌词时三个属性全空`() {
         val page = scene()
         page.setLyricWindow(listOf("一", "二"), 1)
         page.setLyricWindow(emptyList(), -1)
-        assertEquals("", page.lyricPrev2)
         assertEquals("", page.lyricPrev)
         assertEquals("", page.lyricCurrent)
         assertEquals("", page.lyricNext)
-        assertEquals("", page.lyricNext2)
     }
 
     @Test
     fun `歌头歌尾的空位保留不塌陷`() {
         val page = scene()
         page.setLyricWindow(listOf("一", "二"), 0)
-        assertEquals("", page.lyricPrev2)
         assertEquals("", page.lyricPrev)
         assertEquals("一", page.lyricCurrent)
         assertEquals("二", page.lyricNext)
-        assertEquals("", page.lyricNext2)
+    }
+
+    // ---------------------------------------------------------- 布局（第117轮）
+
+    @Test
+    fun `默认布局是三行`() {
+        val page = scene()
+        assertEquals(LyricLayout.THREE, page.lyricLayout)
+        assertEquals(3, page.lyricLayout.rows)
+    }
+
+    @Test
+    fun `KTV布局是两行且当前句在最上面`() {
+        val layout = LyricLayout.KTV
+        assertEquals(2, layout.rows)
+        assertEquals("当前句在最上面（第一行）", 0, layout.currentIndex)
+        assertEquals("上行是当前句", 0, layout.slots[0])
+        assertEquals("下行是下一句", 1, layout.slots[1])
+    }
+
+    @Test
+    fun `三行布局是上一句当前句下一句`() {
+        val layout = LyricLayout.THREE
+        assertEquals(3, layout.rows)
+        assertEquals(-1, layout.slots[0])
+        assertEquals(0, layout.slots[1])
+        assertEquals(1, layout.slots[2])
+    }
+
+    @Test
+    fun `两种布局的当前句都是最大字号`() {
+        for (layout in LyricLayout.values()) {
+            val cur = layout.sizeTiers[layout.currentIndex]
+            val others = layout.sizeTiers.filterIndexed { i, _ -> i != layout.currentIndex }
+            assertTrue(
+                "${layout.name} 布局的当前句字号必须是最大的",
+                others.all { it < cur },
+            )
+        }
+    }
+
+    @Test
+    fun `布局键认不出来时回三行`() {
+        assertEquals(LyricLayout.THREE, LyricLayout.fromKey(null))
+        assertEquals(LyricLayout.THREE, LyricLayout.fromKey(""))
+        assertEquals(LyricLayout.THREE, LyricLayout.fromKey("乱写的"))
+        assertEquals(LyricLayout.THREE, LyricLayout.fromKey("three"))
+        assertEquals(LyricLayout.KTV, LyricLayout.fromKey("ktv"))
+        assertEquals(LyricLayout.KTV, LyricLayout.fromKey("KTV"))
+    }
+
+    @Test
+    fun `布局可以落到偏好里再读回来`() {
+        val prefs = com.cardesk.launcher.core.Prefs(RuntimeEnvironment.getApplication())
+        assertEquals("three", prefs.sceneLyricLayout)
+        prefs.sceneLyricLayout = "ktv"
+        assertEquals("ktv", prefs.sceneLyricLayout)
+        assertEquals(LyricLayout.KTV, LyricLayout.fromKey(prefs.sceneLyricLayout))
     }
 
     // ---------------------------------------------------------- 字号缩放（第 114 轮）

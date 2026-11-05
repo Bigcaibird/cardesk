@@ -3,6 +3,7 @@ package com.cardesk.launcher.ui
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.view.View
+import com.cardesk.launcher.core.media.LyricLayout
 import com.cardesk.launcher.ui.widget.LyricScalePreviewView
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -15,46 +16,55 @@ import org.robolectric.annotation.GraphicsMode
 import kotlin.math.abs
 
 /**
- * 第 115 轮：设置页里的**歌词预览条**。
+ * 第 115 轮：设置页里的**歌词预览条**（第 117 轮：跟布局联动）。
  *
- * 预览条跟桌面中央那块歌词走**同一份排版**（`LyricBlockLayout`），
+ * 预览条跟桌面中央那块歌词走**同一份排版**（`LyricBlockLayout` + `LyricLayout`），
  * 所以断言的是「预览里看到的就是桌面上会出现的」：
- * 五行、上下对称、缩放后仍然居中。
+ * 行数跟布局一致、上下对称、缩放后仍然居中。
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w1920dp-h1080dp-land")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class LyricScalePreviewRenderTest {
 
-    private val lines = listOf(
+    private val lines3 = listOf(
         "第一句 夜空中最亮的星",
         "第二句 风雨里追赶",
         "第三句 我们都曾勇敢地往前走",
-        "第四句 直到看见远方的灯火",
-        "第五句 请指引我靠近你",
+    )
+
+    private val lines2 = listOf(
+        "上一句 风雨里追赶",
+        "当前句 我们都曾勇敢地往前走",
     )
 
     @Test
-    fun 预览条画出五行歌词() {
-        val bands = bands(preview(1f, lines), blank())
-        println("[115轮] 预览行带: $bands")
-        assertEquals("预览条应该正好 5 行", 5, bands.size)
-        // 上下对称
-        assertEquals(bands[0].last - bands[0].first, bands[4].last - bands[4].first)
-        assertEquals(bands[1].last - bands[1].first, bands[3].last - bands[3].first)
+    fun 预览条画出三行歌词() {
+        val bands = bands(preview(1f, LyricLayout.THREE, lines3), blank())
+        println("[117轮] 三行预览行带: $bands")
+        assertEquals("三行布局的预览应该正好 3 行", 3, bands.size)
+        // 上下对称（上面一行与下面一行同字号）
+        assertEquals(bands[0].last - bands[0].first, bands[2].last - bands[2].first)
+    }
+
+    @Test
+    fun 预览条画出KTV两行歌词() {
+        val bands = bands(preview(1f, LyricLayout.KTV, lines2), blank())
+        println("[117轮] KTV 两行预览行带: $bands")
+        assertEquals("KTV 布局的预览应该正好 2 行", 2, bands.size)
     }
 
     @Test
     fun 预览条放大后仍然居中() {
-        val normal = bands(preview(1f, lines), blank())
-        val big = bands(preview(1.4f, lines), blank())
-        println("[115轮] 预览 140% 行带: $big")
-        assertEquals("放大后还是 5 行", 5, big.size)
+        val normal = bands(preview(1f, LyricLayout.THREE, lines3), blank())
+        val big = bands(preview(1.4f, LyricLayout.THREE, lines3), blank())
+        println("[117轮] 三行 140% 行带: $big")
+        assertEquals("放大后还是 3 行", 3, big.size)
 
-        // 放大后每行更高
+        // 放大后当前句更高
         assertTrue(
             "140% 的当前句应该更高",
-            (big[2].last - big[2].first) > (normal[2].last - normal[2].first),
+            (big[1].last - big[1].first) > (normal[1].last - normal[1].first),
         )
 
         // 整块仍然居中（预览 View 高 430，中心 215）
@@ -64,16 +74,17 @@ class LyricScalePreviewRenderTest {
 
     @Test
     fun 预览条没有歌词时不画字() {
-        val view = preview(1f, emptyList())
+        val view = preview(1f, LyricLayout.THREE, emptyList())
         val p = view.getPixel(480, 60)
         val q = view.getPixel(480, 300)
         assertEquals("空歌词时整块应该是纯底色", p, q)
     }
 
     /** 建一个预览条 View 并画到 960×430 的位图上。 */
-    private fun preview(scale: Float, lines: List<String>): Bitmap {
+    private fun preview(scale: Float, layout: LyricLayout, lines: List<String>): Bitmap {
         return draw(LyricScalePreviewView(RuntimeEnvironment.getApplication()).apply {
             this.scale = scale
+            this.layout = layout
             this.lyricLines = lines
         })
     }

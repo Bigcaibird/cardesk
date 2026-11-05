@@ -651,12 +651,27 @@ class Prefs(context: Context) {
      * 存的是**百分比**（整数），不是浮点 —— 避免不同机型上浮点精度带来的
      * 「同一台车重启后字号变了一点」；用的时候再除成缩放系数。
      *
-     * 缩放同时作用于三个字号（远 / 近 / 当前）和两个行距，
+     * 缩放同时作用于各行字号和行距，
      * 并且**歌词块始终居中** —— 放大时上下均匀长，不往某一边偏。
      */
     var sceneLyricScalePct: Int
         get() = intValue("scene_lyric_scale_pct", 100).coerceIn(70, 140)
         set(value) = setIntValue("scene_lyric_scale_pct", value.coerceIn(70, 140))
+
+    /**
+     * 首页中央大字歌词的**布局**（`scene_lyric_layout`，默认 `three`）。
+     *
+     * 第 117 轮：两种布局可选 ——
+     * `three` = 三行（上一句 / 当前句 / 下一句）、
+     * `ktv` = KTV 式两行（上一句在上、当前句在下）。
+     *
+     * 存的是**布局的键**（字符串）而不是下标 ——
+     * 下标会随着以后加布局而错位，键不会。
+     * 认不出来的键一律回三行（见 [com.cardesk.launcher.core.media.LyricLayout.fromKey]）。
+     */
+    var sceneLyricLayout: String
+        get() = stringValue("scene_lyric_layout", "three")
+        set(value) = setStringValue("scene_lyric_layout", value)
 
     /**
      * 桌面紧凑模式主歌词字号（`desk_desk_compact_main_sp`，范围 14..64）。

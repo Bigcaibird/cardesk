@@ -92,12 +92,15 @@ class SettingsOverlay(
     var onSceneLyricChanged: (() -> Unit)? = null
 
     /**
-     * 预览条用的**真实歌词**（顺序：上 2 / 上 1 / 当前 / 下 1 / 下 2）。
+     * 预览条用的**真实歌词**（顺序 = 布局的行序：最上 → 最下）。
      *
      * 第 115 轮：返回 null 就用预览条自带的示例文案。
      * 桌面正在放歌时用真实歌词，用户看到的就是自己那首歌变大的效果。
+     *
+     * 第 117 轮：要**按布局**取 —— 三行和 KTV 两行显示的句子不一样，
+     * 预览必须跟桌面显示的那几行一致。
      */
-    var lyricPreviewLines: (() -> List<String>?)? = null
+    var lyricPreviewLines: ((com.cardesk.launcher.core.media.LyricLayout) -> List<String>?)? = null
     var onShowUpdate: (() -> Unit)? = null
     var onShowRestart: (() -> Unit)? = null
     var onShowAccent: (() -> Unit)? = null
@@ -622,9 +625,18 @@ class SettingsOverlay(
         body.addView(Ui.text(context, title, 22f, pal.textFaint), LinearLayout.LayoutParams(-1, 40).also { it.topMargin = 8 })
     }
 
-    private fun note(text: String) {
-        body.addView(Ui.text(context, text, 22f, pal.textDim).apply { setLineSpacing(10f, 1f) },
-            LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
+    /**
+     * 一行说明文字。
+     *
+     * **返回这个 TextView**：有些说明会跟着用户的选择变
+     * （比如第117轮的「歌词布局」—— 切到 KTV 两行时，
+     * 说明要从「上一句 / 当前句 / 下一句」改成「当前句在上、下一句在下」）。
+     * 那种地方要能**就地改文案**，不能只在建页时写一次。
+     */
+    private fun note(text: String): TextView {
+        val tv = Ui.text(context, text, 22f, pal.textDim).apply { setLineSpacing(10f, 1f) }
+        body.addView(tv, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
+        return tv
     }
 
     /**
@@ -2061,25 +2073,60 @@ class SettingsOverlay(
         // 为什么单独一节：上面四个滑杆管的是**导航栏歌词槽**（收起 / 展开两种形态），
         // 跟桌面正中这块大字歌词是两套画面，混在一起会让人以为改一个动两个。
         section("首页中央歌词")
-        note("桌面正中那五行大字歌词的整体缩放（当前句和上下四行一起变）。")
+        note("桌面正中那坨大字歌词。")
+        // —— 布局选择（第117轮）——
+        //
+        // 摆在预览条**上面**：换布局时预览立刻跟着变，用户当场看到差别，
+        // 不用关掉设置面板再回桌面看。
+        //
+        // 存的是布局的**键**（three / ktv）而不是下标 —— 下标会随着以后加布局而错位。
+        val layoutOptions = com.cardesk.launcher.core.media.LyricLayout.values().toList()
+        var preview: com.cardesk.launcher.ui.widget.LyricScalePreviewView? = null
+        // 说明文案要跟着布局变 —— 但它在 chipRow **下面**，
+        // 所以这里先声明、chipRow 之后再建（Kotlin 不允许向前引用局部 val）。
+        lateinit var hintView: TextView
+        chipRow(
+            "歌词布局",
+            layoutOptions.map { it.label },
+            layoutOptions.indexOfFirst { it.key == prefs.sceneLyricLayout }.coerceAtLeast(0),
+        ) { idx ->
+            val from = prefs.sceneLyricLayout
+            val to = layoutOptions[idx].key
+            prefs.sceneLyricLayout = to
+            logSettingDebug("scene_lyric_layout", "首页中央歌词布局", from, to)
+            preview?.let { p ->
+                p.layout = layoutOptions[idx]
+                p.lyricLines = lyricPreviewLines?.invoke(layoutOptions[idx])
+                    ?: com.cardesk.launcher.ui.widget.LyricScalePreviewView.defaultLines(layoutOptions[idx])
+            }
+            hintView.text = layoutOptions[idx].hint
+            onSceneLyricChanged?.invoke()
+        }
+        // 说明文案跟着布局变（KTV 两行的说明跟三行不是一句话）——
+        // 所以这里留着 TextView，切布局时就地改（见下面的 onPick）。
+        hintView = note(layoutOptions.firstOrNull { it.key == prefs.sceneLyricLayout }?.hint ?: "")
         // 第115轮：滑杆上面加一条**实时预览**。
         //
         // 为什么必须有：设置面板把桌面正中那块歌词整个挡住了，
         // 拖滑杆时用户在背后根本看不到变化 —— 只能关掉面板再回来看一次，
         // 来回折腾好几轮才调得出来。
         //
-        // 预览走的是**桌面同一份排版**（`LyricBlockLayout`）+ 同一套字号常量，
-        // 所以「字多大 / 一句能显示几个字 / 块居不居中」全都是真的。
-        val preview = com.cardesk.launcher.ui.widget.LyricScalePreviewView(context).apply {
+        // 预览走的是**桌面同一份排版**（`LyricBlockLayout` + `LyricLayout`）+
+        // 同一套字号常量，所以「字多大 / 一句能显示几个字 / 块居不居中 / 哪种排法」
+        // 全都是真的。
+        val curLayout = com.cardesk.launcher.core.media.LyricLayout.fromKey(prefs.sceneLyricLayout)
+        preview = com.cardesk.launcher.ui.widget.LyricScalePreviewView(context).apply {
+            layout = curLayout
             scale = prefs.sceneLyricScalePct / 100f
-            lyricLines = lyricPreviewLines?.invoke() ?: com.cardesk.launcher.ui.widget.LyricScalePreviewView.DEFAULT_LINES
+            lyricLines = lyricPreviewLines?.invoke(curLayout)
+                ?: com.cardesk.launcher.ui.widget.LyricScalePreviewView.defaultLines(curLayout)
         }
         body.addView(preview, LinearLayout.LayoutParams(-1, 430).also { it.topMargin = 10 })
         sliderRow("字号缩放", prefs.sceneLyricScalePct, 70, 140, "%", step = 5) { v ->
             val from = prefs.sceneLyricScalePct
             prefs.sceneLyricScalePct = v
             logSettingDebug("scene_lyric_scale_pct", "首页中央歌词字号", from, v)
-            preview.scale = v / 100f
+            preview?.scale = v / 100f
             onSceneLyricChanged?.invoke()
         }
         note("歌词块始终居中，调大调小都不会往一边偏。")
