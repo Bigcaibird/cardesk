@@ -195,4 +195,38 @@ object MediaButtonTransport {
      */
     fun shouldDispatchMediaButton(pkg: String?, hasMediaButtonsFlag: Boolean): Boolean =
         isNetease(pkg) && hasMediaButtonsFlag
+
+    /**
+     * 这个动作要不要走 `transportControls` 而不是**定向按键**（第127轮）。
+     *
+     * ## 为什么网易云的「播放」要例外
+     *
+     * 网易云的按键接收方（`com.netease.cloudmusic.iot.mediacenter.MediaButtonEventReceiver`，
+     * 反编译 `d(Intent)`）在没有音频焦点时**直接丢弃**事件：
+     *
+     * ```java
+     * if (ni.b.c()) {                       // hasNoAudioFocus
+     *     if (e()) { ...ignore... }
+     *     if (!noBlockKeyCodeList.contains(keyEvent.getKeyCode())) return null;  // 忽略
+     * }
+     * ```
+     *
+     * 而「从没在放到开始播」恰恰就是**没有焦点**的时候 ——
+     * 走按键通道 = **按了没反应**。
+     *
+     * UNI 的实测结论（`NeteaseMediaAdapter.command`）：
+     * > Playing from a no-focus state is rejected by the broadcast receiver.
+     * > TransportControls reaches the app's onPlay callback, which requests focus.
+     *
+     * 所以：**开始播放** → `transportControls.play()`（走 App 自己的 `onPlay` 回调，
+     * 由它去申请音频焦点）；**暂停 / 切歌** → 定向按键（DOWN+UP）。
+     *
+     * 暂停 / 切歌不用改：那时候音乐本来就在放、焦点就在网易云手里，
+     * 定向按键才是它真正会消费的通道（它**只消费 `ACTION_UP`**）。
+     *
+     * @param pkg 会话包名
+     * @param action `play` / `pause` / `next` / `previous` / `toggle-play`
+     */
+    fun shouldUseTransportControl(pkg: String?, action: String): Boolean =
+        isNetease(pkg) && action == ACTION_PLAY
 }

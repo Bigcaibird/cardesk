@@ -418,6 +418,8 @@ object OnlineLyricCatalog {
     private fun providerOrder(sourcePkg: String?): List<Provider> = when (sourcePkg) {
         "com.kugou.android.auto" -> listOf(KugouProvider, NeteaseProvider, QqProvider)
         "com.tencent.qqmusiccar" -> listOf(QqProvider, NeteaseProvider, KugouProvider)
+        // 第127轮：汽水音乐车机版**不向第三方暴露歌词**（见 [SodaMediaSource]），
+        // 只能联网查；它的曲库以抖音热歌为主 → 网易云覆盖最好，排第一。
         else -> listOf(NeteaseProvider, QqProvider, KugouProvider)
     }
 

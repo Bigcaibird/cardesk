@@ -68,9 +68,24 @@ object PlayerLyric {
         return best
     }
 
-    /** 播放器可能用的歌词 key 名（小写比较）。 */
+    /**
+     * 播放器可能用的歌词 key 名（**精确匹配** `MediaMetadata.getText(key)`）。
+     *
+     * ## 第127轮新增：`android.media.metadata.LYRIC`
+     *
+     * 网易云音乐车机版（`com.netease.cloudmusic.iot` 6.2.81）把整份 LRC 挂在
+     * **带前缀的全名** key 上（反编译 `vc/g$S(String)`）：
+     *
+     * ```java
+     * builder.putString("android.media.metadata.LYRIC", lyric);
+     * ```
+     *
+     * `MediaMetadata.getText(key)` 是**精确匹配**，短名 `lyric` 取不到它 ——
+     * 这就是「网易云没歌词」的真因。详见 [NeteaseSessionLyric]。
+     */
     val METADATA_LYRIC_KEYS: List<String> = listOf(
         "lyric", "lyrics", "lrc", "lyric_text", "current_lyric", "caption", "subtitles",
+        NeteaseSessionLyric.LYRIC_METADATA_KEY,
     )
 
     /** `MediaDescription.extras` 里带这些词的 key 都当歌词候选。 */

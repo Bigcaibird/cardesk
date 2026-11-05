@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1129",
-  "versionCode": 4225,
-  "tag": "v1.0.1129",
-  "name": "CarDesk 4225 / 1.0.1129-system",
-  "notes": "- 修复：打开方控后控不到 QQ 音乐（方向盘按下去还是在控制爱趣听）\n- 修复：拿不到 QQ 音乐当前播放的歌名/歌手，也没有歌词（原因：从未让 QQ 音乐打开「允许对外发送」开关）\n- 修复：默认媒体源设为 QQ 音乐时桌面启动崩溃（第125轮遗留）\n- 修复：默认媒体源设为 QQ 音乐时音乐页被清空（第125轮遗留）",
-  "publishedAt": "2026-11-05T12:20:15Z",
+  "version": "1.0.1130",
+  "versionCode": 4226,
+  "tag": "v1.0.1130",
+  "name": "CarDesk 4226 / 1.0.1130-system",
+  "notes": "第127轮：网易云 / 汽水音乐车机版接入\n\n【网易云音乐车机版 com.netease.cloudmusic.iot 6.2.81】\n1. 歌词双通道接入（模拟器装真包 + jadx 反编译 + 实测）：\n   - metadata 的 android.media.metadata.LYRIC（整份 LRC）\n   - 会话事件 wt_music_lyric / get_lyric_action / lyric_loading_action\n   两条通道由车机配置 notifyLyricManner 决定，用户那台车是几我们不知道 → 两条都接。\n   原来读歌词的候选 key 全是短名（lyric/lrc/…），而 getText 是精确匹配 →\n   网易云那个带前缀的全名永远取不到，这就是「网易云没歌词」的真因。\n2. 方控：网易云的「开始播放」改走 transportControls.play()。\n   它的按键接收方在没有音频焦点时直接丢弃事件，而「从没在放到开始播」恰恰没有焦点 →\n   走按键通道等于按了没反应。暂停/切歌仍走定向按键（DOWN+UP，它只消费 ACTION_UP）。\n\n【汽水音乐车机版 com.luna.music.car 1.1.27】\n4. 加进 OEM 媒体桥白名单 —— 这是「方向盘方控能控到汽水」的第一因：\n   不在白名单，原车就不会把方控交给我们。\n5. 加进「默认音乐应用」候选，能被选成默认媒体源。\n6. 实测结论：汽水是规矩的 MediaSession App（声明 action 位 950/694、回调实现 onPlay/onPause/\n   onSkipToNext、metadata 是标准布局），标准 transportControls 直接可用，歌名/歌手/专辑/封面走通用路径。\n7. 汽水不向第三方暴露歌词（无 metadata 歌词 key、无会话事件、MediaBrowser 的 browse 树是空的）→\n   歌词只能联网查（网易→QQ→酷狗）。\n\n【其它】\n8. 诊断包新增「sessionLyric(会话歌词)」计数与来源。\n9. 单测 1697 条全绿（新增 21 条），6 项反向验证逐条确认断言变红。",
+  "publishedAt": "2026-11-05T13:16:36Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4225.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4225.apk",
-    "size": 2244442,
-    "sha256": "38dfe683df27ff4977843cccdbab2508710cae9918109789a72fa7bab364881f"
+    "name": "CarDesk-platform-ecarx-cardesk-4226.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4226.apk",
+    "size": 2250878,
+    "sha256": "6f1e8b736427945e83b042318b394e8c1575e655f73ef54dd98b3c00d4782ac6"
   }
 }

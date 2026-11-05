@@ -117,7 +117,7 @@ class MediaSourcesTest {
     @Test
     fun defaultMusicPackages_matchReferenceOrder() {
         //
-        // QQ 音乐车机版 → 爱趣听 → 酷我 → 酷我 clone → 网易云车机版
+        // QQ 音乐车机版 → 爱趣听 → 酷我 → 酷我 clone → 网易云车机版 → 汽水音乐车机版
         assertEquals(
             listOf(
                 "com.tencent.qqmusiccar",
@@ -125,6 +125,7 @@ class MediaSourcesTest {
                 "cn.kuwo.kwmusiccar",
                 "cn.kuwo.kwmusiccarclone",
                 "com.netease.cloudmusic.iot",
+                "com.luna.music.car",
             ),
             MediaSources.DEFAULT_MUSIC_PACKAGES,
         )

@@ -26,14 +26,21 @@ object MediaBridgePolicy {
     /**
      * 允许接管的包名（**只**三方在线播放器）。
      *
-     * 与 [MediaSources] 的 `netease` / `qq` 来源一致；`com.tencent.qqmusic` 是手机版，
+     * 与 [MediaSources] 的 `netease` / `qq` / `soda` 来源一致；`com.tencent.qqmusic` 是手机版，
      * 留在列表里是因为部分车机装的是手机版（UNI 也一并接受）。
+     *
+     * 第127轮新增 `com.luna.music.car`（**汽水音乐车机版**）：
+     * 它也是三方在线播放器，**不进白名单原车就不会把方向盘方控交给我们** ——
+     * 与 QQ 音乐车机版同一条红线（只抢三方在线播放器的播放权，
+     * 原车收音机 / USB / 蓝牙一律不碰）。
+     *
      * 顺序固定，便于日志与单测断言。
      */
     private val ELIGIBLE_PACKAGES = listOf(
         "com.netease.cloudmusic.iot",
         "com.tencent.qqmusiccar",
         "com.tencent.qqmusic",
+        "com.luna.music.car",
     )
 
     /** 允许接管的包名（只读视图）。 */

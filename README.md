@@ -2714,3 +2714,185 @@ Kotlin 的初始化顺序 = **声明顺序**，而 `init{}` 块（**构造期**�
 - 「允许对外发送」是 QQ 音乐自己的**全局**开关，打开后 QQ 音乐会向系统广播播放信息。
   我们**只在用户把默认媒体源显式选成 QQ 音乐时才开**它。
 - QQ 音乐没在运行时，按方控会把它拉起来（它的 `DispacherActivityForThird` 的既定行为）。
+
+## 网易云 / 汽水音乐车机版接入（第 127 轮）
+
+第126轮把 QQ 音乐车机版接进来了（方控 + 歌名/歌词）。这一轮把**网易云音乐车机版**
+与**汽水音乐车机版**按同样的流程做一遍：下真包 → 装模拟器 → 反编译 → 实测协议 → 接入。
+
+### 用的真包（模拟器 emulator-5556 / Android 10 / arm64-v8a）
+
+| App | 版本 | 包名 | MD5 | 来源 |
+|---|---|---|---|---|
+| 网易云音乐车机版 | 6.2.81（6002081） | `com.netease.cloudmusic.iot` | `750A098DB717CC43A8742E43D9165B50` | 网易官方 CDN `d3.music.126.net` |
+| 汽水音乐车机版 | 1.1.27（101027） | `com.luna.music.car` | `11ba8c116d10e75b8df751e1daa15cb4` | 592 下载站 `app.592xiazai.com` |
+
+两个包都**直接装得上**（网易云同时带 `arm64-v8a` 与 `armeabi-v7a`；汽水只有 `arm64-v8a`），
+不用第126轮那套「去 `lib/` + 重签」的招。
+
+### 网易云：歌词有**两条**通道，我们以前**一条都没接**
+
+反编译 `com.netease.cloudmusic/` 得到（`vc/g`）：
+
+**① metadata 通道**（`vc/g$S(String)`）
+
+```java
+builder.putString("android.media.metadata.LYRIC", lyric);
+```
+
+整份 LRC 挂在 MediaSession metadata 的 **`android.media.metadata.LYRIC`** 上。
+
+**② 会话事件通道**（`vc/g$L(Integer, String)` → `I("wt_music_lyric", map)`）
+
+```java
+map = {
+  MediaMetadata.METADATA_KEY_MEDIA_ID : audioId,
+  "wt_music_lyric_obj"  : lyric,   // 整份 LRC
+  "wt_music_lyric_state": state,   // 1 = 歌词就绪；2 = 提示消息；5 = 加载中
+}
+```
+
+**走哪一条由车机配置决定**（`vc/g$e.a(...)`，网易云自己的 `notifyLyricManner`）：
+
+```java
+if (notifyLyricManner == 1)      S(lyric);        // 只写 metadata
+else if (notifyLyricManner == 2) L(state, lyric); // 只发会话事件
+else if (notifyLyricManner == 0) { S(lyric); L(state, lyric); } // 两条都发
+```
+
+用户那台车是几，我们**不知道** → **两条都得接**。
+
+#### 「网易云没歌词」的真因
+
+我们原来读歌词的候选 key 是
+`lyric` / `lyrics` / `lrc` / `lyric_text` / `current_lyric` / `caption` / `subtitles`
+——**全是短名**，而 `MediaMetadata.getText(key)` 是**精确匹配** →
+网易云用的 `android.media.metadata.LYRIC` **永远取不到**。
+
+不是歌词格式认错了，是**根本没取到那一项**。
+
+#### 方控：网易云的「开始播放」必须走 `transportControls`
+
+网易云的按键接收方（`com.netease.cloudmusic.iot.mediacenter.MediaButtonEventReceiver`）
+在**没有音频焦点**时直接丢弃事件：
+
+```java
+if (ni.b.c()) {                       // hasNoAudioFocus
+    if (!noBlockKeyCodeList.contains(keyEvent.getKeyCode())) return null;  // 忽略
+}
+```
+
+而「从没在放到开始播」恰恰就是**没有焦点**的时候 —— 走定向按键 = **按了没反应**。
+
+所以：**开始播放** → `transportControls.play()`（走 App 自己的 `onPlay` 回调，由它申请焦点）；
+**暂停 / 切歌** → 定向按键（DOWN + UP，它的接收方只消费 `ACTION_UP`）。
+（与 UNI `NeteaseMediaAdapter.command` 的实测结论一致。）
+
+#### 网易云还认一条**车机原生**的方控广播
+
+清单里 `MediaButtonEventReceiver`（exported）注册了：
+
+```
+android.intent.action.MEDIA_BUTTON
+hozon.intent.action.SWC_MEDIA_KEY
+```
+
+`SWC_MEDIA_KEY` 那条读的是 **`KeyEvent.keyCode`**（int extra），模拟器实测：
+
+```
+$ adb shell am broadcast -a hozon.intent.action.SWC_MEDIA_KEY \
+      -p com.netease.cloudmusic.iot --ei KeyEvent.keyCode 87
+I/MediaButtonEventReceiver: [filterIntentEvent] action=hozon.intent.action.SWC_MEDIA_KEY,
+  event=KeyEvent { action=ACTION_UP, keyCode=KEYCODE_MEDIA_NEXT, ... }
+```
+
+映射：`85`→toggle_pause、`87`→next、`88`→previous、`126`→play、`127`→pause。
+
+我们**没有**走这条广播 —— 原车把方控交给我们时给的是**动作名**（play/pause/next/previous），
+不是 KeyEvent，走会话的 `transportControls` / `dispatchMediaButtonEvent` 已经是同一条
+`MediaButtonEventReceiver.c(intent)` 通路。多发一路广播只会带来**双份处理**的风险。
+
+### 汽水音乐车机版：它是个**规矩**的 MediaSession App
+
+反编译 `com/luna/`：
+
+| 事实 | 证据 |
+|---|---|
+| 会话 `setFlags(3)`（MEDIA_BUTTONS + TRANSPORT_CONTROLS） | `RemoteControlSession.java` |
+| **声明了 action 位**（950 / 694，含 PLAY/PAUSE/SKIP_TO_\*/SEEK_TO） | `CoreRemoteControl.java` |
+| 回调实现了 `onPlay`/`onPause`/`onSkipToNext`/`onSkipToPrevious`/`onSeekTo` | `DefaultMediaSessionCallback.java` |
+| metadata 是**标准布局**：TITLE=歌名、ARTIST=歌手、ALBUM=专辑、ART=封面位图 | `CoreRemoteControl.java` |
+| TITLE **永远是歌名**（`blueToothLyricOpen` 硬编码 `false`） | `CompositeRemoteControl.buildRemoteControlContext()` |
+
+→ 标准 `transportControls` 通道**直接可用**，歌名/歌手/专辑/封面走通用路径即可。
+
+#### 汽水**不向第三方暴露歌词**（这一条决定了歌词只能联网查）
+
+三条可能的三方歌词通道，逐条排除：
+
+| 通道 | 汽水 | 证据 |
+|---|---|---|
+| metadata 自定义 key | **没有** | 全包 grep 不到歌词类 key；只写上面 6 个标准字段 |
+| `onSessionEvent` | **没有** | 全包 grep 不到 `sendSessionEvent` |
+| `MediaBrowserService` 的 browse 树 | **空的** | `onLoadChildren()` → `sendResultSafe(result, null)`；`onGetRoot()` → `null` |
+
+→ 汽水的歌词只在自己界面里。我们只能**联网查**
+（网易 → QQ → 酷狗；汽水曲库以抖音热歌为主，网易云覆盖最好）。
+
+### 这一轮改了什么
+
+- **新增** `core/media/NeteaseSessionLyric.kt` —— 网易云会话歌词协议的纯逻辑实现
+  （`wt_music_lyric` / `get_lyric_action` / `lyric_loading_action` / `lyric_message_action`
+  的解析、过期判定、长度上限），**可 JVM 单测**。
+- **新增** `core/media/SodaMediaSource.kt` —— 汽水的协议事实（标准会话、不暴露歌词、TITLE 不是歌词行），
+  写进代码是为了**以后有人改白名单 / 把它当「歌词型来源」时立刻有测试变红**。
+- `PlayerLyric.METADATA_LYRIC_KEYS` 加上 **`android.media.metadata.LYRIC`**。
+- `MusicSessionTracker`：实现 `MediaController.Callback.onSessionEvent`，
+  把会话推来的歌词交给 [MusicController]（按 **token** 过滤 + **过期事件**丢弃）。
+- `MusicController`：新增「会话事件歌词」这一级歌词来源（优先级：QQ 广播 → 会话事件 → 播放器自供 → 联网），
+  并把 `get_lyric_action` 的**当前三行**当成「播放器自报的当前句」（没有时间戳，但比联网猜的准）。
+- `MediaButtonTransport`：新增 `shouldUseTransportControl(pkg, action)` ——
+  网易云的「开始播放」改走 `transportControls.play()`。
+- `MediaBridgePolicy.ELIGIBLE_PACKAGES` **加上 `com.luna.music.car`** ——
+  **这是「方向盘方控能控到汽水」的第一因**：不在白名单，原车就不会把方控交给我们。
+- `MediaSources.DEFAULT_MUSIC_PACKAGES` 加上汽水（能被选成「默认音乐应用」）。
+- 诊断包新增 `sessionLyric(会话歌词): 事件=N 行数=N 来源=…`。
+
+### 怎么验证
+
+模拟器（`emulator-5556`，Android 10）上：
+
+```
+# 默认媒体源选网易云 → 桌面启动即锁定网易云，音乐卡片显示网易云真实图标
+I/CarDesk/Media: 媒体源图标已加载 sourceId=netease pkg=com.netease.cloudmusic.iot px=64
+I/CarDesk/Media: 默认媒体源：已锁定 sourceId=netease pkg=com.netease.cloudmusic.iot
+
+# 默认媒体源选汽水 → 同上
+D/CarDesk/Media: 媒体源图标已加载 sourceId=soda pkg=com.luna.music.car px=64
+I/CarDesk/Media: 默认媒体源：已锁定 sourceId=soda pkg=com.luna.music.car
+```
+
+歌词两条通道用一个「协议探针」（模拟网易云那两个通道）验过：
+
+```
+# metadata 通道
+I/CarDesk/Media: 使用播放器自供歌词 key=id:150619 lines=3 title=春风吹 artist=方大同
+# 会话事件通道
+I/CarDesk/Media: 收到会话事件歌词 pkg=com.cardesk.ncprobe key=id:150619 lines=3
+I/CarDesk/Media: 会话事件：更新当前歌词行 pkg=com.cardesk.ncprobe line=谁在夜里唱着歌
+```
+
+**新旧包 A/B 对照**：同一个会话，旧包拿不到 metadata 里的歌词（只能联网，54 行），
+新包直接用播放器自己那份（3 行）—— 日志里分别是「歌词目录命中」与「使用播放器自供歌词」。
+
+### 已知限制
+
+- **模拟器上汽水自己播不了**：它的 `/service/settings/v3/` 接口在模拟器环境被服务端拒了，
+  界面停在「加载异常」。所以汽水的结论来自**清单 + 反编译源码**（权威），
+  没能在模拟器上跑到「真实播放」那一步；真车上登录后应当正常。
+- **模拟器上网易云也没登录**，真实播放时的歌词没跑到；
+  歌词两条通道是用**协议探针**（严格照网易云那两个通道实现）验的。
+- **汽水的歌词只能联网查** —— 它不向第三方暴露自己的歌词，这是 App 侧的限制，
+  我们改不了；抖音独家曲可能查不到。
+- 网易云那台车的 `notifyLyricManner` 是几，诊断包里看
+  `sessionLyric(会话歌词): 来源=netease-metadata` 还是 `netease-session-event` 就知道。

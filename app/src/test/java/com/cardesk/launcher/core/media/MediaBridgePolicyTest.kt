@@ -23,6 +23,7 @@ class MediaBridgePolicyTest {
                 "com.netease.cloudmusic.iot",
                 "com.tencent.qqmusiccar",
                 "com.tencent.qqmusic",
+                "com.luna.music.car",
             ),
             MediaBridgePolicy.eligiblePackages(),
         )
@@ -34,6 +35,8 @@ class MediaBridgePolicyTest {
         assertTrue(MediaBridgePolicy.isEligible("com.netease.cloudmusic.iot"))
         assertTrue(MediaBridgePolicy.isEligible("com.tencent.qqmusiccar"))
         assertTrue(MediaBridgePolicy.isEligible("com.tencent.qqmusic"))
+        // 第127轮：汽水音乐车机版也是三方在线播放器，必须能接管播放权
+        assertTrue(MediaBridgePolicy.isEligible("com.luna.music.car"))
         // 容错空格（会话包名偶尔带空白）
         assertTrue(MediaBridgePolicy.isEligible(" com.tencent.qqmusic "))
     }

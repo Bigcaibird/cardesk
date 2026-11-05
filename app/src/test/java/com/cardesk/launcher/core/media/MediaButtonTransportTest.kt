@@ -265,4 +265,42 @@ class MediaButtonTransportTest {
         )
         assertFalse(MediaButtonTransport.shouldDispatchMediaButton(null, true))
     }
+
+    /**
+     * 第127轮：网易云的「开始播放」必须走 `transportControls`。
+     *
+     * 网易云的按键接收方在没有音频焦点时**直接丢弃**事件，
+     * 而「从没在放到开始播」恰恰就是没有焦点的时候 → 走按键通道 = 按了没反应。
+     */
+    @Test
+    fun shouldUseTransportControl_neteasePlayGoesThroughTransport() {
+        assertTrue(
+            MediaButtonTransport.shouldUseTransportControl(
+                MediaButtonTransport.NETEASE_PACKAGE, MediaButtonTransport.ACTION_PLAY,
+            ),
+        )
+        // 暂停 / 切歌仍走定向按键（那时焦点就在网易云手里，它只消费 ACTION_UP）
+        for (action in listOf(
+            MediaButtonTransport.ACTION_PAUSE,
+            MediaButtonTransport.ACTION_NEXT,
+            MediaButtonTransport.ACTION_PREVIOUS,
+            MediaButtonTransport.ACTION_TOGGLE_PLAY,
+        )) {
+            assertFalse(
+                "$action 不该走 transportControls",
+                MediaButtonTransport.shouldUseTransportControl(
+                    MediaButtonTransport.NETEASE_PACKAGE, action,
+                ),
+            )
+        }
+        // 别的 App 一律不走这条特例
+        assertFalse(
+            MediaButtonTransport.shouldUseTransportControl(
+                "com.tencent.qqmusiccar", MediaButtonTransport.ACTION_PLAY,
+            ),
+        )
+        assertFalse(
+            MediaButtonTransport.shouldUseTransportControl(null, MediaButtonTransport.ACTION_PLAY),
+        )
+    }
 }

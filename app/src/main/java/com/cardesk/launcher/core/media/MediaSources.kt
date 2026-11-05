@@ -91,8 +91,11 @@ object MediaSources {
     /**
      * 「默认音乐应用」候选包。
      *
-     * 顺序：**QQ 音乐车机版 → 爱趣听 → 酷我 → 酷我 clone → 网易云车机版**
+     * 顺序：**QQ 音乐车机版 → 爱趣听 → 酷我 → 酷我 clone → 网易云车机版 → 汽水音乐车机版**
      * 取第一个**装了且有启动入口**的。
+     *
+     * 第127轮新增汽水音乐车机版（`com.luna.music.car`）：它也是三方在线播放器，
+     * 和别的几个一样该能被选成「默认音乐应用」。
      *
      * 注意这与上面的来源菜单候选顺序**不同**（酷我在这里 `kwmusiccar` 在前、
      * `kwmusiccarclone` 在后，两处都，别混用。
@@ -103,6 +106,7 @@ object MediaSources {
         "cn.kuwo.kwmusiccar",
         "cn.kuwo.kwmusiccarclone",
         "com.netease.cloudmusic.iot",
+        "com.luna.music.car",
     )
 
     /** 选择一个来源后的结果，供 UI 层决定「启动 / 提示 / 仅切换显示」。 */

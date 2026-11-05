@@ -355,6 +355,11 @@ object Diagnostics {
             sb.append("qqDoor(允许对外发送): ").append(if (mc.qqDoorOpened) "已开" else "未开")
                 .append('\n')
             sb.append("qqControl(已发方控命令): ").append(mc.qqControlCount).append('\n')
+            // 第127轮：会话歌词通道（网易云 `wt_music_lyric` / metadata 的 LYRIC key）
+            sb.append("sessionLyric(会话歌词): 事件=").append(mc.sessionLyricEventCount)
+                .append(" 行数=").append(mc.sessionLyricLines)
+                .append(" 来源=").append(mc.sessionLyricSource.ifEmpty { "无" })
+                .append('\n')
             if (mc.lastQqBroadcastRaw.isNotEmpty()) {
                 sb.append("qqBroadcastRaw: ").append(mc.lastQqBroadcastRaw).append('\n')
             }

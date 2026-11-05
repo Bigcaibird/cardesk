@@ -9,6 +9,7 @@ import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -60,6 +61,36 @@ class MusicSessionTracker private constructor() {
     interface Listener {
         fun onTrackChanged(track: TrackInfo?)
         fun onPlaybackChanged(playing: Boolean, positionMs: Long)
+    }
+
+    /**
+     * 「会话事件歌词」的**可选**监听（第127轮）。
+     *
+     * ## 为什么单独开一个接口
+     *
+     * 和 [MusicController.RestoredListener] 同一个理由：[Listener] 已经有实现方了，
+     * 加方法会逼着所有实现方一起改。做成**可选接口** ——
+     * 实现了它的监听者才会在会话推来歌词时收到回调。
+     *
+     * ## 这条通道是什么
+     *
+     * 网易云音乐车机版除了往 `MediaMetadata` 里塞歌词，
+     * 还会通过 `MediaController.Callback.onSessionEvent` 推歌词事件
+     * （`wt_music_lyric` / `get_lyric_action` / `lyric_loading_action` …）。
+     *
+     * **哪条通道由车机配置决定**（网易云自己的 `notifyLyricManner`），
+     * 我们不知道用户那台车是几 → 两条都得接。协议细节见 [NeteaseSessionLyric]。
+     */
+    interface SessionLyricListener {
+        /**
+         * 会话推来了歌词。
+         *
+         * @param pkg 来源包名
+         * @param lrc 整份 LRC（空串 = 这条事件不带整份歌词）
+         * @param lines 上一句 / 当前句 / 下一句（**没有时间戳**；空列表 = 不带行）
+         * @param cleared 播放器让我们**清空**歌词（加载中 / 提示消息）
+         */
+        fun onSessionLyric(pkg: String, lrc: String, lines: List<String>, cleared: Boolean)
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -311,6 +342,17 @@ class MusicSessionTracker private constructor() {
                 records.remove(tokenKey)
                 selectAndNotify("session-destroyed")
                 requestRescan(debounceMs = 0)
+            }
+
+            /**
+             * 会话事件（第127轮）：网易云的歌词就靠这条通道。
+             *
+             * 网易云车机版把歌词塞进 `MediaMetadata`（`android.media.metadata.LYRIC`）
+             * **或**用会话事件推（`wt_music_lyric`）—— 走哪条由车机配置决定，
+             * 所以两条都得接（协议见 [NeteaseSessionLyric]）。
+             */
+            override fun onSessionEvent(event: String, extras: Bundle?) {
+                handleSessionEvent(tokenKey, pkg, event, extras)
             }
         }
     }
@@ -989,6 +1031,79 @@ class MusicSessionTracker private constructor() {
             }
         }
         return PlayerLyric.findLrc(candidates).orEmpty()
+    }
+
+    /**
+     * 处理一条会话事件（第127轮）。
+     *
+     * ## 只认**当前选中**会话的事件
+     *
+     * 我们给**每个**会话都注册了回调（候选选择要用各自的 state / metadata），
+     * 所以别的 App 的会话事件也会到这里 —— 必须按 **token** 过滤。
+     *
+     * 还没选中任何会话时（`selectedTokenKey == null`）：同一个包只有一个会话才认 ——
+     * 网易云就只发一个会话（`SessionTag`），不会误伤。
+     *
+     * ## 过期事件要丢
+     *
+     * 网易云切歌时会先把上一首的歌词事件补发一遍（网络回来得慢）。
+     * 事件里带了 `METADATA_KEY_MEDIA_ID`，和当前会话的歌 id 对不上就是过期。
+     */
+    private fun handleSessionEvent(
+        tokenKey: String,
+        pkg: String,
+        event: String?,
+        extras: Bundle?,
+    ) {
+        val parsed = NeteaseSessionLyric.parse(event, bundleToMap(extras)) ?: return
+        if (!parsed.hasContent) return
+        if (!acceptSessionEvent(tokenKey, pkg)) {
+            Logx.d(
+                LogTags.MEDIA, "忽略非选中会话的歌词事件",
+                "pkg" to pkg, "event" to (event ?: ""),
+            )
+            return
+        }
+        // 过期判定：事件里的歌 id 与当前会话的歌 id 不一致 → 丢
+        val record = records[tokenKey]
+        val currentMediaId = record?.metadata?.getString(MediaMetadata.METADATA_KEY_MEDIA_ID)
+        val eventMediaId = NeteaseSessionLyric.mediaIdOf(bundleToMap(extras))
+        if (NeteaseSessionLyric.isStale(eventMediaId, currentMediaId)) {
+            Logx.d(
+                LogTags.MEDIA, "丢弃过期歌词事件（歌 id 不一致）",
+                "pkg" to pkg, "event" to (event ?: ""),
+                "eventMediaId" to eventMediaId, "currentMediaId" to (currentMediaId ?: ""),
+            )
+            return
+        }
+        Logx.i(
+            LogTags.MEDIA, "收到会话歌词事件",
+            "pkg" to pkg, "event" to (event ?: ""),
+            "lrcLen" to parsed.lrc.length, "lines" to parsed.lines.size,
+            "cleared" to parsed.cleared,
+        )
+        listeners.forEach {
+            (it as? SessionLyricListener)?.onSessionLyric(pkg, parsed.lrc, parsed.lines, parsed.cleared)
+        }
+    }
+
+    /**
+     * 这条会话事件要不要认（按 token 过滤；详见 [handleSessionEvent]）。
+     */
+    private fun acceptSessionEvent(tokenKey: String, pkg: String): Boolean {
+        val sel = selectedTokenKey
+        if (sel != null) return sel == tokenKey
+        return records.count { it.value.pkg == pkg } <= 1
+    }
+
+    /** `Bundle` → `Map`（会话事件载荷转成纯 Kotlin，方便复用 [NeteaseSessionLyric]）。 */
+    private fun bundleToMap(bundle: Bundle?): Map<String, Any?> {
+        if (bundle == null) return emptyMap()
+        val out = HashMap<String, Any?>(bundle.size())
+        runCatching {
+            for (k in bundle.keySet()) out[k] = bundle.get(k)
+        }
+        return out
     }
 
     /** TITLE 或 DISPLAY_TITLE 任一非空。 */
@@ -1763,10 +1878,17 @@ class MusicSessionTracker private constructor() {
         }
         applyOptimisticTransport(true)
         if (isDmtPkg(pkg)) dmtResumeRequested = true
-        if (MediaButtonTransport.shouldDispatchMediaButton(pkg, buttons)) {
-            dispatchNeteaseButton(c, MediaButtonTransport.ACTION_PLAY, true)
-        } else {
+        // 第127轮：网易云的「开始播放」要走 `transportControls.play()`，不能走定向按键 ——
+        // 它的按键接收方在**没有音频焦点**时会直接丢弃事件，
+        // 而「从没在放到开始播」恰恰就是没有焦点的时候（按了没反应）。
+        // 详见 [MediaButtonTransport.shouldUseTransportControl]。
+        val playViaTransport = MediaButtonTransport.shouldUseTransportControl(
+            pkg, MediaButtonTransport.ACTION_PLAY,
+        ) || !MediaButtonTransport.shouldDispatchMediaButton(pkg, buttons)
+        if (playViaTransport) {
             playTransport(c)
+        } else {
+            dispatchNeteaseButton(c, MediaButtonTransport.ACTION_PLAY, true)
         }
         return true
     }

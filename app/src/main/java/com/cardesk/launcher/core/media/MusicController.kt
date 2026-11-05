@@ -156,6 +156,49 @@ class MusicController private constructor() {
     private var lastLyricSongKey = ""
     private var broadcastLyric: LyricTimeline? = null
     private var broadcastSongKey = ""
+
+    /**
+     * 来自**会话事件**的歌词（第127轮）。
+     *
+     * 网易云音乐车机版把歌词塞进 `MediaMetadata`（`android.media.metadata.LYRIC`）
+     * **或**用会话事件推（`wt_music_lyric`）—— 走哪一条由车机配置决定，
+     * 两条都得接（协议见 [NeteaseSessionLyric]）。
+     */
+    private var sessionLyric: LyricTimeline? = null
+
+    /** 会话歌词对应的歌 key（空串 = 还没有会话歌词）。 */
+    private var sessionLyricSongKey = ""
+
+    /**
+     * 收到的**会话歌词事件**条数（第127轮）。
+     *
+     * 真车排障时最想知道的是「网易云到底有没有往会话里推歌词」——
+     * 计数为 0 就说明那台车的 `notifyLyricManner` 走的是 metadata 通道，
+     * 或者压根没推。
+     */
+    var sessionLyricEventCount: Int = 0
+        private set
+
+    /** 最近一次会话歌词事件的行数（0 = 没收到过）。 */
+    var sessionLyricLines: Int = 0
+        private set
+
+    /**
+     * 最近一次会话歌词的**来源**（诊断用）。
+     *
+     * `netease-metadata` = 走 metadata 的 `android.media.metadata.LYRIC`；
+     * `netease-session-event` = 走会话事件 `wt_music_lyric`。
+     */
+    var sessionLyricSource: String = ""
+        private set
+
+    /**
+     * 当前显示的歌词是不是来自会话事件。
+     *
+     * 决定「播放器让我们清空歌词」（加载中 / 出错）时要不要把界面上那份一起清掉 ——
+     * 只有本来就是它给的才清，否则会把联网查来的好歌词误伤。
+     */
+    private var lyricFromSession = false
     private var tickerRunning = false
 
     /**
@@ -265,7 +308,14 @@ class MusicController private constructor() {
 
     // ---------------------------------------------------------------- tracker
 
-    private val trackerListener = object : MusicSessionTracker.Listener {
+    private val trackerListener = object : MusicSessionTracker.Listener, MusicSessionTracker.SessionLyricListener {
+        /**
+         * 会话推来了歌词（第127轮：网易云 `wt_music_lyric`）。
+         */
+        override fun onSessionLyric(pkg: String, lrc: String, lines: List<String>, cleared: Boolean) {
+            handleSessionLyric(pkg, lrc, lines, cleared)
+        }
+
         override fun onTrackChanged(t: TrackInfo?) {
             if (t == null) {
                 // —— 会话消失后延迟 NULL_SESSION_CLEAR_MS 再清空
@@ -578,6 +628,10 @@ class MusicController private constructor() {
             lyricSourceDurationMs = 0L
             lastLyricSongKey = ""
             lastFailKey = ""
+            // 第127轮：会话歌词也一起清（会话都没了，那份歌词已经没有归属）
+            sessionLyric = null
+            sessionLyricSongKey = ""
+            lyricFromSession = false
         }
         if (!keep.keepCover) {
             coverBitmap = null
@@ -591,6 +645,89 @@ class MusicController private constructor() {
         listeners.forEach { it.onMediaChanged(keep.track) }
         listeners.forEach {
             it.onLyricChanged(if (keep.keepLyric) lyric else null, lyricIndex, lyricWipe)
+        }
+    }
+
+    /**
+     * 收到会话事件歌词（第127轮：网易云 `wt_music_lyric`）。
+     *
+     * ## 这条通道解决什么
+     *
+     * 网易云车机版把歌词塞进 `MediaMetadata`（`android.media.metadata.LYRIC`）
+     * **或**用会话事件推 —— 走哪条由**车机配置**（`notifyLyricManner`）决定，
+     * 用户那台车是几我们不知道 → **两条都得接**。
+     *
+     * 协议细节见 [NeteaseSessionLyric]。
+     *
+     * ## 两种载荷分开处理
+     *
+     * - **整份 LRC**（`wt_music_lyric_obj`）→ 解析成时间轴，直接挂上去；
+     * - **当前三行**（`get_lyric_action`）→ **没有时间戳**，只能当
+     *   「播放器自报的当前句」（[playerCurrentLine]）——
+     *   那是最权威的「现在唱到哪一句」，比联网查来的时间轴更准。
+     */
+    private fun handleSessionLyric(pkg: String, lrc: String, lines: List<String>, cleared: Boolean) {
+        sessionLyricEventCount++
+        sessionLyricLines = lines.size
+        sessionLyricSource = if (cleared) "cleared" else "netease-session-event"
+        // ① 当前句（没有时间戳）：直接当「播放器自报的当前行」
+        if (lines.size >= 2) {
+            val cur = lines[1].trim()
+            if (cur.isNotEmpty() && cur != playerCurrentLine) {
+                playerCurrentLine = cur
+                Logx.i(
+                    LogTags.MEDIA, "会话事件：更新当前歌词行",
+                    "pkg" to pkg, "line" to cur,
+                )
+                recomputeLyric()
+            }
+        }
+        // ② 播放器让我们清空歌词（加载中 / 出错）
+        if (cleared) {
+            sessionLyric = null
+            sessionLyricSongKey = ""
+            if (lyricFromSession) {
+                lyric = null
+                lyricIndex = -1
+                lyricWipe = 0f
+                lyricLiveText = ""
+                lyricState = LYRIC_LOADING
+                lyricFromSession = false
+                Logx.i(LogTags.MEDIA, "会话事件：歌词被播放器清空", "pkg" to pkg)
+                listeners.forEach { it.onLyricChanged(null, -1, 0f) }
+            }
+            return
+        }
+        // ③ 整份 LRC
+        if (lrc.isEmpty()) return
+        val timeline = LrcParser.parse(lrc)
+        if (timeline.isEmpty) {
+            Logx.i(LogTags.MEDIA, "会话事件歌词解析后为空", "pkg" to pkg, "len" to lrc.length)
+            return
+        }
+        val t = track
+        if (t == null) {
+            // 还没有曲目：先存着，等曲目来了再挂上去
+            sessionLyric = timeline
+            sessionLyricSongKey = ""
+            return
+        }
+        val key = lyricKey(t)
+        sessionLyric = timeline
+        sessionLyricSongKey = key
+        Logx.i(
+            LogTags.MEDIA, "收到会话事件歌词",
+            "pkg" to pkg, "key" to key, "lines" to timeline.lines.size,
+            "title" to t.title, "artist" to t.artist,
+        )
+        // 已经是当前这首歌 → 直接挂上去
+        if (key == lastLyricSongKey) {
+            lyric = timeline
+            lyricState = ""
+            lyricNotFound = false
+            lyricSourceDurationMs = 0L
+            lyricFromSession = true
+            recomputeLyric()
         }
     }
 
@@ -634,6 +771,25 @@ class MusicController private constructor() {
             recomputeLyric()
             return
         }
+        // 1.2) 会话事件歌词（第127轮：网易云 `wt_music_lyric`）
+        //
+        // 网易云的歌词有两条通道：metadata 的 `android.media.metadata.LYRIC`
+        // 与会话事件 `wt_music_lyric` —— 走哪条由**车机配置**决定，我们都得接。
+        // 事件那份排在「播放器自供」前面：它是播放器**刚刚**推过来的那一份。
+        val sess = sessionLyric
+        if (sess != null && key == sessionLyricSongKey) {
+            lyric = sess
+            lyricState = ""
+            lyricNotFound = false
+            lyricSourceDurationMs = 0L
+            lyricFromSession = true
+            Logx.i(
+                LogTags.MEDIA, "使用会话事件歌词",
+                "key" to key, "lines" to sess.lines.size, "title" to t.title,
+            )
+            recomputeLyric()
+            return
+        }
         // 1.5) 播放器自供歌词（第四十一轮新增）
         //
         //  里带的 LRC（metadata 自定义 key / description extras）。
@@ -641,12 +797,17 @@ class MusicController private constructor() {
         // 有就用它，不联网。没有这条通道，属于增强。
         val playerLrc = t.playerLyric
         if (playerLrc.isNotEmpty()) {
+            // 诊断：这条歌词是**播放器自供**的（网易云走的就是 metadata 里的
+            // `android.media.metadata.LYRIC`；见 [NeteaseSessionLyric]）
+            sessionLyricSource = "netease-metadata"
             val playerTimeline = LrcParser.parse(playerLrc)
+            sessionLyricLines = playerTimeline.lines.size
             if (!playerTimeline.isEmpty) {
                 lyric = playerTimeline
                 lyricState = ""
                 lyricNotFound = false
                 lyricSourceDurationMs = 0L
+                lyricFromSession = false
                 Logx.i(
                     LogTags.MEDIA, "使用播放器自供歌词",
                     "key" to key, "lines" to playerTimeline.lines.size,
@@ -807,6 +968,9 @@ class MusicController private constructor() {
         lyricState = ""
         lyricNotFound = false
         lyricSourceDurationMs = sourceDurationMs
+        // 联网查来的歌词不是「会话事件歌词」——
+        // 播放器让我们清空歌词时，不能把这一份一起清掉。
+        lyricFromSession = false
         // 排障场景：歌词行数不对（少一半 / 重复）时，这里能看到拿到多少行
         Logx.i(
             LogTags.MEDIA, "歌词已应用",
