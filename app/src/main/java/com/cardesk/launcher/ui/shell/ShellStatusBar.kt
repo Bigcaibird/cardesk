@@ -233,13 +233,21 @@ class ShellStatusBar(context: Context) : View(context) {
         avatarRect.set(EDGE, avatarTop, EDGE + AVATAR, avatarTop + AVATAR)
         val avatarPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Skin.ACCENT }
         canvas.drawRoundRect(avatarRect, AVATAR_RADIUS, AVATAR_RADIUS, avatarPaint)
-        val initial = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        // 第123轮：原来这里画的是字母「C」（CarDesk 首字母），
+        // 用户要求「把左上角的 C 字设置入口改成一个设置图标」——
+        // 这个位置本来就是**设置入口**（点击 `onAvatar` 打开设置页），
+        // 字母 C 看不出来是干什么的，齿轮才一眼认得出。
+        //
+        // 底板（强调色方块）保留不变：它是这个入口的「按钮」外形，
+        // 点击命中区（avatarRect）也一点没变。
+        val gearPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Skin.ACCENT_INK
-            textSize = AVATAR_TEXT
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            textAlign = Paint.Align.CENTER
+            style = Paint.Style.FILL
         }
-        canvas.drawText("C", avatarRect.centerX(), avatarRect.centerY() + AVATAR_TEXT / 3f, initial)
+        canvas.drawPath(
+            gearPath(avatarRect.centerX(), avatarRect.centerY()),
+            gearPaint,
+        )
 
         // 状态胶囊（第五十一轮按设计板 对齐：文字 20px `var(--text)`、
         // 间距 18、胶囊内边距 22/12/22、指示点 12px 强调色实心圆
@@ -486,6 +494,64 @@ class ShellStatusBar(context: Context) : View(context) {
         }
     }
 
+    /**
+     * 齿轮（设置图标）的路径。
+     *
+     * ## 为什么用 Canvas 现画，不用 drawable 资源
+     *
+     * 状态栏这一行的其它图标（蓝牙 / WiFi / 信号 / 燃油 / 时钟）**全是 Canvas 画的**，
+     * 齿轮再单独引一套矢量资源，风格和缩放口径就会多一个例外。
+     *
+     * ## 画法
+     *
+     * 8 个梯形齿 + 一圈齿轮身 + 中心孔。
+     * 中心孔用 [Path.FillType.EVEN_ODD] 挖空 —— 不依赖底色，
+     * 换任何背景都还是透明的。
+     *
+     * @param cx 中心 x
+     * @param cy 中心 y
+     * @param rOuter 齿尖半径
+     * @param rBody 齿根半径（齿轮身的外沿）
+     * @param rHole 中心孔半径
+     * @param teeth 齿数
+     */
+    private fun gearPath(
+        cx: Float,
+        cy: Float,
+        rOuter: Float = AVATAR_GEAR_R,
+        rBody: Float = AVATAR_GEAR_BODY_R,
+        rHole: Float = AVATAR_GEAR_HOLE_R,
+        teeth: Int = 8,
+    ): Path {
+        val p = Path()
+        val step = 360f / teeth
+        // 齿在外缘占一半角度（另一半是齿间的缺口）
+        val half = step / 4f
+        fun polar(r: Float, deg: Float): FloatArray {
+            val rad = Math.toRadians(deg.toDouble())
+            return floatArrayOf(
+                cx + r * Math.cos(rad).toFloat(),
+                cy + r * Math.sin(rad).toFloat(),
+            )
+        }
+        for (i in 0 until teeth) {
+            val base = i * step
+            val a = polar(rOuter, base - half)
+            val b = polar(rOuter, base + half)
+            val c = polar(rBody, base + half)
+            val d = polar(rBody, base + step - half)
+            if (i == 0) p.moveTo(a[0], a[1]) else p.lineTo(a[0], a[1])
+            p.lineTo(b[0], b[1])
+            p.lineTo(c[0], c[1])
+            p.lineTo(d[0], d[1])
+        }
+        p.close()
+        // 中心孔：EVEN_ODD 把它挖成透明
+        p.addCircle(cx, cy, rHole, Path.Direction.CW)
+        p.fillType = Path.FillType.EVEN_ODD
+        return p
+    }
+
     private fun drawFuelIcon(canvas: Canvas, x: Float, y: Float) {
         val c = iconPaint
         canvas.drawRoundRect(RectF(x + 2f, y + 2f, x + 15f, y + 22f), 2f, 2f, c)
@@ -588,8 +654,20 @@ class ShellStatusBar(context: Context) : View(context) {
         /** 头像圆角。 */
         const val AVATAR_RADIUS = 13f
 
-        /** 头像里的字母字号（设计板 26px bold）。 */
-        const val AVATAR_TEXT = 21f
+        /**
+         * 齿轮图标的**齿尖半径**（设计 px）。
+         *
+         * 第123轮：这里原来是一个字母「C」的字号（21px），
+         * 现在改成设置图标 —— 齿轮外径 23px（= 2×11.5），
+         * 跟原来字母的视觉大小（21px 粗体）差不多，不改变这一格的视觉分量。
+         */
+        const val AVATAR_GEAR_R = 11.5f
+
+        /** 齿轮的**齿根半径**（齿轮身的外沿）。 */
+        const val AVATAR_GEAR_BODY_R = 8f
+
+        /** 齿轮的**中心孔半径**。 */
+        const val AVATAR_GEAR_HOLE_R = 3.8f
 
         /** 头像与状态胶囊之间的距离（第五十一轮按设计板 18 改；布局是 22）。 */
         const val CHIP_GAP = 12f
