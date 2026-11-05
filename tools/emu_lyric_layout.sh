@@ -19,12 +19,21 @@ NAME="${2:-y30-lyric-$LAYOUT}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ADB="${CARDESK_ADB:-/Users/roy/Documents/desktopapp/toolchain/sdk/platform-tools/adb}"
 DEV="${CARDESK_DEVICE:-emulator-5556}"
-OUT="$REPO/emu-verify/y30"
+# 证据目录（默认 y30；第119轮用 y32）
+OUT="${CARDESK_OUT_DIR:-$REPO/emu-verify/y30}"
+# 屏幕尺寸：第119轮要把模拟器调成用户那张图的 1920x941 做**同尺寸对照**
+WM_SIZE="${CARDESK_WM_SIZE:-}"
 PREFS=/data/data/com.ecarx.cardesk/shared_prefs/cardesk.xml
 
 mkdir -p "$OUT"
 
 adb() { "$ADB" -s "$DEV" "$@"; }
+
+if [ -n "$WM_SIZE" ]; then
+  echo "== ⓪ 屏幕尺寸设为 $WM_SIZE =="
+  adb shell wm size "$WM_SIZE"
+  sleep 1
+fi
 
 echo "== ① 强杀 CarDesk 进程 =="
 adb shell am force-stop com.ecarx.cardesk

@@ -6,6 +6,8 @@ import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import com.cardesk.launcher.MainActivity
+import com.cardesk.launcher.core.media.KTV_CURRENT_LEFT_X
+import com.cardesk.launcher.core.media.KTV_NEXT_LEFT_X
 import com.cardesk.launcher.core.media.LyricLayout
 import com.cardesk.launcher.ui.pages.ScenePage
 import org.junit.Assert.assertEquals
@@ -142,7 +144,8 @@ class LyricsPreviewRenderTest {
     }
 
     /**
-     * 第 117 轮：**KTV 式两行** —— **当前句在上、下一句在下，两句一样大**。
+     * 第 119 轮：**KTV 式两行** —— **错落阶梯**：
+     * 当前句贴左边距在左上、下一句往右下错开，两句一样大、都左对齐。
      */
     @Test
     fun 渲染KTV两行大字歌词() {
@@ -160,8 +163,10 @@ class LyricsPreviewRenderTest {
             withLyric.compress(Bitmap.CompressFormat.PNG, 100, it)
         }
 
-        val bands = diffBands(base, withLyric, x0 = 300, x1 = 1440, y0 = 200, y1 = 764)
-        println("[117轮] KTV 两行歌词行带: $bands")
+        // 扫描范围要覆盖**整个错落块**：左边从 x=44（当前句的左边缘）起，
+        // 右边到车况卡左沿 1488 为止。
+        val bands = diffBands(base, withLyric, x0 = 44, x1 = 1488, y0 = 200, y1 = 764)
+        println("[119轮] KTV 两行歌词行带: $bands")
 
         assertEquals("KTV 布局的歌词应该正好 2 行", 2, bands.size)
 
@@ -180,18 +185,25 @@ class LyricsPreviewRenderTest {
             abs(mainH - nextH) <= 2,
         )
 
-        // —— 两行是**分开**的两块：中间的空档要比三行布局里的大 ——
+        // —— 两行是**分开**的两块：中间要有空档 ——
         val gapKtv = next.first - main.last
         assertTrue("KTV 两行之间应该留出明显的空档（实际 $gapKtv）", gapKtv >= 30)
 
-        // —— 整块仍然居中 ——
-        val center = (main.first + next.last) / 2f
+        // —— 错落：当前句贴左边距，下一句往右下错开 ——
+        val mainLeft = leftInkX(base, withLyric, main, 44, 1488)
+        val nextLeft = leftInkX(base, withLyric, next, 44, 1488)
+        println("[119轮] KTV 两行左边缘: 当前句=$mainLeft 下一句=$nextLeft")
         assertTrue(
-            "KTV 两行歌词块中心($center) 应该落在 ${ScenePage.LYRIC_BLOCK_CENTER_Y} 附近",
-            abs(center - ScenePage.LYRIC_BLOCK_CENTER_Y) <= 14f,
+            "当前句应该贴桌面的左边距（实际左边缘 $mainLeft）",
+            abs(mainLeft - KTV_CURRENT_LEFT_X) <= 6,
         )
+        assertTrue(
+            "下一句应该往右下错开（实际左边缘 $nextLeft）",
+            abs(nextLeft - KTV_NEXT_LEFT_X) <= 6,
+        )
+        assertTrue("下一句应该比当前句更靠右", nextLeft > mainLeft)
 
-        // —— 不压到底部卡片区 ——
+        // —— 两行都在底部卡片区之上 ——
         assertTrue(
             "最下面一行($next) 不该压到底部卡片区（上沿 ${ScenePage.LYRIC_BOTTOM_CARD_TOP}）",
             next.last < ScenePage.LYRIC_BOTTOM_CARD_TOP,
@@ -277,6 +289,26 @@ class LyricsPreviewRenderTest {
         val bmp = Bitmap.createBitmap(1920, 1080, Bitmap.Config.ARGB_8888)
         decor.draw(Canvas(bmp))
         return bmp
+    }
+
+    /**
+     * 某一行文字的**最左墨迹 x**（两图差分）。
+     *
+     * 用来钉死「这一行从哪开始起排」——
+     * 错落阶梯就是靠这个坐标认出来的（当前句贴左边距、下一句往右下错开）。
+     */
+    private fun leftInkX(a: Bitmap, b: Bitmap, band: IntRange, x0: Int, x1: Int): Int {
+        for (x in x0 until x1) {
+            for (y in band) {
+                val p = a.getPixel(x, y)
+                val q = b.getPixel(x, y)
+                val dr = abs(((p shr 16) and 0xFF) - ((q shr 16) and 0xFF))
+                val dg = abs(((p shr 8) and 0xFF) - ((q shr 8) and 0xFF))
+                val db = abs((p and 0xFF) - (q and 0xFF))
+                if (dr + dg + db > 60) return x
+            }
+        }
+        return x0
     }
 
     /**

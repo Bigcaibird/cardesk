@@ -694,6 +694,8 @@ class ScenePage(context: Context) : View(context) {
         val layout = lyricLayout
         val rows = layout.rows
         val current = layout.currentIndex
+        // 锚定布局（KTV 两行）= 每行一个定死的锚点；居中块布局（三行）= null。
+        val anchors = layout.anchors
         // 行序 = 最上 → 最下；每行是什么由布局的 slots 决定。
         val contents = arrayOf(lyricPrev, lyricCurrent, lyricNext)
         // 当前布局用不到的行不画（KTV 两行不用「上一句」）。
@@ -733,23 +735,33 @@ class ScenePage(context: Context) : View(context) {
             asc[i] = -fm.ascent
             desc[i] = fm.descent
         }
-        // 基线与居中走**共用**的排版规则（跟设置页里的预览条同一份）——
+        // 基线：两种布局两套算法。
+        //
+        // - **居中块**（三行）：按字号算相对基线，再把整块平移到中心；
+        // - **锚定**（KTV 两行）：每行一个定死的锚点（错落阶梯），不算、不平移。
+        //
+        // 基线规则走**共用**的排版（跟设置页里的预览条同一份）——
         // 两边各写一套的话，预览跟实际画出来的东西会对不上。
-        val base = com.cardesk.launcher.core.media.LyricBlockLayout.baselines(
-            asc,
-            desc,
-            gap,
-            rows,
-            current,
-        )
-        val shift = com.cardesk.launcher.core.media.LyricBlockLayout.centerShift(
-            asc,
-            desc,
-            base,
-            LYRIC_BLOCK_CENTER_Y,
-            rows,
-        )
-        for (i in 0 until rows) base[i] += shift
+        val base = if (anchors != null) {
+            com.cardesk.launcher.core.media.LyricBlockLayout.anchoredBaselines(anchors)
+        } else {
+            val b = com.cardesk.launcher.core.media.LyricBlockLayout.baselines(
+                asc,
+                desc,
+                gap,
+                rows,
+                current,
+            )
+            val shift = com.cardesk.launcher.core.media.LyricBlockLayout.centerShift(
+                asc,
+                desc,
+                b,
+                LYRIC_BLOCK_CENTER_Y,
+                rows,
+            )
+            for (i in 0 until rows) b[i] += shift
+            b
+        }
 
         // —— 衬句（当前行以外的那些）——
         // 有导航引导卡时，**够高**（字顶在引导卡下沿之上）的行要收窄宽度：
@@ -764,8 +776,20 @@ class ScenePage(context: Context) : View(context) {
             text.textSize = sizes[i]
             text.color = colors[i]
             val inkTop = base[i] - asc[i]
-            val w = if (guideOn && inkTop < LYRIC_GUIDE_CARD_BOTTOM) LYRIC_GUIDE_CLEAR_W else LYRIC_MAX_W
-            canvas.drawText(clipLabel(s, w), cx, base[i], text)
+            val leftX = anchors?.get(i)?.leftX
+            val w = if (guideOn && inkTop < LYRIC_GUIDE_CARD_BOTTOM) {
+                LYRIC_GUIDE_CLEAR_W
+            } else {
+                lyricMaxWidth(leftX)
+            }
+            if (leftX != null) {
+                // 锚定布局：这一行从自己的左边缘起排（不居中）。
+                text.textAlign = Paint.Align.LEFT
+                canvas.drawText(clipLabel(s, w), leftX, base[i], text)
+            } else {
+                text.textAlign = Paint.Align.CENTER
+                canvas.drawText(clipLabel(s, w), cx, base[i], text)
+            }
         }
 
         // —— 当前句（视觉焦点）—— 带**擦除高亮** ——
@@ -777,7 +801,8 @@ class ScenePage(context: Context) : View(context) {
                 Typeface.DEFAULT
             }
             text.textSize = sizes[current]
-            val mainText = clipLabel(used[current], LYRIC_MAX_W)
+            val curLeftX = anchors?.get(current)?.leftX
+            val mainText = clipLabel(used[current], lyricMaxWidth(curLeftX))
             com.cardesk.launcher.ui.widget.LyricWipeText.draw(
                 canvas = canvas,
                 text = mainText,
@@ -788,7 +813,8 @@ class ScenePage(context: Context) : View(context) {
                 inactiveColor = Skin.TEXT,
                 fraction = lyricWipeState.display,
                 edgePx = com.cardesk.launcher.core.media.LyricWipe.edgeWidth(resources.displayMetrics.density),
-                maxWidth = LYRIC_MAX_W,
+                maxWidth = lyricMaxWidth(curLeftX),
+                leftX = curLeftX ?: 0f,
             )
         }
 
@@ -798,6 +824,23 @@ class ScenePage(context: Context) : View(context) {
         text.textSize = LYRIC_FAR_SIZE
         text.color = Skin.TEXT_DIM
     }
+
+    /**
+     * 一行歌词能占多宽（设计 px）。
+     *
+     * - 居中布局：固定 [LYRIC_MAX_W]（歌词居中在 x=960，再宽就伸到车况卡底下）；
+     * - **锚定布局**（KTV 两行）：那一行从自己的左边缘起排，
+     *   右边界的**安全线是车况卡的左沿**（[LYRIC_SAFE_RIGHT]）——
+     *   下一句错开到 x=776 之后，能用的宽度只剩那么多。
+     *
+     * @param leftX 这一行的左边缘 x；null = 居中布局
+     */
+    private fun lyricMaxWidth(leftX: Float?): Float =
+        com.cardesk.launcher.core.media.LyricBlockLayout.rowMaxWidth(
+            leftX = leftX,
+            maxWidth = LYRIC_MAX_W,
+            safeRight = LYRIC_SAFE_RIGHT,
+        )
 
     /**
      * 字号档 → 实际字号（设计原值，缩放由 [lyricScale] 统一乘）。
@@ -3316,6 +3359,17 @@ class ScenePage(context: Context) : View(context) {
          * 全部用这一个行距，所以那一档删掉了。
          */
         const val LYRIC_GAP_MAIN = 18f
+
+        /**
+         * 歌词右边的**安全线**（设计 px）—— 车况卡的左沿。
+         *
+         * 车况卡：宽 [CAR_STATUS_CARD_W]、右缘贴 `Design.W - 44`（= 1876），
+         * 所以左沿 = 1876 - 388 = **1488**。
+         *
+         * 第119轮：KTV 两行错落之后，下一句从 x=776 起排，
+         * 它能占的宽度就到这条线为止 —— 否则长句会钻到车况卡底下。
+         */
+        const val LYRIC_SAFE_RIGHT = 1488f
 
         /**
          * 歌词最大宽度（超出加省略号）。

@@ -3,6 +3,39 @@ package com.cardesk.launcher.core.media
 import java.util.Locale
 
 /**
+ * 一行歌词的**锚点**（设计 px）。
+ *
+ * ## 为什么要有锚点
+ *
+ * 居中块布局（三行）里，每行的位置是「算出来」的：
+ * 先按字号推基线，再把整块平移到中心。
+ *
+ * 但 KTV 式两行要的是**错落阶梯** —— 当前句贴左边距，
+ * 下一句往右下错开。每行的位置是**定死的**，算不出来。
+ *
+ * 所以给布局加一份「每行的锚点」：
+ * [leftX] = 文字**左边缘** x（这一版是左对齐，不是居中），
+ * [baselineY] = 文字基线 y。
+ *
+ * @param leftX 文字左边缘 x（设计 px）
+ * @param baselineY 文字基线 y（设计 px）
+ */
+data class LyricAnchor(val leftX: Float, val baselineY: Float)
+
+// —— KTV 两行的锚点（设计坐标 1920×1080）——
+//
+// 用户画的示意图：当前句在**左上**、下一句在**右下**，两行一样大、都从左边缘起。
+// 下面的具体数值是按实机效果定的（示意图只表示「错落成阶梯」这个关系）。
+//
+// 当前句贴桌面左边距（44，跟导航引导卡 / 巡航卡同一条竖线）；
+// 下一句往右下错开 —— 错到 x=776，既跟当前句拉开距离，
+// 又能在车况卡（左边界 1488）之前收住（40px 字号下一句最多 17 个汉字）。
+const val KTV_CURRENT_LEFT_X = 44f
+const val KTV_CURRENT_BASELINE_Y = 552f
+const val KTV_NEXT_LEFT_X = 776f
+const val KTV_NEXT_BASELINE_Y = 656f
+
+/**
  * 歌词的**字号档**（第117轮）。
  *
  * ## 为什么单独一个对象
@@ -68,8 +101,10 @@ enum class LyricLayout(
     /**
      * 行距倍数（相对桌面那个基础行距）。
      *
-     * KTV 式两行是「分开的两块」，行距要更大；
-     * 三行布局里当前句上下都贴着衬句，用基础行距就够。
+     * 只对**居中块布局**有意义（三行：当前句上下都贴着衬句，用基础行距就够）。
+     *
+     * **锚定布局**（KTV 两行）不用它 —— 那里的行距由两个锚点之间的距离
+     * 定死了，算出来的行距反而会跟锚点打架。
      */
     val gapScale: Float = 1f,
     /**
@@ -89,6 +124,15 @@ enum class LyricLayout(
      * 加粗跟它的大字号是一致的，就保持粗体。
      */
     val boldCurrent: Boolean = true,
+    /**
+     * 每一行的**锚点**（按行序，与 [slots] 顺序一致）。
+     *
+     * - `null` = 走「整块居中」算法（三行布局：基线算出来，再把整块平移到中心）；
+     * - 非 `null` = 每行**独立定位**（KTV 两行的错落阶梯：位置定死，不算）。
+     *
+     * 锚定布局下 [gapScale] 不参与计算（行距已经由锚点之间的距离定死了）。
+     */
+    val anchors: Array<LyricAnchor>? = null,
 ) {
 
     /**
@@ -125,15 +169,27 @@ enum class LyricLayout(
      * 40px 的粗体中文字视觉上比常规字大一号，
      * 那样就又变成「上下不一样大」了。
      *
-     * [gapScale] 比三行大：这两行是**分开**的两块，不该挤在一起。
+     * ## 位置：错落阶梯（不是居中）
+     *
+     * 用户画的示意图是「当前句在左上、下一句在右下」，
+     * 两行从各自的**左边缘**起排（不是居中）。
+     * 所以这一版不用「整块居中」那套算法，
+     * 改用 [anchors] 给每行一个固定锚点。
+     *
+     * 具体坐标见文件顶部的 [KTV_CURRENT_LEFT_X] 等常量。
      */
     KTV(
         rows = 2,
         currentIndex = 0,
         slots = intArrayOf(0, 1),
         sizeTiers = intArrayOf(LyricSizeTier.NEAR, LyricSizeTier.NEAR),
-        gapScale = 1.8f,
         boldCurrent = false,
+        anchors = arrayOf(
+            // 行 0 = 当前句（贴左边距，在上面）
+            LyricAnchor(KTV_CURRENT_LEFT_X, KTV_CURRENT_BASELINE_Y),
+            // 行 1 = 下一句（往右下错开）
+            LyricAnchor(KTV_NEXT_LEFT_X, KTV_NEXT_BASELINE_Y),
+        ),
     ),
     ;
 
@@ -149,7 +205,19 @@ enum class LyricLayout(
     /** 一句话说明这个布局长什么样（设置页的提示文案）。 */
     val hint: String get() = when (this) {
         THREE -> "上一句 / 当前句 / 下一句"
-        KTV -> "当前句在上、下一句在下，两句一样大"
+        KTV -> "当前句在左上、下一句在右下错开，两句一样大"
+    }
+
+    /**
+     * 设置页里关于**位置**的那句说明。
+     *
+     * 三行是「整块居中」—— 调字号整块跟着缩放但中心不动；
+     * KTV 两行是「错落阶梯」—— 位置本来就是定死的，调字号不动。
+     * 两种布局的这句话不一样，所以由布局自己给。
+     */
+    val positionHint: String get() = when (this) {
+        THREE -> "歌词块始终居中，调大调小都不会往一边偏。"
+        KTV -> "两行位置是定死的：当前句贴左边在左上，下一句往右下错开。"
     }
 
     companion object {

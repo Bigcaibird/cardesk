@@ -51,7 +51,7 @@ class LyricScalePreviewRenderTest {
     @Test
     fun 预览条画出KTV两行歌词() {
         val bands = bands(preview(1f, LyricLayout.KTV, lines2), blank())
-        println("[117轮] KTV 两行预览行带: $bands")
+        println("[119轮] KTV 两行预览行带: $bands")
         assertEquals("KTV 布局的预览应该正好 2 行", 2, bands.size)
 
         // —— 两句一样大（用户要求：不靠字号区分前后句）——
@@ -61,6 +61,34 @@ class LyricScalePreviewRenderTest {
             "KTV 两行应该一样高（上行 $top / 下行 $bottom）",
             abs(top - bottom) <= 2,
         )
+    }
+
+    /**
+     * 第 119 轮：KTV 两行在预览条里也是**错落阶梯**。
+     *
+     * 桌面上的错落靠「每行一个锚点」实现，预览条走的是**同一份锚点**
+     * （`LyricLayout.KTV.anchors`），只是整块等比缩小放进条子里 ——
+     * 所以预览里看到的上下错开、左右错开，跟桌面上的比例是同一个。
+     */
+    @Test
+    fun 预览条里的KTV两行是错落阶梯() {
+        val withText = preview(1f, LyricLayout.KTV, lines2)
+        val bands = bands(withText, blank())
+        assertEquals("KTV 布局的预览应该正好 2 行", 2, bands.size)
+
+        val curLeft = leftInkX(withText, blank(), bands[0])
+        val nextLeft = leftInkX(withText, blank(), bands[1])
+        println("[119轮] 预览条 KTV 左边缘: 当前句=$curLeft 下一句=$nextLeft")
+
+        // ① 当前句贴左边（放大缩小之后依然从左边起排，不是居中）
+        assertTrue("当前句应该从预览条左边起排（实际 $curLeft）", curLeft <= 40)
+
+        // ② 下一句往右边错开
+        assertTrue("下一句应该往右错开（实际 $nextLeft）", nextLeft > curLeft + 200)
+
+        // ③ 下一句不能被条子右边缘切掉
+        val nextRight = rightInkX(withText, blank(), bands[1])
+        assertTrue("下一句不该超出预览条右边缘（实际 $nextRight）", nextRight <= 960)
     }
 
     @Test
@@ -116,18 +144,41 @@ class LyricScalePreviewRenderTest {
         return bmp
     }
 
+    /** 某一行文字的最左墨迹 x。 */
+    private fun leftInkX(a: Bitmap, b: Bitmap, band: IntRange): Int {
+        for (x in 0 until 960) {
+            for (y in band) {
+                if (diff(a.getPixel(x, y), b.getPixel(x, y))) return x
+            }
+        }
+        return 0
+    }
+
+    /** 某一行文字的最右墨迹 x。 */
+    private fun rightInkX(a: Bitmap, b: Bitmap, band: IntRange): Int {
+        for (x in 959 downTo 0) {
+            for (y in band) {
+                if (diff(a.getPixel(x, y), b.getPixel(x, y))) return x
+            }
+        }
+        return 959
+    }
+
+    /** 两个像素的差异是否超过阈值（抗锯齿边缘不误判）。 */
+    private fun diff(p: Int, q: Int): Boolean {
+        val dr = abs(((p shr 16) and 0xFF) - ((q shr 16) and 0xFF))
+        val dg = abs(((p shr 8) and 0xFF) - ((q shr 8) and 0xFF))
+        val db = abs((p and 0xFF) - (q and 0xFF))
+        return dr + dg + db > 60
+    }
+
     /** 两张图的差分 → 连续变化的行带。 */
     private fun bands(a: Bitmap, b: Bitmap): List<IntRange> {
         val changed = BooleanArray(430)
         for (y in 0 until 430) {
             var hit = false
             for (x in 0 until 960) {
-                val p = a.getPixel(x, y)
-                val q = b.getPixel(x, y)
-                val dr = abs(((p shr 16) and 0xFF) - ((q shr 16) and 0xFF))
-                val dg = abs(((p shr 8) and 0xFF) - ((q shr 8) and 0xFF))
-                val db = abs((p and 0xFF) - (q and 0xFF))
-                if (dr + dg + db > 60) {
+                if (diff(a.getPixel(x, y), b.getPixel(x, y))) {
                     hit = true
                     break
                 }

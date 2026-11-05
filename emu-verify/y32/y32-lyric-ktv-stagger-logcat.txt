@@ -1,0 +1,5 @@
+11-05 11:47:00.509 I/CarDesk/Media( 1093): 歌词竞速命中 provider=kugou score=205 lines=54 key=t:怎么我睡不着你也不来救我 sourceDurationMs=277000
+11-05 11:47:00.509 I/CarDesk/Media( 1093): 歌词已应用 key=t:怎么我睡不着你也不来救我 lines=54 sourceDurationMs=277000
+11-05 11:47:02.540 I/CarDesk/App(10771): 切页 from=0 to=0 animate=true
+11-05 11:47:03.942 I/CarDesk/Media(10771): 歌词竞速命中 provider=kugou score=205 lines=54 key=t:怎么我睡不着你也不来救我 sourceDurationMs=277000
+11-05 11:47:03.943 I/CarDesk/Media(10771): 歌词已应用 key=t:怎么我睡不着你也不来救我 lines=54 sourceDurationMs=277000

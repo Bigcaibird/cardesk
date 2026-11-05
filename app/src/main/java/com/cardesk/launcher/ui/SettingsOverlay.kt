@@ -2085,6 +2085,9 @@ class SettingsOverlay(
         // 说明文案要跟着布局变 —— 但它在 chipRow **下面**，
         // 所以这里先声明、chipRow 之后再建（Kotlin 不允许向前引用局部 val）。
         lateinit var hintView: TextView
+        // 位置说明也要跟着布局变（三行是「整块居中」，KTV 两行是「错落定死」）——
+        // 同样留着 TextView，切布局时就地改。
+        lateinit var positionNoteView: TextView
         chipRow(
             "歌词布局",
             layoutOptions.map { it.label },
@@ -2100,6 +2103,7 @@ class SettingsOverlay(
                     ?: com.cardesk.launcher.ui.widget.LyricScalePreviewView.defaultLines(layoutOptions[idx])
             }
             hintView.text = layoutOptions[idx].hint
+            positionNoteView.text = layoutOptions[idx].positionHint
             onSceneLyricChanged?.invoke()
         }
         // 说明文案跟着布局变（KTV 两行的说明跟三行不是一句话）——
@@ -2129,7 +2133,9 @@ class SettingsOverlay(
             preview?.scale = v / 100f
             onSceneLyricChanged?.invoke()
         }
-        note("歌词块始终居中，调大调小都不会往一边偏。")
+        positionNoteView = note(
+            layoutOptions.firstOrNull { it.key == prefs.sceneLyricLayout }?.positionHint ?: "",
+        )
         note("放大后一句能显示的字会变少（屏幕就那么宽）。")
         section("胎压")
         sliderRow("胎压数字字号", prefs.deskTpmsValueSp, 10, 48, " px") {

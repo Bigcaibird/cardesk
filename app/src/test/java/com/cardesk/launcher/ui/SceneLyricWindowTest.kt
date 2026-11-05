@@ -1,10 +1,15 @@
 package com.cardesk.launcher.ui
 
+import com.cardesk.launcher.core.media.KTV_CURRENT_LEFT_X
+import com.cardesk.launcher.core.media.KTV_NEXT_LEFT_X
+import com.cardesk.launcher.core.media.LyricBlockLayout
 import com.cardesk.launcher.core.media.LyricLayout
 import com.cardesk.launcher.core.media.LyricSizeTier
 import com.cardesk.launcher.ui.pages.ScenePage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -156,5 +161,83 @@ class SceneLyricWindowTest {
         assertEquals(1.4f, page.lyricScale, 0.001f)
         page.lyricScale = 1.2f
         assertEquals(1.2f, page.lyricScale, 0.001f)
+    }
+
+    // ------------------------------------------------------ 错落阶梯（第119轮）
+
+    @Test
+    fun `KTV两行是错落阶梯_当前句贴左边距下一句往右下错开`() {
+        val anchors = LyricLayout.KTV.anchors
+        assertNotNull("KTV 两行必须带锚点（位置是定死的）", anchors)
+        val a = anchors!!
+
+        // ① 当前句贴桌面的左边距（跟导航引导卡同一条竖线）
+        assertEquals(KTV_CURRENT_LEFT_X, a[0].leftX, 0.001f)
+        assertEquals(44f, a[0].leftX, 0.001f)
+
+        // ② 下一句往**右**错开
+        assertTrue("下一句应该往右下错开", a[1].leftX > a[0].leftX)
+        assertEquals(KTV_NEXT_LEFT_X, a[1].leftX, 0.001f)
+
+        // ③ 当前句在**上面**
+        assertTrue("当前句应该在下一句上面", a[0].baselineY < a[1].baselineY)
+    }
+
+    @Test
+    fun `KTV两行都左对齐_不是居中`() {
+        val a = LyricLayout.KTV.anchors!!
+        // 锚定布局 = 每一行从自己的左边缘起排。
+        // 两行的左边缘必须都是「整数意义上的锚点」，
+        // 不能像居中块那样被平移到某个计算出来的 x。
+        assertEquals(KTV_CURRENT_LEFT_X, a[0].leftX, 0.001f)
+        assertEquals(KTV_NEXT_LEFT_X, a[1].leftX, 0.001f)
+        // 下一句要错得**够开**（用户示意图里两框之间有一大段空白）
+        assertTrue("下一句应该错开足够远", a[1].leftX - a[0].leftX >= 600f)
+        // 下一句从屏幕**中线左边一点**起排（用户示意图：x≈776），
+        // 但仍在桌面中央区域里 —— 不跑到最右（那里是车况卡）。
+        assertTrue("下一句的起点不该跑到屏幕最右", a[1].leftX < 1000f)
+    }
+
+    @Test
+    fun `KTV两行不压到引导卡也不压到底部卡片区`() {
+        val a = LyricLayout.KTV.anchors!!
+        val size = ScenePage.LYRIC_NEAR_SIZE
+
+        // ① 当前句的字顶要在引导卡下沿（387）之下
+        val curInkTop = a[0].baselineY - size
+        assertTrue(
+            "当前句字顶($curInkTop) 不该压到引导卡上（下沿 ${ScenePage.LYRIC_GUIDE_CARD_BOTTOM}）",
+            curInkTop > ScenePage.LYRIC_GUIDE_CARD_BOTTOM,
+        )
+
+        // ② 下一句的字底要在底部卡片区（上沿 764）之上
+        val nextInkBottom = a[1].baselineY + size * 0.3f
+        assertTrue(
+            "下一句字底($nextInkBottom) 不该压到底部卡片区（上沿 ${ScenePage.LYRIC_BOTTOM_CARD_TOP}）",
+            nextInkBottom < ScenePage.LYRIC_BOTTOM_CARD_TOP,
+        )
+    }
+
+    @Test
+    fun `KTV下一句不会钻到车况卡底下`() {
+        val a = LyricLayout.KTV.anchors!!
+        val maxW = LyricBlockLayout.rowMaxWidth(
+            leftX = a[1].leftX,
+            maxWidth = ScenePage.LYRIC_MAX_W,
+            safeRight = ScenePage.LYRIC_SAFE_RIGHT,
+        )
+        assertTrue(
+            "下一句的右边缘(${
+                a[1].leftX + maxW
+            }) 不能越过车况卡左沿(${ScenePage.LYRIC_SAFE_RIGHT})",
+            a[1].leftX + maxW <= ScenePage.LYRIC_SAFE_RIGHT,
+        )
+        // 40px 一个汉字 → 这一行最多能放十来个字
+        assertTrue("一行能放的字数应该在 15 个以上", maxW / ScenePage.LYRIC_NEAR_SIZE >= 15f)
+    }
+
+    @Test
+    fun `三行布局不用锚点_还是整块居中`() {
+        assertNull("三行布局走整块居中，不带锚点", LyricLayout.THREE.anchors)
     }
 }

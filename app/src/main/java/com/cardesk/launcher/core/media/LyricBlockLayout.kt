@@ -60,6 +60,49 @@ object LyricBlockLayout {
     }
 
     /**
+     * **锚定布局**的基线：每行一个固定位置，不用算。
+     *
+     * 第119轮：KTV 式两行是「错落阶梯」——
+     * 当前句贴左边距、下一句往右下错开，位置是**定死**的，
+     * 不能像居中块那样「先算相对基线、再整体平移」。
+     *
+     * @param anchors 每行的锚点（按行序）
+     * @return 长度与 [anchors] 相同、每项就是那行锚点里的基线 y
+     */
+    fun anchoredBaselines(anchors: Array<LyricAnchor>): FloatArray =
+        FloatArray(anchors.size) { anchors[it].baselineY }
+
+    /**
+     * 一行歌词能占多宽（设计 px）。
+     *
+     * - **居中布局**（三行）：固定 [maxWidth] ——
+     *   歌词居中在 x=960，再宽就伸到右边的车况卡底下。
+     * - **锚定布局**（KTV 两行）：这一行从自己的左边缘起排，
+     *   右边的**安全线**是车况卡的左沿（[safeRight]），
+     *   再留 [margin] 的呼吸位 —— 否则长句会钻到车况卡底下。
+     *
+     * ## 为什么放在这里
+     *
+     * 桌面（`ScenePage`）和设置页的**预览条**都得用这条规则，
+     * 否则预览里「一句能显示多少字」跟桌面上的对不上。
+     * 所以它是**共用**的排版规则，不是某个 View 的私有逻辑。
+     *
+     * @param leftX 这一行的左边缘 x；`null` = 居中布局
+     * @param maxWidth 居中布局下的最大宽度
+     * @param safeRight 锚定布局下的右边界安全线
+     * @param margin 离安全线的余量
+     */
+    fun rowMaxWidth(
+        leftX: Float?,
+        maxWidth: Float,
+        safeRight: Float,
+        margin: Float = 24f,
+    ): Float {
+        if (leftX == null) return maxWidth
+        return minOf(maxWidth, safeRight - leftX - margin)
+    }
+
+    /**
      * 整块的平移量：让块的中心落在 [target]。
      *
      * 块的范围：从**最上一行**的字顶（`base[0] - ascent[0]`）

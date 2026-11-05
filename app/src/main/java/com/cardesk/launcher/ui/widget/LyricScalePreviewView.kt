@@ -7,6 +7,7 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import android.view.View
 import com.cardesk.launcher.core.Skin
+import com.cardesk.launcher.core.media.LyricAnchor
 import com.cardesk.launcher.core.media.LyricBlockLayout
 import com.cardesk.launcher.core.media.LyricLayout
 import com.cardesk.launcher.core.media.LyricSizeTier
@@ -101,30 +102,115 @@ class LyricScalePreviewView(context: Context) : View(context) {
             asc[i] = -fm.ascent
             desc[i] = fm.descent
         }
-        val base = LyricBlockLayout.baselines(
-            asc,
-            desc,
-            ScenePage.LYRIC_GAP_MAIN * lay.gapScale * k,
-            rows,
-            current,
-        )
-        val shift = LyricBlockLayout.centerShift(asc, desc, base, h / 2f, rows)
-        for (i in 0 until rows) base[i] += shift
 
-        // 截断宽度跟桌面一致（预览 View 比它窄时按窄的来）。
-        val maxW = minOf(ScenePage.LYRIC_MAX_W, w - 16f)
-        paint.textAlign = Paint.Align.CENTER
+        // 两种布局两套画法：
+        // - **居中块**（三行）：整块居中，1:1 画（宽度用真实的歌词最大宽度，
+        //   所以「一句能显示多少字」是真的）；
+        // - **锚定**（KTV 两行）：位置是定死的错落阶梯，整块横跨桌面 x=44~1464，
+        //   预览条只有 960 宽 —— 1:1 画不下，所以**等比缩小**（见 drawAnchored）。
+        val anchors = lay.anchors
+        if (anchors != null) {
+            drawAnchored(canvas, lay, anchors, sizes, asc, desc, w, h)
+        } else {
+            val base = LyricBlockLayout.baselines(
+                asc,
+                desc,
+                ScenePage.LYRIC_GAP_MAIN * lay.gapScale * k,
+                rows,
+                current,
+            )
+            val shift = LyricBlockLayout.centerShift(asc, desc, base, h / 2f, rows)
+            for (i in 0 until rows) base[i] += shift
+
+            // 截断宽度跟桌面一致（预览 View 比它窄时按窄的来）。
+            val maxW = minOf(ScenePage.LYRIC_MAX_W, w - 16f)
+            paint.textAlign = Paint.Align.CENTER
+            for (i in 0 until rows) {
+                val s = lyricLines.getOrNull(i) ?: continue
+                if (s.isEmpty()) continue
+                paint.typeface = if (i == current && lay.boldCurrent) {
+                    Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                } else {
+                    Typeface.DEFAULT
+                }
+                paint.textSize = sizes[i]
+                paint.color = colorOf(lay.sizeTiers[i])
+                canvas.drawText(clip(s, maxW), w / 2f, base[i], paint)
+            }
+        }
+    }
+
+    /**
+     * **锚定布局**（KTV 两行错落阶梯）的预览。
+     *
+     * ## 为什么是「等比缩小」而不是 1:1
+     *
+     * 桌面上这两行的横向跨度是 x=44 ~ 1464（下一句的可占宽到车况卡左沿 1488 为止），
+     * 而预览条只有 960 宽 —— 1:1 画的话下一句直接画到条子外面。
+     *
+     * 所以这里把**整块**等比缩小后放进预览条：
+     * 位置、字号、截断宽度都乘同一个系数，
+     * 于是「当前句在左上、下一句在右下」这个**比例关系**在预览里是真的。
+     *
+     * ## 为什么缩放系数不看歌词内容
+     *
+     * 包围盒左右用**标称**最大宽度（不是实际文字宽度）——
+     * 否则换一首歌、歌词长短一变，预览的缩放就跟着变，
+     * 字号滑杆会「看着忽大忽小」。用标称宽度 → 系数只跟布局有关，稳。
+     *
+     * @param anchors 每一行的锚点（跟桌面同一份 [LyricLayout.anchors]）
+     * @param sizes 每一行的字号（设计 px，已含用户的缩放）
+     */
+    private fun drawAnchored(
+        canvas: Canvas,
+        lay: LyricLayout,
+        anchors: Array<LyricAnchor>,
+        sizes: FloatArray,
+        asc: FloatArray,
+        desc: FloatArray,
+        w: Float,
+        h: Float,
+    ) {
+        val rows = anchors.size
+        // 每行在桌面上能占多宽（跟桌面同一份规则）。
+        val rowW = FloatArray(rows) {
+            LyricBlockLayout.rowMaxWidth(
+                leftX = anchors[it].leftX,
+                maxWidth = ScenePage.LYRIC_MAX_W,
+                safeRight = ScenePage.LYRIC_SAFE_RIGHT,
+            )
+        }
+        // 基线：同一份规则（桌面那边也是这么算的）。
+        val base = LyricBlockLayout.anchoredBaselines(anchors)
+
+        // —— 内容包围盒（设计 px）——
+        val left = anchors.minOf { it.leftX }
+        val right = (0 until rows).maxOf { anchors[it].leftX + rowW[it] }
+        val top = (0 until rows).minOf { base[it] - asc[it] }
+        val bottom = (0 until rows).maxOf { base[it] + desc[it] }
+        val cw = (right - left).coerceAtLeast(1f)
+        val ch = (bottom - top).coerceAtLeast(1f)
+
+        // —— 等比缩小，放进预览条 ——
+        val pad = 16f
+        val s = minOf((w - pad * 2f) / cw, (h - pad * 2f) / ch)
+        val x0 = pad + (w - pad * 2f - cw * s) / 2f
+        val y0 = pad + (h - pad * 2f - ch * s) / 2f
+
+        paint.textAlign = Paint.Align.LEFT
         for (i in 0 until rows) {
-            val s = lyricLines.getOrNull(i) ?: continue
-            if (s.isEmpty()) continue
-            paint.typeface = if (i == current && lay.boldCurrent) {
+            val text = lyricLines.getOrNull(i) ?: continue
+            if (text.isEmpty()) continue
+            paint.typeface = if (i == lay.currentIndex && lay.boldCurrent) {
                 Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             } else {
                 Typeface.DEFAULT
             }
-            paint.textSize = sizes[i]
+            paint.textSize = sizes[i] * s
             paint.color = colorOf(lay.sizeTiers[i])
-            canvas.drawText(clip(s, maxW), w / 2f, base[i], paint)
+            val x = x0 + (anchors[i].leftX - left) * s
+            val y = y0 + (base[i] - top) * s
+            canvas.drawText(clip(text, rowW[i] * s), x, y, paint)
         }
     }
 

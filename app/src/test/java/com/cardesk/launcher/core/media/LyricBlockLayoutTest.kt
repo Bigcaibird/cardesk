@@ -135,4 +135,52 @@ class LyricBlockLayoutTest {
         }
         assertTrue("当前行下标越界必须报错（否则会画到数组外面）", threw)
     }
+
+    // ------------------------------------------------------ 锚定布局（第119轮）
+
+    @Test
+    fun `锚定基线就是锚点里写死的那个y`() {
+        val anchors = arrayOf(
+            LyricAnchor(leftX = 44f, baselineY = 552f),
+            LyricAnchor(leftX = 776f, baselineY = 656f),
+        )
+        val base = LyricBlockLayout.anchoredBaselines(anchors)
+        assertEquals(2, base.size)
+        assertEquals(552f, base[0], 0.001f)
+        assertEquals(656f, base[1], 0.001f)
+    }
+
+    @Test
+    fun `锚定基线不依赖字号和行距`() {
+        // 锚定布局的位置是**定死**的：字号怎么调、行距怎么算都不影响它。
+        val anchors = LyricLayout.KTV.anchors!!
+        val base = LyricBlockLayout.anchoredBaselines(anchors)
+        assertEquals(anchors[0].baselineY, base[0], 0.001f)
+        assertEquals(anchors[1].baselineY, base[1], 0.001f)
+    }
+
+    @Test
+    fun `居中布局的一行用固定的最大宽度`() {
+        assertEquals(
+            960f,
+            LyricBlockLayout.rowMaxWidth(null, maxWidth = 960f, safeRight = 1488f),
+            0.001f,
+        )
+    }
+
+    @Test
+    fun `锚定布局的一行到安全线为止`() {
+        // 下一句从 x=776 起排，右边界安全线是车况卡左沿 1488，留 24 的余量。
+        assertEquals(
+            1488f - 776f - 24f,
+            LyricBlockLayout.rowMaxWidth(776f, maxWidth = 960f, safeRight = 1488f),
+            0.001f,
+        )
+        // 当前句从 x=44 起排，安全线还够远 → 仍用固定的最大宽度。
+        assertEquals(
+            960f,
+            LyricBlockLayout.rowMaxWidth(44f, maxWidth = 960f, safeRight = 1488f),
+            0.001f,
+        )
+    }
 }

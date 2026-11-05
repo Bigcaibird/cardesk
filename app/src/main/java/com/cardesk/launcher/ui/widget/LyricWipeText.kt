@@ -43,6 +43,9 @@ object LyricWipeText {
      * @param maxWidth 最大宽度（<=0 表示不限制）；超宽按中间省略
      * @param scrollable 走**跑马灯**模式：不再省略，文字左对齐并按 [marqueeOffset] 平移
      * @param marqueeOffset 跑马灯偏移（<=0）；0 = 文字左边缘贴容器左边，负值 = 向左移
+     * @param leftX **左对齐**时的文字左边缘 x（<=0 表示不左对齐，按 [cx] 居中）。
+     *        第119轮 KTV 式两行是「错落阶梯」，每一行都从自己的左边缘起排，
+     *        不是居中 —— 擦除高亮也得跟着从左边画。
      */
     fun draw(
         canvas: Canvas,
@@ -57,6 +60,7 @@ object LyricWipeText {
         maxWidth: Float = 0f,
         scrollable: Boolean = false,
         marqueeOffset: Float = 0f,
+        leftX: Float = 0f,
     ) {
         if (text.isEmpty()) return
         val oldColor = paint.color
@@ -66,8 +70,12 @@ object LyricWipeText {
         val shown = if (scrollable) text else clip(text, paint, maxWidth)
         val tw = paint.measureText(shown)
         // 跑马灯：x0 就是偏移量本身（0 = 左对齐，-overflow = 右端）。
-        // 普通模式：按 cx 居中。
-        val x0 = if (scrollable) marqueeOffset else cx - tw / 2f
+        // 普通模式：按 cx 居中；给了 leftX 就从左边缘起排。
+        val x0 = when {
+            scrollable -> marqueeOffset
+            leftX > 0f -> leftX
+            else -> cx - tw / 2f
+        }
 
         // 1) 整行暗色
         paint.color = inactiveColor
