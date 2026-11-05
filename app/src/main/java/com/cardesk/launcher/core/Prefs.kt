@@ -591,6 +591,27 @@ class Prefs(context: Context) {
         get() = stringValue("design_music_source_v1", "generic")
         set(value) = setStringValue("design_music_source_v1", value)
 
+    /**
+     * **默认媒体源** id（`default_music_source_v1`，第 125 轮）。
+     *
+     * ## 和 [musicSource] 的区别
+     *
+     * - [musicSource]：**当前生效**的来源。卡片上的来源行点一下就能改，
+     *   改完记在这里。
+     * - 本项：**默认**来源。在设置页里选定，**桌面启动时**自动锁定它。
+     *
+     * ## 为什么默认是「通用音乐」
+     *
+     * 「通用音乐」= 不锁包、跟随系统当前会话 —— 也就是**原来的行为**。
+     * 本项保持默认「通用音乐」时，桌面启动什么都不改，现有行为一个字节都不变；
+     * 用户在设置页显式选了别的，才开始自动锁定。
+     *
+     * 用户在卡片上临时切了别的，**不**会改这一项 —— 下次启动仍回到默认源。
+     */
+    var defaultMusicSource: String
+        get() = stringValue("default_music_source_v1", "generic")
+        set(value) = setStringValue("default_music_source_v1", value)
+
     var mock360Overlay: Boolean
         get() = sp.getBoolean("mock_360_overlay", true)
         set(v) = sp.edit().putBoolean("mock_360_overlay", v).apply()

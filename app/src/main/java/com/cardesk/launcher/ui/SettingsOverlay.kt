@@ -75,6 +75,13 @@ class SettingsOverlay(
 
     var onClose: (() -> Unit)? = null
     var onApply: (() -> Unit)? = null
+
+    /**
+     * 「默认媒体源」被改（第 125 轮）。
+     *
+     * 传来源 id。宿主负责落盘 + 锁定对应的包 + 刷新桌面。
+     */
+    var onDefaultMediaSource: ((String) -> Unit)? = null
     var onVehicleSource: (() -> Unit)? = null
     var onEditNavSlots: (() -> Unit)? = null
     var onShowTasks: (() -> Unit)? = null
@@ -761,6 +768,18 @@ class SettingsOverlay(
             onApply?.invoke()
         }
         scroll.addView(seg)
+        // 第125轮：**初始就滚到选中项**。
+        //
+        // 「默认媒体源」有 9 个选项、选中的是第 7 个（通用音乐）——
+        // 不滚过去的话，打开设置页看到的是 QQ音乐/网易云一排**没高亮**的 chip，
+        // 根本看不出当前选的是哪个。氛围灯那几行选中项在第 0 个，不受影响。
+        if (selectedIndex > 0) {
+            scroll.post {
+                val child = seg.getChildAt(selectedIndex) ?: return@post
+                val target = (child.left - scroll.width / 2 + child.width / 2).coerceAtLeast(0)
+                scroll.scrollTo(target, 0)
+            }
+        }
         // 宽度必须占满「标签右侧的剩余空间」（-1 + 左外边距），
         // 否则 wrap_content 的内容会溢出并压在标签上
         holder.addView(
@@ -2533,6 +2552,23 @@ class SettingsOverlay(
             "系统能力报告",
             "caps" to caps.joinToString(",") { "${it.first.label}=${if (it.second) "可用" else "不可用"}" },
         )
+        // 第125轮：默认媒体源（可设）。
+        // 放在「媒体来源」这一节的**最上面** —— 用户看一眼就知道
+        // 「默认用哪个」和「这 9 个分别装没装」是同一件事的两面。
+        section("默认媒体源")
+        note("桌面启动时自动锁定这个来源；音乐卡片上的来源行仍可临时切换成别的。")
+        chipRow(
+            "默认来源",
+            com.cardesk.launcher.core.media.MediaSources.LIST.map { it.label },
+            com.cardesk.launcher.core.media.MediaSources.byId(prefs.defaultMusicSource)?.label
+                ?: com.cardesk.launcher.core.media.MediaSources.GENERIC_LABEL,
+            compact = true,
+        ) { label ->
+            val src = com.cardesk.launcher.core.media.MediaSources.byLabel(label) ?: return@chipRow
+            prefs.defaultMusicSource = src.id
+            onDefaultMediaSource?.invoke(src.id)
+            onApply?.invoke()
+        }
         section("媒体来源（固定 9 个）")
         for (source in com.cardesk.launcher.core.media.MediaSources.LIST) {
             val candidates = com.cardesk.launcher.core.media.MediaSources.packageCandidates(source.label)

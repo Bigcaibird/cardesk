@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1127",
-  "versionCode": 4223,
-  "tag": "v1.0.1127",
-  "name": "CarDesk 4223 / 1.0.1127-system",
-  "notes": "## 第 124 轮：设置页主体外的留白改成透出桌面\n\n- 设置页面板（主体）之外的那圈留白，从一整块不透明的 `.bgwash + .scrim` 改成半透明，桌面透得出来。\n- 面板主体那张卡仍是不透明（`palette.surface`），里面的字照旧清楚。\n- 只改设置页；空调 / 应用抽屉 / 最近任务等其它浮层维持原样。\n- 新增 5 条单测（像素级 + 纯 Kotlin 透出率），并做了两轮反向验证。\n- 全量 1627 个单测全绿。",
-  "publishedAt": "2026-11-05T07:11:51Z",
+  "version": "1.0.1128",
+  "versionCode": 4224,
+  "tag": "v1.0.1128",
+  "name": "CarDesk 4224 / 1.0.1128-system",
+  "notes": "## 第 125 轮：默认媒体源可设 + 音乐卡片媒体源加图标\n\n- **默认媒体源可设**：设置页 → 系统诊断 → 「默认媒体源」一栏，9 个来源横排 chip 可选。\n  桌面启动时自动锁定它（只锁定，不拉起 App）；卡片上的来源行仍可临时切换。\n  默认值是「通用音乐」= 跟随当前会话，所以不选时行为跟以前一模一样。\n- **音乐卡片媒体源加图标**：原来只有一个品牌色小圆点，现在换成真正的图标 ——\n  装了对应 App 就取它的**真实图标**（QQ音乐绿色音符、网易云红色音符…），\n  蓝牙 / USB / 通用音乐没有对应 App，用 Canvas 自绘的专属符号（音符 / 蓝牙 / USB）。\n- 全量 1643 个单测全绿（新增 16 条，含像素级断言与两轮反向验证）。",
+  "publishedAt": "2026-11-05T09:09:31Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4223.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4223.apk",
-    "size": 2222518,
-    "sha256": "d64931670507465d606da1eb46f7a74e77d9d2e21613386c6df46741382480b7"
+    "name": "CarDesk-platform-ecarx-cardesk-4224.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4224.apk",
+    "size": 2229706,
+    "sha256": "111731e1727fdfa86f76c4a6512040ecd87f7a72d2b1dd01715b34b53f778bdd"
   }
 }

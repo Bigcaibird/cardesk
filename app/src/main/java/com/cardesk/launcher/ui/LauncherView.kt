@@ -1714,6 +1714,86 @@ class LauncherView(context: Context) : FrameLayout(context) {
             ?: com.cardesk.launcher.core.media.MediaSources.byId("generic")!!.label
     }
 
+    /**
+     * 当前生效的**来源 id**（第 125 轮）。
+     *
+     * 与 [currentSourceLabel] 同一套规则，只是返回 id 而不是文案 ——
+     * 卡片上要画哪个图标得按 id 查，画布上拿不到 id。
+     */
+    private fun currentSourceId(track: com.cardesk.launcher.core.media.TrackInfo?): String {
+        val selected = com.cardesk.launcher.core.media.MediaSources.byId(prefs.musicSource)
+        if (selected != null && selected.id != com.cardesk.launcher.core.media.MediaSources.GENERIC_ID) {
+            return selected.id
+        }
+        return com.cardesk.launcher.core.media.MediaSources.byId(track?.sourceId.orEmpty())?.id
+            ?: com.cardesk.launcher.core.media.MediaSources.GENERIC_ID
+    }
+
+    // --------------------------------------------------------------- 媒体源图标（第125轮）
+
+    /** 正在后台加载图标的来源 id（防重复加载：refresh 每秒都会调）。 */
+    private var iconLoadingFor: String? = null
+
+    /** 图标加载完回主线程用。 */
+    private val iconHandler = Handler(Looper.getMainLooper())
+
+    /**
+     * 媒体源图标：真 App 图标优先，取不到用自绘符号。
+     *
+     * 取图标要读 APK 资源 → **后台线程**取，主线程只读缓存。
+     */
+    private fun updateMediaSourceIcon(sourceId: String) {
+        val kind = com.cardesk.launcher.core.media.MediaSources.iconKind(sourceId)
+        scenePage.mediaSourceIconKind = kind
+        if (kind != com.cardesk.launcher.core.media.MediaSourceIconKind.APP) {
+            // 蓝牙 / USB / 通用音乐没有对应 App，直接用自绘符号。
+            scenePage.mediaSourceIcon = null
+            scenePage.invalidate()
+            return
+        }
+        val cached = com.cardesk.launcher.ui.widget.MediaSourceIcons.cached(sourceId)
+        if (cached != null) {
+            scenePage.mediaSourceIcon = cached
+            scenePage.invalidate()
+            return
+        }
+        if (iconLoadingFor == sourceId) return
+        iconLoadingFor = sourceId
+        val ctx = context.applicationContext
+        Thread {
+            val bmp = com.cardesk.launcher.ui.widget.MediaSourceIcons.load(ctx, sourceId)
+            iconHandler.post {
+                if (iconLoadingFor == sourceId) {
+                    iconLoadingFor = null
+                    scenePage.mediaSourceIcon = bmp
+                    scenePage.invalidate()
+                }
+            }
+        }.apply { isDaemon = true }.start()
+    }
+
+    /**
+     * 应用「默认媒体源」（第 125 轮）：锁定对应的包。
+     *
+     * - 目标已安装 → 锁定包，**不拉起 App**（桌面启动不该自己弹音乐）；
+     * - 「通用音乐」或没装 → 释放锁定，回落到跟随当前会话。
+     *
+     * @return 实际锁定的包（null = 没锁定）
+     */
+    fun applyDefaultMediaSource(sourceId: String): String? {
+        val pkg = com.cardesk.launcher.core.media.MediaSources.resolveDefaultPackage(sourceId) { p ->
+            runCatching { context.packageManager.getApplicationInfo(p, 0) != null }.getOrDefault(false)
+        }
+        if (pkg == null) {
+            com.cardesk.launcher.core.media.MusicSessionTracker.get().clearPackageLock()
+            Logx.i(LogTags.MEDIA, "默认媒体源：跟随当前会话", "sourceId" to sourceId)
+            return null
+        }
+        com.cardesk.launcher.core.media.MusicSessionTracker.get().lockToPackage(pkg)
+        Logx.i(LogTags.MEDIA, "默认媒体源：已锁定", "sourceId" to sourceId, "pkg" to pkg)
+        return pkg
+    }
+
     // --------------------------------------------------------------- 页面切换
 
     private fun showPage(target: Int) {
@@ -2355,6 +2435,14 @@ private fun showCam() {
         overlay.onClose = { closeSettings() }
         overlay.onApply = { onSettingsApplied() }
         overlay.onCardLayoutChanged = { reloadSceneCardLayout() }
+        // 第125轮：默认媒体源 —— 设置里选了立刻锁定对应包，卡片上也切过去。
+        overlay.onDefaultMediaSource = { id ->
+            prefs.defaultMusicSource = id
+            applyDefaultMediaSource(id)
+            // 「当前生效的来源」也跟着走，卡片上立刻能看到新默认源。
+            prefs.musicSource = id
+            refresh()
+        }
         // 第114轮：拖「首页中央歌词字号」滑杆时，桌面立刻跟着变。
         // 第117轮：改「歌词布局」时也一样立刻生效。
         overlay.onSceneLyricChanged = {
@@ -2791,6 +2879,9 @@ private fun showCam() {
         // 艺术家行默认值是空串，不要塞自造占位文案
         scenePage.mediaArtist = track?.artist?.ifBlank { "" } ?: ""
         scenePage.mediaSource = sourceLabel
+        // 第125轮：来源图标（真实 App 图标优先，取不到用自绘符号）。
+        scenePage.mediaSourceId = currentSourceId(track)
+        updateMediaSourceIcon(scenePage.mediaSourceId)
         scenePage.mediaArtwork = track?.artwork
         // 场景页底部那张音乐卡的 ▶/⏸ 按钮读的是 scenePage.mediaPlaying
         // （场景页音乐卡）。

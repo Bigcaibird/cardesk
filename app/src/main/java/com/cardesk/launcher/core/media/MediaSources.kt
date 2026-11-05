@@ -4,6 +4,35 @@ import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 
 /**
+ * 媒体源图标的**画法**（第 125 轮）。
+ *
+ * 音乐卡片上的来源行原来只有一个品牌色小圆点 —— 看得出是哪个来源，
+ * 但认不出是哪个 App。这一轮给每个来源配一个真正的图标。
+ *
+ * ## 为什么分两种
+
+ * - [APP]：能取到**真实 App 图标**（QQ音乐的绿色音符、网易云的红色音符 …）——
+ *   用户一眼就认得。前提是那个 App **装了**。
+ * - 其它三个：**自绘符号**。蓝牙音乐 / USB 音乐 / 通用音乐本来就没有
+ *   对应的 App 可取图标，硬凑一个会显示别人的图标，不如画一个符号。
+ *
+ * 纯 Kotlin（不碰 `android.graphics`），保证能 JVM 单测。
+ */
+enum class MediaSourceIconKind {
+    /** 取对应 App 的真实图标。 */
+    APP,
+
+    /** 自绘音符（通用音乐）。 */
+    NOTE,
+
+    /** 自绘蓝牙符号。 */
+    BLUETOOTH,
+
+    /** 自绘 USB 符号。 */
+    USB,
+}
+
+/**
  * 9 个固定媒体来源（： 的 9 行 +）。
  *
  * 文案与品牌色逐字 `android:text` / `android:tag`
@@ -149,6 +178,51 @@ object MediaSources {
 
     /** 品牌色：来源标签左侧圆点的颜色。 */
     fun brandColor(label: String): Int = byLabel(label)?.brandColor ?: 0xFFEC4899.toInt()
+
+    /**
+     * 该来源取**真实 App 图标**时的候选包（按序取第一个已安装的）。
+     *
+     * 只有「有对应 App」的来源才有：QQ / 网易云 / 酷狗 / 酷我 / 汽水 / 多媒体。
+     * 蓝牙、USB、通用音乐没有对应 App —— 它们用自绘符号。
+     */
+    fun iconPackageCandidates(sourceId: String): List<String> = when (sourceId) {
+        "qq" -> FIXED_CANDIDATES.getValue("qq")
+        "netease" -> FIXED_CANDIDATES.getValue("netease")
+        "kugou" -> FIXED_CANDIDATES.getValue("kugou")
+        "kuwo" -> FIXED_CANDIDATES.getValue("kuwo")
+        "soda" -> FIXED_CANDIDATES.getValue("soda")
+        "local" -> MULTIMEDIA_CANDIDATES
+        else -> emptyList()
+    }
+
+    /**
+     * 该来源的图标画法。
+     *
+     * 有候选包 → [MediaSourceIconKind.APP]（取真实 App 图标）；
+     * 没有候选包的按 id 落到各自的自绘符号。
+     */
+    fun iconKind(sourceId: String): MediaSourceIconKind = when (sourceId) {
+        "bluetooth" -> MediaSourceIconKind.BLUETOOTH
+        "usb" -> MediaSourceIconKind.USB
+        else -> if (iconPackageCandidates(sourceId).isEmpty()) {
+            MediaSourceIconKind.NOTE
+        } else {
+            MediaSourceIconKind.APP
+        }
+    }
+
+    /**
+     * 「默认媒体源」对应的包（取第一个**已安装**的候选）。
+     *
+     * - 来源不认识 → null；
+     * - 「通用音乐」→ null（**不锁包**，跟随系统当前会话）；
+     * - 目标没装 → null（调用方据此降级回通用音乐）。
+     */
+    fun resolveDefaultPackage(sourceId: String, isInstalled: (String) -> Boolean): String? {
+        val source = byId(sourceId) ?: return null
+        if (source.id == GENERIC_ID) return null
+        return packageFor(source.label, isInstalled)
+    }
 
     /**
      * 包名 → 来源文案。

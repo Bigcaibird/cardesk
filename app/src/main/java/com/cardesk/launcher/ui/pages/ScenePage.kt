@@ -79,6 +79,25 @@ class ScenePage(context: Context) : View(context) {
     /** 艺术家：默认是**空串**。 */
     var mediaArtist: String = ""
     var mediaSource: String = "通用音乐"
+
+    /**
+     * 媒体源 id（第 125 轮）—— 决定卡片上画哪个图标。
+     *
+     * 文案（[mediaSource]）给人看，id 才是机器认的键。
+     */
+    var mediaSourceId: String = "generic"
+
+    /**
+     * 媒体源的**真实 App 图标**（第 125 轮）；null = 用自绘符号。
+     *
+     * 由 [com.cardesk.launcher.ui.LauncherView] 在后台线程取好后塞进来。
+     */
+    var mediaSourceIcon: Bitmap? = null
+
+    /** 真实图标取不到时画哪个自绘符号（蓝牙 / USB / 音符）。 */
+    var mediaSourceIconKind: com.cardesk.launcher.core.media.MediaSourceIconKind =
+        com.cardesk.launcher.core.media.MediaSourceIconKind.NOTE
+
     var mediaPlaying: Boolean = false
     var mediaArtwork: Bitmap? = null
 
@@ -1906,14 +1925,36 @@ class ScenePage(context: Context) : View(context) {
         // 画在封面 / 文字 / 进度环**之下**。
         drawCoverGlow(canvas, rect)
 
-        // ① 来源行（dot + 名称 + 箭头）—— 设计板放在卡片**左上角**
+        // ① 来源行（图标 + 名称 + 箭头）—— 设计板放在卡片**左上角**
         text.textAlign = Paint.Align.LEFT
         text.typeface = Typeface.DEFAULT
         text.textSize = (21f * k).coerceAtLeast(12f)
         text.color = Skin.TEXT_DIM
         val srcY = top + 10f
-        fill.color = MediaSources.brandColor(mediaSource)
-        canvas.drawCircle(x + 22f * k, srcY + 12f, 4f * k, fill)
+        // 第125轮：来源图标（真实 App 图标优先，取不到用自绘符号）。
+        // 图标与原来的品牌色圆点**同中心**（x+22k / srcY+12k），文字起点也不变，
+        // 所以只是把那个小圆点换成了图标，版式没有漂。
+        val iconSize = 16f * k
+        val iconCx = x + 22f * k
+        val iconCy = srcY + 12f
+        val appIcon = mediaSourceIcon
+        if (appIcon != null) {
+            val half = iconSize / 2f
+            val box = RectF(iconCx - half, iconCy - half, iconCx + half, iconCy + half)
+            // 圆角矩形裁剪（与卡片里的封面图一个风格）。
+            val clip = Path().apply {
+                addRoundRect(box, iconSize * 0.22f, iconSize * 0.22f, Path.Direction.CW)
+            }
+            canvas.save()
+            canvas.clipPath(clip)
+            canvas.drawBitmap(appIcon, null, box, fill)
+            canvas.restore()
+        } else {
+            fill.color = MediaSources.brandColor(mediaSource)
+            com.cardesk.launcher.ui.widget.MediaSourceIcons.drawFallback(
+                canvas, mediaSourceIconKind, iconCx, iconCy, iconSize * 0.5f, fill.color,
+            )
+        }
         text.color = Skin.TEXT_DIM
         canvas.drawText(mediaSource, x + 34f * k, srcY + 20f, text)
         val srcNameW = text.measureText(mediaSource)

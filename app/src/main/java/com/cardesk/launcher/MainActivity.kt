@@ -272,6 +272,24 @@ class MainActivity : Activity() {
         runCatching { com.cardesk.launcher.core.media.MusicController.get().start(applicationContext) }
             .onFailure { Logx.w(LogTags.MEDIA, "媒体会话启动失败", it) }
 
+        // 第125轮：**默认媒体源** —— 桌面启动时自动锁定用户在设置里指定的来源。
+        //
+        // 默认值是「通用音乐」（不锁包、跟随系统当前会话），所以默认状态下
+        // 这段**什么都不做**，原来的行为一个字节都不变；
+        // 只有用户在设置页显式选了别的来源，才开始自动锁定。
+        //
+        // 注意只**锁定**，不拉起 App —— 桌面起来自己弹出音乐应用不合适。
+        runCatching {
+            val prefs = com.cardesk.launcher.core.Prefs(applicationContext)
+            val id = prefs.defaultMusicSource
+            if (id != com.cardesk.launcher.core.media.MediaSources.GENERIC_ID) {
+                view.applyDefaultMediaSource(id)
+                // 「当前生效的来源」也跟着走 → 卡片上启动即显示默认源。
+                // 用户在卡片上临时切别的，**下次启动仍回到默认源**。
+                prefs.musicSource = id
+            }
+        }.onFailure { Logx.w(LogTags.MEDIA, "默认媒体源应用失败", it) }
+
         // 氛围灯（第七十轮）：绑上下文；上次是开着的就把频谱采集拉起来。
         // 第七十一轮接上了真实通道：车机端 AdaptAPI 的
         // `SETTING_FUNC_AMBIENCE_LIGHT_*` 一组设置类功能号
