@@ -171,10 +171,9 @@ class SceneLyricWindowTest {
         assertNotNull("KTV 两行必须带锚点（位置是定死的）", anchors)
         val a = anchors!!
 
-        // ① 当前句 x=100（用户指定：比内容左边距 44 往右一点，
-        //    但不跟下一句挤在一起）
+        // ① 当前句 x=200（用户指定：比内容左边距 44 往右不少）
         assertEquals(KTV_CURRENT_LEFT_X, a[0].leftX, 0.001f)
-        assertEquals(100f, a[0].leftX, 0.001f)
+        assertEquals(200f, a[0].leftX, 0.001f)
 
         // ② 下一句往**右**错开
         assertTrue("下一句应该往右下错开", a[1].leftX > a[0].leftX)
@@ -192,8 +191,9 @@ class SceneLyricWindowTest {
         // 不能像居中块那样被平移到某个计算出来的 x。
         assertEquals(KTV_CURRENT_LEFT_X, a[0].leftX, 0.001f)
         assertEquals(KTV_NEXT_LEFT_X, a[1].leftX, 0.001f)
-        // 下一句要错得**够开**（用户示意图里两框之间有一大段空白）
-        assertTrue("下一句应该错开足够远", a[1].leftX - a[0].leftX >= 600f)
+        // 下一句要错得**够开**（用户示意图里两框之间有一大段空白）。
+        // 用户最终指定的坐标是 200 / 776 → 错开 576px（≈14 个汉字），还是一眼能看出阶梯。
+        assertTrue("下一句应该错开足够远", a[1].leftX - a[0].leftX >= 500f)
         // 下一句从屏幕**中线左边一点**起排（x=776），
         // 但仍在桌面中央区域里 —— 不跑到最右（那里是车况卡）。
         assertTrue("下一句的起点不该跑到屏幕最右", a[1].leftX < 1000f)
