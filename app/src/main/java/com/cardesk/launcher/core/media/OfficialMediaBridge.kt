@@ -121,6 +121,19 @@ object OfficialMediaBridge {
     @Volatile
     private var running = false
 
+    /**
+     * **兜底的方控目标包名**（第128轮）。
+     *
+     * 没有样本（没拿到歌名）时，方控要发给谁 —— 由「用户选的媒体源」决定
+     * （例如用户选了 QQ 音乐 → `com.tencent.qqmusiccar`）。
+     *
+     * 为什么要有它：QQ 音乐车机版**不发布会话**，歌名只能靠它的三方广播；
+     * 而广播要等 QQ 音乐自己开口才有 → 在那之前方控不能空等，
+     * 先按用户的选择把按键发给它（`qqmusiccar://?action=20&m0=N`）。
+     */
+    @Volatile
+    private var controlTarget: String = ""
+
     @Volatile
     private var registered = false
 
@@ -281,6 +294,21 @@ object OfficialMediaBridge {
     }
 
     /**
+     * 设置**兜底的方控目标**（第128轮）。
+     *
+     * 由 [MusicSessionTracker] 定期同步：把「用户当前选的媒体源」
+     * 翻译成包名交给桥。这样**没有歌名时**方控也有地方可去。
+     *
+     * @param pkg 目标包名（空 / null = 取消兜底目标）
+     */
+    fun setControlTarget(pkg: String?) {
+        val next = pkg?.trim().orEmpty()
+        if (next == controlTarget) return
+        controlTarget = next
+        Logx.i(LogTags.MEDIA, "OEM 媒体桥兜底方控目标已更新", "target" to next)
+    }
+
+    /**
      * 用**广播**同步给原车（第126轮）。
      *
      * ## 为什么要多这一条路
@@ -404,6 +432,7 @@ object OfficialMediaBridge {
         "sourceType" to if (sample.available) ONLINE else -1,
         // 第126轮：原车现在看到的到底是**哪个来源**的曲目。
         // 「方控控不到 QQ 音乐」时，这一行能一眼看出是广播来源还是会话来源。
+        "controlTarget" to controlTarget,
         "sourceKind" to when (
             MediaBridgePolicy.pickSource(sessionSample.available, broadcastSample.available)
         ) {
@@ -548,7 +577,11 @@ object OfficialMediaBridge {
 
     /** 注册成在线音乐源（幂等）。 */
     private fun register() {
-        if (!running || !sample.available || registered || api == null) return
+        // 第128轮：**不再要求有样本**。
+        // 「有没有歌名」与「能不能注册」是两件事 —— 卡住注册就等于
+        // 原车永远不把方向盘方控交给我们（真车诊断包：bound=true 但
+        // registered=false，callbackCount=0，registerMusic 一次都没被调用过）。
+        if (!MediaBridgePolicy.shouldRegister(running, apiReady, registered) || api == null) return
         try {
             token = invoke("registerMusic", wireClient)
             registered = token != null
@@ -569,13 +602,26 @@ object OfficialMediaBridge {
 
     private fun publish(next: Sample) {
         if (!running) return
-        if (!next.available) {
-            if (registered) release()
-            return
-        }
         if (!initialized) initialize()
+        // 注册**不依赖样本**：先把「我是一个在线音乐源」这件事告诉原车，
+        // 原车才把方向盘方控交给我们（第128轮）。
         if (!registered && apiReady) register()
         if (!registered) return
+        if (!next.available) {
+            // 没有样本（第128轮）：**不注销**。
+            // 老实现在这里 `release()` —— 一注销，原车就把方控收回去了，
+            // 于是「注册上了但按键不来」，比没注册更难查。
+            // 现在只把播放态报成「没在放」，歌名/仪表等拿到广播再说。
+            if (lastPlaying || playbackAccepted) {
+                runCatching {
+                    playbackAccepted = (invoke("updateMusicPlaybackState", token, 0) as? Boolean) == true
+                }
+                lastPlaying = false
+                lastTrack = ""
+            }
+            reason = if (playbackAccepted) "已注册，等待曲目" else "已注册，等待原车接受播放信息"
+            return
+        }
         try {
             val stateChanged = next.playing != lastPlaying
             val sourceChanged = next.source != lastSource
@@ -634,7 +680,10 @@ object OfficialMediaBridge {
         val current = sample
         return when (method.name) {
             "getCurrentProgress" -> current.position
-            "getCurrentSourceType" -> if (current.available) ONLINE else -1
+            // 第128轮：**已注册就是在线音乐源**。
+            // 老实现在没样本时返回 -1，等于告诉原车「这个源不可用」——
+            // 原车就不会把方向盘方控交给我们。
+            "getCurrentSourceType" -> if (current.available || registered) ONLINE else -1
             "getMediaSourceTypeList" -> intArrayOf(ONLINE)
             "getMusicPlaybackInfo" -> playback
             // 标准 MediaSession 只暴露「当前这一条」，不是播放器的完整队列 ——
@@ -683,14 +732,31 @@ object OfficialMediaBridge {
      * 派发时再校验一次 running / 代数 / 来源，防止「已经切走的会话」被旧回调误伤。
      */
     private fun dispatch(action: String): Boolean {
-        if (!running || !sample.available) return false
+        if (!running) return false
+        // 第128轮：目标不再要求「有样本」。
+        // 有歌名时用歌名的来源；没有歌名时用「用户选的媒体源」当兜底目标。
+        val source = MediaBridgePolicy.controlTargetFor(sample.source, controlTarget)
+        if (!MediaBridgePolicy.acceptsControl(source)) {
+            // 目标不在白名单（空 / 收音机 / USB / 蓝牙）→ 不发，
+            // 宁可不动也不碰原车音源（本文件顶部的红线）。
+            Logx.i(
+                LogTags.MEDIA, "OEM 方控回调：没有可用的三方目标，忽略",
+                "action" to action, "target" to source,
+                "sampleSource" to sample.source, "controlTarget" to controlTarget,
+            )
+            return false
+        }
         callbackCount++
         lastCallback = action
-        Logx.i(LogTags.MEDIA, "OEM 方控回调", "action" to action, "source" to sample.source)
-        val source = sample.source
+        Logx.i(LogTags.MEDIA, "OEM 方控回调", "action" to action, "source" to source)
         val session = generation
         main.post {
-            if (running && session == generation && sample.available && source == sample.source) {
+            // 目标没变才发 —— 老实现校验的是 `source == sample.source`，
+            // 现在目标是「歌名来源 **或** 兜底目标」，所以要按**新口径**重算一次，
+            // 防止「已经切走的会话 / 已经改掉的媒体源」被旧回调误伤。
+            if (running && session == generation &&
+                source == MediaBridgePolicy.controlTargetFor(sample.source, controlTarget)
+            ) {
                 commands?.send(action, source)
                 changed?.invoke()
             }

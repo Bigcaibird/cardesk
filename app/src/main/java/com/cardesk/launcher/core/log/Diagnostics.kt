@@ -353,6 +353,11 @@ object Diagnostics {
                 .append(" 丢弃=").append(mc.qqBroadcastDropped).append('\n')
             // 第126轮：「允许对外发送」那扇门开了没有（没开 = QQ 音乐一个字节都不往外广播）。
             sb.append("qqDoor(允许对外发送): ").append(if (mc.qqDoorOpened) "已开" else "未开")
+                .append(" 开门命令已发=").append(mc.qqDoorSentCount)
+                .append('\n')
+            // 第128轮：QQ 广播的 method 计数表。
+            // 只看「最后一条原文」会被 update_app_foreground 误导（那条本来就不含歌名）。
+            sb.append("qqBroadcastMethods: ").append(mc.qqBroadcastMethodSummary.ifEmpty { "无" })
                 .append('\n')
             sb.append("qqControl(已发方控命令): ").append(mc.qqControlCount).append('\n')
             // 第127轮：会话歌词通道（网易云 `wt_music_lyric` / metadata 的 LYRIC key）
@@ -390,6 +395,14 @@ object Diagnostics {
                 sb.append(com.cardesk.launcher.core.media.PackageBroadcastProbe.describeReceivers(app, pkg))
                     .append('\n')
             }.onFailure { sb.append(pkg).append(" 读取失败: ").append(it.message).append('\n') }
+            // 第128轮：把**版本号**也写出来。
+            // 车上的 QQ 音乐车机版与我们在模拟器上逆向的版本未必一致，
+            // 协议对不对得上全靠版本号对齐 —— 不写出来每次都得重新问用户。
+            runCatching {
+                sb.append(pkg).append(" 版本: ")
+                    .append(com.cardesk.launcher.core.media.PackageBroadcastProbe.versionOf(app, pkg))
+                    .append('\n')
+            }
         }
 
         // 车辆信号 / 通知使用权：这两项之前只在设置页里看得到，

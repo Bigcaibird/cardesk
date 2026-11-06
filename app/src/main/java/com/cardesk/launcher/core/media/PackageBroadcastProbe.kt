@@ -73,6 +73,35 @@ object PackageBroadcastProbe {
     }
 
     /**
+     * 该包**已安装的版本**（诊断用，第128轮）。
+     *
+     * ## 为什么需要
+     *
+     * 真车诊断包证明了一件事：**车上的 QQ 音乐车机版与我们在模拟器上
+     * 逆向的那个版本未必是同一个**（模拟器实测的是 1.9.8.22，
+     * 车上的广播内容是 `module:"app"` / `update_app_foreground`，
+     * 与模拟器上见过的 `module:"play"` 系列不是一回事）。
+     *
+     * 协议对不对得上，全靠版本号对齐 —— 所以诊断包里必须直接写出来，
+     * 不然每次都要重新问用户「你车上 QQ 音乐是哪个版本」。
+     *
+     * @return 「版本名 (versionCode)」；没装则返回「未安装」
+     */
+    fun versionOf(context: Context, pkg: String): String {
+        val pm = context.packageManager
+        return runCatching {
+            val info = pm.getPackageInfo(pkg, 0)
+            val code = if (android.os.Build.VERSION.SDK_INT >= 28) {
+                info.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                info.versionCode.toLong()
+            }
+            "${info.versionName} ($code)"
+        }.getOrElse { "未安装" }
+    }
+
+    /**
      * 只列出「看起来像给第三方用」的 action（带关键词的）。
      *
      * 只关心 `qqmusiccar` / `play` / `media` / `music` / `lyric` / `third` 这些关键词，

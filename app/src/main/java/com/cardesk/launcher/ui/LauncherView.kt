@@ -1723,6 +1723,15 @@ class LauncherView(context: Context) : FrameLayout(context) {
             else -> Unit
         }
         prefs.musicSource = sourceId
+        // 第128轮：用户在**卡片来源行**选了 QQ 音乐 = 显式意图。
+        // 「允许对外发送」的门要跟着这个选择开 —— 真车诊断包实测：
+        // 用户只在 design_music_source_v1 上选过 QQ 音乐，
+        // 设置页的 default_music_source_v1 压根没写过 →
+        // 第126轮的开门广播一次都没发出去 → QQ 不往外挂曲目 → 方控拿不到东西。
+        runCatching {
+            com.cardesk.launcher.core.media.MusicController.get()
+                .onCurrentMediaSourceChanged(sourceId)
+        }
         refresh()
     }
 

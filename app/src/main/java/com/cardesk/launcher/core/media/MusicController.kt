@@ -94,8 +94,47 @@ class MusicController private constructor() {
     /** 缓存的「默认媒体源」id（避免 16ms 一次的 tick 里反复读 prefs）。 */
     private var qqSourceCache: String = ""
 
+    /**
+     * 缓存的「**当前**媒体源」id（第128轮）。
+     *
+     * 为什么单独缓存：用户在**卡片来源行**里选 QQ 音乐，写的是
+     * `design_music_source_v1`（[Prefs.musicSource]），
+     * 与设置页里的「默认媒体源」（`default_music_source_v1`）**是两个不同的键**。
+     * 真车诊断包实测：用户只在前者上选过 QQ 音乐，后者**压根没写过**，
+     * 于是第126轮只读后者 → 采纳门永远关着、开门广播一次都没发。
+     */
+    private var qqCurrentCache: String = ""
+
     /** 上次读「默认媒体源」的时刻。 */
     private var qqSourceCheckedAt = 0L
+
+    /** 「允许对外发送」开门命令**已发送次数**（第128轮，诊断用）。 */
+    var qqDoorSentCount: Int = 0
+        private set
+
+    /**
+     * 上一次的开门判定结果（`null` = 还没判过）。
+     *
+     * 只用来做「变化时才记日志」—— 判定每 16ms 跑一次，
+     * 不去重会把车机磁盘刷爆。
+     */
+    private var qqDoorDecision: Boolean? = null
+
+    /**
+     * QQ 广播的 **method 计数表**（第128轮，诊断用）。
+     *
+     * 形如 `update_song×3, update_state×12, update_app_foreground×4`。
+     *
+     * 为什么不能只看「最后一条 raw」：真车诊断包里最后一条是
+     * `update_app_foreground`（QQ 音乐说「我在不在前台」），
+     * 它**不含歌名**，看完会误判成「QQ 音乐根本没发曲目广播」。
+     * 计数表能一眼看出 QQ 到底发过哪些 method、各几条。
+     */
+    private val qqBroadcastMethods = LinkedHashMap<String, Int>()
+
+    /** 上面那张计数表的可读形式（诊断包里显示）。 */
+    val qqBroadcastMethodSummary: String
+        get() = qqBroadcastMethods.entries.joinToString(", ") { "${it.key}×${it.value}" }
 
     var track: TrackInfo?
         get() = sessionTrack ?: broadcastTrack
@@ -1145,6 +1184,10 @@ class MusicController private constructor() {
         // 原始内容留一份（截断）—— 下次诊断包就能看到 QQ 音乐到底发了什么字段。
         lastQqBroadcastRaw = if (raw.length > 600) raw.take(600) + "…" else raw
 
+        // method 计数表（第128轮）：先记，解析失败也要记
+        val method = QqBroadcast.methodOf(raw)
+        qqBroadcastMethods[method] = (qqBroadcastMethods[method] ?: 0) + 1
+
         val boundPkg = sessionTrack?.pkg.orEmpty()
         if (!acceptQqBroadcast(boundPkg)) {
             qqBroadcastDropped++
@@ -1152,6 +1195,8 @@ class MusicController private constructor() {
                 LogTags.MEDIA, "忽略 QQ 广播（当前会话不是 QQ 音乐）",
                 "boundPkg" to boundPkg,
                 "defaultSrc" to (prefs?.defaultMusicSource ?: ""),
+                "currentSrc" to (prefs?.musicSource ?: ""),
+                "method" to method,
             )
             return
         }
@@ -1163,6 +1208,11 @@ class MusicController private constructor() {
             return
         }
         qqBroadcastAccepted++
+        Logx.d(
+            LogTags.MEDIA, "采纳 QQ 广播",
+            "method" to method, "module" to payload.module,
+            "boundPkg" to boundPkg,
+        )
 
         // ——歌名 / 歌手 / 进度：合成曲目（没有会话时，这是唯一的来源）——
         if (payload.hasSong) {
@@ -1205,7 +1255,11 @@ class MusicController private constructor() {
      * 这里只负责把「设置里的默认媒体源」塞进去。
      */
     private fun acceptQqBroadcast(boundPkg: String): Boolean =
-        QqBroadcast.shouldAccept(boundPkg, prefs?.defaultMusicSource)
+        QqBroadcast.shouldAccept(
+            boundPkg,
+            prefs?.defaultMusicSource,
+            prefs?.musicSource,
+        )
 
     /**
      * 把「允许对外发送」的门打开（第126轮）。
@@ -1232,16 +1286,41 @@ class MusicController private constructor() {
         if (force || now - qqSourceCheckedAt > QQ_SOURCE_CACHE_MS) {
             qqSourceCheckedAt = now
             qqSourceCache = runCatching { prefs?.defaultMusicSource }.getOrNull().orEmpty()
+            qqCurrentCache = runCatching { prefs?.musicSource }.getOrNull().orEmpty()
         }
-        if (qqSourceCache != MediaSources.QQ_ID) return
+        // 「默认媒体源」或「当前媒体源」任一选了 QQ 音乐即可（第128轮）。
+        // 真车诊断包：用户只在卡片来源行选了 QQ（design_music_source_v1=qq），
+        // 设置页的 default_music_source_v1 压根没写过 → 第126轮的门永远关着，
+        // 开门广播一次都没发出去 → QQ 音乐不往外挂 update_song → 我们拿不到歌名。
+        if (!QqBroadcast.isQqSelected(qqSourceCache, qqCurrentCache)) {
+            // 只在**判定结果变化**时记一条。
+            // 这个方法每 16ms 被 ticker 调一次，无脑记日志会把车机磁盘刷爆
+            // （项目里踩过：2.5s 一次的 WARN 就已经刷爆过）。
+            if (qqDoorDecision != false) {
+                qqDoorDecision = false
+                Logx.i(
+                    LogTags.MEDIA, "QQ 开门广播：用户没选 QQ 音乐，不发",
+                    "defaultSrc" to qqSourceCache, "currentSrc" to qqCurrentCache,
+                )
+            }
+            return
+        }
+        if (qqDoorDecision != true) {
+            qqDoorDecision = true
+            Logx.i(
+                LogTags.MEDIA, "QQ 开门广播：已选 QQ 音乐，准备开门",
+                "defaultSrc" to qqSourceCache, "currentSrc" to qqCurrentCache,
+            )
+        }
         if (qqDoorOpened && !force) return
         if (!force && now - qqDoorSentAt < QQ_DOOR_RETRY_MS) return
         val sent = QqBroadcast.openSendDoor(ctx)
         qqDoorSentAt = now
+        qqDoorSentCount++
         Logx.i(
             LogTags.MEDIA, "请求 QQ 音乐打开「允许对外发送」",
             "sent" to sent, "doorOpened" to qqDoorOpened,
-            "defaultSrc" to qqSourceCache,
+            "defaultSrc" to qqSourceCache, "currentSrc" to qqCurrentCache,
         )
     }
 
@@ -1267,6 +1346,18 @@ class MusicController private constructor() {
      */
     fun onDefaultMediaSourceChanged(sourceId: String) {
         qqSourceCache = sourceId
+        qqSourceCheckedAt = System.currentTimeMillis()
+        if (sourceId == MediaSources.QQ_ID) maybeOpenQqDoor(force = true)
+    }
+
+    /**
+     * 用户在**卡片来源行**里换了媒体源（第128轮）。
+     *
+     * 与设置页的「默认媒体源」是**两个不同的键**，但对「我要用 QQ 音乐」
+     * 这件事来说是同一个意思 —— 开门广播要跟着它走。
+     */
+    fun onCurrentMediaSourceChanged(sourceId: String) {
+        qqCurrentCache = sourceId
         qqSourceCheckedAt = System.currentTimeMillis()
         if (sourceId == MediaSources.QQ_ID) maybeOpenQqDoor(force = true)
     }

@@ -448,6 +448,12 @@ class MusicSessionTracker private constructor() {
                 "pkg" to (ctx?.packageName ?: ""),
             )
         }
+        // 第128轮：**启动时就同步一次**兜底方控目标。
+        //
+        // 周期重扫是 2.5s 一次，而桥是在重扫之前就起来了 ——
+        // 这 2.5 秒里兜底目标是空的，原车若此时回调方控会被
+        // 「没有可用的三方目标」挡掉。启动即同步可以消掉这个窗口。
+        ctx?.let { syncControlTarget(it) }
         main.postDelayed(this::tryAttach, 0)
         main.postDelayed(ticker, PROGRESS_TICK_MS)
         // MusicSessionTracker:461-462 —— 2.5s 周期重扫
@@ -760,7 +766,29 @@ class MusicSessionTracker private constructor() {
         }
         // 排障场景：确认 2.5s 周期重扫确实在跑（若计数不涨，说明扫描线程被卡住）
         Logx.d(LogTags.MEDIA, "周期重扫", "count" to rescanCount, "sessions" to controllers.size)
+        syncControlTarget(ctx)
         reconcile(controllers)
+    }
+
+    /**
+     * 把「用户当前选的媒体源」翻译成包名，交给原车媒体桥当**兜底方控目标**（第128轮）。
+     *
+     * ## 为什么需要
+     *
+     * QQ 音乐车机版**不发布会话**，歌名只能靠它的三方广播；
+     * 而广播要等 QQ 音乐自己开口才有（而且要先发 `action=100` 开门）。
+     * 在那之前，**方控不能空等**：原车媒体桥注册上之后就会把方向盘按键交给我们，
+     * 这时候我们得知道「按下去发给谁」—— 答案就是用户选的媒体源。
+     *
+     * 只认 [MediaSources.PRIMARY_PACKAGES] 里**固定的**三方播放器
+     * （QQ 音乐车机版 / 网易云车机版 / 汽水车机版 …），
+     * 「通用音乐 / 蓝牙 / USB」这些**拿不到包名** → 不设目标 →
+     * 桥不会去碰原车音源（见 [MediaBridgePolicy] 顶部的红线）。
+     */
+    private fun syncControlTarget(ctx: Context) {
+        val id = runCatching { Prefs(ctx).musicSource }.getOrNull().orEmpty()
+        val pkg = MediaSources.PRIMARY_PACKAGES[id].orEmpty()
+        OfficialMediaBridge.setControlTarget(pkg)
     }
 
     private fun reconcile(controllers: List<MediaController>) {
@@ -1495,6 +1523,20 @@ class MusicSessionTracker private constructor() {
      */
     private val mediaBridgeCommands = object : OfficialMediaBridge.Commands {
         override fun send(action: String, source: String): Boolean {
+            // 第128轮：**QQ 音乐车机版优先走广播通道**。
+            // 它的会话是个「空壳」（metadata=null + state=0 + 没有 setCallback），
+            // transportControls 发过去没人接 —— 第126轮踩过。
+            if (source == QqBroadcast.PACKAGE) {
+                val qqHandler = broadcastControl
+                if (qqHandler != null) {
+                    val ok = runCatching { qqHandler(action) }.getOrDefault(false)
+                    Logx.i(
+                        LogTags.MEDIA, "OEM 方控回调走 QQ 广播通道",
+                        "action" to action, "source" to source, "ok" to ok,
+                    )
+                    return ok
+                }
+            }
             val c = controller
             if (c != null && c.packageName == source) {
                 return when (action) {

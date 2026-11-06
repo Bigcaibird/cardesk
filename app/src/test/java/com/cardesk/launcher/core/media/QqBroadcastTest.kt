@@ -211,6 +211,32 @@ class QqBroadcastTest {
         assertEquals("com.tencent.qqmusiccar", QqBroadcast.PACKAGE)
     }
 
+    // ------------------------------------------------------------ method 提取（第128轮）
+
+    @Test
+    fun `methodOf能取出广播里的method`() {
+        // 真车诊断包里收到的那一条（QQ 音乐说「我在不在前台」，本来就不含歌名）：
+        val raw = """{"module":"app","command":{"method":"update_app_foreground","data":{"isForeground":2}}}"""
+        assertEquals("update_app_foreground", QqBroadcast.methodOf(raw))
+    }
+
+    @Test
+    fun `methodOf对play模块的曲目广播也有效`() {
+        val raw = """{"module":"play","command":{"method":"update_song","data":{"key_title":"春风吹"}}}"""
+        assertEquals("update_song", QqBroadcast.methodOf(raw))
+        val raw2 = """{"module":"play","command":{"method":"update_lyric","data":{"lyric":"[00:00.00]x"}}}"""
+        assertEquals("update_lyric", QqBroadcast.methodOf(raw2))
+    }
+
+    @Test
+    fun `methodOf解析不出来时返回空串而不是抛异常`() {
+        assertEquals("", QqBroadcast.methodOf(null))
+        assertEquals("", QqBroadcast.methodOf(""))
+        assertEquals("", QqBroadcast.methodOf("不是JSON"))
+        assertEquals("", QqBroadcast.methodOf("""{"module":"play"}"""))
+        assertEquals("", QqBroadcast.methodOf("""{"command":{"data":{}}}"""))
+    }
+
     // ------------------------------------------------------------ LRC 头
 
     @Test

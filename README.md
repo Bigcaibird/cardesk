@@ -2712,7 +2712,9 @@ Kotlin 的初始化顺序 = **声明顺序**，而 `init{}` 块（**构造期**�
   所以诊断包里带了 `qqBroadcastRaw`（最近一条广播原文）和各 App 的接收器 action 清单，
   出问题一看就知道是哪一环对不上。
 - 「允许对外发送」是 QQ 音乐自己的**全局**开关，打开后 QQ 音乐会向系统广播播放信息。
-  我们**只在用户把默认媒体源显式选成 QQ 音乐时才开**它。
+  我们**只在用户把 QQ 音乐选成了媒体源（默认源或当前源）时才开**它 ——
+  第126轮原本只看「默认源」，真车诊断包证明那样**一次都发不出去**，
+  第128轮已改成两个源都认（见下节）。
 - QQ 音乐没在运行时，按方控会把它拉起来（它的 `DispacherActivityForThird` 的既定行为）。
 
 ## 网易云 / 汽水音乐车机版接入（第 127 轮）
@@ -2896,3 +2898,177 @@ I/CarDesk/Media: 会话事件：更新当前歌词行 pkg=com.cardesk.ncprobe li
   我们改不了；抖音独家曲可能查不到。
 - 网易云那台车的 `notifyLyricManner` 是几，诊断包里看
   `sessionLyric(会话歌词): 来源=netease-metadata` 还是 `netease-session-event` 就知道。
+
+## QQ 音乐方控修好：诊断包把第126轮的一个假设证伪了（第 128 轮）
+
+第127轮发布后，用户在真车（领克 dcy11 / Android 9 / `geely/dcy11_a1`）上装了 4226 包，
+出了一份诊断包（`cardesk-logs-20261106-085332.zip`），结论是「**还是无法方控 QQ 音乐**」。
+这一轮就照着这份诊断包把问题挖到底。
+
+### 诊断包里那 6 行，是全篇的钥匙
+
+```
+SharedPreferences(cardesk) 全量键值：
+    design_music_source_v1 = qq          ← 有
+    （**没有** default_music_source_v1）  ← 真车上压根没写过
+
+qqBroadcast: 收到=4 采纳=0 丢弃=4
+忽略 QQ 广播（当前会话不是 QQ 音乐） boundPkg= defaultSrc=generic
+qqControl(已发方控命令): 0
+bridge.bound: true                      ← 原车服务连上了
+bridge.registered: false                ← 但注册一次都没成功
+bridge.callbackCount: 0                 ← 原车一次方控回调都没给过我们
+bridge.reason: 正在连接原车媒体中心
+```
+
+### 根因一：采纳门**读错了键**（第126轮的注释是错的）
+
+第126轮在 `QqBroadcast.shouldAccept` 的 KDoc 里写：
+
+> 2. **当前没有绑定任何会话**，而且**用户把默认媒体源选成了 QQ 音乐**
+>    —— 真车上的实际情况（`default_music_source_v1=qq`）。
+
+**这个假设被诊断包证伪了。** 真车上用户是在**音乐卡片的来源行**里选了 QQ 音乐，
+写的是 `design_music_source_v1`（`Prefs.musicSource`）；
+而设置页里的「默认媒体源」是**另一个键** `default_music_source_v1`，
+用户**从来没动过它** → 读到的永远是默认值 `generic`。
+
+于是采纳门永远关着 → 4 条广播**全被丢弃** → 我们拿不到歌名。
+
+**两个选择是同一个意思**（「我要用 QQ 音乐」），只是存在不同的键里。
+现在这道门**两个都认**：
+
+```kotlin
+fun shouldAccept(boundPkg: String?, defaultSourceId: String?, currentSourceId: String?): Boolean {
+    if (QqLyric.isQqMusicPackage(boundPkg)) return true
+    if (!boundPkg.isNullOrEmpty()) return false      // 别的 App 在播 → 让位
+    return isQqSelected(defaultSourceId, currentSourceId)
+}
+```
+
+### 根因二：开门广播（`action=100`）**一次都没发过**
+
+QQ 音乐默认不往外挂广播，只有第三方发 `action=100` 打开「允许对外发送」才会。
+第126轮的开门广播用**同一个键**判条件 → `qqSourceCache != "qq"` → **直接 return**，
+所以这条命令**一次都没发出去** → QQ 音乐不往外挂 `update_song` / `update_state` / `update_lyric`
+→ 我们永远拿不到歌名。
+
+现在开门广播与采纳门共用同一个判定（`QqBroadcast.isQqSelected`），
+并且卡片来源行切换时**立刻**开门（`LauncherView.applySource` → `onCurrentMediaSourceChanged`）。
+
+### 根因三：原车媒体桥把「注册」和「有歌名」**绑死了**
+
+`OfficialMediaBridge.register()` 的门槛是：
+
+```kotlin
+if (!running || !sample.available || registered || api == null) return
+```
+
+`sample.available` = 「我们拿到了歌名」。而 QQ 音乐车机版**不发布可用的 MediaSession**
+（诊断包：会话枚举里一次都没出现过它）→ 歌名只能靠它的三方广播 →
+拿不到歌名 → **永远注册不上** → 原车永远不会把**方向盘方控**交给我们。
+
+诊断包里 `bound=true` 但 `registered=false`、且 `reason` 停在「正在连接原车媒体中心」，
+就是铁证：`registerMusic()` 这个原车 API **根本没被调用过**
+（调用过的话 reason 会变成「原车媒体注册未返回令牌」或某个异常名）。
+
+### 这一轮的核心：把「方控目标」和「歌名」**解耦**
+
+|  | 以前 | 现在 |
+|---|---|---|
+| 注册原车在线音乐源 | **必须先有歌名** | **只要桥在跑就注册** |
+| 方控发给谁 | 只能是「歌名的来源包」 | 歌名的来源包 **或** 用户选的媒体源 |
+| 没有歌名时 | 方控回调被丢弃（`!sample.available`） | 方控照常派发给兜底目标 |
+
+「注册」= 「我是一个在线音乐源」，原车因此把方向盘方控交给我们；
+「歌名」= 「我在放什么」，只影响仪表显示与桌面卡片。
+**这两件事本来就不该绑在一起** —— 绑在一起就等于：拿不到歌名就永远拿不到方控。
+
+抢播放权（`requestPlay` + `updateCurrentSourceType`）**仍然要求样本 + 正在播放**，
+原车的收音机 / USB / 蓝牙一律不碰（`MediaBridgePolicy` 顶部的红线不变）。
+
+**一个有意为之的行为变化**：以前「没有样本就 `release()` 注销」，
+注销了原车就把方控收回去 → 于是「注册上了但按键不来」，比没注册更难查。
+现在**没有样本也保持注册**，只把播放态报成「没在放」。
+代价是原车界面上会**一直挂着「在线音乐」这个源**（内容为空）——
+用户可以随时在设置里关掉「原车媒体桥接」开关把它摘掉（`stop()` 会注销）。
+我们**不会**在没有内容时去抢播放权，所以原车认为的「当前音源」不会变。
+
+兜底目标由 `MusicSessionTracker.syncControlTarget()` 定期同步：
+把「用户当前选的媒体源」翻译成包名交给桥（`MediaSources.PRIMARY_PACKAGES`）。
+「通用音乐 / 蓝牙 / USB」拿不到固定包名 → 不设目标 → 桥不会去动原车音源。
+
+### 模拟器实测（emulator-5556 / Android 10 / 真包 QQ 音乐车机版 1.9.8.22）
+
+模拟器上的 prefs 特意做成**和真车一模一样**：`design_music_source_v1=qq`，
+**没有** `default_music_source_v1`。
+
+```
+# ① 开门广播发出去了（注意 defaultSrc=generic 也照发）
+I/CarDesk/Media: QQ 开门广播：已选 QQ 音乐，准备开门 defaultSrc=generic currentSrc=qq
+I/CarDesk/Media: 请求 QQ 音乐打开「允许对外发送」 sent=true doorOpened=false defaultSrc=generic currentSrc=qq
+
+# ② QQ 音乐侧真的开门了
+I/BroadcastSenderCenterForThird: setAllowSendOutside, allow=true
+D/BroadcastSenderCenterForThird: updatePlayState commandString :{"module":"play","command":{"method":"update_state",…
+
+# ③ 我们采纳了（真车上这里曾是 采纳=0 丢弃=4）
+D/CarDesk/Media: 采纳 QQ 广播 method=update_state module=play boundPkg=
+D/CarDesk/Media: 采纳 QQ 广播 method=update_song module=play boundPkg=
+I/CarDesk/Media: QQ 广播合成曲目 title=测试歌名 artist=测试歌手 durationMs=200000 method=update_song positionMs=5000 playing=true
+I/CarDesk/Media: 收到 QQ 歌词广播 boundPkg= lines=3 title=测试歌名 artist=测试歌手
+D/CarDesk/Media: 歌词当前行 index=0 total=3 positionMs=5000 … lineText=这是第一句歌词
+
+# ④ 方控 URI 通道能真正下发到 QQ 音乐
+I/BroadcastReceiverCenterForThird: onReceive： uri:qqmusiccar://?action=20&m0=3
+D/BroadcastReceiverCenterForThird: gotoNextByHtmlScheme：dataUrl is:action=20&m0=3
+D/BroadcastReceiverCenterForThird: ACTION : 20
+```
+
+**真车 vs 新包**（同一份诊断包格式，A/B 对照）：
+
+| 字段 | 4226（旧，真车） | 4227（新，模拟器） |
+|---|---|---|
+| `qqBroadcast` | 收到=4 **采纳=0 丢弃=4** | 收到=2 **采纳=2 丢弃=0** |
+| `qqDoor` | （只有「已开」，看不出发没发） | 已开 **开门命令已发=1** |
+| `bridge.controlTarget` | （没有这个字段） | `com.tencent.qqmusiccar` |
+| `bridge.sourceKind` | none | **broadcast** |
+
+### 诊断包这一轮也补了几处
+
+- **`qqBroadcastMethods: update_state×1, update_song×1`** ——
+  原来只记**最后一条**广播的原文，真车上那一条是
+  `update_app_foreground`（QQ 说「我在不在前台」，**本来就不含歌名**），
+  看完只会得出「QQ 根本没发过曲目广播」的错误结论。计数表一眼就能看出 QQ 发过什么。
+- **`qqDoor(允许对外发送): 已开 开门命令已发=N`** ——
+  原来只分「已开/未开」，看不出**我们到底发没发过那条开门命令**。
+- **`bridge.controlTarget: com.tencent.qqmusiccar`** ——
+  新增的兜底方控目标，看得见方控该发给谁。
+- **各音乐 App 的版本号**（`com.tencent.qqmusiccar 版本: 1.9.8.22 (28)`）——
+  协议对不对得上全靠版本号对齐，不用每次都问用户「你车上是哪个版本」。
+
+### 怎么验证
+
+真车上装 4227 后出一份诊断包，看这几行：
+
+```
+qqBroadcast: 收到=N 采纳=N 丢弃=N      ← 采纳数应该 > 0
+qqBroadcastMethods: update_song×N, update_state×N, update_lyric×N
+qqDoor(允许对外发送): 已开 开门命令已发=N
+bridge.registered: true                ← 原车认了
+bridge.controlTarget: com.tencent.qqmusiccar
+bridge.callbackCount: N                ← 原车把方控交给我们了
+qqControl(已发方控命令): N             ← 我们真的把命令发给 QQ 音乐了
+```
+
+### 已知限制
+
+- **模拟器上 QQ 音乐没登录**，所以「真实播放时的歌名/歌词」是用**协议探针**
+  （`am broadcast` 按 QQ 的真实协议发 `update_song`）验的，
+  歌名/歌手/时长/进度/播放态/歌词**全部实测到位**（见 `emu-verify/y128/`），
+  但「QQ 音乐自己在播放时发什么」这一段仍需真车登录后复验。
+- **原车媒体桥在模拟器上没有 ecarx SDK**（`原车媒体接入失败：NameNotFoundException`），
+  所以「注册 → 原车交方控 → 我们派发」这一段**只能在真车上验**。
+  模拟器能验的是它前面的一切：开门、采纳、歌名/歌词、以及方控 URI 通道本身。
+- 诊断包里的 `bridge.bound` 在模拟器上是 `false`（没有 ecarx 服务），
+  真车上是 `true`；这两者不要混着看。

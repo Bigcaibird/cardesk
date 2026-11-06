@@ -116,6 +116,77 @@ object MediaBridgePolicy {
         else -> BridgeSource.NONE
     }
 
+    // ---------------------------------------------------------------- 第128轮：解耦「方控」与「歌名」
+
+    /**
+     * 要不要现在就去原车媒体中心**注册**（第128轮，纯逻辑，可单测）。
+     *
+     * ## 第128轮修的真 bug
+     *
+     * 老实现里注册的前提是「**有样本**（拿到歌名了）」：
+     *
+     * ```kotlin
+     * private fun register() {
+     *     if (!running || !sample.available || registered || api == null) return
+     * ```
+     *
+     * 真车诊断包（1.0.1130 / 4226）实测：
+     *
+     * ```
+     * bridge.bound: true          <- 原车服务**连上了**
+     * bridge.registered: false    <- 但注册**一次都没成功**
+     * bridge.reason: 正在连接原车媒体中心
+     * bridge.callbackCount: 0     <- 原车一次方控回调都没给过我们
+     * ```
+     *
+     * `reason` 停在「正在连接原车媒体中心」说明：`registerMusic()` 这个
+     * 原车 API **根本没被调用过**（调用过的话 reason 会变成
+     * 「原车媒体注册未返回令牌」或某个异常名）。
+     * 卡住它的就是 `!sample.available` —— 而 QQ 音乐车机版
+     * **不发布会话**，歌名只能靠它的三方广播，拿不到就永远注册不上。
+     *
+     * ## 现在的规则
+     *
+     * **有没有歌名与能不能注册是两件事**：
+     * - 注册 = 「我是一个在线音乐源」，原车因此把**方向盘方控**交给我们；
+     * - 歌名 = 「我在放什么」，只影响仪表显示与桌面卡片。
+     *
+     * 把两者解耦之后，**即使还没拿到歌名也能先注册上**，
+     * 方控回调就能进来，命令可以直接发给 QQ 音乐
+     * （`qqmusiccar://?action=20&m0=N`），**根本不需要先知道歌名**。
+     *
+     * 抢播放权（`requestPlay` + `updateCurrentSourceType`）**仍然要求样本**，
+     * 原车的收音机 / USB / 蓝牙一律不碰（见本文件顶部的红线）。
+     */
+    fun shouldRegister(running: Boolean, apiReady: Boolean, registered: Boolean): Boolean =
+        running && apiReady && !registered
+
+    /**
+     * 方控按键要发给谁（第128轮，纯逻辑，可单测）。
+     *
+     * 优先级：
+     * 1. **样本的来源包名**（有歌名时最准 —— 正在放的就是它）；
+     * 2. **兜底目标**（用户选的媒体源对应的包名）——
+     *    没有歌名时用它（例如 QQ 音乐车机版：只有方控目标，没有歌名）。
+     *
+     * @param sampleSource 样本来源包名（空 / null = 没有样本）
+     * @param fallbackTarget 兜底目标包名（空 / null = 没有）
+     */
+    fun controlTargetFor(sampleSource: String?, fallbackTarget: String?): String {
+        val s = sampleSource?.trim().orEmpty()
+        if (s.isNotEmpty()) return s
+        return fallbackTarget?.trim().orEmpty()
+    }
+
+    /**
+     * 这个方控目标**能不能**接我们的命令（第128轮，纯逻辑，可单测）。
+     *
+     * 只认白名单里的三方在线播放器 —— 原车收音机 / USB / 蓝牙不碰
+     * （本文件顶部的红线）。目标为空也不认（没有目标就发不出去，
+     * 总比发给原车音源强）。
+     */
+    fun acceptsControl(target: String?): Boolean = isEligible(target)
+
     /**
      * 设置页诊断要展示的字段名（顺序即展示顺序）。
      *
@@ -130,6 +201,7 @@ object MediaBridgePolicy {
         "sourceType",
         "sourceKind",
         "source",
+        "controlTarget",
         "title",
         "callbackCount",
         "lastCallback",
@@ -145,6 +217,7 @@ object MediaBridgePolicy {
         "sourceType" -> "在线音乐源类型"
         "sourceKind" -> "当前来源类型"
         "source" -> "当前来源包名"
+        "controlTarget" -> "兜底方控目标"
         "title" -> "当前歌名"
         "callbackCount" -> "方控/仪表回调次数"
         "lastCallback" -> "最近一次回调"

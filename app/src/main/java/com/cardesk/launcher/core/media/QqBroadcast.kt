@@ -271,6 +271,30 @@ object QqBroadcast {
     }
 
     /**
+     * 只取广播里的 `command.method`（第128轮，纯逻辑，可单测）。
+     *
+     * ## 为什么单独要一个函数
+     *
+     * 真车诊断包原来只记了**最后一条**广播的原文，那一条是
+     * `{"module":"app","command":{"method":"update_app_foreground",…}}` ——
+     * QQ 音乐在说「我在不在前台」，**本来就不含歌名**。
+     * 只看它会误判成「QQ 音乐根本没发过曲目广播」。
+     *
+     * 所以诊断要改成记 **method 计数表**：`update_song` / `update_state` /
+     * `update_lyric` 各几条，一眼就能看出 QQ 到底发了什么。
+     * 这个函数与 [parse] 独立：**即使 JSON 解析失败也要能报出 method**
+     * （解析失败本身就是重要信号）。
+     *
+     * @return method 名；取不到时返回空串
+     */
+    fun methodOf(raw: String?): String {
+        if (raw.isNullOrBlank()) return ""
+        val root = JsonLite.parseObject(raw) ?: return ""
+        val command = root["command"] as? Map<String, Any?> ?: return ""
+        return JsonLite.str(command, "method")
+    }
+
+    /**
      * 取歌手。
      *
      * `key_artist` 是**数组** `[{"singer":"方大同"}]`（QQ 音乐自己的写法），
@@ -413,7 +437,7 @@ object QqBroadcast {
     // ---------------------------------------------------------------- 采纳门
 
     /**
-     * 这条 QQ 广播**要不要采纳**（第126轮，纯逻辑，可单测）。
+     * 这条 QQ 广播**要不要采纳**（第126轮；第128轮加「当前媒体源」，纯逻辑，可单测）。
      *
      * ## 为什么不能只看「当前绑定的会话是不是 QQ 音乐」
      *
@@ -424,23 +448,68 @@ object QqBroadcast {
      *
      * 模拟器实测（装了真的 QQ 音乐车机版）：
      * `CarDesk/Media: 忽略 QQ 歌词广播（当前会话不是 QQ 音乐） boundPkg=`
-     * —— 广播明明到了，就是被这道门挡掉了。
+     * —— 广播明明到了，就是被这道门挡掉的。
      *
-     * ## 现在的两条通路
+     * ## 第128轮：真车诊断包把这个假设**证伪**了
+     *
+     * 第126轮在这段注释里写「真车上的实际情况（`default_music_source_v1=qq`）」——
+     * **这是错的**。2026-11-06 的真车诊断包（1.0.1130 / 4226）实测：
+     *
+     * ```
+     * SharedPreferences(cardesk) 全量键值里 **没有** default_music_source_v1
+     * design_music_source_v1 = qq      <- 有
+     * 忽略 QQ 广播（当前会话不是 QQ 音乐） boundPkg= defaultSrc=generic
+     * qqBroadcast: 收到=4 采纳=0 丢弃=4
+     * ```
+     *
+     * 用户是**在音乐卡片的来源行里**选了 QQ 音乐（那是 `design_music_source_v1`，
+     * 也就是 [prefs.musicSource]），**从来没在设置页里改过「默认媒体源」**
+     * （那是 `default_music_source_v1` / [prefs.defaultMusicSource]）。
+     * 于是：
+     *
+     * - 采纳门只读 `default_music_source_v1` → 读到的永远是默认值 `generic`
+     *   → 4 条广播**全部被丢弃**；
+     * - 开门广播（`action=100`）用同一个键判条件 → **一次都没发过**
+     *   → QQ 音乐不往外挂 `update_song` / `update_state` / `update_lyric`
+     *   → 我们永远拿不到歌名。
+     *
+     * 两个选择是**同一个意思**（「我要用 QQ 音乐」），只存在不同的键里。
+     * 所以这道门现在**两个都认**。
+     *
+     * ## 现在的通路
      *
      * 1. **当前绑定的会话就是 QQ 音乐** —— 原来就有，保持；
-     * 2. **当前没有绑定任何会话**，而且**用户把默认媒体源选成了 QQ 音乐**
-     *    —— 真车上的实际情况（`default_music_source_v1=qq`）。
+     * 2. **当前没有绑定任何会话**，而且用户把 QQ 音乐选成了
+     *    **默认媒体源**（设置页）或**当前媒体源**（卡片来源行）—— 任一即可。
      *
      * 条件 2 不会误伤别的 App：一旦有别的播放器在播（比如爱趣听），
      * 绑定包就不是空了 → 条件 2 不成立 → QQ 的广播**不会盖掉正在播的歌**。
      *
      * @param boundPkg 当前绑定的会话包名（空串 / null = 没有绑定任何会话）
-     * @param defaultSourceId 设置里的「默认媒体源」id（空串 / null = 没设）
+     * @param defaultSourceId 设置页里的「默认媒体源」id（空串 / null = 没设）
+     * @param currentSourceId 卡片来源行里**当前生效**的媒体源 id（空串 / null = 没选）
      */
-    fun shouldAccept(boundPkg: String?, defaultSourceId: String?): Boolean {
+    fun shouldAccept(
+        boundPkg: String?,
+        defaultSourceId: String?,
+        currentSourceId: String?,
+    ): Boolean {
         if (QqLyric.isQqMusicPackage(boundPkg)) return true
         if (!boundPkg.isNullOrEmpty()) return false
-        return defaultSourceId == MediaSources.QQ_ID
+        return isQqSelected(defaultSourceId, currentSourceId)
     }
+
+    /**
+     * 用户**是不是**把 QQ 音乐选成了媒体源（第128轮，纯逻辑，可单测）。
+     *
+     * 「默认媒体源」和「当前媒体源」任一命中即可 —— 理由见 [shouldAccept]。
+     *
+     * 这个判断要同时用在两个地方：
+     * - **采纳广播**（[shouldAccept]）；
+     * - **开门广播**（`action=100`，让 QQ 音乐开始往外挂曲目）。
+     *   第126轮的开门广播只看「默认媒体源」，真车上因此一次都没发出去。
+     */
+    fun isQqSelected(defaultSourceId: String?, currentSourceId: String?): Boolean =
+        defaultSourceId == MediaSources.QQ_ID || currentSourceId == MediaSources.QQ_ID
+
 }

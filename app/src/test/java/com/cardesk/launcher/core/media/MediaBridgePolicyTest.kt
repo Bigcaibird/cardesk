@@ -105,6 +105,7 @@ class MediaBridgePolicyTest {
                 "sourceType",
                 "sourceKind",
                 "source",
+                "controlTarget",
                 "title",
                 "callbackCount",
                 "lastCallback",
@@ -164,5 +165,69 @@ class MediaBridgePolicyTest {
             MediaBridgePolicy.BridgeSource.NONE,
             MediaBridgePolicy.pickSource(sessionAvailable = false, broadcastAvailable = false),
         )
+    }
+
+    // ------------------------------------------------------------ 第128轮：解耦「方控」与「歌名」
+
+    @Test
+    fun shouldRegister_doesNotRequireAnySample() {
+        // 真车诊断包：bound=true 但 registered=false、callbackCount=0、
+        // reason 停在「正在连接原车媒体中心」—— 说明 registerMusic 一次都没被调用过。
+        // 卡住它的就是「必须先有样本（歌名）」。
+        // 现在：只要桥在跑、Binder 就绪、还没注册 → 就该注册。
+        assertTrue(MediaBridgePolicy.shouldRegister(running = true, apiReady = true, registered = false))
+    }
+
+    @Test
+    fun shouldRegister_notWhenNotRunningOrNotReadyOrAlreadyRegistered() {
+        assertFalse(MediaBridgePolicy.shouldRegister(running = false, apiReady = true, registered = false))
+        assertFalse(MediaBridgePolicy.shouldRegister(running = true, apiReady = false, registered = false))
+        assertFalse(MediaBridgePolicy.shouldRegister(running = true, apiReady = true, registered = true))
+    }
+
+    @Test
+    fun controlTarget_prefersSampleSource() {
+        // 有歌名时以歌名的来源为准（正在放的就是它）
+        assertEquals(
+            "com.netease.cloudmusic.iot",
+            MediaBridgePolicy.controlTargetFor("com.netease.cloudmusic.iot", "com.tencent.qqmusiccar"),
+        )
+    }
+
+    @Test
+    fun controlTarget_fallsBackToChosenSourceWhenNoSample() {
+        // 没有歌名（QQ 音乐车机版的常态）→ 用「用户选的媒体源」当兜底目标。
+        assertEquals(
+            "com.tencent.qqmusiccar",
+            MediaBridgePolicy.controlTargetFor("", "com.tencent.qqmusiccar"),
+        )
+        assertEquals(
+            "com.tencent.qqmusiccar",
+            MediaBridgePolicy.controlTargetFor(null, "com.tencent.qqmusiccar"),
+        )
+        // 样本来源是空白字符时也算没有
+        assertEquals(
+            "com.tencent.qqmusiccar",
+            MediaBridgePolicy.controlTargetFor("   ", "com.tencent.qqmusiccar"),
+        )
+    }
+
+    @Test
+    fun controlTarget_emptyWhenNeitherAvailable() {
+        assertEquals("", MediaBridgePolicy.controlTargetFor(null, null))
+        assertEquals("", MediaBridgePolicy.controlTargetFor("", ""))
+    }
+
+    @Test
+    fun acceptsControl_onlyThirdPartyOnlinePlayers() {
+        // 红线不变：方控**只**能发给三方在线播放器，
+        // 原车收音机 / USB / 蓝牙一律不碰。
+        assertTrue(MediaBridgePolicy.acceptsControl("com.tencent.qqmusiccar"))
+        assertTrue(MediaBridgePolicy.acceptsControl("com.netease.cloudmusic.iot"))
+        assertTrue(MediaBridgePolicy.acceptsControl("com.luna.music.car"))
+        assertFalse(MediaBridgePolicy.acceptsControl("com.android.bluetooth"))
+        assertFalse(MediaBridgePolicy.acceptsControl("com.tencent.wecarflow"))
+        assertFalse(MediaBridgePolicy.acceptsControl(null))
+        assertFalse(MediaBridgePolicy.acceptsControl(""))
     }
 }
