@@ -313,6 +313,21 @@ object Diagnostics {
             runCatching { VehicleController.gateway.lastError() }
                 .onSuccess { sb.append("网关最近错误: ").append(it ?: "无").append('\n') }
         }.onFailure { sb.append("车控状态读取失败: ").append(it.message).append('\n') }
+        // 第135轮：开机自动切换驾驶模式。
+        //
+        // 用户报「自动切换驾驶模式功能无效」时，光看「空调状态」看不出任何东西 ——
+        // 这个开关以前只存不执行，得能看到：开关开没开、目标是谁、
+        // 上次什么时候跑的、跑出来是什么结果。
+        sb.append("\n---- 驾驶模式自动切换（第135轮）----\n")
+        runCatching {
+            val p = com.cardesk.launcher.core.Prefs(app)
+            sb.append("enabled: ").append(p.startSwitchEnabled).append('\n')
+            sb.append("target: ").append(p.startSwitchMode)
+                .append(" (").append(com.cardesk.launcher.vehicle.DriveMode.fullLabel(p.startSwitchMode))
+                .append(")\n")
+            sb.append("lastAt: ").append(p.driveModeSwitchLastAt).append('\n')
+            sb.append("lastResult: ").append(p.driveModeSwitchLastResult.ifEmpty { "无" }).append('\n')
+        }.onFailure { sb.append("驾驶模式自动切换读取失败: ").append(it.message).append('\n') }
         sb.append("空调状态: ")
         runCatching { sb.append(VehicleController.state.toString()) }
             .onFailure { sb.append("读取失败: ").append(it.message) }

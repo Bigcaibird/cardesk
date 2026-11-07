@@ -60,6 +60,14 @@ class BootReceiver : BroadcastReceiver() {
         applyAdbAutoStart(context)
         applyIssAutoStart(context)
         applyClusterLyricsStart(context)
+        // 第135轮：开机自动切换驾驶模式。
+        //
+        // 这个开关以前**只存不执行**（设置页写、没人读），用户报「功能无效」。
+        // 执行端在这里补上；桌面启动那条路（LauncherView）也调同一个入口，
+        // 两个触发点共用同一套冷却，一次开机只切一次。
+        runCatching {
+            com.cardesk.launcher.vehicle.DriveModeAutoStart.apply(context, "开机广播")
+        }.onFailure { Logx.w(LogTags.VEHICLE, "开机自动切换驾驶模式失败", it) }
     }
 
     /**

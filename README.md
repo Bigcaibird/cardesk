@@ -3838,3 +3838,162 @@ DISPLAY_ICON_URI → ART_URI → ALBUM_ART_URI
 | SHA-256 | `27681da7b5be95d10934ebd316bd11284ade1dbcd6291ad3649d4251aba8c118` |
 | 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
 | 单测 | 1841 项全绿（`tools/release.sh` 出包时一并跑的） |
+
+## 第135轮：自动切换驾驶模式接上执行端 + 没开播放器时方控不再唤起爱趣听
+
+> 用户诉求（4231 版真车诊断包）：
+> 1. 「自动切换驾驶模式功能无效」；
+> 2. 「在没打开播放器的情况下，方控默认唤起的还是原车的爱趣听」。
+
+### 根因 1：这个开关**只存不执行**
+
+设置页「启动切换」页里的「自动切换驾驶模式」=
+`Prefs.startSwitchEnabled`（`start_switch_enabled`）+
+`Prefs.startSwitchMode`（`start_switch_mode`）。
+
+`git log -S start_switch_enabled` **只命中首次提交 `22d5b75`** ——
+全仓**只有 `SettingsOverlay` 在写，没有任何执行端**。
+典型的「设置项存下来了，但没人读」。
+
+> 别和第132轮接上执行端的**另一个**开关搞混：
+> 那是 `iss_keep_enabled`（发动机启停，功能号 `537002240` / `0x20020100`），
+> 和驾驶模式（`570491136` / `0x22010100`）是两条完全不同的功能。
+
+顺带发现**写入路径也不对**：原厂桌面写驾驶模式的降级顺序是
+（反编译 `com/claunchercard/manager/DriveModeController.writeDriveModeAdaptApi`）：
+
+```
+setFunctionValue(FUNCTION_DRIVE_MODE_SELECT, modeId)   // 两参，成功就收工
+  ↓ 失败
+trySetDriveModeWithZone(f, 2, modeId)                  // 三参 zone=2
+  ↓ 失败
+trySetDriveModeWithZone(f, 1, modeId)                  // 三参 zone=1
+```
+
+我们的 `VehicleGateway.writeFunction` **只有两参一条路** ——
+固件不提供两参重载时直接失败，原厂却能靠 zone 兜底写成功。
+
+### 根因 2：桥注册上了，但从**没 claim** 过
+
+诊断包（4231）实测：
+
+```
+bridge.registered: true          bridge.playClaimed: false
+bridge.callbackCount: 0          bridge.sourceType: -1
+bridge.controlTarget: com.tencent.qqmusiccar     <- 第131轮的目标修复已生效
+bridge.reason: 已注册，等待原车接受播放信息
+```
+
+所有日志文件里「OEM 方控回调」**0 条**。
+
+原因在 `MediaBridgePolicy.shouldAcquire`：
+**只有真的开始播放、且是刚刚开始播 / 换了来源**时才抢播放权
+（`playing && (stateChanged || sourceChanged)`）。
+于是「没打开播放器」时：
+
+1. 没有样本 → 不 claim → 原车认为当前音源还是爱趣听；
+2. 原车不把方向盘方控交给我们 → **我们连回调都收不到**；
+3. 按键落进空里 → 原车只好自己把爱趣听拉起来 → **用户看到「打开爱趣听」**。
+
+第131轮补的「收到回调后拉起桌面选定播放器」那段代码**根本没机会执行**。
+
+对照原厂：`SessionBridge.setBridgeEnabled(true)` 会
+`registerMediaCenterSource(); start(...); refresh(); pushToMediaCenter(true);`
+—— `pushToMediaCenter(true)` 里的 `t.a()` 就是 claim
+（`t.b()` 声明音源类型、`t.d()` 推 meta）。
+**原厂是「启用即 claim」**，我们是「有歌在放才 claim」。
+
+### 改了什么
+
+| 文件 | 改动 |
+|---|---|
+| `vehicle/DriveModeSwitch.kt`（新，纯逻辑） | 目标合法性 / 「已经是目标」判定 / 冷却 / 跳过原因 / 原厂口径的写入入口 |
+| `vehicle/DriveModeAutoStart.kt`（新） | 执行端：开关 → 目标 → 等车控通道就绪 → 读当前 → 决定 → 写 → 回读确认 |
+| `vehicle/VehicleGateway.kt` | 新增 `writeSelectFunction(func, value)`：**选择型**功能的写入通道（默认只走两参） |
+| `vehicle/AdaptapiGateway.kt` | 覆写 `writeSelectFunction`：**两参优先 → zone 2 → zone 1**（与原厂逐字对齐） |
+| `vehicle/VehicleController.kt` | 手动切驾驶模式也走同一条通道（原来只有两参一条路） |
+| `BootReceiver.kt` / `ui/LauncherView.kt` | 两个触发点：开机广播 / 桌面启动 |
+| `core/Prefs.kt` | 持久化「上次尝试时间 / 上次目标 / 上次结果」 |
+| `core/media/MediaBridgePolicy.kt` | `shouldClaim` + `hasNativeSourcePlaying`（纯逻辑，可单测） |
+| `core/media/OfficialMediaBridge.kt` | 注册成功后**主动 claim 一次**；`claimTarget` / `nativeSourcePlaying` 诊断字段 |
+| `core/media/MusicSessionTracker.kt` | 把「车机原厂音源正在放」同步给桥 |
+| `core/log/Diagnostics.kt` | 诊断包新增「驾驶模式自动切换（第135轮）」段 |
+
+### 四个关键取舍
+
+1. **两个触发点 + 一套冷却**：开机广播（`BOOT_COMPLETED`）是主场景，
+   但真车诊断包 4231 里**一条「收到开机广播」都没有**（那次是进程重启，不是设备开机）——
+   有些车机根本不给这个广播。所以桌面启动（`LauncherView`）也补一刀。
+   两个触发点共用 **10 分钟冷却**：桌面在一次开机里会被拉起很多次，
+   没有冷却就会对着车机连写几十次（写车是同步 Binder）。
+
+2. **写入按原厂口径降级，不猜 zone**：两参（文档口径，也是原厂第一选择）→
+   zone 2 → zone 1，顺序照抄原厂。**读不到当前模式时照样写** ——
+   「读不到」≠「已经是目标」，这个区分很重要，否则读失败的机器永远切不了。
+
+3. **claim 的红线没松**：只在**目标是三方在线播放器**（白名单）时 claim；
+   **车机原厂音源（爱趣听一类）正在放时不 claim**（原厂 `pushToMediaCenter`
+   遇到 `isNativeSystemMediaSource(pkg)` 也是直接 skip）；
+   **同一个目标只 claim 一次**（claim 是抢播放权，每 tick 都抢会把原车的播放权来回甩）。
+   目标口径与方控回调**完全一致**（有歌名用歌名来源，没歌名用用户选的媒体源）。
+
+4. **`playClaimed` 的语义改成「曾经成功接管过」**：失败的重试不再把一次成功的接管抹掉 ——
+   真车排障要看的正是「接管过没有」。
+
+### 验证
+
+**模拟器（`emu-verify/y135/`）**
+
+| | 证据 | 结果 |
+|---|---|---|
+| 执行端真的跑起来了 | `y135-log-drive-mode.txt` | `写入驾驶模式 func=0x22010100 value=570491139 label=运动模式 ok=true` |
+| 模式真的变了 | 同上 | `驾驶模式变化 from=null to=运动 mode=570491139` → 状态栏胶囊变成「驾驶模式 · 运动」 |
+| 冷却生效 | 同上 | 第二次启动：`自动切换驾驶模式：冷却中，跳过 sinceLastMs=15732`，**写入 0 次** |
+| 设置页读到的是持久化值 | `y135-02-settings-drive-mode.png` | 开关是绿的、目标停在「运动模式」 |
+| 诊断包里有新字段 | `y135-summary.txt` | 新增「驾驶模式自动切换（第135轮）」段 + `bridge.claimTarget` / `bridge.nativeSourcePlaying` |
+
+**单测**：全量 **1871 项全绿**（第134轮 1841 → +30），
+新增 `DriveModeSwitchTest`（23 项）+ `MediaBridgePolicyTest` 补 7 项。
+
+**反向验证 13 项全部变红**（`tools/verify_y135_reverse.sh`，可复跑）：
+
+| 反向 | 改法 | 红灯 |
+|---|---|---|
+| 1 | 目标模式什么值都算合法（哨兵值会被当成模式写下去） | 4 |
+| 2 | 读不到当前模式也判成「已经是目标」 | 3 |
+| 3 | 冷却失效 | 3 |
+| 4 | 写入退回「只有两参」的老路 | 2 |
+| 5 | zone 降级顺序颠倒（1 先 2 后） | 1 |
+| 6 | 真车通道不走两参（接线检查） | 1 |
+| 7 | 执行端不接开机广播（接线检查） | 1 |
+| 8 | claim 不看白名单 | 1 |
+| 9 | 原厂音源在放时也 claim | 1 |
+| 10 | 同一个目标反复 claim | 1 |
+| 11 | 注册成功后不主动 claim（接线检查） | 1 |
+| 12 | claim 只声明音源类型、不真的抢播放权（接线检查） | 1 |
+| 13 | 原厂音源的播放态不传给桥（接线检查） | 1 |
+
+### 已知限制
+
+- **问题 2 的「方控真的被我们接管了」这段模拟器上验不了** ——
+  模拟器没有原车 `ecarx.xsf.mediacenter` 服务，也没有仪表（DIM）。
+  **必须真车复验**：装包后不打开任何播放器，按方向盘播放键，
+  看是不是**桌面选定的那个播放器**起来了（而不是爱趣听）；
+  诊断包看 `bridge.claimTarget`（空 = 从没接管过）与 `bridge.callbackCount`（>0 = 原车把按键交给我们了）。
+- **「已经是目标模式就不写」这条分支在模拟器上走不到** ——
+  模拟通道的当前模式只存在内存里，进程一重启就回到「读不到」。
+  该分支由 `DriveModeSwitchTest` 钉死。
+- **写车成功 ≠ 模式真的变了**：真车通道写完会回读确认（`verifyDriveMode`），
+  确认不了时如实报「已下发但没确认」。
+- **没有发 GitHub Release、没有传 R2**（等明确指示）。
+
+### 产物
+
+| 项 | 值 |
+|---|---|
+| 文件 | `dist/CarDesk-platform-ecarx-cardesk-4233.apk` |
+| versionCode / versionName | 4233 / 1.0.1137-system |
+| 大小 | 2 323 325 字节 |
+| SHA-256 | `7c08bcd3ff4918a6e14a17fb64f3919bbac022c978125bed981b0536ff2ad3ed` |
+| 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
+| 单测 | 1871 项全绿（`tools/release.sh` 出包时一并跑的） |

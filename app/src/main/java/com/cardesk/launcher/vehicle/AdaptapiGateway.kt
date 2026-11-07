@@ -584,6 +584,90 @@ class AdaptapiGateway(private val context: Context) : VehicleGateway {
     }
 
     /**
+     * 选择型功能写入：**两参优先**，失败再按 zone 降级（第一百三十五轮）。
+     *
+     * ## 为什么不能直接用 [writeFunction]
+     *
+     * [writeFunction] 只有两参一条路（`setFunctionValue(func, value)`），
+     * 找不到两参重载就**直接失败**。
+     *
+     * 原厂桌面（`com.claunchercard.manager.DriveModeController.writeDriveModeAdaptApi`）
+     * 的降级顺序是：
+     *
+     * ```
+     * setFunctionValue(FUNCTION_DRIVE_MODE_SELECT, modeId)   // 两参，成功就收工
+     *   ↓ 失败
+     * trySetDriveModeWithZone(f, 2, modeId)                  // 三参 zone=2
+     *   ↓ 失败
+     * trySetDriveModeWithZone(f, 1, modeId)                  // 三参 zone=1
+     * ```
+     *
+     * 我们只试两参的话，固件不提供两参重载的那台车就**永远切不了模式**
+     * —— 这正是用户报「自动切换驾驶模式无效」时最可能踩的坑。
+     *
+     * 注意与 [setHvac] 的区别：那边是「三参优先、两参兜底」（空调要 zone），
+     * 这里是「两参优先、三参兜底」（选择型功能是全局项，文档口径就是两参）。
+     */
+    override fun writeSelectFunction(func: Int, value: Int): Boolean {
+        val f = ensureFunction() ?: run {
+            lastError = "拿不到 ICarFunction 句柄（车机服务未连接或当前应用无权限）"
+            Logx.w(
+                LogTags.VEHICLE,
+                "写入选择型功能失败（拿不到句柄）",
+                "func" to VehicleLog.hex(func),
+                "value" to value,
+                "reason" to lastError,
+            )
+            return false
+        }
+        val m2 = findMethod(f, "setFunctionValue", INT, INT)
+        val m3 = findMethod(f, "setFunctionValue", INT, INT, INT)
+        // 1) 两参（文档口径，也是原厂的第一选择）
+        if (m2 != null && invokeBool(m2, f, func, value) == true) {
+            Logx.i(
+                LogTags.VEHICLE,
+                "写入选择型功能成功",
+                "func" to VehicleLog.hex(func),
+                "name" to VehicleLog.funcName(func),
+                "value" to value,
+                "overload" to "2参",
+                "ok" to true,
+            )
+            return true
+        }
+        // 2) 三参 zone 降级（原厂 trySetDriveModeWithZone：zone 2 → zone 1）
+        if (m3 != null) {
+            for (zone in intArrayOf(2, 1)) {
+                if (invokeBool(m3, f, func, zone, value) == true) {
+                    Logx.i(
+                        LogTags.VEHICLE,
+                        "写入选择型功能成功",
+                        "func" to VehicleLog.hex(func),
+                        "name" to VehicleLog.funcName(func),
+                        "zone" to zone,
+                        "value" to value,
+                        "overload" to "3参",
+                        "ok" to true,
+                    )
+                    return true
+                }
+            }
+        }
+        lastError = "setFunctionValue 两参/三参重载都失败 func=$func value=$value"
+        Logx.w(
+            LogTags.VEHICLE,
+            "写入选择型功能失败",
+            "func" to VehicleLog.hex(func),
+            "name" to VehicleLog.funcName(func),
+            "value" to value,
+            "has2" to (m2 != null),
+            "has3" to (m3 != null),
+            "reason" to lastError,
+        )
+        return false
+    }
+
+    /**
      * 文档口径读：`ICarFunction.getFunctionValue(func)`（一参，无 zone）。
      *
      * 与 [readValue] 分开：`readValue` 走的是带 zone 的路径，驾驶模式是全局选择项。

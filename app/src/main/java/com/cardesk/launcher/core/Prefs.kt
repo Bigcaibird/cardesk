@@ -913,6 +913,26 @@ class Prefs(context: Context) {
         get() = intValue("start_switch_mode", 0)
         set(v) = setIntValue("start_switch_mode", v)
 
+    /**
+     * 「自动切换驾驶模式」上次**尝试**的时间戳（墙上时钟，毫秒）。
+     *
+     * 用途：一次开机里只切一次（桌面会被拉起很多次）。
+     * 车机重启后墙上时钟会跳到当前时间 → 冷却自然失效 → 新的一次开机照样切。
+     */
+    var driveModeSwitchLastAt: Long
+        get() = longValue("drive_mode_switch_last_at", 0L)
+        set(v) = setLongValue("drive_mode_switch_last_at", v)
+
+    /** 「自动切换驾驶模式」上次执行的结果（人话，诊断包直接显示）。 */
+    var driveModeSwitchLastResult: String
+        get() = stringValue("drive_mode_switch_last_result", "")
+        set(v) = setStringValue("drive_mode_switch_last_result", v)
+
+    /** 「自动切换驾驶模式」上次执行时的目标模式值。 */
+    var driveModeSwitchLastTarget: Int
+        get() = intValue("drive_mode_switch_last_target", 0)
+        set(v) = setIntValue("drive_mode_switch_last_target", v)
+
     /** 启动导航投屏（`start_navi_cast_enabled`）。 */
     var startNaviCastEnabled: Boolean
         get() = flag("start_navi_cast_enabled", false)
@@ -1204,6 +1224,29 @@ class Prefs(context: Context) {
 
     fun setIntValue(name: String, value: Int) {
         sp.edit().putInt(name, value).apply()
+    }
+
+    /**
+     * 读一个长整型设置。
+     *
+     * 与 [intValue] 同一个理由（`getLong` 遇到类型不符的键也会抛
+     * `ClassCastException`）：宁可返回默认值，也不能让设置页/诊断包崩掉。
+     */
+    fun longValue(name: String, def: Long): Long {
+        val raw = runCatching { sp.all[name] }.getOrNull() ?: return def
+        return when (raw) {
+            is Long -> raw
+            is Int -> raw.toLong()
+            is Float -> raw.toLong()
+            is Double -> raw.toLong()
+            is Boolean -> if (raw) 1L else 0L
+            is String -> raw.trim().toLongOrNull() ?: def
+            else -> def
+        }
+    }
+
+    fun setLongValue(name: String, value: Long) {
+        sp.edit().putLong(name, value).apply()
     }
 
     fun remove(name: String) {

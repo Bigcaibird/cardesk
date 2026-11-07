@@ -391,6 +391,14 @@ class LauncherView(context: Context) : FrameLayout(context) {
         addView(content, content.layoutParams)
 
         VehicleController.init(context.applicationContext, prefs)
+        // 第135轮：桌面启动时也补一次「开机自动切换驾驶模式」。
+        //
+        // 为什么不能只靠开机广播：有些车机不把 `BOOT_COMPLETED` 广播给我们
+        // （真车诊断包 4231 里一条「收到开机广播」都没有）。
+        // 两个触发点走同一个入口 + 同一套冷却（10 分钟）→ 一次开机只切一次。
+        runCatching {
+            com.cardesk.launcher.vehicle.DriveModeAutoStart.apply(context, "桌面启动")
+        }.onFailure { Logx.w(LogTags.VEHICLE, "桌面启动自动切换驾驶模式失败", it) }
         VehicleController.addObserver { refresh() }
         // 360 状态回调：只做三件事 ——
         // 刷新导航栏 360 图标、标记「本桌面开启」、按设置切视角；

@@ -110,6 +110,9 @@ class MediaBridgePolicyTest {
                 // 第132轮：仪表有没有图
                 "artwork",
                 "artworkSource",
+                // 第135轮：方控有没有被我们接管
+                "claimTarget",
+                "nativeSourcePlaying",
                 "callbackCount",
                 "lastCallback",
                 "reason",
@@ -232,5 +235,133 @@ class MediaBridgePolicyTest {
         assertFalse(MediaBridgePolicy.acceptsControl("com.tencent.wecarflow"))
         assertFalse(MediaBridgePolicy.acceptsControl(null))
         assertFalse(MediaBridgePolicy.acceptsControl(""))
+    }
+
+    // ------------------------------------------------------------ 第135轮：主动 claim
+
+    @Test
+    fun shouldClaim_yesWhenRegisteredAndTargetIsThirdPartyPlayer() {
+        // 原厂「启用即 claim」：注册成功 + 目标是三方在线播放器 → 主动接管播放入口。
+        assertTrue(
+            MediaBridgePolicy.shouldClaim(
+                registered = true,
+                target = "com.tencent.qqmusiccar",
+                claimedTarget = null,
+                nativeSourcePlaying = false,
+            )
+        )
+    }
+
+    @Test
+    fun shouldClaim_noWhenNotRegisteredYet() {
+        // 没注册就没有令牌，claim 无从谈起。
+        assertFalse(
+            MediaBridgePolicy.shouldClaim(
+                registered = false,
+                target = "com.tencent.qqmusiccar",
+                claimedTarget = null,
+                nativeSourcePlaying = false,
+            )
+        )
+    }
+
+    @Test
+    fun shouldClaim_noForRadioUsbBtAndNativeAudio() {
+        // 红线：原车收音机 / USB / 蓝牙 / 爱趣听，一概不碰。
+        for (pkg in listOf(
+            "com.android.bluetooth",
+            "com.tencent.wecarflow",
+            "com.ecarx.media",
+            "",
+        )) {
+            assertFalse(
+                "不该 claim $pkg",
+                MediaBridgePolicy.shouldClaim(
+                    registered = true,
+                    target = pkg,
+                    claimedTarget = null,
+                    nativeSourcePlaying = false,
+                )
+            )
+        }
+        assertFalse(
+            MediaBridgePolicy.shouldClaim(
+                registered = true,
+                target = null,
+                claimedTarget = null,
+                nativeSourcePlaying = false,
+            )
+        )
+    }
+
+    @Test
+    fun shouldClaim_noWhenNativeSourceIsPlaying() {
+        // 原厂 SessionBridge.pushToMediaCenter 开头就是
+        // `else if (isNativeSystemMediaSource(pkg)) { ...skip... }` ——
+        // 用户正在听电台时原厂自己都不 claim，我们照做。
+        assertFalse(
+            MediaBridgePolicy.shouldClaim(
+                registered = true,
+                target = "com.tencent.qqmusiccar",
+                claimedTarget = null,
+                nativeSourcePlaying = true,
+            )
+        )
+    }
+
+    @Test
+    fun shouldClaim_noWhenAlreadyClaimedForThatTarget() {
+        // 只 claim 一次：不跟用户在车机里手动切源来回打架。
+        assertFalse(
+            MediaBridgePolicy.shouldClaim(
+                registered = true,
+                target = "com.tencent.qqmusiccar",
+                claimedTarget = "com.tencent.qqmusiccar",
+                nativeSourcePlaying = false,
+            )
+        )
+        // 目标换了 → 可以再 claim 一次
+        assertTrue(
+            MediaBridgePolicy.shouldClaim(
+                registered = true,
+                target = "com.netease.cloudmusic.iot",
+                claimedTarget = "com.tencent.qqmusiccar",
+                nativeSourcePlaying = false,
+            )
+        )
+    }
+
+    @Test
+    fun hasNativeSourcePlaying_detectsNonThirdPartyPlayingSources() {
+        // 原厂口径：原厂音源（爱趣听一类）在放的时候，原厂自己都不 claim。
+        assertTrue(
+            MediaBridgePolicy.hasNativeSourcePlaying(
+                listOf("com.tencent.wecarflow"),
+            )
+        )
+        assertTrue(
+            MediaBridgePolicy.hasNativeSourcePlaying(
+                listOf("com.tencent.qqmusiccar", "com.android.bluetooth"),
+            )
+        )
+        // 三方在线播放器在放 → 不是「原厂音源在放」→ 正常 claim
+        assertFalse(
+            MediaBridgePolicy.hasNativeSourcePlaying(
+                listOf("com.tencent.qqmusiccar"),
+            )
+        )
+        assertFalse(MediaBridgePolicy.hasNativeSourcePlaying(emptyList()))
+        // 空包名不算（那是「没有会话」，不是「原厂音源在放」）
+        assertFalse(MediaBridgePolicy.hasNativeSourcePlaying(listOf("")))
+    }
+
+    @Test
+    fun snapshotKeywords_includeClaimDiagnostics() {
+        // 真车排障第一眼要看的两行：接管了没有、接管的是谁。
+        val keys = MediaBridgePolicy.snapshotKeywords()
+        assertTrue(keys.contains("claimTarget"))
+        assertTrue(keys.contains("nativeSourcePlaying"))
+        assertEquals("已接管的播放入口", MediaBridgePolicy.labelFor("claimTarget"))
+        assertEquals("原厂音源正在放", MediaBridgePolicy.labelFor("nativeSourcePlaying"))
     }
 }

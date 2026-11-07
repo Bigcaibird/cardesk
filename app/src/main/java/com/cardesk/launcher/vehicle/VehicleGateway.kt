@@ -41,6 +41,27 @@ interface VehicleGateway {
     fun readFunction(func: Int): Int? = readValue(func, 0)
 
     /**
+     * 写一个「**选择型**」功能属性（驾驶模式这类**全局选择项**）。
+     *
+     * ## 为什么要有这一条（第一百三十五轮）
+     *
+     * 原厂桌面写驾驶模式的降级顺序（反编译
+     * `com/claunchercard/manager/DriveModeController.writeDriveModeAdaptApi`）是：
+     *
+     * 1. **两参** `setFunctionValue(FUNCTION_DRIVE_MODE_SELECT, modeId)`；
+     * 2. 失败再试 **三参** `(func, zone=2, modeId)`；
+     * 3. 还失败再试 **三参** `(func, zone=1, modeId)`。
+     *
+     * 而 [writeFunction] **只有两参一条路** —— 固件不提供两参重载时直接失败，
+     * 原厂却能靠 zone 兜底写成功。真车（领克 dcy11 / 820A）的固件到底提供哪种，
+     * 只能两种都试，所以给「选择型」功能单开一路。
+     *
+     * 默认实现 = 只走两参（其余通道行为不变）；
+     * 真车通道（`AdaptapiGateway`）覆写成上面那条完整链。
+     */
+    fun writeSelectFunction(func: Int, value: Int): Boolean = writeFunction(func, value)
+
+    /**
      * 写除霜。
      *
      * 除霜走特殊回退：先试「无 zone」的两参重载，再按 `{2,1,0}` 试三参重载

@@ -241,9 +241,15 @@ object VehicleController {
      * 切驾驶模式（第九十五轮补丁）：给状态栏「驾驶模式 · xx」胶囊的快捷面板用。
      *
      * 厂商没有公开的「设置驾驶模式」封装，这里按 AdaptAPI 的 `setFunctionValue`
-     * 语义试两种写法，**写完回读确认**：
-     * 1. 主流写法：`setFunctionValue(570491136, 2, 模式号)`；
-     * 2. 旧固件写法：`setFunctionValue(模式号, 2, 1)`。
+     * 语义写，**写完回读确认**：
+     *
+     * 写入顺序（第一百三十五轮改）：
+     * - **两参** `setFunctionValue(570491136, 模式号)`（文档口径，无 zone）——
+     *   原厂桌面 `DriveModeController.writeDriveModeAdaptApi` 的第一选择；
+     * - 失败再试 **三参** `(570491136, zone=2, 模式号)`，再试 `(…, zone=1, …)`。
+     *
+     * 以前只有两参一条路（`writeFunction`），固件不提供两参重载时就**切不了**；
+     * 现在与原厂口径一致（见 [DriveModeSwitch]）。
      *
      * 写车是同步 binder，放后台线程；结果回主线程。
      * Mock 通道不做回读（它本来就没有真实模式值，回读校验必然失败）。
@@ -261,13 +267,8 @@ object VehicleController {
         val mock = gw.id == "mock"
         Thread {
             val label = DriveMode.fullLabel(value)
-            // 文档口径（docs/ecarx-adapterapi/16-hud-dim-adas.md §4.3 +
-            // jimu 文档站 api-drive-mode）：驾驶模式只提供两参写
-            // `ICarFunction.setFunctionValue(0x22010100, 模式枚举)`，没有 zone。
-            // 找不到两参重载就如实失败，不拿三参重载猜 zone。
-            var written = runCatching {
-                gw.writeFunction(DriveMode.FUNCTION_DRIVE_MODE_SELECT, value)
-            }.getOrDefault(false)
+            // 两参优先 + zone 降级（与原厂 DriveModeController.writeDriveModeAdaptApi 一致）。
+            var written = DriveModeSwitch.write(gw, value)
             var ok = written
             if (!mock && written) ok = verifyDriveMode(gw, value)
             val failureReason = runCatching { gw.lastError() }.getOrNull()

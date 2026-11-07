@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1136",
-  "versionCode": 4232,
-  "tag": "v1.0.1136",
-  "name": "CarDesk 4232 / 1.0.1136-system",
-  "notes": "接管方控后仪表没有图片：原车 SDK 里 IMediaInfo/IMusicPlaybackInfo 的 getArtwork 返回 Uri，我们的代理压根没实现（落到 defaultValue 返回 null），于是仪表只有歌名歌手没有图。本轮按原车 MediaCenterHelper 同一套口径（DISPLAY_ICON_URI → ART_URI → ALBUM_ART_URI）取封面，并用 ArtworkProvider 把我们自己的封面位图暴露成仪表读得到的 content:// Uri（QQ 音乐车机版不发布会话、广播里也没有图，只能走我们自己搜的封面）。新增 BridgeArtwork 纯逻辑 + ArtworkProvider；诊断加 artwork / artworkSource",
-  "publishedAt": "2026-11-07T09:20:38Z",
+  "version": "1.0.1137",
+  "versionCode": 4233,
+  "tag": "v1.0.1137",
+  "name": "CarDesk 4233 / 1.0.1137-system",
+  "notes": "第135轮：\n1) 自动切换驾驶模式接上执行端（以前只存不执行）。开机广播 + 桌面启动两个触发点，共用 10 分钟冷却；写入按原厂口径「两参优先 → zone 2 → zone 1」降级，失败会如实回读确认。\n2) 没打开播放器时方控默认唤起原车爱趣听：桥注册成功后按原厂「启用即 claim」主动接管播放入口（requestPlay + updateCurrentSourceType）。红线不变——只接管三方在线播放器；车机原厂音源在放时不抢；同一个目标只 claim 一次。\n3) 诊断包新增「驾驶模式自动切换」段与 bridge.claimTarget / bridge.nativeSourcePlaying 字段。",
+  "publishedAt": "2026-11-07T13:02:20Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4232.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4232.apk",
-    "size": 2315549,
-    "sha256": "27681da7b5be95d10934ebd316bd11284ade1dbcd6291ad3649d4251aba8c118"
+    "name": "CarDesk-platform-ecarx-cardesk-4233.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4233.apk",
+    "size": 2323325,
+    "sha256": "7c08bcd3ff4918a6e14a17fb64f3919bbac022c978125bed981b0536ff2ad3ed"
   }
 }

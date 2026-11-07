@@ -187,6 +187,67 @@ object MediaBridgePolicy {
      */
     fun acceptsControl(target: String?): Boolean = isEligible(target)
 
+    // ---------------------------------------------------------------- 第135轮：主动 claim
+
+    /**
+     * 要不要**主动 claim**（`requestPlay` + `updateCurrentSourceType`）——
+     * 第135轮，纯逻辑，可单测。
+     *
+     * ## 为什么需要「主动 claim」
+     *
+     * 原厂桌面（`com.ecarx.qq.tool.session.SessionBridge.setBridgeEnabled(true)`）
+     * 在**启用桥**的那一刻就会：
+     *
+     * ```
+     * registerMediaCenterSource(); start(); refresh(); pushToMediaCenter(true);
+     * ```
+     *
+     * 而 `pushToMediaCenter(true)` 里的 `t.a()` 就是 claim
+     * —— 也就是原厂的「**启用即 claim**」。
+     *
+     * 我们以前只在「有样本**且正在播**」时才 claim（[shouldAcquire]），
+     * 于是「**没打开播放器**」时整条链是断的：
+     *
+     * 1. 没有样本 → 不 claim → 原车认为当前音源还是爱趣听；
+     * 2. 原车不把方向盘方控交给我们 → **我们连回调都收不到**
+     *    （真车诊断包 4231：`bridge.callbackCount=0`、`bridge.playClaimed=false`）；
+     * 3. 按键落进空里 → 原车只好自己把爱趣听拉起来。
+     *
+     * 这正是用户报的「没打开播放器时方控默认唤起的还是原车爱趣听」。
+     *
+     * ## 四条前置条件
+     *
+     * | 条件 | 为什么 |
+     * | --- | --- |
+     * | 已注册到原车 | 没注册就没有令牌，claim 无从谈起 |
+     * | 目标在白名单（三方在线播放器） | **红线**：原车收音机 / USB / 蓝牙一律不碰 |
+     * | 目标不是原厂音源在放 | 原厂 `pushToMediaCenter` 遇到 `isNativeSystemMediaSource(pkg)` 直接 skip —— 我们照做，别去打断用户正在听的电台 |
+     * | 还没 claim 过这个目标 | 只 claim 一次，不跟用户在车机里手动切源来回打架 |
+     */
+    fun shouldClaim(
+        registered: Boolean,
+        target: String?,
+        claimedTarget: String?,
+        nativeSourcePlaying: Boolean,
+    ): Boolean = registered &&
+        acceptsControl(target) &&
+        target != claimedTarget &&
+        !nativeSourcePlaying
+
+    /**
+     * 系统里有没有**车机原厂音源**（爱趣听一类）正在放（第135轮，纯逻辑，可单测）。
+     *
+     * 判据：有一个会话处于播放中，而它的包名**不在**三方在线播放器白名单里。
+     *
+     * 原厂口径：原厂 `SessionBridge.pushToMediaCenter` 遇到
+     * `isNativeSystemMediaSource(pkg)` 直接 skip —— **原厂音源在放的时候，
+     * 原厂自己都不 claim**。我们照做，别去打断用户正在听的电台。
+     *
+     * @param playingPackages 处于播放中的会话包名（可以多几个）
+     */
+    fun hasNativeSourcePlaying(playingPackages: Collection<String>): Boolean =
+        playingPackages.any { pkg -> pkg.isNotBlank() && !isEligible(pkg) }
+
     /**
      * 设置页诊断要展示的字段名（顺序即展示顺序）。
      *
@@ -206,6 +267,9 @@ object MediaBridgePolicy {
         // 第134轮：仪表有没有图 —— 真车排障第一眼就要看这两行。
         "artwork",
         "artworkSource",
+        // 第135轮：我们主动接管了播放入口没有？接管的是谁？
+        "claimTarget",
+        "nativeSourcePlaying",
         "callbackCount",
         "lastCallback",
         "reason",
@@ -224,6 +288,8 @@ object MediaBridgePolicy {
         "title" -> "当前歌名"
         "artwork" -> "仪表封面 Uri"
         "artworkSource" -> "封面来源"
+        "claimTarget" -> "已接管的播放入口"
+        "nativeSourcePlaying" -> "原厂音源正在放"
         "callbackCount" -> "方控/仪表回调次数"
         "lastCallback" -> "最近一次回调"
         "reason" -> "当前状态说明"

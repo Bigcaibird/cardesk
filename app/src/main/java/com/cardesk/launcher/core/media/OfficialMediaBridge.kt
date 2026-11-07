@@ -162,6 +162,31 @@ object OfficialMediaBridge {
     @Volatile
     private var lastCallback = ""
 
+    /**
+     * 已经**主动 claim 过**的目标包名（第一百三十五轮）。
+     *
+     * 空 = 还没 claim 过。
+     *
+     * 为什么要记它：claim 是「抢占原车的播放入口」，每 200ms 一次 tick 都抢会把
+     * 原车的播放权来回甩（原厂注释里专门提醒过）。所以**同一个目标只 claim 一次**；
+     * 目标换了（用户改了桌面上的媒体源）才再 claim 一次。
+     */
+    @Volatile
+    private var claimTarget: String = ""
+
+    /**
+     * **车机原厂音源**（爱趣听一类）是不是正在放（第一百三十五轮）。
+     *
+     * 由 [MusicSessionTracker] 每轮重扫时同步。
+     *
+     * 为什么要它：原厂 `SessionBridge.pushToMediaCenter` 开头就是
+     * `else if (isNativeSystemMediaSource(pkg)) { ...skip... }` ——
+     * **原厂音源在放的时候原厂自己不 claim**。我们照做：
+     * 用户正在听电台时不去抢播放入口，免得把声音切走。
+     */
+    @Volatile
+    private var nativeSourcePlaying: Boolean = false
+
     /** 代数号：`stop()` 时 +1，让在飞的旧回调 / 旧代理全部失效。 */
     @Volatile
     private var generation = 0
@@ -323,6 +348,7 @@ object OfficialMediaBridge {
             registered = false
             playbackAccepted = false
             playClaimed = false
+            claimTarget = ""
             token = null
             reason = "已停止"
         }
@@ -354,6 +380,24 @@ object OfficialMediaBridge {
         if (next == controlTarget) return
         controlTarget = next
         Logx.i(LogTags.MEDIA, "OEM 媒体桥兜底方控目标已更新", "target" to next)
+        // 第135轮：目标换成一个**三方在线播放器**时，主动 claim 一次
+        // （原厂「启用即 claim」的同款动作 —— 见 [claimIfNeeded]）。
+        //
+        // 必须在 worker 上做：claim 是同步 Binder 调用。
+        if (running) worker.execute { claimIfNeeded("目标变更") }
+    }
+
+    /**
+     * 同步「车机原厂音源（爱趣听一类）是不是正在放」（第一百三十五轮）。
+     *
+     * 由 [MusicSessionTracker] 每轮重扫时调。正在放的时候我们**不 claim** ——
+     * 原厂 `SessionBridge.pushToMediaCenter` 也是这么干的
+     * （`isNativeSystemMediaSource(pkg)` → skip），别去打断用户正在听的电台。
+     */
+    fun setNativeSourcePlaying(playing: Boolean) {
+        if (playing == nativeSourcePlaying) return
+        nativeSourcePlaying = playing
+        Logx.i(LogTags.MEDIA, "OEM 媒体桥原厂音源播放态已更新", "playing" to playing)
     }
 
     /**
@@ -570,6 +614,12 @@ object OfficialMediaBridge {
         // 第134轮：封面（仪表有没有图）—— 真车排障第一眼要看的就是这两行。
         "artwork" to sample.artwork.take(96),
         "artworkSource" to artworkSourceOf(),
+        // 第135轮：方控有没有真的被我们接管 —— 真车排障第一眼要看的就是这两行。
+        //
+        // `claimTarget` 空 = 从来没接管过（方控还在原车爱趣听那边）；
+        // `callbackCount=0` = 原车一次按键都没给我们（接管没成功）。
+        "claimTarget" to claimTarget,
+        "nativeSourcePlaying" to nativeSourcePlaying,
         "callbackCount" to callbackCount,
         "lastCallback" to lastCallback,
         "reason" to reason,
@@ -729,6 +779,12 @@ object OfficialMediaBridge {
             reason = if (registered) "" else "原车媒体注册未返回令牌"
             if (registered) {
                 invoke("updateMediaSourceTypeList", token, intArrayOf(ONLINE))
+                // 第135轮：注册成功就**主动 claim 一次**（对齐原厂「启用即 claim」）。
+                //
+                // 没有这一步，「没打开播放器」时原车认为当前音源还是爱趣听 →
+                // 方控不交给我们 → 按键落进空里 → 原车自己把爱趣听拉起来
+                // （真车诊断包 4231：callbackCount=0、playClaimed=false）。
+                claimIfNeeded("注册成功")
             }
             Logx.i(LogTags.MEDIA, "OEM 媒体桥注册结果", "registered" to registered)
         } catch (e: Exception) {
@@ -737,6 +793,63 @@ object OfficialMediaBridge {
             onPublishFailed("原车媒体注册失败", e)
         }
         notifyChanged()
+    }
+
+    /**
+     * **主动 claim 一次**（第一百三十五轮）：`requestPlay` + `updateCurrentSourceType`。
+     *
+     * ## 这一步在原车那边意味着什么
+     *
+     * 原车的 MediaCenter 里同时只有**一个**「当前音源」。
+     * 我们注册成在线音乐源（type 6）只是「**有资格**当音源」；
+     * 不 claim 的话，原车仍然认为当前音源是爱趣听，
+     * 方向盘按键也就仍然送给爱趣听。
+     *
+     * `requestPlay(令牌)` = 「这个源请求播放」→ 原车把当前音源切到我们；
+     * `updateCurrentSourceType(令牌, 6)` = 「当前音源类型是在线音乐」。
+     *
+     * ## 与原厂的一致性
+     *
+     * 原厂桌面 `SessionBridge.setBridgeEnabled(true)` →
+     * `pushToMediaCenter(true)` → `t.a()`（claim）+ `t.b()`（声明音源类型）。
+     * 我们现在也是「注册成功就 claim」。
+     *
+     * ## 什么时候**不**claim
+     *
+     * - 目标不在白名单（爱趣听 / 收音机 / USB / 蓝牙）→ 红线，绝不碰；
+     * - 车机原厂音源正在放 → 原厂自己也是 skip 的，别打断用户正在听的电台；
+     * - 这个目标已经 claim 过 → 只 claim 一次，不跟用户手动切源打架。
+     */
+    private fun claimIfNeeded(reason: String) {
+        if (!registered || api == null || token == null) return
+        // 目标口径与方控回调**完全一致**（见 [dispatch]）：
+        // 有歌名时用歌名的来源，没有歌名时用「用户选的媒体源」。
+        val target = MediaBridgePolicy.controlTargetFor(sample.source, controlTarget)
+        if (!MediaBridgePolicy.shouldClaim(registered, target, claimTarget, nativeSourcePlaying)) {
+            Logx.d(
+                LogTags.MEDIA,
+                "OEM 媒体桥不主动接管播放入口",
+                "reason" to reason,
+                "target" to target,
+                "claimedTarget" to claimTarget,
+                "nativeSourcePlaying" to nativeSourcePlaying,
+            )
+            return
+        }
+        val ok = runCatching { (invoke("requestPlay", token) as? Boolean) == true }.getOrDefault(false)
+        if (ok) {
+            runCatching { invoke("updateCurrentSourceType", token, ONLINE) }
+            playClaimed = true
+            claimTarget = target
+        }
+        Logx.i(
+            LogTags.MEDIA,
+            "OEM 媒体桥主动接管播放入口",
+            "reason" to reason,
+            "target" to target,
+            "claimed" to ok,
+            "nativeSourcePlaying" to nativeSourcePlaying,
+        )
     }
 
     // ---------------------------------------------------------------- 同步（worker）
@@ -770,8 +883,16 @@ object OfficialMediaBridge {
             lastSource = next.source
             lastPlaying = next.playing
             if (acquire) {
-                playClaimed = (invoke("requestPlay", token) as? Boolean) == true
-                if (playClaimed) invoke("updateCurrentSourceType", token, ONLINE)
+                // 第135轮：`playClaimed` 的语义改成「**曾经成功接管过**」，
+                // 失败时**不清零** —— 之前一次成功的接管不该被后面一次
+                // 失败的重试抹掉（真车排障要看的是「接管过没有」）。
+                val claimed = runCatching { (invoke("requestPlay", token) as? Boolean) == true }
+                    .getOrDefault(false)
+                if (claimed) {
+                    playClaimed = true
+                    claimTarget = next.source
+                    invoke("updateCurrentSourceType", token, ONLINE)
+                }
             }
             // 指纹里**必须含封面**：封面是异步到手的（先有歌名，几百毫秒后图才下载完），
             // 不含封面的话 `trackChanged` 一直是 false，那张图永远推不出去。
@@ -939,6 +1060,7 @@ object OfficialMediaBridge {
         registered = false
         playbackAccepted = false
         playClaimed = false
+        claimTarget = ""
         lastSource = ""
         lastTrack = ""
         lastPlaying = false
