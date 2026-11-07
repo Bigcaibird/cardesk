@@ -203,6 +203,9 @@ object MediaBridgePolicy {
         "source",
         "controlTarget",
         "title",
+        // 第134轮：仪表有没有图 —— 真车排障第一眼就要看这两行。
+        "artwork",
+        "artworkSource",
         "callbackCount",
         "lastCallback",
         "reason",
@@ -219,6 +222,8 @@ object MediaBridgePolicy {
         "source" -> "当前来源包名"
         "controlTarget" -> "兜底方控目标"
         "title" -> "当前歌名"
+        "artwork" -> "仪表封面 Uri"
+        "artworkSource" -> "封面来源"
         "callbackCount" -> "方控/仪表回调次数"
         "lastCallback" -> "最近一次回调"
         "reason" -> "当前状态说明"

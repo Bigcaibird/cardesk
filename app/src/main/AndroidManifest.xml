@@ -125,6 +125,21 @@
             android:exported="false"
             android:label="@string/app_name" />
 
+        <!-- 仪表封面（第134轮）：把我们自己的封面位图暴露成仪表读得到的
+             content:// Uri（`content://<applicationId>.artwork/cover/<key>`）。
+
+             exported=true 且**不设任何读写权限** ——
+             仪表是别的进程（未必与我们同 uid），走 provider 才能保证读得到；
+             `file://` 指向我们私有目录的话对方多半读不了。
+
+             暴露的只是一张封面图：路径只认我们自己生成的 key，其它一律 404。 -->
+        <provider
+            android:name=".core.media.ArtworkProvider"
+            android:authorities="${applicationId}.artwork"
+            android:exported="true"
+            android:grantUriPermissions="true"
+            android:label="@string/app_name" />
+
         <receiver
             android:name=".core.SystemOps$InstallResultReceiver"
             android:exported="false">

@@ -6,9 +6,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.PlaybackState
+import android.net.Uri
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -18,7 +20,9 @@ import com.cardesk.launcher.core.log.Logx
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
+import java.io.File
 import java.util.Collections
+import java.util.LinkedHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -187,6 +191,47 @@ object OfficialMediaBridge {
     @Volatile
     private var broadcastSample = Sample.EMPTY
 
+    /**
+     * **我们自己拿到的封面**（第134轮）：仪表要的封面 Uri（`content://` 字符串）。
+     *
+     * 什么时候才用得上：
+     * - 会话**只给位图、不给 Uri**（拿不到 Uri）；
+     * - 或者**根本没有会话** —— QQ 音乐车机版不发布会话，它的广播里也没有图
+     *   （实测 apk：广播字段只有 `key_title` / `key_artist` / `key_album` / `key_is_fav`）。
+     *
+     * 这两种情况下唯一的图就是我们自己搜/取到的那张。
+     *
+     * ## 为什么是「按歌缓存」而不是「一个当前值」
+     *
+     * 封面是**异步**到手的，顺序不固定：
+     * - 歌名先到（会话 / 广播），封面几百毫秒后才到（下载 + 解码）；
+     * - 甚至**封面先到、歌名后到**（会话刷新慢一步）。
+     *
+     * 用「一个当前值」的话，迟到的旧封面会把新歌的图顶掉，
+     * 而先到的封面又会因为「当前歌还对不上」被丢掉。
+     * 按 key 存就两种顺序都稳：[withExternalArtwork] 只取**当前这首歌**的那张。
+     */
+    private val artworkCache: MutableMap<String, ArtworkEntry> =
+        Collections.synchronizedMap(LinkedHashMap(8, 0.75f, true))
+
+    /**
+     * 缓存里的一条封面：Uri + 烘焙时那张图的尺寸。
+     *
+     * 尺寸要记，是因为**同一首歌可能先给小图标、后给大图**：
+     * 小图先到时先烘焙一张，之后来了大图要**再烘焙一次**（仪表上要的是大图）；
+     * 反过来（图没变大）就不再折腾 —— 会话每 200ms~2.5s 推一次 metadata，
+     * 不去重的话日志会被刷爆（限频规矩：判定类逻辑只在**变化时**记）。
+     */
+    private data class ArtworkEntry(val uri: String, val width: Int, val height: Int)
+
+    /**
+     * 待烘焙的封面（Bitmap → JPEG 文件 → `content://` Uri）。
+     *
+     * 压 JPEG + 落盘是**文件 IO**，不能占主线程 —— 丢给 worker 做。
+     */
+    @Volatile
+    private var pendingArtwork: Pair<String, Bitmap>? = null
+
     // ---------------------------------------------------------------- 以下只在 worker 线程访问
 
     private var api: Any? = null
@@ -209,6 +254,7 @@ object OfficialMediaBridge {
 
     // ---------------------------------------------------------------- 主线程侧
 
+    @Volatile
     private var waitingForSource = false
 
     /** 防误清空：选中会话消失后延迟清来源（暂停时车机 App 会销毁会话）。 */
@@ -260,6 +306,8 @@ object OfficialMediaBridge {
         sample = Sample.EMPTY
         sessionSample = Sample.EMPTY
         broadcastSample = Sample.EMPTY
+        artworkCache.clear()
+        pendingArtwork = null
         worker.execute {
             release()
             val conn = connection
@@ -355,8 +403,84 @@ object OfficialMediaBridge {
             position = positionMs.coerceAtLeast(0L),
             duration = durationMs.coerceAtLeast(0L),
             launch = launchIntentFor(ctx, source),
+            // 第134轮：广播来源没有自己的封面字段，封面由 [updateArtwork] 补
+            // （我们自己的封面搜索结果）。songKey 要和 [MusicController] 推过来的一致，
+            // 否则迟到的封面会被当成「不是这一首的」丢掉。
+            artwork = "",
+            songKey = BridgeArtwork.songKey(source, title, artist),
         )
         applySample()
+    }
+
+    /**
+     * 上报「我们自己拿到的封面」（第134轮）。
+     *
+     * ## 为什么要这条
+     *
+     * 仪表的封面走 `IMediaInfo#getArtwork()`（返回 `android.net.Uri`）。
+     * 我们能拿到两种「图」：
+     * 1. **会话 metadata 里的 URI 字符串** —— 桥自己就能取（见 [Sample.from]）；
+     * 2. **我们自己拿到的 Bitmap** —— 会话只给位图时，或者**根本没有会话**时
+     *    （QQ 音乐车机版），只能靠 [CoverLoader] 搜出来的那张。
+     *
+     * 第 2 种是 Bitmap，不是 Uri —— 得先落盘再换成仪表读得到的 `content://` Uri。
+     * 压 JPEG + 写文件是**文件 IO**，丢给 worker 做（主线程不能被一张图卡住）。
+     *
+     * @param bitmap 封面位图（空 = 没有）
+     * @param key 这首歌的 key（[BridgeArtwork.songKey]）
+     */
+    fun updateArtwork(bitmap: Bitmap?, key: String) {
+        if (bitmap == null || bitmap.isRecycled) return
+        val k = key.trim()
+        if (k.isEmpty()) return
+        // 去重：同一首歌、且新图**不比已烘焙的更大** → 不重复烘焙。
+        // （会话每 200ms~2.5s 推一次 metadata，不去重日志会被刷爆。）
+        val cached = artworkCache[k]
+        if (cached != null && bitmap.width <= cached.width && bitmap.height <= cached.height) {
+            return
+        }
+        pendingArtwork = k to bitmap
+        if (running) worker.execute { bakeArtwork() }
+    }
+
+    /** 把待处理的封面压成 JPEG 落盘，换成 `content://` Uri（worker 线程）。 */
+    private fun bakeArtwork() {
+        val pending = pendingArtwork ?: return
+        pendingArtwork = null
+        val (key, bitmap) = pending
+        val ctx = context ?: return
+        // 只给**我们接管**的来源写封面文件（别的 App 的歌跟我们没关系，
+        // 也不该在我们的磁盘上留下它们的图）。
+        val pkg = key.substringBefore('|')
+        if (!MediaBridgePolicy.isEligible(pkg)) return
+        val uri = ArtworkStore.put(ctx, key, bitmap)
+        if (uri.isEmpty()) return
+        val prev = artworkCache[key]
+        artworkCache[key] = ArtworkEntry(uri, bitmap.width, bitmap.height)
+        // 只在**真的变了**的时候记（限频：会话每 200ms~2.5s 推一次 metadata）
+        if (prev == null || prev.uri != uri) {
+            Logx.i(
+                LogTags.MEDIA, "封面已转成仪表可读的 Uri",
+                "key" to key, "uri" to uri,
+                "w" to bitmap.width, "h" to bitmap.height,
+                "current" to sample.songKey, "命中" to (key == sample.songKey),
+            )
+        }
+        applySample()
+    }
+
+    /**
+     * 补上「我们自己拿到的封面」。
+     *
+     * 优先级：**会话自己给的 Uri 优先**（那是播放器的权威口径，与原车一致），
+     * 会话没给 Uri 才用我们自己的。
+     */
+    private fun withExternalArtwork(s: Sample): Sample {
+        if (!s.available) return s
+        if (s.artwork.isNotEmpty()) return s
+        val ext = artworkCache[s.songKey]?.uri ?: return s
+        if (ext.isEmpty()) return s
+        return s.copy(artwork = ext)
     }
 
     /**
@@ -378,13 +502,14 @@ object OfficialMediaBridge {
      * 两个都没有时，才走「2.5s 后清空」那条防闪的延迟路径。
      */
     private fun applySample() {
-        val next = when (
+        val picked = when (
             MediaBridgePolicy.pickSource(sessionSample.available, broadcastSample.available)
         ) {
             MediaBridgePolicy.BridgeSource.SESSION -> sessionSample
             MediaBridgePolicy.BridgeSource.BROADCAST -> broadcastSample
             MediaBridgePolicy.BridgeSource.NONE -> Sample.EMPTY
         }
+        val next = withExternalArtwork(picked)
         if (!next.available && running && sample.available) {
             if (!waitingForSource) {
                 waitingForSource = true
@@ -442,10 +567,26 @@ object OfficialMediaBridge {
         },
         "source" to sample.source,
         "title" to sample.title,
+        // 第134轮：封面（仪表有没有图）—— 真车排障第一眼要看的就是这两行。
+        "artwork" to sample.artwork.take(96),
+        "artworkSource" to artworkSourceOf(),
         "callbackCount" to callbackCount,
         "lastCallback" to lastCallback,
         "reason" to reason,
     )
+
+    /** 封面是哪来的（排障用）：会话 / 广播 / 我们自己搜的 / 没有。 */
+    private fun artworkSourceOf(): String {
+        if (sample.artwork.isEmpty()) return "none"
+        if (artworkCache[sample.songKey]?.uri == sample.artwork) return "external"
+        return when (
+            MediaBridgePolicy.pickSource(sessionSample.available, broadcastSample.available)
+        ) {
+            MediaBridgePolicy.BridgeSource.SESSION -> "session"
+            MediaBridgePolicy.BridgeSource.BROADCAST -> "broadcast"
+            MediaBridgePolicy.BridgeSource.NONE -> "none"
+        }
+    }
 
     // ---------------------------------------------------------------- 初始化（worker）
 
@@ -632,7 +773,10 @@ object OfficialMediaBridge {
                 playClaimed = (invoke("requestPlay", token) as? Boolean) == true
                 if (playClaimed) invoke("updateCurrentSourceType", token, ONLINE)
             }
-            val track = next.source + "\n" + next.title + "\n" + next.artist + "\n" + next.duration
+            // 指纹里**必须含封面**：封面是异步到手的（先有歌名，几百毫秒后图才下载完），
+            // 不含封面的话 `trackChanged` 一直是 false，那张图永远推不出去。
+            val track = next.source + "\n" + next.title + "\n" + next.artist + "\n" +
+                next.duration + "\n" + next.artwork
             val trackChanged = track != lastTrack
             if (trackChanged) {
                 // MediaBeanHelper 也是 package-private 静态工具（同 IP753 的老 API）
@@ -710,6 +854,23 @@ object OfficialMediaBridge {
     private fun playbackValue(proxy: Any, method: Method, args: Array<Any?>?): Any? {
         objectMethod(proxy, method, args)?.let { return it }
         val s = sample
+        // 第134轮：**先看是不是取封面的 getter**。
+        //
+        // 原车 SDK：`IMediaInfo#getArtwork()` / `IMusicPlaybackInfo#getArtwork()`
+        // 都返回 `android.net.Uri`；我们以前压根没实现 → defaultValue → null
+        // → 仪表上只有歌名和歌手、没有图片。
+        //
+        // 没有图时给 **`Uri.parse("")`**（空 Uri）而不是 null ——
+        // 与原车 `MediaCenterHelper.D()` 的口径一致（它没图时就是 `Uri.parse("")`）。
+        val art = BridgeArtwork.artworkGetter(method.name)
+        if (art != BridgeArtwork.ArtworkGetter.NONE) {
+            return when (art) {
+                BridgeArtwork.ArtworkGetter.CURRENT -> artworkUri(s.artwork)
+                // 原车自己的 `getNextArtwork` / `getPreviousArtwork` 也返回 null
+                // （反编译 `MusicPlaybackInfo` 实测），我们只有一首，照原样返回。
+                else -> null
+            }
+        }
         return when (method.name) {
             "getTitle" -> s.title
             "getArtist" -> s.artist
@@ -817,6 +978,15 @@ object OfficialMediaBridge {
         throw NoSuchMethodException(name)
     }
 
+    /**
+     * 给原车的封面 Uri。
+     *
+     * 没有图时给 **`Uri.parse("")`**（空 Uri）而不是 null ——
+     * 与原车 `MediaCenterHelper.D()` 的口径一致。
+     */
+    private fun artworkUri(value: String): Uri =
+        if (value.isEmpty()) Uri.parse("") else Uri.parse(value)
+
     /** 反射调用的返回值兜底（代理方法必须返回一个合法值，否则原车侧会 NPE）。 */
     private fun defaultValue(type: Class<*>): Any? = when {
         type == Boolean::class.javaPrimitiveType -> false
@@ -857,9 +1027,19 @@ object OfficialMediaBridge {
         val position: Long,
         val duration: Long,
         val launch: PendingIntent?,
+        /**
+         * 给仪表的封面 Uri 字符串（**空串 = 没有图**）。
+         *
+         * 原车 SDK 里 `IMediaInfo#getArtwork()` 返回 `android.net.Uri`，
+         * 以前我们没实现这个 getter → `defaultValue()` → **null** →
+         * 仪表上只有歌名和歌手、没有图片（第134轮）。
+         */
+        val artwork: String,
+        /** 这首歌的 key（来源 + 歌名 + 歌手）：用来判断迟到的封面是不是这一首的。 */
+        val songKey: String,
     ) {
         companion object {
-            val EMPTY = Sample(false, false, "", "", "", "", 0L, 0L, null)
+            val EMPTY = Sample(false, false, "", "", "", "", 0L, 0L, null, "", "")
 
             fun from(context: Context?, controller: MediaController?): Sample {
                 val ctx = context ?: return EMPTY
@@ -869,16 +1049,21 @@ object OfficialMediaBridge {
                 return runCatching {
                     val meta = c.metadata
                     val state = c.playbackState
+                    val title = text(meta, MediaMetadata.METADATA_KEY_TITLE)
+                    val artist = text(meta, MediaMetadata.METADATA_KEY_ARTIST)
                     Sample(
                         available = state != null,
                         playing = state?.state == PlaybackState.STATE_PLAYING,
                         source = pkg,
-                        title = text(meta, MediaMetadata.METADATA_KEY_TITLE),
-                        artist = text(meta, MediaMetadata.METADATA_KEY_ARTIST),
+                        title = title,
+                        artist = artist,
                         album = text(meta, MediaMetadata.METADATA_KEY_ALBUM),
                         position = maxOf(0L, state?.position ?: 0L),
                         duration = maxOf(0L, meta?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L),
                         launch = launchIntentFor(ctx, pkg),
+                        // 封面：**与原车同一套口径**从会话 metadata 取（第134轮）
+                        artwork = artworkFromMeta(meta),
+                        songKey = BridgeArtwork.songKey(pkg, title, artist),
                     )
                 }.getOrElse {
                     // 采样失败不能把桥打挂：退回 EMPTY，下一 tick 再来
@@ -888,6 +1073,38 @@ object OfficialMediaBridge {
 
             private fun text(meta: MediaMetadata?, key: String): String =
                 meta?.getString(key).orEmpty()
+
+            /**
+             * 从会话 metadata 里取封面 Uri（第134轮）。
+             *
+             * **与原车 `MediaCenterHelper.D(MediaMetadataCompat, String)` 完全同一套口径**
+             * （反编译自 `carmedia/MultiMedia.apk`）：
+             *
+             * ```
+             * DISPLAY_ICON_URI → ART_URI → ALBUM_ART_URI
+             * ```
+             *
+             * 其中 `ART_URI` 若是**本地裸路径**：
+             * 原车的口径是「文件存在就 `Uri.fromFile(file)`，否则原样 `Uri.parse`」。
+             * 这里照抄（本地路径文件不存在时当没有图 —— 给了也读不出来）。
+             */
+            private fun artworkFromMeta(meta: MediaMetadata?): String {
+                val candidate = BridgeArtwork.pickUri(
+                    mapOf(
+                        MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI to
+                            meta?.getString(MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI),
+                        MediaMetadata.METADATA_KEY_ART_URI to
+                            meta?.getString(MediaMetadata.METADATA_KEY_ART_URI),
+                        MediaMetadata.METADATA_KEY_ALBUM_ART_URI to
+                            meta?.getString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI),
+                    ),
+                )
+                if (!BridgeArtwork.isLocalPath(candidate)) {
+                    return BridgeArtwork.resolveUri(candidate, false)
+                }
+                val exists = runCatching { File(candidate).exists() }.getOrDefault(false)
+                return BridgeArtwork.resolveUri(candidate, exists)
+            }
         }
     }
 }

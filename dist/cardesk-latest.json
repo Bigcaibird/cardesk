@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1135",
-  "versionCode": 4231,
-  "tag": "v1.0.1135",
-  "name": "CarDesk 4231 / 1.0.1135-system",
-  "notes": "第132轮：启停（ISS）开关接上执行端。\n设置 → 车控 → 启停控制 里的「开机后自动关闭启停」，以前只往配置里存了个开关，\n车机上的启停一点没变（项目第一天起就没有执行端）。现在真的会写：\n开关打开立刻把启停关掉，关掉则完全不碰车机；页面补上状态行和\n「立即开启/关闭启停」「刷新状态」；开机广播里自动应用一次。\n\n第133轮：仪表盘歌词副屏投射（参考 UNI 桌面 0.7.10 的实现逻辑）。\n设置 → 仪表歌词 那一堆滑杆以前也全是「只存设置、不执行」，\n现在把歌词窗口真正投到副屏（仪表）上：可选目标屏、调水平/垂直位置与显示行数、\n胶囊/纯文字/发光三种样式；默认不再画半透明灰底，歌词直接落在仪表画面上；\n走前台服务，切到音乐 App 后歌词不会自己消失。\n\n两个功能在模拟器上都已端到端验证过，真车行为仍需复验（详见 README 第132/133轮）。",
-  "publishedAt": "2026-11-07T08:14:30Z",
+  "version": "1.0.1136",
+  "versionCode": 4232,
+  "tag": "v1.0.1136",
+  "name": "CarDesk 4232 / 1.0.1136-system",
+  "notes": "接管方控后仪表没有图片：原车 SDK 里 IMediaInfo/IMusicPlaybackInfo 的 getArtwork 返回 Uri，我们的代理压根没实现（落到 defaultValue 返回 null），于是仪表只有歌名歌手没有图。本轮按原车 MediaCenterHelper 同一套口径（DISPLAY_ICON_URI → ART_URI → ALBUM_ART_URI）取封面，并用 ArtworkProvider 把我们自己的封面位图暴露成仪表读得到的 content:// Uri（QQ 音乐车机版不发布会话、广播里也没有图，只能走我们自己搜的封面）。新增 BridgeArtwork 纯逻辑 + ArtworkProvider；诊断加 artwork / artworkSource",
+  "publishedAt": "2026-11-07T09:20:38Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4231.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4231.apk",
-    "size": 2306709,
-    "sha256": "e228d78deae0c1709519b844a7040110372b92725900ec8e9bf01e827b340e7f"
+    "name": "CarDesk-platform-ecarx-cardesk-4232.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4232.apk",
+    "size": 2315549,
+    "sha256": "27681da7b5be95d10934ebd316bd11284ade1dbcd6291ad3649d4251aba8c118"
   }
 }

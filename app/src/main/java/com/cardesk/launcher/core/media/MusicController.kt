@@ -385,6 +385,9 @@ class MusicController private constructor() {
             val merged = mergeCachedCover(t)
             track = merged
             listeners.forEach { it.onMediaChanged(merged) }
+            // 第134轮：会话**自带**位图时也要推给桥（会话没给 Uri 的话，
+            // 桥只能靠我们这份位图来给仪表出图）。
+            pushArtworkToBridge(merged)
             // —— 播放器自报的当前句（第七十八轮新增）
             //
             // 变了就要重算当前行：LRC 的行号没动、但播放器报的那句变了，
@@ -486,6 +489,30 @@ class MusicController private constructor() {
     }
 
     /**
+     * 把封面推给原车媒体桥（第134轮）。
+     *
+     * ## 为什么需要这一步
+     *
+     * 仪表的封面走 `IMediaInfo#getArtwork()`（返回 `android.net.Uri`）。
+     * 桥自己能拿到的是**会话 metadata 里的 Uri 字符串**；
+     * 但下面两种情况它拿不到：
+     * - 会话只给了**位图**、没给 Uri；
+     * - **根本没有会话** —— QQ 音乐车机版不发布会话，它的广播里也没有图
+     *   （实测 apk：广播字段只有 `key_title` / `key_artist` / `key_album` / `key_is_fav`）。
+     *
+     * 这两种情况下，唯一的图就是**我们自己取到的那张**
+     * （会话位图，或 [CoverLoader] 搜出来的网络图）。
+     *
+     * 压 JPEG + 落盘 + 换 Uri 都在桥的 worker 线程上做（主线程不碰文件 IO）。
+     */
+    private fun pushArtworkToBridge(t: TrackInfo?) {
+        val bmp = t?.artwork ?: return
+        val key = BridgeArtwork.songKey(t.pkg, t.title, t.artist)
+        if (key.isEmpty()) return
+        OfficialMediaBridge.updateArtwork(bmp, key)
+    }
+
+    /**
      * 按优先级链取封面。
      *
      * 链路：会话 bitmap → → → 网络搜索
@@ -528,6 +555,8 @@ class MusicController private constructor() {
             }
             track = cur.copy(artwork = bmp)
             listeners.forEach { it.onMediaChanged(track) }
+            // 第134轮：把封面推给原车媒体桥 → 仪表才有图。
+            pushArtworkToBridge(track)
             Logx.i(
                 LogTags.MEDIA, "封面已回填",
                 "key" to key, "source" to source, "w" to bmp.width, "h" to bmp.height,

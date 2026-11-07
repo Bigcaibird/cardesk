@@ -107,6 +107,9 @@ class MediaBridgePolicyTest {
                 "source",
                 "controlTarget",
                 "title",
+                // 第132轮：仪表有没有图
+                "artwork",
+                "artworkSource",
                 "callbackCount",
                 "lastCallback",
                 "reason",

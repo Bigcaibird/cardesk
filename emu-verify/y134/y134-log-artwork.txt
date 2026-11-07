@@ -1,0 +1,6 @@
+11-07 17:11:49.513  9090  9090 I CarDesk/Media: OEM 媒体桥兜底方控目标已更新 target=com.tencent.qqmusiccar
+11-07 17:11:49.514  9090  9090 I CarDesk/Media: OEM 媒体桥启用，开始注册到原车媒体中心
+11-07 17:11:49.514  9090  9090 I CarDesk/Media: OEM 媒体桥启动 sdk=com.ecarx.sdk.mediacenter
+11-07 17:11:55.416  9090  9090 I CarDesk/Media: 开始取封面 key=id:150619 title=春风吹 artist=方大同 hasUri=false uri=
+11-07 17:11:56.204  9090  9090 I CarDesk/Media: 封面加载成功（网络搜索） url=https://y.gtimg.cn/music/photo_new/T002R500x500M000004J3oTJ2E4cuo.jpg w=500 h=500
+11-07 17:11:56.211  9090  9125 I CarDesk/Media: 封面已转成仪表可读的 Uri key=com.tencent.qqmusic|春风吹|方大同 uri=content://com.ecarx.cardesk.artwork/cover/com.tencent.qqmusic_春风吹_方大同 w=500 h=500 current=com.tencent.qqmusic|春风吹|方大同 命中=true

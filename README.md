@@ -3736,3 +3736,105 @@ Robolectric 一样都模拟不出来。它用 `DisplayManager.createVirtualDispl
 | SHA-256 | `e228d78deae0c1709519b844a7040110372b92725900ec8e9bf01e827b340e7f` |
 | 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
 | 单测 | 1814 项全绿（`tools/release.sh` 出包时一并跑的） |
+
+---
+
+## 第134轮：接管方控后仪表没有图片（桥没实现 `getArtwork`）
+
+> 用户诉求：
+> 「目前接管方控之后，仪表只有歌名和歌手，没有图片；
+> 车机默认的爱趣听是有图片的，试着修复这个问题。」
+
+### 根因：原车问我们要封面，我们没接
+
+`carmedia/MultiMedia.apk` 里带着**完整的原车 `com.ecarx.sdk.mediacenter` SDK**，
+反编译后接口长这样：
+
+```java
+// IMediaInfo / IMusicPlaybackInfo / 仪表侧 IMediaInteraction.IMedia 都有这一项
+Uri getArtwork();      // ← 仪表渲染图片的依据
+```
+
+原车自己填这个 Uri 的口径（`MediaCenterHelper.D(MediaMetadataCompat, String)`）：
+
+```
+DISPLAY_ICON_URI → ART_URI → ALBUM_ART_URI
+（ART_URI 是本地裸路径时文件存在才 Uri.fromFile；都没有时给 Uri.parse("")）
+```
+
+而我们的桥的代理**只实现了 `getTitle` / `getArtist` / `getAlbum` / `getDuration`**，
+`getArtwork` 落到 `else -> defaultValue(...)` → **返回 null** → 仪表拿不到封面。
+
+> **歌名歌手有、偏偏图没有，恰恰证明桥是通的** —— 缺的只有封面这一项。
+> 参考实现 **UNI 桌面的桥也是同样漏的**，这是整条传承链上的共同缺口。
+
+### 改了什么
+
+| 文件 | 改动 |
+|---|---|
+| `core/media/BridgeArtwork.kt`（新，纯逻辑） | 封面 Uri 取值优先级（**与原车一致**）/ 合法性 / 本地路径判定 / `getArtwork` getter 映射 / 变化判定 / 歌的 key |
+| `core/media/ArtworkProvider.kt`（新） | `ContentProvider`：把我们的封面位图暴露成仪表读得到的 `content://` Uri |
+| `core/media/OfficialMediaBridge.kt` | ① `Sample` 加 `artwork`/`songKey` ② 按原车口径从会话 metadata 取封面 ③ **实现 `getArtwork`/`getNextArtwork`/`getPreviousArtwork`** ④ 推给原车的指纹**含封面** ⑤ 按歌 key 的封面缓存 + 限频 |
+| `core/media/MusicController.kt` | 封面到手时推给桥（补齐「没有会话」的来源） |
+| `core/media/MediaBridgePolicy.kt` | 诊断加 `artwork` / `artworkSource` |
+
+**封面 Uri 的来源**：① 会话 metadata（与原车逐字一致的口径）→ ② **我们自己的封面**
+（`CoverLoader` 搜到的网络图 / 会话自带的位图）。
+第 ② 条是必须的 —— **QQ 音乐车机版不发布会话**，它的广播里也没有封面字段
+（实测 apk：只有 `key_title`/`key_artist`/`key_album`/`key_is_fav`）。
+
+**为什么用 `content://` 而不是 `file://`**：封面文件在我们的私有目录，
+别的进程能不能读取决于 uid；`content://` 由我们的进程替别人读，与对方 uid 无关。
+
+### 三个踩过并修掉的坑
+
+1. **authority 写死** → 调试包与系统包抢同一个 authority，表现为「provider 在但永远读不到文件」。
+   改成 `${applicationId}.artwork` + 代码里 `context.packageName` 现算。
+2. **硬件位图不能直接压缩** —— `MediaMetadata.getBitmap()` 在 API 26+ 是 `Config.HARDWARE`，
+   `compress` 直接抛异常被吞掉 → 这一路静默失败。先 `copy(ARGB_8888)` 再压。
+3. **日志被刷爆** —— 会话每 200ms~2.5s 推一次 metadata。改成**只在变化时记**。
+
+### 验证（`emu-verify/y134/`）
+
+| | 证据 | 结果 |
+|---|---|---|
+| 封面链路 | `y134-log-artwork.txt` | 会话 → 封面搜索（500×500）→ 落盘 → `content://` Uri → 缓存命中 |
+| provider 跨进程吐图 | `adb shell content read`（**另一个 uid**） | 读回 47 773 字节 JPEG，**SHA-256 与磁盘文件逐字节一致** |
+| 桌面卡片 | `y134-01-desktop-cover.png` | 卡片与 Dock 都是这张封面 |
+
+**单测**：全量 **1841 项全绿**（新增 `BridgeArtworkTest` 21 + `ArtworkStoreTest` 6）。
+
+**反向验证 11 项全部变红**（`tools/verify_y134_reverse.sh`，可复跑）：
+
+| 反向 | 改法 | 红灯 |
+|---|---|---|
+| 1 | 认不出 `getArtwork`（回到「压根没实现」） | 1 |
+| 2 | 取值顺序颠倒（`ART_URI` 压过 `DISPLAY_ICON_URI`） | 2 |
+| 3 | 不认 `content://` | 6 |
+| 4 | 认 `android.resource://`（跨进程读不到） | 3 |
+| 5 | 本地路径文件不存在也当有图 | 1 |
+| 6 | 封面变了不重推 | 1 |
+| 7 | `sanitize` 放过 `..`（目录穿越） | 1 |
+| 8 | `sanitize` 放过 `/` | 3 |
+| 9 | authority 写死 | 1 |
+| 10 | 歌的 key 恒为空 | 2 |
+| 11 | 代理里把封面应答改成 `null`（接线检查） | 1 |
+
+### 已知限制
+
+- **「仪表真的把图画出来了」这段模拟器上验不了** —— 模拟器没有原车
+  `ecarx.xsf.mediacenter` 服务，也没有仪表（DIM）。**必须真车复验**：
+  装包后放一首歌看仪表有没有图；诊断包看 `bridge.artwork` 与 `bridge.artworkSource`。
+- `getNextArtwork` / `getPreviousArtwork` 仍返回 `null` —— 与原车 `MusicPlaybackInfo` 一致。
+- **没有发 GitHub Release、没有传 R2**（等明确指示）。
+
+### 产物
+
+| 项 | 值 |
+|---|---|
+| 文件 | `dist/CarDesk-platform-ecarx-cardesk-4232.apk` |
+| versionCode / versionName | 4232 / 1.0.1136-system |
+| 大小 | 2 315 549 字节 |
+| SHA-256 | `27681da7b5be95d10934ebd316bd11284ade1dbcd6291ad3649d4251aba8c118` |
+| 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
+| 单测 | 1841 项全绿（`tools/release.sh` 出包时一并跑的） |
