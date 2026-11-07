@@ -354,6 +354,35 @@ adb logcat -d | grep -E "手势：单指横滑翻页|切页 "
 > ③ **读秒是倒着走的** → `raw=3` 时等 3 秒再去抓，整段递减已经走完了 ⇒
 >    要用 `--raw 6 --warmup 0.8` 这类参数把整段抓全。
 
+## H10. 第132轮新增（启停 ISS 开关接上执行端）
+
+设置 → 车控 → **启停控制**。功能号 `537002240`（`0x20020100`，
+`IVehicle.SETTING_FUNC_ENGINE_STOP_START`）。
+
+证据文件：`emu-verify/y132/r132-logcat-iss.txt`、
+`emu-verify/y132/r132-iss-page.png`、`emu-verify/y132/r132-iss-closed.png`、
+`emu-verify/y132/r132-iss-off-confirmed.png`；
+逐条验证报告：`emu-verify/y132/REPORT-y132.md`。
+
+| # | 项 | 操作 | 期望 | 结果 |
+|---|---|---|---|---|
+| H84 | 页面渲染 | 设置 → 车控 → 启停控制 | 有开关、状态行、三个动作按钮 | ✅ `r132-iss-page.png`：状态行「启停**开着**」（模拟车默认开着） |
+| H85 | **开关打开 = 立刻关掉启停** | 打开「开机后自动关闭启停」 | 写 `0` + 回读确认 | ✅ `设置变更 key=iss_keep_enabled from=false to=true` → `写入启停状态 func=0x20020100 name=发动机启停 value=0 target=关闭 ok=true` → `启停写入已下发 … confirmed=true` → 回读 `raw=0 isOn=false` |
+| H86 | 立即开启启停 | 点「立即开启启停」 | 写 `1` + 回读确认 | ✅ `value=1 target=开启 ok=true` → `confirmed=true` → 回读 `raw=1 isOn=true` |
+| H87 | 立即关闭启停 | 点「立即关闭启停」 | 写 `0` + 回读确认 | ✅ `value=0 target=关闭 ok=true` → 回读 `raw=0 isOn=false` |
+| H88 | **开关关掉 = 不碰车机** | 关掉「开机后自动关闭启停」 | 只改本地开关，**零写入** | ✅ 只有 `设置变更 key=iss_keep_enabled from=true to=false`，logcat 里**没有**「写入启停状态」 |
+| H89 | **开机自动应用**（开关开） | `am force-stop` → `am broadcast -a android.intent.action.BOOT_COMPLETED -p com.cardesk.launcher --include-stopped-packages` | 开机自动关一次启停 | ✅ `收到开机广播` → `初始化车控 … candidates=mock` → `写入启停状态 value=0 ok=true` → `开机自动关闭启停 ok=true detail=已关闭启停` |
+| H90 | **开机不越权**（开关关） | 同上 | 开机**不碰**启停 | ✅ 只有 `收到开机广播` / `开机广播已拉起桌面`，**无任何启停写入** |
+| H91 | 状态行的诚实性 | 状态行三种取值 | 判不了时**不能**显示成「开着」 | ✅ 模拟车 `supported=true` 时显示「启停开着 / 启停已关闭」；判不了走 `IssControl.State.label()` =「启停状态读不到」（弱文字色） |
+| H92 | 不闪退 | 全程 | pid 不变、无 FATAL、无 tombstone | ✅ 无 `FATAL EXCEPTION` / `Fatal signal` |
+
+> **开机那条广播是保护广播**，普通 shell 发会被拒（`SecurityException`）。
+> 模拟器上用 `adb root` 之后 `am broadcast` 才能发出去（`result=0`）。
+>
+> **「开关关掉 = 不碰车机」这条最容易写坏**：副标写的是「关闭则不改动车机逻辑」，
+> 所以关开关时**只能**改本地开关，往车机写「恢复原状」是越权。
+> 想改回来用页面上的「立即开启启停」。
+
 ## I. 稳定性
 
 | # | 项 | 期望 | 结果 |

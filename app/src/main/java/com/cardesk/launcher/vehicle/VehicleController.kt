@@ -311,6 +311,86 @@ object VehicleController {
     }
 
     /**
+     * 写发动机启停（ISS）。
+     *
+     * 功能号 `537002240`（`0x20020100`，
+     * `IVehicle.SETTING_FUNC_ENGINE_STOP_START`），见 [IssControl]。
+     *
+     * 写完**回读确认**：厂商的读侧在信号缺失时返回默认值 `1`，
+     * 所以只有读到 `0` 才算「确凿关闭」（见 [IssControl.State.isOn]）。
+     * 回读确认不了时**如实说「已下发但没确认」**，不谎报成功。
+     *
+     * 写车是同步 binder，放后台线程；结果回主线程。
+     *
+     * @param onResult `(ok, message)`，message 可直接展示给用户
+     */
+    fun setIssEnabled(on: Boolean, onResult: (Boolean, String) -> Unit) {
+        if (!initialized || !::gateway.isInitialized) {
+            Logx.w(LogTags.VEHICLE, "切换启停被忽略（车控未初始化）", "target" to on)
+            onResult(false, "车控还没连接好，稍后再试")
+            return
+        }
+        val gw = gateway
+        val mock = gw.id == "mock"
+        Thread {
+            val written = IssControl.write(gw, on)
+            val reason = runCatching { gw.lastError() }.getOrNull()
+            // 模拟通道没有真值：写入即视为生效（回读校验必然失败）。
+            var confirmed = mock && written
+            if (written && !mock) {
+                confirmed = verifyIss(gw, on)
+            }
+            Logx.i(
+                LogTags.VEHICLE,
+                if (written) "启停写入已下发" else "启停写入失败",
+                "target" to if (on) "开启" else "关闭",
+                "written" to written,
+                "confirmed" to confirmed,
+                "channel" to runCatching { gw.id }.getOrDefault("?"),
+                "reason" to reason,
+            )
+            main.post {
+                when {
+                    written && confirmed -> onResult(true, if (on) "已开启启停" else "已关闭启停")
+                    written -> onResult(
+                        true,
+                        "已下发启停指令，但这台车机回读没确认（回读不可信或还没应用）",
+                    )
+                    else -> onResult(
+                        false,
+                        "这台车机不接受桌面写启停（${reason ?: "文档口径的写入接口不可用"}）",
+                    )
+                }
+            }
+        }.start()
+    }
+
+    /**
+     * 写完后回读启停状态，最多等 1.2 秒确认真的变了。
+     *
+     * 只有读到**目标值**才算确认：关 = 读到 `0`；开 = 读到 `1`
+     * **且**固件确认有这条信号（否则读到的是信号缺失时的默认值 1）。
+     */
+    private fun verifyIss(gw: VehicleGateway, want: Boolean): Boolean {
+        repeat(6) {
+            Thread.sleep(200)
+            val state = IssControl.read(gw)
+            if (state.isOn == want) return true
+        }
+        return false
+    }
+
+    /**
+     * 读一次启停状态（给设置页显示用）。
+     *
+     * 读不到返回 null；**读得到也不一定是准的**（见 [IssControl.State.isOn]）。
+     */
+    fun readIssState(): IssControl.State? {
+        if (!initialized || !::gateway.isInitialized) return null
+        return runCatching { IssControl.read(gateway) }.getOrNull()
+    }
+
+    /**
      * 复位行程2（自复位行程）。
      *
      * ## 文档依据与限制

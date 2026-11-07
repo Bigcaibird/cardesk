@@ -1856,13 +1856,124 @@ class SettingsOverlay(
         }
     }
 
-    /** 启停控制（case "autostop"）。 */
+    /**
+     * 启停控制（case "autostop"）。
+     *
+     * ## 这一页现在**真的有执行端**
+     *
+     * 以前这里只有一个开关：把 `iss_keep_enabled` 写进 SharedPreferences 就完事，
+     * **全仓没有任何代码读它** —— 开关能切、能持久化，车机的启停一点没变。
+     *
+     * 现在接上了：
+     * - 功能号 `537002240`（`0x20020100`，
+     *   `IVehicle.SETTING_FUNC_ENGINE_STOP_START`），厂商 jar 里读、写都实现
+     *   （见 `com.cardesk.launcher.vehicle.IssControl`）；
+     * - 打开开关 → **立刻**把启停关掉（写完回读确认），开机时再关一次；
+     * - 关闭开关 → **不动车机**（副标写的「关闭则不改动车机逻辑」），
+     *   想改回来用下面的「立即开启启停」。
+     *
+     * ## 读侧有个坑：默认值是 1
+     *
+     * 厂商 `getMappedFunctionValue(PaSsActivation)` 在信号缺失时返回 **1**，
+     * 所以「读到 1」分不清「开着」和「根本读不到」。
+     * 状态行只在**读到 0**（确凿关闭）或**读到 1 且固件确认有这条信号**时才下结论，
+     * 否则老老实实说「读不到」。
+     */
     private fun pageAutostop() {
+        section("启停")
+
+        // 状态行要在写完之后原地刷新，所以把视图留出来。
+        var stateView: TextView? = null
+        fun refreshState() {
+            stateView?.let { readIssStateAsync(it) }
+        }
+
         switchRow("开机后自动关闭启停", prefs.issKeepEnabled, "开启后保持 ISS 关闭；关闭则不改动车机逻辑") {
             val from = prefs.issKeepEnabled
             prefs.issKeepEnabled = it
             logSetting("iss_keep_enabled", "开机后自动关闭启停", from, it)
+            if (it) {
+                // 打开 = 用户现在就要关掉启停，立刻下发，不等下次开机。
+                writeIss(false) { refreshState() }
+            } else {
+                Toast.makeText(
+                    context,
+                    "已关闭「开机后自动关闭启停」，车机启停不再被改动",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
         }
+
+        section("车机当前状态")
+        stateView = kvRow("启停", "读取中…", false)
+        actionButton("立即关闭启停", primary = true) {
+            writeIss(false) { refreshState() }
+        }
+        actionButton("立即开启启停") {
+            writeIss(true) { refreshState() }
+        }
+        actionButton("刷新状态") {
+            refreshState()
+        }
+
+        refreshState()
+    }
+
+    /**
+     * 写一次启停并给用户一个明确说法。
+     *
+     * 写车是同步 binder，放在后台线程；
+     * [com.cardesk.launcher.vehicle.VehicleController.setIssEnabled] 已经负责
+     * 切回主线程，这里只在主线程上弹 Toast + 刷新状态行。
+     */
+    private fun writeIss(on: Boolean, after: () -> Unit) {
+        Logx.event(LogTags.SETTING, "写启停", "target" to if (on) "开启" else "关闭")
+        com.cardesk.launcher.vehicle.VehicleController.setIssEnabled(on) { ok, msg ->
+            // 失败要看得久一点——原因就一句话，短一闪而过等于没说。
+            Toast.makeText(context, msg, if (ok) Toast.LENGTH_SHORT else Toast.LENGTH_LONG).show()
+            after()
+        }
+    }
+
+    /**
+     * 读一次启停状态并写进行里。
+     *
+     * 读也是 binder 调用，必须放后台线程。
+     *
+     * 颜色跟着结论走：确凿关掉是绿的，开着是正常色，**判不了是弱文字**——
+     * 判不了的时候不能给一个看着像「有结论」的颜色。
+     */
+    private fun readIssStateAsync(view: TextView) {
+        Thread {
+            val state = com.cardesk.launcher.vehicle.VehicleController.readIssState()
+            val text: String
+            val color: Int
+            when {
+                state == null -> {
+                    text = "车控通道未就绪"
+                    color = pal.textDim
+                }
+                state.isOn == false -> {
+                    text = state.label()
+                    color = pal.ok
+                }
+                state.isOn == true -> {
+                    text = state.label()
+                    color = pal.text
+                }
+                else -> {
+                    text = state.label()
+                    color = pal.textDim
+                }
+            }
+            post {
+                view.text = text
+                view.setTextColor(color)
+            }
+        }.apply {
+            name = "iss-state"
+            isDaemon = true
+        }.start()
     }
 
     /** 自动热点（case "hotspot"）。 */

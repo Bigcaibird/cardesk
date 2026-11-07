@@ -31,6 +31,7 @@ internal object VehicleLog {
         HvacIds.FUNC_360 -> "360全景"
         HvacIds.FUNC_360_VIEW -> "360视角"
         DriveMode.FUNCTION_DRIVE_MODE_SELECT -> "驾驶模式"
+        IssControl.FUNCTION_ENGINE_STOP_START -> "发动机启停"
         else -> "未知属性"
     }
 

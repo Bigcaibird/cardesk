@@ -26,6 +26,16 @@ class MockVehicleGateway(
     override val displayName: String = "模拟车辆"
     override var on360State: ((Boolean) -> Unit)? = null
 
+    /**
+     * 模拟的启停状态（`1` = 开着，`0` = 关闭）。
+     *
+     * 默认 `1`（开着）——和真车一样，启停默认是开着的，
+     * 桌面写 0 之后应该能读到 0，模拟器上才演示得出「关掉了」。
+     */
+    @Volatile
+    var simIssOn: Boolean = true
+        private set
+
     private val listeners = CopyOnWriteArrayList<(Int, Int, Int) -> Unit>()
     private var car = HvacState()
     private var connected = false
@@ -143,6 +153,10 @@ class MockVehicleGateway(
         }
         Logx.d(LogTags.VEHICLE, "模拟车辆写入功能", "func" to VehicleLog.hex(func), "name" to VehicleLog.funcName(func), "value" to value)
         if (func == DriveMode.FUNCTION_DRIVE_MODE_SELECT) driveModeValue = value
+        if (func == IssControl.FUNCTION_ENGINE_STOP_START) {
+            simIssOn = value != 0
+            Logx.event(LogTags.VEHICLE, "模拟车辆切换启停", "on" to simIssOn)
+        }
         if (func == TripSignals.FUNCTION_TRIP_RESET && value == 1) {
             resetMockTrip2()
             return true
@@ -159,6 +173,18 @@ class MockVehicleGateway(
 
     override fun readFunction(func: Int): Int? = when (func) {
         DriveMode.FUNCTION_DRIVE_MODE_SELECT -> driveModeValue
+        IssControl.FUNCTION_ENGINE_STOP_START -> if (simIssOn) IssControl.ON else IssControl.OFF
+        else -> null
+    }
+
+    /**
+     * 模拟通道的支持探针。
+     *
+     * 启停这一条返回 `true`——模拟器上要能演示「固件支持 → 写 → 回读确认」整条链路。
+     * 其余功能号返回 null（判不了），与真车通道「探不到就当支持」的老口径一致。
+     */
+    override fun isFunctionSupported(func: Int, zone: Int): Boolean? = when (func) {
+        IssControl.FUNCTION_ENGINE_STOP_START -> true
         else -> null
     }
 

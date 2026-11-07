@@ -3400,3 +3400,119 @@ return false
 - **原车桥的白名单里没有酷我 / 酷狗**（只有 QQ音乐车机版/手机版、网易云、汽水）——
   桌面选的是这两家时原车桥**会忽略**按键，要支持得先在真机上验证它们发不发会话。
 - **没有发 GitHub Release、没有传 R2**（等明确指示）。
+
+## 第132轮：启停开关接上执行端（之前它只存了个开关）
+
+### 1. 之前是什么状态
+
+设置 → 车控 → **启停控制** 那一页只有一个开关「开机后自动关闭启停」。
+它做的事只有一件：把 `iss_keep_enabled` 写进 SharedPreferences。
+
+**全仓没有任何代码读这个键** —— `git log -S issKeepEnabled` 只命中首次提交
+`22d5b75`，也就是说从项目第一天起就**没有过执行端**。
+
+现象：开关能点、能持久化、能写日志，**车机上的启停一点没变**。
+那一页原本还有一句说明「开机后自动关闭启停的状态会保存到 iss_keep_enabled 配置项。」，
+在第 97~99 轮的「设置文案精简」里被删掉了——它本来就在如实告诉用户「这只是存个配置项」。
+
+按 `analysis/compare/cardesk-features.md` 自己的判据，这叫「仅设置项」。
+
+### 2. 文档口径：这个功能**能写**
+
+| 东西 | 值 | 出处 |
+| --- | --- | --- |
+| 功能号 | `537002240`（`0x20020100`） | `IVehicle.SETTING_FUNC_ENGINE_STOP_START` |
+| 读 | `getPaSsActivation` | `CarFunctionValueImpl.java:429` |
+| 写 | `setCbSsActivation` | `CarFunctionValueImpl.java:1247` |
+| 值域 | `{0, 1}` | `docs/ecarx-adapterapi/data/value-domain.md:32` |
+| 支持探针 | `isFunctionSupported` → `PaSsActivation.availability` | `CarFunctionSupportedUtil.java:356` |
+
+原厂桌面（`com.claunchercard` 的 `DriveModeController`）用的就是这个功能号：
+
+- `:21` `FUNCTION_ENGINE_STOP_START = 537002240`
+- `:273` `isIssOn()` → `getFunctionValue(...) == 1`
+- `:511` `setIssEnabled(z)` → `setFunctionValue(..., z ? 1 : 0)`
+
+**语义**：`1` = 启停开着，`0` = 启停关闭。
+
+另一条看着很像的路走不通：驾驶模式里的
+`IDriveMode.DM_FUNC_DM_CUSTOM_EN_START_STOP`（`0x22030E00`）在厂商 jar 里
+**没有实现**（`func-map.csv` 里 0 行）。
+
+### 3. 读侧有个坑：厂商的默认值是 1
+
+`CarFunctionValueUtil.getMappedFunctionValue(PaSsActivation)`：
+
+```java
+if (pa == null || pa.data == null) {
+    Logger.w(TAG, "pa is null, returning defaultValue:1");
+    return 1;                       // ← 信号缺失时返回 1，不是错误哨兵
+}
+```
+
+所以「读到 1」是**二义的**：可能确实开着，也可能根本**没这条信号**、
+厂商拿默认值 1 兜住了。
+
+`IssControl.State.isOn` 因此按三档判：
+
+| raw | supported | 结论 |
+| --- | --- | --- |
+| 0 | 任意 | **确凿关闭**（信号缺失只会返回 1，能读到 0 就是真关了） |
+| 1 | `true` | **确凿开启** |
+| 1 | `false` / `null` | **判不了** |
+
+页面上的状态行也跟着这个口径走：**判不了就说「启停状态读不到」**，
+颜色用弱文字——不能把「读不到」显示成一个看着像「有结论」的绿字。
+
+### 4. 实现
+
+| 文件 | 改了什么 |
+| --- | --- |
+| `vehicle/IssControl.kt`（新） | 功能号常量、读（支持探针 + 原始值）、写、状态判定与文案 |
+| `vehicle/VehicleController.kt` | `setIssEnabled(on, onResult)`（写完回读确认，最多等 1.2s）、`readIssState()` |
+| `vehicle/MockVehicleGateway.kt` | 模拟车也有启停状态（默认开着），支持探针返回 `true` |
+| `vehicle/VehicleLog.kt` | 日志里 `0x20020100` 显示为「发动机启停」（原来「未知属性」） |
+| `ui/SettingsOverlay.kt` | 开关打开→**立刻**关掉启停；关掉→**不动车机**；加状态行与「立即关闭/开启启停」「刷新状态」 |
+| `BootReceiver.kt` | 开机广播里按 `iss_keep_enabled` 应用一次（等通道就绪，最多 30s） |
+
+**「关闭则不改动车机逻辑」是照副标做的**：开关关掉时只改本地开关，
+不往车机写任何东西；想改回来用页面上的「立即开启启停」。
+
+**开机那条为什么要自己 init 车控**：`VehicleController.init` 平时是 `LauncherView` 建的，
+而 LauncherView 依附于 MainActivity —— Android 10+ 禁止后台启动 Activity，
+开机广播里那次 `startActivity` **可能失败**。桌面起不来 = 车控通道永远不初始化
+= 启停永远关不掉。所以 `BootReceiver` 主动 init 一次
+（`init` 本身幂等，`if (initialized) return`，后面 LauncherView 再调一次没有副作用）。
+
+### 5. 模拟器实测（API 28，`emulator-5558`）
+
+证据：`emu-verify/y132/r132-logcat-iss.txt`、`emu-verify/y132/r132-iss-closed.png`、
+`emu-verify/y132/r132-iss-page.png`、`emu-verify/y132/r132-iss-off-confirmed.png`；
+逐条验证报告见 `emu-verify/y132/REPORT-y132.md`。
+
+| # | 操作 | 期望 | 实测 |
+| --- | --- | --- | --- |
+| 1 | 打开「开机后自动关闭启停」 | 立刻写 `0` 并回读确认 | ✅ `设置变更 key=iss_keep_enabled from=false to=true` → `写入启停状态 func=0x20020100 value=0 target=关闭 ok=true` → `confirmed=true` → 回读 `raw=0 isOn=false` |
+| 2 | 点「立即开启启停」 | 写 `1` 并回读确认 | ✅ `value=1 target=开启 ok=true` → `confirmed=true` → 回读 `raw=1 isOn=true` |
+| 3 | 点「立即关闭启停」 | 写 `0` 并回读确认 | ✅ `value=0 target=关闭 ok=true` → 回读 `raw=0 isOn=false` |
+| 4 | 关掉开关 | **只改本地开关，不碰车机** | ✅ 只有 `设置变更 key=iss_keep_enabled from=true to=false`，**无任何写入** |
+| 5 | 开机广播（开关开） | 开机自动关一次启停 | ✅ `收到开机广播` → `初始化车控` → `写入启停状态 value=0 ok=true` → `开机自动关闭启停 ok=true detail=已关闭启停` |
+| 6 | 开机广播（开关关） | 开机不碰车机 | ✅ 只有 `收到开机广播` / `开机广播已拉起桌面`，**无启停写入** |
+
+**单测**：全量 **1765 项全绿**（第131轮 1750 → +15），新增
+`vehicle/IssControlTest.kt`（15 项，含「读到 1 但信号缺失 ⇒ 判不了」这条）。
+
+### 6. 已知限制（**真车还没验**）
+
+- **模拟器验的是通道与逻辑，不是真车的启停行为** —— 真车能不能真的关掉启停、
+  写进去有没有被整车状态机接受，要在真车上看这几行日志：
+  `写入启停状态` / `启停写入已下发`（`confirmed` 是不是 `true`）/ `开机自动关闭启停`。
+- **只写一次可能不够**：启停功能通常在**每次上电/点火后**由整车状态机复位，
+  只在开机广播里写一次 `0`，用户中途熄火再点火后可能又被打开。
+  稳妥做法是盯 `PaSsActivationChangedCallback`（jar 里有），
+  状态被改回 `1` 时再补写一次 —— 这一版**没做**。
+- **`confirmed=false` 不等于失败**：厂商写接口返回 `true` 只代表信号收下了，
+  回读确认不了时页面会明说「已下发启停指令，但这台车机回读没确认」，
+  不谎报成功。
+- **`ENGINE_START_STOP_STATE` 传感器事件（`0x00201700`）在 jar 里未实现**，
+  所以「当前启停运行状态」只能靠 `getPaSsActivation` 这条设置侧的路。

@@ -58,6 +58,61 @@ class BootReceiver : BroadcastReceiver() {
         runCatching { com.cardesk.launcher.core.dock.GlobalDockService.ensureStarted(context) }
             .onFailure { Logx.w(LogTags.DOCK, "开机启动全局 Dock 失败", it) }
         applyAdbAutoStart(context)
+        applyIssAutoStart(context)
+    }
+
+    /**
+     * 开机自动关闭启停（ISS）。
+     *
+     * ## 为什么要在这里等
+     *
+     * 车控通道是**异步连上**的：开机广播发出来的时候，
+     * `AdaptapiGateway` 往往还没拿到 `ICarFunction` 句柄。
+     * 这时候直接写会被拒（「拿不到句柄」），所以这里轮询等通道就绪，
+     * 最多等 [ISS_BOOT_TIMEOUT_MS]。
+     *
+     * ## 为什么要自己 init 车控
+     *
+     * `VehicleController.init` 平时是 `LauncherView` 建的，而 LauncherView 依附于
+     * MainActivity —— Android 10+ 禁止后台启动 Activity，
+     * 上面那次 `startActivity` **可能失败**：
+     * 桌面起不来 = 车控通道永远不初始化 = 启停永远关不掉。
+     * 所以这里主动 init 一次（`init` 本身幂等，`if (initialized) return`，
+     * 后面 LauncherView 再调一次不会有副作用）。
+     *
+     * ## 只在开关打开时才动
+     *
+     * `iss_keep_enabled` 关着 = 用户明确表示「别碰车机启停」，
+     * 这里就什么都不做。
+     */
+    private fun applyIssAutoStart(context: Context) {
+        val app = context.applicationContext
+        val prefs = Prefs(app)
+        if (!prefs.issKeepEnabled) return
+        Thread {
+            runCatching { com.cardesk.launcher.vehicle.VehicleController.init(app, prefs) }
+                .onFailure { Logx.w(LogTags.VEHICLE, "开机初始化车控失败", it) }
+            var waited = 0L
+            while (waited < ISS_BOOT_TIMEOUT_MS) {
+                val gw = if (com.cardesk.launcher.vehicle.VehicleController.initialized) {
+                    runCatching { com.cardesk.launcher.vehicle.VehicleController.gateway }.getOrNull()
+                } else {
+                    null
+                }
+                if (gw != null && runCatching { gw.isServiceConnected() }.getOrDefault(false)) {
+                    com.cardesk.launcher.vehicle.VehicleController.setIssEnabled(false) { ok, msg ->
+                        Logx.i(LogTags.VEHICLE, "开机自动关闭启停", "ok" to ok, "detail" to msg)
+                    }
+                    return@Thread
+                }
+                Thread.sleep(ISS_BOOT_POLL_MS)
+                waited += ISS_BOOT_POLL_MS
+            }
+            Logx.w(LogTags.VEHICLE, "开机自动关闭启停超时：车控通道一直没连上")
+        }.apply {
+            name = "iss-boot"
+            isDaemon = true
+        }.start()
     }
 
     /**
@@ -86,5 +141,13 @@ class BootReceiver : BroadcastReceiver() {
             name = "adb-boot"
             isDaemon = true
         }.start()
+    }
+
+    private companion object {
+        /** 等车控通道就绪的最长时间（毫秒）。 */
+        const val ISS_BOOT_TIMEOUT_MS = 30_000L
+
+        /** 轮询间隔（毫秒）。 */
+        const val ISS_BOOT_POLL_MS = 500L
     }
 }

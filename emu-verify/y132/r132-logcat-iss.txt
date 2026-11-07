@@ -1,0 +1,31 @@
+--------- beginning of system
+--------- beginning of main
+11-07 11:59:42.736 20539 20539 I CarDesk/Setting: 设置变更 key=iss_keep_enabled name=开机后自动关闭启停 from=false to=true
+11-07 11:59:42.736 20539 20539 I CarDesk/Setting: [EVT] 写启停 target=关闭
+11-07 11:59:42.736 20539 20539 I CarDesk/Setting: 设置已应用
+11-07 11:59:42.737 20539 20659 D CarDesk/Vehicle: 模拟车辆写入功能 func=0x20020100 name=发动机启停 value=0
+11-07 11:59:42.737 20539 20659 I CarDesk/Vehicle: [EVT] 模拟车辆切换启停 on=false
+11-07 11:59:42.737 20539 20659 I CarDesk/Vehicle: 写入启停状态 func=0x20020100 value=0 target=关闭 ok=true reason=null
+11-07 11:59:42.737 20539 20659 I CarDesk/Vehicle: 启停写入已下发 target=关闭 written=true confirmed=true channel=mock reason=null
+11-07 11:59:42.762 20539 20660 D CarDesk/Vehicle: 读取启停状态 func=0x20020100 supported=true raw=0 isOn=false
+11-07 11:59:45.860 20539 20539 I CarDesk/Setting: [EVT] 写启停 target=开启
+11-07 11:59:45.861 20539 20671 D CarDesk/Vehicle: 模拟车辆写入功能 func=0x20020100 name=发动机启停 value=1
+11-07 11:59:45.861 20539 20671 I CarDesk/Vehicle: [EVT] 模拟车辆切换启停 on=true
+11-07 11:59:45.861 20539 20671 I CarDesk/Vehicle: 写入启停状态 func=0x20020100 value=1 target=开启 ok=true reason=null
+11-07 11:59:45.861 20539 20671 I CarDesk/Vehicle: 启停写入已下发 target=开启 written=true confirmed=true channel=mock reason=null
+11-07 11:59:45.863 20539 20672 D CarDesk/Vehicle: 读取启停状态 func=0x20020100 supported=true raw=1 isOn=true
+11-07 11:59:48.978 20539 20539 I CarDesk/Setting: [EVT] 写启停 target=关闭
+11-07 11:59:48.979 20539 20683 D CarDesk/Vehicle: 模拟车辆写入功能 func=0x20020100 name=发动机启停 value=0
+11-07 11:59:48.979 20539 20683 I CarDesk/Vehicle: [EVT] 模拟车辆切换启停 on=false
+11-07 11:59:48.979 20539 20683 I CarDesk/Vehicle: 写入启停状态 func=0x20020100 value=0 target=关闭 ok=true reason=null
+11-07 11:59:48.979 20539 20683 I CarDesk/Vehicle: 启停写入已下发 target=关闭 written=true confirmed=true channel=mock reason=null
+11-07 11:59:48.981 20539 20684 D CarDesk/Vehicle: 读取启停状态 func=0x20020100 supported=true raw=0 isOn=false
+
+===== 开机路径（iss_keep_enabled=true）=====
+11-07 11:59:58.889 20709 20709 I CarDesk/App: 收到开机广播 action=android.intent.action.BOOT_COMPLETED bootMs=233805829
+11-07 11:59:58.910 20709 20709 I CarDesk/App: 开机广播已拉起桌面 bootMs=233805849
+11-07 11:59:58.966 20709 20729 D CarDesk/Vehicle: 模拟车辆写入功能 func=0x20020100 name=发动机启停 value=0
+11-07 11:59:58.966 20709 20729 I CarDesk/Vehicle: [EVT] 模拟车辆切换启停 on=false
+11-07 11:59:58.966 20709 20729 I CarDesk/Vehicle: 写入启停状态 func=0x20020100 value=0 target=关闭 ok=true reason=null
+11-07 11:59:58.967 20709 20729 I CarDesk/Vehicle: 启停写入已下发 target=关闭 written=true confirmed=true channel=mock reason=null
+11-07 11:59:59.100 20709 20709 I CarDesk/Vehicle: 开机自动关闭启停 ok=true detail=已关闭启停
