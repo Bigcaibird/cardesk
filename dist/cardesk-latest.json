@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1133",
-  "versionCode": 4229,
-  "tag": "v1.0.1133",
-  "name": "CarDesk 4229 / 1.0.1133-system",
-  "notes": "修复画中画黑屏：判据换成「承载任务的 Activity 还挂在我们的 VirtualDisplay 上」（像素采样看不见 ActivityView 画面，实测会把正常的高德误判成黑屏），自愈改为分级：重发启动 → 重建承载面 → 放弃，桌面不在前台时不抢回应用",
-  "publishedAt": "2026-11-07T02:51:53Z",
+  "version": "1.0.1134",
+  "versionCode": 4230,
+  "tag": "v1.0.1134",
+  "name": "CarDesk 4230 / 1.0.1134-system",
+  "notes": "没打开任何播放器时按方控播放，改为控制桌面默认选定的播放器（卡片来源行 → 设置页默认媒体源 → 记住的播放器 → 默认音乐应用列表），不再打开爱趣听；车机原厂音源不由我们接管",
+  "publishedAt": "2026-11-07T03:23:00Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4229.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4229.apk",
-    "size": 2263290,
-    "sha256": "965606aa6615b4b5f383d5cd477ab2a434003f26e39032d898e4e79303b460b7"
+    "name": "CarDesk-platform-ecarx-cardesk-4230.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4230.apk",
+    "size": 2266222,
+    "sha256": "c0cbca5a2b13c9cc993fdc2c3c59027a40822fb7bcd8f25af5e6b2857dd47f52"
   }
 }

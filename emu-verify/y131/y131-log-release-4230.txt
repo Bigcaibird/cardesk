@@ -1,0 +1,4 @@
+11-07 11:25:20.068  6275  6275 I CarDesk/Media: OEM 媒体桥兜底方控目标已更新 target=com.tencent.qqmusiccar
+11-07 11:25:24.590  6351  6351 I CarDesk/Media: OEM 媒体桥兜底方控目标已更新 target=com.tencent.qqmusiccar
+11-07 11:25:34.929  6351  6351 I CarDesk/Media: 播放指令（无会话）：走桌面选定的媒体源 pkg=com.tencent.qqmusiccar remembered=com.cardesk.ncprobe
+11-07 11:25:35.073  6351  6351 I CarDesk/Media: QQ 音乐方控命令 action=play ok=true

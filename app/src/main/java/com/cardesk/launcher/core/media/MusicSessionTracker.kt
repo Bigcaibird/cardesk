@@ -1567,6 +1567,29 @@ class MusicSessionTracker private constructor() {
                 )
                 return ok
             }
+            // —— 第131轮：**没有会话时把目标播放器拉起来** ——
+            //
+            // 真车现象（用户报的）：没打开任何第三方播放器时按方向盘播放键，
+            // **打开的是爱趣听**（车机原厂音源），而不是桌面选定的那个播放器。
+            //
+            // 原因就在这个分支以前的位置：目标播放器**没在运行** → 没有它的
+            // MediaSession → `controller == null` → 以前直接「已过期，忽略」，
+            // **按键落进了空里** → 原车只好自己把爱趣听拉起来。
+            //
+            // 现在：把目标播放器拉起来（让它自己开始播），方控才真的作用在它身上。
+            //
+            // 车机原厂音源（爱趣听一类）**不由我们接管** —— 那是原车自己的 owner
+            // （见 MediaBridgePolicy 顶部的红线），保持原样。
+            if (action == MediaButtonTransport.ACTION_PLAY &&
+                PlayTarget.noSessionAction(source) == PlayTarget.NoSessionAction.SELECTED_SOURCE
+            ) {
+                val ok = launchMusicApp(source)
+                Logx.i(
+                    LogTags.MEDIA, "OEM 方控回调：没有会话，拉起目标播放器",
+                    "action" to action, "source" to source, "ok" to ok,
+                )
+                return ok
+            }
             Logx.i(
                 LogTags.MEDIA, "OEM 方控回调已过期，忽略",
                 "action" to action, "source" to source,
@@ -2039,6 +2062,48 @@ class MusicSessionTracker private constructor() {
             main.postDelayed({ fallbackLaunchMusicApp(resumePkg) }, RESUME_LAUNCH_FALLBACK_MS)
             return
         }
+        // —— 第131轮：目标优先用「桌面选定的媒体源」 ——
+        //
+        // 用户诉求：「没打开任何播放器时按播放，让方控控制桌面默认选定的播放器，
+        // 而不是打开爱趣听」。
+        //
+        // 以前这里的目标是「记住的上次播放器」—— 那是**历史**。
+        // 真车诊断包实测就是这种错位：用户选了 QQ 音乐，
+        // 上次播的却是车机原厂音源 → 按播放打开的是原厂音源。
+        //
+        // 现在目标按 [PlayTarget.resolve] 的优先级来（卡片来源行 → 设置页默认源 →
+        // 记住的播放器 → 默认音乐应用列表），而且**原厂音源不由我们接管**。
+        val selected = selectedSourcePkg()
+        val target = PlayTarget.resolve(
+            currentSourcePkg = selected.first,
+            defaultSourcePkg = selected.second,
+            rememberedPkg = pkg,
+            defaultPackages = MediaSources.DEFAULT_MUSIC_PACKAGES,
+            isInstalled = ::isPackageInstalled,
+        )
+        if (PlayTarget.noSessionAction(target) == PlayTarget.NoSessionAction.SELECTED_SOURCE) {
+            Logx.i(
+                LogTags.MEDIA, "播放指令（无会话）：走桌面选定的媒体源",
+                "pkg" to target, "remembered" to pkg,
+            )
+            // —— QQ 音乐车机版走它自己的三方协议 ——
+            //
+            // `qqmusiccar://?action=20&m0=N` 才会**真的开始播**
+            // （广播通道的 action=0/2/3 只会把界面打开，不会播），
+            // 而且 QQ 音乐没在运行时它会自己把 App 拉起来 ——
+            // 这正是「按播放」该有的样子。
+            val viaQq = PlayTarget.isQqTarget(target) &&
+                broadcastControl?.invoke(MediaButtonTransport.ACTION_PLAY) == true
+            if (!viaQq) {
+                // 其它播放器：先给目标发一路**定向**播放事件（有些 App 收到就会接着放），
+                // 再把它拉起来 —— 没运行时只有拉起来才谈得上「控制」。
+                sendTargetedPlayEvent(target, "无会话：桌面选定的媒体源")
+                launchMusicApp(target)
+            }
+            applyOptimisticTransport(true)
+            rescanNow()
+            return
+        }
         if (!customPlayFlag && !isAiqutingPkg(pkg)) {
             Logx.i(LogTags.MEDIA, "播放指令（无会话）：打开默认音乐应用", "pkg" to pkg)
             // —— 第六十八轮：先给「上一次使用的播放器」发一个**定向**播放事件。
@@ -2111,6 +2176,66 @@ class MusicSessionTracker private constructor() {
     }
 
     /**
+     * 桌面**选定的媒体源** → 包名（第131轮）。
+     *
+     * 两个来源：
+     * - 卡片上当前选定的来源（`design_music_source_v1` / [Prefs.musicSource]）
+     *   —— 用户在音乐卡的来源行里选的那个，桌面上一眼能看见；
+     * - 设置页的「默认媒体源」（`default_music_source_v1` / [Prefs.defaultMusicSource]）
+     *   —— 桌面启动时锁定的那个（第 1 条是「通用音乐」时用它）。
+     *
+     * 「通用音乐 / 蓝牙 / USB」这些**没有对应 App** → 返回空
+     * （交给 [PlayTarget.resolve] 的后面几级兜底）。
+     *
+     * @return `(卡片来源的包, 设置页默认源的包)`，没有的用空串
+     */
+    private fun selectedSourcePkg(): Pair<String, String> {
+        val ctx = appContext ?: return "" to ""
+        val prefs = runCatching { Prefs(ctx) }.getOrNull() ?: return "" to ""
+        val currentId = runCatching { prefs.musicSource }.getOrDefault("")
+        val defaultId = runCatching { prefs.defaultMusicSource }.getOrDefault("")
+        val current = resolveSourcePkg(currentId)
+        val default = resolveSourcePkg(defaultId)
+        return current to default
+    }
+
+    /** 来源 id → 包名（没装 / 通用音乐 / 蓝牙 / USB → 空串）。 */
+    private fun resolveSourcePkg(sourceId: String): String {
+        if (sourceId.isEmpty()) return ""
+        return MediaSources.resolveDefaultPackage(sourceId, ::isPackageInstalled).orEmpty()
+    }
+
+    /** 这个包装了没（且有启动入口）。 */
+    private fun isPackageInstalled(pkg: String): Boolean {
+        val ctx = appContext ?: return false
+        return runCatching {
+            ctx.packageManager.getLaunchIntentForPackage(pkg) != null
+        }.getOrDefault(false)
+    }
+
+    /**
+     * 把某个音乐 App 拉起来（第131轮）。
+     *
+     * @param pkg 目标包名
+     * @return 是否真的拉起来了
+     */
+    private fun launchMusicApp(pkg: String): Boolean {
+        val ctx = appContext ?: return false
+        val target = pkg.trim()
+        if (target.isEmpty()) return false
+        return runCatching {
+            // appContext 是 Application 上下文 —— 从它启动 Activity 必须带 NEW_TASK，
+            // 否则系统抛「Calling startActivity() from outside of an Activity context」。
+            val intent = ctx.packageManager.getLaunchIntentForPackage(target) ?: return false
+            ctx.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            true
+        }.getOrElse {
+            Logx.w(LogTags.MEDIA, "音乐应用启动失败", it, "pkg" to target)
+            false
+        }
+    }
+
+    /**
      * 打开默认音乐应用。
      *
      * 包候选顺序：`com.tencent.qqmusiccar` → `com.tencent.wecarflow`
@@ -2134,16 +2259,9 @@ class MusicSessionTracker private constructor() {
             Logx.w(LogTags.MEDIA, "没有可用的默认音乐应用")
             return
         }
-        runCatching {
-            // appContext 是 Application 上下文 —— 从它启动 Activity 必须带 NEW_TASK，
-            // 否则系统抛「Calling startActivity() from outside of an Activity context」。
-            ctx.packageManager.getLaunchIntentForPackage(pkg)?.let {
-                ctx.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            }
-        }.onFailure {
-            Logx.w(LogTags.MEDIA, "默认音乐应用启动失败", it, "pkg" to pkg)
-        }
-        Logx.i(LogTags.MEDIA, "已打开默认音乐应用", "pkg" to pkg)
+        // 第131轮：实际拉起走 [launchMusicApp]（和方控那条路同一套动作）
+        val ok = launchMusicApp(pkg)
+        Logx.i(LogTags.MEDIA, "已打开默认音乐应用", "pkg" to pkg, "ok" to ok)
     }
 
     /**

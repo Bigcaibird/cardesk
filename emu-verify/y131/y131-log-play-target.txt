@@ -1,0 +1,2 @@
+11-07 11:18:25.896  6066  6066 I CarDesk/Media: 播放指令（无会话）：走桌面选定的媒体源 pkg=com.tencent.qqmusiccar remembered=com.cardesk.ncprobe
+11-07 11:18:25.984  6066  6066 I CarDesk/Media: QQ 音乐方控命令 action=play ok=true
