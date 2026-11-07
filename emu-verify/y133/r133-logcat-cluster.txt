@@ -1,0 +1,19 @@
+=== CarDesk/Cluster 日志 ===
+11-07 14:26:40.785 23938 23938 I CarDesk/Cluster: 没有可投的目标屏 reason=service-created displays=0 wantId=-1 wantName= cause=no-secondary-display
+11-07 14:26:40.790 23938 23938 I CarDesk/Cluster: 没有可投的目标屏 reason=start-command displays=0 wantId=-1 wantName= cause=no-secondary-display
+
+=== 服务进程状态 ===
+  * ServiceRecord{ddb6aa9 u0 com.cardesk.launcher/.cluster.ClusterLyricsService}
+    intent={cmp=com.cardesk.launcher/.cluster.ClusterLyricsService}
+    packageName=com.cardesk.launcher
+    processName=com.cardesk.launcher
+    baseDir=/data/app/com.cardesk.launcher-fGu0AszuEmRgH2tWN_R76Q==/base.apk
+    dataDir=/data/user/0/com.cardesk.launcher
+
+=== 通知 ===
+    NotificationRecord(0x08b9fffa: pkg=com.cardesk.launcher user=UserHandle{0} id=754 tag=null importance=2 key=0|com.cardesk.launcher|754|null|10119appImportanceLocked=false: Notification(channel=cardesk_cluster_lyrics pri=0 contentView=null vibrate=null sound=null defaults=0x0 flags=0x62 color=0x00000000 actions=1 vis=PRIVATE))
+      uid=10119 userId=0
+      icon=Icon(typ=RESOURCE pkg=com.cardesk.launcher id=0x7f010000) / com.cardesk.launcher:drawable/ic_cardesk
+--
+      effectiveNotificationChannel=NotificationChannel{mId='cardesk_cluster_lyrics', mName=仪表歌词投射, mDescription=hasDescription , mImportance=2, mBypassDnd=false, mLockscreenVisibility=-1000, mSound=content://settings/system/notification_sound, mLights=false, mLightColor=0, mVibration=null, mUserLockedFields=0, mFgServiceShown=true, mVibrationEnabled=false, mShowBadge=false, mDeleted=false, mGroup='null', mAudioAttributes=AudioAttributes: usage=USAGE_NOTIFICATION content=CONTENT_TYPE_SONIFICATION flags=0x0 tags= bundle=null, mBlockableSystem=false}
+      mAdjustments=[]

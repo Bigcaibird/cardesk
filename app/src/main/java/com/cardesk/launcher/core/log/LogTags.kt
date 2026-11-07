@@ -35,6 +35,7 @@ package com.cardesk.launcher.core.log
  * | `CarDesk/Sys` | 系统能力：policy_control / overscan / 状态栏 / 导航栏 |
  * | `CarDesk/Theme` | 日夜模式 / 主题 |
  * | `CarDesk/Float` | 浮窗 |
+ * | `CarDesk/Cluster` | 仪表歌词投射：选屏、加窗、喂数、失败退避 |
  * | `CarDesk/Log` | 日志系统自身（导出、滚动、失败） |
  */
 object LogTags {
@@ -62,11 +63,13 @@ object LogTags {
     const val SYS = "CarDesk/Sys"
     const val THEME = "CarDesk/Theme"
     const val FLOAT = "CarDesk/Float"
+    const val CLUSTER = "CarDesk/Cluster"
     const val LOG = "CarDesk/Log"
 
     /** 全部 tag（导出诊断包时列出，方便排查「哪个域没日志」）。 */
     val ALL: List<String> = listOf(
         APP, VEHICLE, HVAC, CAM360, WINDOW, SIGNAL, MEDIA, AMBIENT, MUSIC_UI, NAV_UI,
-        SCENE, DOCK, DRAWER, SETTING, TASK, LAN, APK_STORE, WEATHER, KEYS, SYS, THEME, FLOAT, LOG,
+        SCENE, DOCK, DRAWER, SETTING, TASK, LAN, APK_STORE, WEATHER, KEYS, SYS, THEME, FLOAT,
+        CLUSTER, LOG,
     )
 }

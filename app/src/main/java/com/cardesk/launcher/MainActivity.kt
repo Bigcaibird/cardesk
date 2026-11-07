@@ -273,6 +273,21 @@ class MainActivity : Activity() {
         runCatching { com.cardesk.launcher.core.media.MusicController.get().start(applicationContext) }
             .onFailure { Logx.w(LogTags.MEDIA, "媒体会话启动失败", it) }
 
+        // 仪表歌词投射（第一百三十三轮）：桌面起来了就把投射服务拉起来。
+        //
+        // ## 为什么放在这里而不是「设置页勾开关时才起」
+        //
+        // 用户勾一次开关之后，下次开机总得还有词投出去 ——
+        // 而设置页是**启动后**才打开的，靠它拉服务意味着「开机不打开设置页 = 永远不投」。
+        // 桌面本身是开机就会起来的（HOME 应用），所以这里是最可靠的兜底点。
+        //
+        // 顺序放在 `MusicController.start` 之后：投射服务从 `MusicController` 取歌词，
+        // 媒体会话先起来，第一帧就能拿到歌名而不是「等待播放」。
+        //
+        // `apply` 内部只在开关开着时才起服务；开关关着时它等于空操作。
+        runCatching { com.cardesk.launcher.cluster.ClusterLyricsService.apply(applicationContext) }
+            .onFailure { Logx.w(LogTags.CLUSTER, "启动仪表歌词投射失败", it) }
+
         // 第125轮：**默认媒体源** —— 桌面启动时自动锁定用户在设置里指定的来源。
         //
         // 默认值是「通用音乐」（不锁包、跟随系统当前会话），所以默认状态下

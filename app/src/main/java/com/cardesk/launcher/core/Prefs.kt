@@ -755,9 +755,23 @@ class Prefs(context: Context) {
         get() = intValue("desk_overlay_w", 100).coerceIn(30, 100)
         set(value) = setIntValue("desk_overlay_w", value.coerceIn(30, 100))
 
-    /** Overlay 背景透明度百分比（`desk_overlay_bg_alpha`，默认 70，范围 0..100）。 */
+    /**
+     * Overlay 底板透明度百分比（`desk_overlay_bg_alpha`，默认 **0**，范围 0..100）。
+     *
+     * ## 默认为什么是 0（没有底板）
+     *
+     * 歌词是投到**仪表自己的画面**上的。仪表底色本来就是深色，
+     * 再压一块半透明深色底 = 一条灰蒙蒙的带子横在仪表中间，
+     * 反而把车速 / 档位那些信息衬得更脏。
+     *
+     * 所以默认**不画底板**：文字直接落在仪表画面上，
+     * 「胶囊 / 纯文字 / 发光」三种样式的差别只在字本身。
+     *
+     * 需要底板（比如仪表底色太亮、字看不清）时，用设置页的
+     * 「仪表背景透明度」把它拉上去即可 —— 滑杆还在，语义不变。
+     */
     var overlayBgAlpha: Int
-        get() = intValue("desk_overlay_bg_alpha", 70).coerceIn(0, 100)
+        get() = intValue("desk_overlay_bg_alpha", 0).coerceIn(0, 100)
         set(value) = setIntValue("desk_overlay_bg_alpha", value.coerceIn(0, 100))
 
     /** Overlay 主歌词字号（`desk_overlay_main_sp`，默认 28，范围 12..72）。 */
@@ -789,6 +803,48 @@ class Prefs(context: Context) {
     var clusterLyricSubColor: Int
         get() = intValue("desk_cluster_lyric_sub_color", 0)
         set(value) = setIntValue("desk_cluster_lyric_sub_color", value)
+
+    /**
+     * 歌词投射的目标屏 id（`desk_cluster_display_id`，默认 -1 = 没选过）。
+     *
+     * 存 id 是为了「同一块屏重启后还在」；但 id 会变（车机重连、副屏热插后
+     * 重新枚举出来的新 id），所以同时存了 [clusterDisplayName]，
+     * 真正认屏时以**名字唯一命中**为兜底（见 `DisplayPicker.pick`）。
+     *
+     * 注意：**主屏 id ≤ 0 永远不会成为目标**，
+     * 单屏设备上把歌词投到主屏会把桌面自己盖住。
+     */
+    var clusterDisplayId: Int
+        get() = intValue("desk_cluster_display_id", -1)
+        set(value) = setIntValue("desk_cluster_display_id", value)
+
+    /**
+     * 歌词投射的目标屏名字（`desk_cluster_display_name`，默认空）。
+     *
+     * 只在**名字唯一命中**时用来找回换了 id 的屏；
+     * 两块屏同名 ⇒ 宁可判不了也不猜（猜错会把歌词糊到副驾屏上）。
+     */
+    var clusterDisplayName: String
+        get() = stringValue("desk_cluster_display_name", "")
+        set(value) = setStringValue("desk_cluster_display_name", value)
+
+    /**
+     * 歌词面板可见行数（`desk_cluster_rows`，默认 3，范围 1..3）。
+     *
+     * 3 = 上一句 + 当前句 + 下一句；2 = 当前句 + 下一句；1 = 只有当前句。
+     */
+    var clusterRows: Int
+        get() = intValue("desk_cluster_rows", 3).coerceIn(1, 3)
+        set(value) = setIntValue("desk_cluster_rows", value.coerceIn(1, 3))
+
+    /**
+     * 歌词面板样式（`desk_cluster_style`，默认 `pill`）。
+     *
+     * 取值：`pill`（胶囊底板）/ `plain`（纯文字）/ `glow`（发光）。
+     */
+    var clusterStyle: String
+        get() = stringValue("desk_cluster_style", "pill")
+        set(value) = setStringValue("desk_cluster_style", value)
 
     // ------------------------------------------------------------------ 按键增强
 

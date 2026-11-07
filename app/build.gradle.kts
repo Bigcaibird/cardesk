@@ -53,6 +53,9 @@ android {
         targetSdk = 29
         versionCode = versionCodeOverride
         versionName = versionNameOverride.ifEmpty { "0.1.0" }
+        // 第一百三十三轮：仪表歌词投射的**真机式**验证需要 instrumented 测试
+        // （要真的建一块副屏、真的往上面加窗口）。
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     // 平台签名（AOSP platform 测试密钥，与参考 App 的 PLATFORM.RSA 同一指纹）
@@ -144,4 +147,9 @@ dependencies {
     // 刻意不引入任何运行时依赖：纯 framework API 实现，减小包体、也方便直接丢进 AOSP 源码树
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.12.2")
+    // instrumented 测试只用来验证「歌词窗口能挂到第二块屏上」这一件事。
+    // 只引 runner（JUnit4 入口 `androidx.test.runner.AndroidJUnit4` 就在这个包里），
+    // 不引 espresso / ext:junit —— 少一个依赖就少一处版本冲突，
+    // 而且版本必须压住：compileSdk 只有 29，太新的 androidx.test 会报 minCompileSdk 过高。
+    androidTestImplementation("androidx.test:runner:1.3.0")
 }

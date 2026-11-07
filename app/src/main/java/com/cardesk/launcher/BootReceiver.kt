@@ -59,6 +59,31 @@ class BootReceiver : BroadcastReceiver() {
             .onFailure { Logx.w(LogTags.DOCK, "开机启动全局 Dock 失败", it) }
         applyAdbAutoStart(context)
         applyIssAutoStart(context)
+        applyClusterLyricsStart(context)
+    }
+
+    /**
+     * 开机把「仪表歌词投射」服务拉起来（第一百三十三轮）。
+     *
+     * ## 为什么桌面起来之后还要再拉一次
+     *
+     * 桌面是 HOME 应用，冷启动一般会被系统拉起 → `MainActivity` 里已经起过一次。
+     * 但 Android 10+ 禁止后台启动 Activity，上面那次 `startActivity` **可能失败**
+     * （车机不主动 re-launch HOME 时尤其容易失败）；
+     * 桌面起不来 = `MainActivity.startLaunchServices` 跑不到 = 投射服务不会起来。
+     *
+     * 所以这里独立拉一次。开机广播的接收方在系统里有**临时白名单**
+     * （`BOOT_COMPLETED` 在 Android 8+ 的后台启动豁免名单里），
+     * 所以 `startService` 不会被后台执行限制挡掉。
+     *
+     * 失败不重试：服务自己带指数退避（1s → 30s），
+     * 屏还没热起来 / 悬浮窗权限还没生效时它会自己重连。
+     */
+    private fun applyClusterLyricsStart(context: Context) {
+        val app = context.applicationContext
+        if (!Prefs(app).clusterOverlayEnabled) return
+        runCatching { com.cardesk.launcher.cluster.ClusterLyricsService.apply(app) }
+            .onFailure { Logx.w(LogTags.CLUSTER, "开机启动仪表歌词投射失败", it) }
     }
 
     /**

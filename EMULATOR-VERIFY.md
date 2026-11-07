@@ -383,6 +383,81 @@ adb logcat -d | grep -E "手势：单指横滑翻页|切页 "
 > 所以关开关时**只能**改本地开关，往车机写「恢复原状」是越权。
 > 想改回来用页面上的「立即开启启停」。
 
+## H11. 第133轮新增（仪表盘歌词 · 副屏投射接上执行端）
+
+设置 → 仪表歌词 → **打开布局参数对话框…**。
+机制：把一个 `TYPE_APPLICATION_OVERLAY` 窗口加到**目标屏自己的** WindowManager 上
+（`createDisplayContext(display)` → `addView`）。
+
+证据文件：`emu-verify/y133/r133-cluster-cast.png`（**从第二块屏抓回来的真实画面**）、
+`emu-verify/y133/r133-cluster-settings.png`、`emu-verify/y133/r133-cluster-settings-on.png`、
+`emu-verify/y133/r133-logcat-cluster.txt`、`emu-verify/y133/r133-cluster-no-plate.png`；
+逐条验证报告：`emu-verify/y133/REPORT-y133.md`。
+离屏渲染（`preview/` 不入库，本机产物）：
+`preview/30-cluster-pill.png`、`preview/31-cluster-plain.png`、
+`preview/32-cluster-glow.png`、`preview/33-cluster-empty.png`、
+`preview/34-cluster-settings.png`、`preview/35-cluster-plate.png`。
+
+### H11.1 instrumented：真的造一块副屏投过去
+
+`app/src/androidTest/java/com/cardesk/launcher/cluster/ClusterLyricsCastTest.kt`
+（`adb shell am instrument -w -e class com.cardesk.launcher.cluster.ClusterLyricsCastTest
+com.cardesk.launcher.test/androidx.test.runner.AndroidJUnitRunner`）。
+
+用 `DisplayManager.createVirtualDisplay` 造一块 **1920×720@240dpi** 的副屏，
+背后接 `ImageReader` 把那块屏的画面抓回来。
+
+| # | 项 | 操作 | 期望 | 结果 |
+|---|---|---|---|---|
+| H93 | 造副屏 | `createVirtualDisplay(1920,720,240,flags=0)` | id > 0，出现在自己的 `getDisplays()` 里 | ✅ `ID 1` |
+| H94 | 选屏 | 偏好指到这块屏 | 选中它 | ✅ 报告 `已投射 · CarDesk 测试仪表 · ID 1` |
+| H95 | **加窗** | 服务 `createDisplayContext` + `addView` | 窗口挂到**那块屏**上 | ✅ 无异常；`ServiceRecord{… .cluster.ClusterLyricsService}` 在 |
+| H96 | **真的画上去了** | 从 `ImageReader` 抓一帧 | 有非全透明像素 | ✅ `opaque > 0`，抓回来的 PNG 里有胶囊底板 + 「等待播放」文字（`r133-cluster-cast.png`） |
+| H97 | 悬浮窗权限 | appop `SYSTEM_ALERT_WINDOW` | 不被 `canDrawOverlays` 拦 | ✅ 测试内用 `UiAutomation` 执行 `appops set … allow` |
+
+> **`VIRTUAL_DISPLAY_FLAG_PUBLIC` 不能用**：会被系统当成「屏幕共享 / 投屏」，
+> 要求 `CAPTURE_VIDEO_OUTPUT` 权限（普通应用拿不到）→ 直接 `SecurityException`。
+> 用 flags = 0 的**私有**虚拟屏：一样出现在自己的 `getDisplays()` 里，一样能挂窗口。
+>
+> **`createVirtualDisplay` 的公开签名是 `(name, w, h, dpi, surface, flags)`** ——
+> surface 在 flags **前面**（AOSP 内部那版反过来）；
+> 返回的 `VirtualDisplay` **不是** `android.view.Display` 的子类，要 `getDisplay()` 才拿得到屏。
+
+### H11.2 单屏模拟器（`emulator-5558`，只有主屏）
+
+| # | 项 | 操作 | 期望 | 结果 |
+|---|---|---|---|---|
+| H98 | 设置页 | 设置 → 仪表歌词 → 打开布局参数对话框… | 有投射目标 / 投射状态 / 位置 / 行数 / 样式 | ✅ `r133-cluster-settings.png` |
+| H99 | 开关打开 | 点「仪表 Overlay 歌词」 | 服务**立刻**起来 | ✅ `CarDesk/Cluster: 没有可投的目标屏 reason=service-created displays=0 wantId=-1 wantName= cause=no-secondary-display` |
+| H100 | 状态诚实 | 看「投射状态」 | 说清为什么投不出去 | ✅ 「状态：这台车机没有向应用暴露副屏（仪表可能由独立 SoC 驱动）」 |
+| H101 | **不往主屏投** | 单屏设备 | 主屏上**没有**歌词窗口 | ✅ `displays=0`；桌面截图上没有任何歌词浮层 |
+| H102 | 位置 / 行数 / 样式 | 拖滑杆、切样式 | 偏好立刻更新 | ✅ `desk_overlay_x` / `desk_overlay_y` / `desk_cluster_rows` / `desk_cluster_style` 落盘，服务 `restyle()` 原地改窗口 |
+| H103 | **前台服务** | 开关打开 | 服务是前台，不会在桌面转后台后被系统停掉 | ✅ `dumpsys activity services` → `isForeground=true foregroundId=754 foregroundNoti=Notification(channel=cardesk_cluster_lyrics pri=0 …)` |
+
+> **为什么必须是前台服务**：这个功能的用途就是「用户切到音乐 App 听歌时，仪表上还有词」，
+> 而切走之后桌面（HOME）就转入后台 —— Android 8+ 会把普通 Service 在约一分钟后停掉，
+> 歌词会自己消失。所以走 `startForegroundService` + 低优先级前台通知
+> （不出声、不弹横幅，带一个「停止投射」动作）。
+
+### H11.3 面板渲染（离屏 PNG，`preview/`）
+
+| # | 项 | 期望 | 结果 |
+|---|---|---|---|
+| H104 | 胶囊样式 | 三行：上一句(小) / 当前句(大，带擦除高亮) / 下一句(小) | ✅ `30-cluster-pill.png`：擦除边界在 45% 处，左右颜色不同 |
+| H105 | 纯文字样式 | 无底板 | ✅ `31-cluster-plain.png` |
+| H106 | 发光样式 | 字带同色光晕 | ✅ `32-cluster-glow.png`（halo 可见） |
+| H107 | 空态 | 「等待播放」**垂直居中** | ✅ `33-cluster-empty.png` |
+| H108 | 三行不重叠 | 三行基线各不相同 | ✅ 修掉了「行号 × 本行行高」那个累加 bug（重叠成一团） |
+| H111 | **默认没有灰底** | 底板透明度默认 0 | ✅ 抓回来的副屏画面里只剩文字，没有半透明灰带（`r133-cluster-cast.png`）；`preview/30-cluster-pill.png` 同理 |
+| H112 | 底板选项还在 | 「仪表背景透明度」拉到 70% | ✅ `preview/35-cluster-plate.png`：灰底回来了（仪表底色太亮时用） |
+
+### H11.4 稳定性
+
+| # | 项 | 期望 | 结果 |
+|---|---|---|---|
+| H109 | 不闪退 | 全程 pid 不变、无 FATAL | ✅ 无 `FATAL EXCEPTION` |
+| H110 | 单测 | 全量绿 | ✅ **1814 项全绿**（1765 → +49，新增 4 个 cluster 测试类） |
+
 ## I. 稳定性
 
 | # | 项 | 期望 | 结果 |

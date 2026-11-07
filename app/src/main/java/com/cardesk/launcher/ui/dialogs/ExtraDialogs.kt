@@ -13,6 +13,8 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.SeekBar
+import android.widget.Toast
+import com.cardesk.launcher.cluster.ClusterLyricsService
 import com.cardesk.launcher.core.Palette
 import com.cardesk.launcher.core.Prefs
 import com.cardesk.launcher.core.Shape
@@ -431,6 +433,24 @@ class RestartDialog(context: Context, pal: Palette) : DialogSheet(context, pal, 
  * 把这一页放在 SYSTEM tab「界面显示 → 仪表歌词」下，内容分三段
  * 仪表 Overlay（贴到副屏的歌词）、歌词颜色、桌面歌词字号。
  * 这里的滑块全部按**区间与默认值**实现，单位文案也照抄。
+ *
+ * ## 第一百三十三轮：接上执行端
+ *
+ * 这一页以前只有一堆**只写偏好、不执行**的滑杆：勾上「仪表 Overlay 歌词」，
+ * 桌面上什么都不会发生 —— 因为当时整个 App 里根本没有第二个窗口能加到副屏上。
+ *
+ * 现在补齐了从「设置」到「屏上真的有字」的最后一公里：
+ *
+ * - **投射目标**：列出这台车机**实际暴露给应用**的屏，点一块就选中；
+ *   列表为空 ⇒ 这台车机根本没把副屏开放给第三方应用（仪表多由独立 SoC 驱动），
+ *   直接把这句话说给用户听，而不是让用户对着一堆无效滑杆猜。
+ * - **投射状态**：直接显示服务最后一次结果（成功 / 失败原因 / 歌词行数）。
+ * - **位置与行数**：这两个偏好键以前**根本没有 UI**（`desk_overlay_x` /
+ *   `desk_overlay_y` 只有写入方没有读取方），这里补上滑杆。
+ * - **样式**：胶囊 / 纯文字 / 发光。
+ *
+ * 改完**立刻**生效：滑杆拖动时就地改窗口（`ClusterLyricsService.refresh`），
+ * 不用等「应用」按钮 —— 拖着滑杆时副屏上的面板跟着走才是对的反馈。
  */
 class DesktopLayoutDialog(
     context: Context,
@@ -439,6 +459,23 @@ class DesktopLayoutDialog(
 ) : DialogSheet(context, pal, 980, 900, "仪表歌词") {
 
     var onApplied: (() -> Unit)? = null
+
+    /**
+     * 当前选中的目标屏 id（-1 = 没选过）。
+     *
+     * 跟偏好里的一致，但**在对话框打开期间**可以先改后存：
+     * 用户点了一块屏、还没点「应用」就关掉了对话框 ⇒ 偏好不变，下次还是老目标。
+     */
+    private var pickedId: Int = prefs.clusterDisplayId
+
+    /** 当前选中的目标屏名字（空 = 没选过）。 */
+    private var pickedName: String = prefs.clusterDisplayName
+
+    /** 屏幕列表容器（点选后整段重建）。 */
+    private val displayList = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+
+    /** 投射状态文本。 */
+    private val statusText = Ui.text(context, "", 20f, pal.textDim)
 
     init {
         val content = flowContent()
@@ -449,30 +486,125 @@ class DesktopLayoutDialog(
 
         // —— 仪表歌词 ——
         inner.addView(section("仪表歌词"))
-        inner.addView(switchLine("仪表 Overlay 歌词", prefs.clusterOverlayEnabled, "将歌词贴到副屏") {
+        inner.addView(switchLine("仪表 Overlay 歌词", prefs.clusterOverlayEnabled, "把歌词贴到副屏（仪表 / 副驾屏）") {
             val from = prefs.clusterOverlayEnabled
             prefs.clusterOverlayEnabled = it
             logSetting("desk_cluster_overlay", "仪表 Overlay 歌词", from, it)
+            // 开关一变就**立刻**生效：开 → 起服务去加窗；关 → 拆窗停服务。
+            // 不靠「应用」按钮 —— 用户点了开关就该马上看到结果，
+            // 否则「勾上了但什么都没发生」是这一页最容易招投诉的地方。
+            ClusterLyricsService.apply(context)
+            refreshStatus()
+            // 开了却一块副屏都没有 → 立刻说清楚，别让用户以为是自己选错了。
+            if (it && ClusterLyricsService.displays(context).isEmpty()) {
+                Toast.makeText(
+                    context,
+                    "这台车机没有向应用暴露副屏，歌词无处可投",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
         })
+
+        // —— 投射目标 ——
+        inner.addView(section("投射目标"))
+        inner.addView(displayList, Ui.linear(-1, -2))
+        rebuildDisplayList()
+        inner.addView(
+            chip("刷新屏幕列表", sizePx = 20f) {
+                rebuildDisplayList()
+                refreshStatus()
+            },
+            Ui.linear(-2, -2).apply { topMargin = 10 },
+        )
+
+        // —— 投射状态 ——
+        inner.addView(section("投射状态"))
+        inner.addView(statusText, Ui.linear(-1, -2).apply { topMargin = 6 })
+        inner.addView(
+            chip("刷新状态", sizePx = 20f) { refreshStatus() },
+            Ui.linear(-2, -2).apply { topMargin = 10 },
+        )
+
+        // —— 面板位置与样式 ——
+        inner.addView(section("面板位置与样式"))
+        inner.addView(sliderRow("水平位置", 0, 100, prefs.overlayXPct, "%") {
+            val from = prefs.overlayXPct
+            prefs.overlayXPct = it
+            logSetting("desk_overlay_x", "水平位置", from, it, debug = true)
+            liveRefresh()
+        })
+        inner.addView(sliderRow("垂直位置", 0, 100, prefs.overlayYPct, "%") {
+            val from = prefs.overlayYPct
+            prefs.overlayYPct = it
+            logSetting("desk_overlay_y", "垂直位置", from, it, debug = true)
+            liveRefresh()
+        })
+        inner.addView(sliderRow("显示行数", 1, 3, prefs.clusterRows, " 行") {
+            val from = prefs.clusterRows
+            prefs.clusterRows = it
+            logSetting("desk_cluster_rows", "显示行数", from, it, debug = true)
+            liveRefresh()
+        })
+        val styleRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        styleRow.addView(Ui.text(context, "面板样式", 22f, pal.text), Ui.linear(0, -2, 1f))
+        styleRow.addView(
+            segmented(
+                listOf(
+                    "胶囊" to (prefs.clusterStyle == "pill"),
+                    "纯文字" to (prefs.clusterStyle == "plain"),
+                    "发光" to (prefs.clusterStyle == "glow"),
+                ),
+                sizePx = 19f,
+            ) { index ->
+                val next = listOf("pill", "plain", "glow")[index]
+                val from = prefs.clusterStyle
+                prefs.clusterStyle = next
+                logSetting("desk_cluster_style", "面板样式", from, next)
+                liveRefresh()
+                // 分段控件是静态的，选中态要自己刷一遍。
+                rebuildStyleRow(styleRow)
+            },
+            Ui.linear(-2, -2),
+        )
+        styleRow.layoutParams = Ui.linear(-1, 76)
+        inner.addView(styleRow)
+
         inner.addView(sliderRow("模块宽度", 30, 100, prefs.overlayWidthPct, "%") {
             val from = prefs.overlayWidthPct
             prefs.overlayWidthPct = it
             logSetting("desk_overlay_w", "模块宽度", from, it, debug = true)
+            liveRefresh()
         })
         inner.addView(sliderRow("仪表背景透明度", 0, 100, prefs.overlayBgAlpha, "%") {
             val from = prefs.overlayBgAlpha
             prefs.overlayBgAlpha = it
             logSetting("desk_overlay_bg_alpha", "仪表背景透明度", from, it, debug = true)
+            liveRefresh()
         })
+        inner.addView(
+            Ui.text(
+                context,
+                "0% = 不画底板，歌词直接落在仪表画面上（默认）。\n" +
+                    "仪表底色太亮、字看不清时，把这里拉上去加一层底。",
+                19f,
+                pal.textFaint,
+            ),
+            Ui.linear(-1, -2).apply { topMargin = 4 },
+        )
         inner.addView(sliderRow("主歌词字号", 12, 72, prefs.overlayMainSp, "") {
             val from = prefs.overlayMainSp
             prefs.overlayMainSp = it
             logSetting("desk_overlay_main_sp", "主歌词字号", from, it, debug = true)
+            liveRefresh()
         })
         inner.addView(sliderRow("副歌词字号", 8, 48, prefs.overlaySubSp, "") {
             val from = prefs.overlaySubSp
             prefs.overlaySubSp = it
             logSetting("desk_overlay_sub_sp", "副歌词字号", from, it, debug = true)
+            liveRefresh()
         })
         // 第三十二轮起桌面只有两页，`desk_desk_page3_main_sp` / `desk_desk_page3_sub_sp`
         // 这两个「第三页全屏歌词」字号已经没有对应的画面了，设置项随之移除；
@@ -484,11 +616,13 @@ class DesktopLayoutDialog(
             val from = prefs.clusterLyricMainColor
             prefs.clusterLyricMainColor = it
             logSetting("desk_cluster_lyric_main_color", "主歌词颜色", from, it)
+            liveRefresh()
         })
         inner.addView(colorRow("副歌词颜色", prefs.clusterLyricSubColor) {
             val from = prefs.clusterLyricSubColor
             prefs.clusterLyricSubColor = it
             logSetting("desk_cluster_lyric_sub_color", "副歌词颜色", from, it)
+            liveRefresh()
         })
 
         // —— 桌面歌词字号 ——
@@ -523,9 +657,132 @@ class DesktopLayoutDialog(
         footer.addView(primaryButton("应用") {
             // 排障场景：仪表歌词参数改了没生效 —— 记下应用动作
             Logx.event(LogTags.SETTING, "应用仪表歌词/布局参数")
+            // 把对话框里暂存的目标屏存进偏好。
+            prefs.clusterDisplayId = pickedId
+            prefs.clusterDisplayName = pickedName
+            ClusterLyricsService.refresh(context)
             onApplied?.invoke()
             onClose?.invoke()
         }, Ui.linear(-2, 62))
+
+        // 打开时就把「投射状态」填上，别让用户先点一次「刷新状态」才知道有没有投出去。
+        refreshStatus()
+    }
+
+    /**
+     * 重建「投射目标」的屏幕列表。
+     *
+     * 列表项就是这台车机**真正暴露给应用**的屏 ——
+     * 不是「车机物理上有几块屏」，而是「Android 侧能看到几块」。
+     * 这个差别很关键：仪表常常由独立 SoC / 总线驱动，
+     * 对系统而言它压根不是一块 `Display`，那就**画不上去**。
+     */
+    private fun rebuildDisplayList() {
+        displayList.removeAllViews()
+        val rows = ClusterLyricsService.displays(context)
+        if (rows.isEmpty()) {
+            displayList.addView(
+                Ui.text(
+                    context,
+                    "这台车机没有向应用暴露副屏。\n" +
+                        "如果仪表由独立 SoC / 总线驱动，第三方窗口画不上去 —— 这不是设置问题。",
+                    19f,
+                    pal.textFaint,
+                ),
+                Ui.linear(-1, -2),
+            )
+            return
+        }
+        rows.forEach { row ->
+            val selected = row.id == pickedId ||
+                (pickedId <= 0 && row.name.isNotEmpty() && row.name.equals(pickedName, ignoreCase = true))
+            val line = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(4, 0, 4, 0)
+                isClickable = true
+            }
+            line.addView(
+                Ui.text(
+                    context,
+                    (if (selected) "● " else "○ ") + row.label,
+                    21f,
+                    if (selected) pal.accentInk else pal.text,
+                    bold = selected,
+                ),
+                Ui.linear(0, -2, 1f),
+            )
+            if (row.presentation) {
+                line.addView(Ui.text(context, "副屏", 18f, pal.textFaint), Ui.linear(-2, -2).apply { rightMargin = 12 })
+            }
+            line.setOnClickListener {
+                pickedId = row.id
+                pickedName = row.name
+                logSetting("desk_cluster_display_id", "投射目标屏", row.id, row.id)
+                rebuildDisplayList()
+                // 选完就生效：不用等「应用」。
+                prefs.clusterDisplayId = pickedId
+                prefs.clusterDisplayName = pickedName
+                ClusterLyricsService.refresh(context)
+                refreshStatus()
+            }
+            line.layoutParams = Ui.linear(-1, 62)
+            displayList.addView(line)
+        }
+    }
+
+    /** 样式分段控件重建（选中态是静态的，只能自己刷）。 */
+    private fun rebuildStyleRow(row: LinearLayout) {
+        row.removeAllViews()
+        row.addView(Ui.text(context, "面板样式", 22f, pal.text), Ui.linear(0, -2, 1f))
+        row.addView(
+            segmented(
+                listOf(
+                    "胶囊" to (prefs.clusterStyle == "pill"),
+                    "纯文字" to (prefs.clusterStyle == "plain"),
+                    "发光" to (prefs.clusterStyle == "glow"),
+                ),
+                sizePx = 19f,
+            ) { index ->
+                val next = listOf("pill", "plain", "glow")[index]
+                val from = prefs.clusterStyle
+                prefs.clusterStyle = next
+                logSetting("desk_cluster_style", "面板样式", from, next)
+                liveRefresh()
+                rebuildStyleRow(row)
+            },
+            Ui.linear(-2, -2),
+        )
+    }
+
+    /**
+     * 就地刷新（不改窗口连接）。
+     *
+     * 服务活着 → 原地改样式与位置（`restyle`）；没活着 → 若开关开着就拉起来。
+     */
+    private fun liveRefresh() {
+        ClusterLyricsService.refresh(context)
+        refreshStatus()
+    }
+
+    /** 刷新「投射状态」那段文字。 */
+    private fun refreshStatus() {
+        val status = ClusterLyricsService.status(context)
+        val report = status["report"] as? String ?: "未启用"
+        val target = status["displayName"] as? String ?: ""
+        val track = status["track"] as? String ?: ""
+        val artist = status["artist"] as? String ?: ""
+        val lines = status["lyricLines"] as? Int ?: 0
+        val text = buildString {
+            append("状态：").append(report)
+            append('\n')
+            append("目标屏：").append(if (target.isEmpty()) "未选择" else target)
+            append('\n')
+            append("曲目：").append(if (track.isEmpty()) "—" else "$track / $artist")
+            append('\n')
+            append("歌词：").append(if (lines > 0) "$lines 行" else "无")
+        }
+        statusText.text = text
     }
 
     /**

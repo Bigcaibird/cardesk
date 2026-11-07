@@ -114,6 +114,17 @@
             android:exported="false"
             android:label="@string/app_name" />
 
+        <!-- 仪表歌词投射（第一百三十三轮）：把歌词窗口加到**副屏**自己的
+             WindowManager 上。
+             exported=false：只由本应用（设置页 / 开机广播 / 桌面启动）拉起。
+             不用 foregroundServiceType：Android 9 上普通后台 Service 足够，
+             加前台类型反而要在清单里声明 targetSdk 对应的权限，
+             在这台 API 28 的车机上反而更容易起不来。 -->
+        <service
+            android:name=".cluster.ClusterLyricsService"
+            android:exported="false"
+            android:label="@string/app_name" />
+
         <receiver
             android:name=".core.SystemOps$InstallResultReceiver"
             android:exported="false">
