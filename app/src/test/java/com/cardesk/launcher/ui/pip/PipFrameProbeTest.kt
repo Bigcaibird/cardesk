@@ -8,123 +8,142 @@ import org.junit.Test
 /**
  * [PipFrameProbe] 的**纯判定**单测。
  *
- * 这一层只测「要不要自愈」的三道闸 —— 采样本身要真机（`PixelCopy`）才能跑。
+ * 这一层只测「这一帧算不算黑」「采样矩形往里缩多少」——
+ * 采样本身要真机（`PixelCopy`）才能跑；
+ * 「要不要自愈」的决策在 [PipBlackHeal] 里测。
  */
 class PipFrameProbeTest {
 
     @Test
-    fun `没见过非黑画面时不自愈`() {
-        // 第一道闸：有些设备 PixelCopy 采 SurfaceView 恒为黑（硬件 overlay），
-        // 那种情况下**绝不能**一直以为黑了 → 一直重启承载应用。
-        assertFalse(
-            PipFrameProbe.shouldHeal(
-                sawContent = false,
-                consecutiveBlack = 99,
-            ),
-        )
-    }
-
-    @Test
-    fun `黑帧不够多不自愈`() {
-        // 第二道闸：避开地图加载中的短暂黑帧
-        assertFalse(
-            PipFrameProbe.shouldHeal(
-                sawContent = true,
-                consecutiveBlack = PipFrameProbe.BLACK_STREAK_LIMIT - 1,
-            ),
-        )
-    }
-
-    @Test
-    fun `见过画面又连续全黑就自愈`() {
-        assertTrue(
-            PipFrameProbe.shouldHeal(
-                sawContent = true,
-                consecutiveBlack = PipFrameProbe.BLACK_STREAK_LIMIT,
-            ),
-        )
-    }
-
-    @Test
-    fun `冷却没过不自愈`() {
-        // 第三道闸：不要连着重启承载应用
-        assertFalse(
-            PipFrameProbe.shouldHeal(
-                sawContent = true,
-                consecutiveBlack = PipFrameProbe.BLACK_STREAK_LIMIT,
-                cooldownMs = 60_000L,
-                sinceLastHealMs = 1_000L,
-            ),
-        )
-        assertTrue(
-            PipFrameProbe.shouldHeal(
-                sawContent = true,
-                consecutiveBlack = PipFrameProbe.BLACK_STREAK_LIMIT,
-                cooldownMs = 60_000L,
-                sinceLastHealMs = 60_000L,
-            ),
-        )
-    }
-
-    @Test
     fun `阈值常量符合预期`() {
         assertEquals(3, PipFrameProbe.BLACK_STREAK_LIMIT)
-        assertEquals(60_000L, PipFrameProbe.BLACK_HEAL_COOLDOWN_MS)
         assertEquals(10, PipFrameProbe.BLACK_LUMA)
         assertEquals(64, PipFrameProbe.SAMPLE_W)
         assertEquals(36, PipFrameProbe.SAMPLE_H)
     }
 
-    // ---------------------------------------------------------------- 第112轮
+    // ---------------------------------------------------------------- 第130轮：判黑
 
     /**
-     * 第112轮：换肤重建后画中画**一直黑**、永远不自愈。
+     * 第130轮：判黑补了「整体很暗」这条判据。
      *
-     * 新承载面一次都没出过画面 → `sawContent` 永远是 false →
-     * 路径 A 的第一道闸过不去 → 永远不自愈。
-     *
-     * 所以补了路径 B：「嵌入之后一直没出画面」。
+     * 承载应用画的是 `#101010` 这种深色底时，最大亮度是 16 ——
+     * 在老阈值（< 10）下**判不出来**，但用户看到的就是一块黑。
      */
     @Test
-    fun `嵌入后一直没出画面时走新路径自愈`() {
+    fun `深色底也判黑_整体很暗`() {
+        // #101010 → luma 16：老阈值判不出来
+        assertFalse(PipFrameProbe.isBlackFrame(maxLuma = 16, avgLuma = 16))
+        // 补上「整体很暗」判据后判得出来
+        assertTrue(PipFrameProbe.isBlackFrame(maxLuma = 16, avgLuma = 5))
+    }
+
+    @Test
+    fun `纯黑当然判黑`() {
+        assertTrue(PipFrameProbe.isBlackFrame(maxLuma = 0, avgLuma = 0))
+        assertTrue(PipFrameProbe.isBlackFrame(maxLuma = 9, avgLuma = 9))
+    }
+
+    @Test
+    fun `夜里深色地图不误判`() {
+        // 有路网/文字 → 最大亮度很高 → 两条判据都不成立
+        assertFalse(PipFrameProbe.isBlackFrame(maxLuma = 180, avgLuma = 30))
+        // 平均暗但有一处亮点（路网）→ 也不判黑
+        assertFalse(PipFrameProbe.isBlackFrame(maxLuma = 60, avgLuma = 3))
+    }
+
+    @Test
+    fun `第130轮新增的常量符合预期`() {
+        assertEquals(24, PipFrameProbe.DARK_MAX_LUMA)
+        assertEquals(8, PipFrameProbe.DARK_AVG_LUMA)
+        assertEquals(1_500L, PipFrameProbe.SAMPLE_TIMEOUT_MS)
+        assertEquals(30, PipFrameProbe.LOG_EVERY_N_FRAMES)
+        assertEquals(48, PipFrameProbe.BRIGHT_LUMA)
+        assertEquals(0.02, PipFrameProbe.BRIGHT_RATIO_MIN, 1e-9)
+        assertEquals(0.15f, PipFrameProbe.SAMPLE_INSET_RATIO, 1e-6f)
+    }
+
+    // ---------------------------------------------------------------- 第130轮：采样矩形
+
+    /**
+     * 第130轮：采样矩形必须**往里缩**。
+     *
+     * 我们自己叠在承载面上的控件（左侧 36×110 的分屏按钮、顶部三个点）是亮的，
+     * 不缩进去就会把「黑屏」洗成「有画面」→ 探针永远判不出黑。
+     */
+    @Test
+    fun `采样矩形四边都往里缩`() {
+        val r = PipFrameProbe.sampleRectOf(0, 0, 1000, 800, ratio = 0.15f)
+        // 左右各缩 150、上下各缩 120
+        assertEquals(150, r[0])
+        assertEquals(120, r[1])
+        assertEquals(850, r[2])
+        assertEquals(680, r[3])
+    }
+
+    @Test
+    fun `采样矩形比例为零时保持原样`() {
+        val r = PipFrameProbe.sampleRectOf(16, 60, 1363, 927, ratio = 0f)
+        assertEquals(16, r[0])
+        assertEquals(60, r[1])
+        assertEquals(1363, r[2])
+        assertEquals(927, r[3])
+    }
+
+    @Test
+    fun `采样矩形偏移会跟着走`() {
+        val r = PipFrameProbe.sampleRectOf(100, 200, 1100, 1000, ratio = 0.1f)
+        assertEquals(200, r[0])
+        assertEquals(280, r[1])
+        assertEquals(1000, r[2])
+        assertEquals(920, r[3])
+    }
+
+    // ---------------------------------------------------------------- 第130轮：亮像素占比
+
+    /**
+     * 第130轮：判黑加了「亮像素占比」这条判据。
+     *
+     * 只看最大亮度的话，**一颗**小亮点就能把「黑」洗成「有画面」。
+     */
+    @Test
+    fun `几乎没有亮像素就判黑`() {
+        // 有一点亮度（不到纯黑），但几乎没有亮像素 → 判黑
+        assertTrue(PipFrameProbe.isBlackFrame(maxLuma = 40, avgLuma = 12, brightRatio = 0.001))
+        // 亮像素够多 → 不判黑
+        assertFalse(PipFrameProbe.isBlackFrame(maxLuma = 40, avgLuma = 12, brightRatio = 0.30))
+    }
+
+    @Test
+    fun `亮像素占比的边界`() {
+        // 正好等于阈值 → 不判黑（判据是「小于」）
+        assertFalse(
+            PipFrameProbe.isBlackFrame(
+                maxLuma = 200,
+                avgLuma = 30,
+                brightRatio = PipFrameProbe.BRIGHT_RATIO_MIN,
+            ),
+        )
         assertTrue(
-            PipFrameProbe.shouldHealNeverSeenContent(
-                samples = PipFrameProbe.NEVER_SEEN_MIN_SAMPLES,
-                consecutiveBlack = PipFrameProbe.BLACK_STREAK_LIMIT,
+            PipFrameProbe.isBlackFrame(
+                maxLuma = 200,
+                avgLuma = 30,
+                brightRatio = PipFrameProbe.BRIGHT_RATIO_MIN - 0.001,
             ),
         )
     }
 
     @Test
-    fun `没采够帧不自愈_避免误判`() {
-        // 一次都没采到（探针没工作）→ 不能判
-        assertFalse(
-            PipFrameProbe.shouldHealNeverSeenContent(
-                samples = 0,
-                consecutiveBlack = 99,
-            ),
-        )
-        // 采了几帧但还不够多（应用还在起）→ 不能判
-        assertFalse(
-            PipFrameProbe.shouldHealNeverSeenContent(
-                samples = PipFrameProbe.NEVER_SEEN_MIN_SAMPLES - 1,
-                consecutiveBlack = PipFrameProbe.BLACK_STREAK_LIMIT,
-            ),
-        )
+    fun `纯黑一定判黑_不依赖占比`() {
+        assertTrue(PipFrameProbe.isBlackFrame(maxLuma = 0, avgLuma = 0, brightRatio = 0.0))
+        assertTrue(PipFrameProbe.isBlackFrame(maxLuma = 9, avgLuma = 9, brightRatio = 0.0))
     }
 
     @Test
-    fun `黑帧不够多不自愈_新路径`() {
-        assertFalse(
-            PipFrameProbe.shouldHealNeverSeenContent(
-                samples = 99,
-                consecutiveBlack = PipFrameProbe.BLACK_STREAK_LIMIT - 1,
-            ),
-        )
-    }
-
-    @Test
-    fun `新路径的阈值常量符合预期`() {
-        assertEquals(4, PipFrameProbe.NEVER_SEEN_MIN_SAMPLES)
+    fun `正常画面不会被判黑`() {
+        // 深色底地图：有大量路网/文字 → 亮像素占比高 → 不判黑
+        assertFalse(PipFrameProbe.isBlackFrame(maxLuma = 120, avgLuma = 40, brightRatio = 0.08))
+        // 白天地图
+        assertFalse(PipFrameProbe.isBlackFrame(maxLuma = 238, avgLuma = 90, brightRatio = 0.45))
     }
 }

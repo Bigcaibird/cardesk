@@ -587,6 +587,34 @@ object ActivityEmbed {
     }
 
     /**
+     * 取承载面所在**窗口**（画面探针采样用，第130轮）。
+     *
+     * ## 为什么优先从窗口采，而不是从 SurfaceView 的 surface 采
+     *
+     * `ActivityView` 内部是 `SurfaceView`，它的内容画在**独立的 surface 图层**上。
+     * 用 `PixelCopy.request(surface, …)` 直接采那个 surface，
+     * 在很多环境上会返回 [android.view.PixelCopy.ERROR_SOURCE_NO_DATA]
+     * （实测模拟器上 `result=3`）—— **采不到一帧**。
+     *
+     * 而从**窗口**采，SurfaceView 的内容会先合成进窗口再被抓下来，
+     * 成功率明显更高。所以探针优先走窗口，窗口拿不到再退回 surface。
+     *
+     * @return null = 拿不到窗口（探针只能安静跳过）
+     */
+    fun windowOf(view: View): android.view.Window? {
+        var ctx: Context? = view.context
+        var depth = 0
+        while (ctx != null && depth < 8) {
+            if (ctx is android.app.Activity) return ctx.window
+            val next = (ctx as? android.content.ContextWrapper)?.baseContext
+            if (next === ctx) return null
+            ctx = next
+            depth++
+        }
+        return null
+    }
+
+    /**
      * 取承载面的 **Surface**（画面探针采样用）。
      *
      * AOSP 的 `ActivityView` 内部是 `mSurfaceView`（`SurfaceView`），
@@ -599,6 +627,89 @@ object ActivityEmbed {
             ?.let { readField(it, view) } as? android.view.SurfaceView ?: return null
         return runCatching { surfaceView.holder.surface }.getOrNull()
     }
+
+    /**
+     * 读一个任务的 **displayId**（第130轮）。
+     *
+     * `ActivityManager.RunningTaskInfo` 继承自 `TaskInfo`，
+     * 它的 `displayId` 是**隐藏字段**（公开 SDK 里没有）→ 只能反射读。
+     *
+     * AOSP 从 API 21 起就有这个字段（`TaskInfo.displayId`），
+     * 真车（API 28）与模拟器（API 29）都能读到。
+     *
+     * @return null = 读不到（判据不可靠，调用方必须按「不知道」处理）
+     */
+    fun displayIdOfTask(task: Any): Int? = runCatching {
+        task.javaClass.getField("displayId").getInt(task)
+    }.getOrNull()
+
+    /**
+     * 取承载面所在 **VirtualDisplay 的 displayId**（第130轮）。
+     *
+     * ## 为什么需要它
+     *
+     * 画中画黑屏的**权威判据**是「承载应用的 Activity 还挂在我们的
+     * VirtualDisplay 上吗」—— 挂在别的 display 上时，画中画里就只剩一块黑。
+     *
+     * 这跟 AOSP 官方 `VirtualDisplay Launcher` 示例判活的方式一致：
+     * `task.displayId == virtualDisplay.getDisplayId()`。
+     *
+     * ## 取 displayId 的坑（第130轮实测踩过）
+     *
+     * `ActivityView` 内部有两块「display」：
+     * - `mHost.mDisplay` —— **承载面自己所在的那个显示器**（我们桌面的 display 0），
+     *   不是虚拟显示器！拿它当虚拟显示器的 id → 跟任何 task 都对不上
+     *   → **把正常的画面判成「任务不在我们的 display 上」**（实测误判并重启了高德）；
+     * - `mVirtualDisplay`（在 `ActivityView` 或 `mHost` 上）—— 才是我们要的。
+     *
+     * 所以取值的顺序是：公开方法 → `mVirtualDisplay` → `mHost.mVirtualDisplay`
+     * → **只有当它确实是 VirtualDisplay 时**才用 `mHost.mDisplay`。
+     *
+     * @return null = 取不到（判据不可用，调用方必须按「不知道」处理）
+     */
+    fun virtualDisplayIdOf(view: View): Int? {
+        // 1) 公开方法（API 30+）
+        val publicId = runCatching {
+            view.javaClass.getMethod("getVirtualDisplayId").invoke(view) as Int
+        }.getOrNull()
+        if (publicId != null && publicId > 0) return publicId
+        // 2) ActivityView 自己持有的 mVirtualDisplay
+        val own = findField(view, "mVirtualDisplay")?.let { readField(it, view) }
+        if (own is android.view.Display) {
+            val id = runCatching { own.displayId }.getOrNull()
+            if (id != null && id > 0) return id
+        }
+        // 3) mHost.mVirtualDisplay
+        val host = findField(view, "mHost")?.let { readField(it, view) }
+        if (host != null) {
+            val field = findField(host, "mVirtualDisplay")
+            val display = field?.let { readField(it, host) } as? android.view.Display
+            val id = runCatching { display?.displayId }.getOrNull()
+            if (id != null && id > 0) return id
+            // 4) mHost.mDisplay —— **必须确认它是 VirtualDisplay**
+            //    （ActivityView 自己的 mDisplay 是我们桌面的显示器，不是虚拟显示器）
+            val mDisplay = findField(host, "mDisplay")
+            val m = mDisplay?.let { readField(it, host) }
+            if (m is android.view.Display && isVirtualDisplay(m)) {
+                val mid = runCatching { m.displayId }.getOrNull()
+                if (mid != null && mid > 0) return mid
+            }
+        }
+        return null
+    }
+
+    /**
+     * 这个 Display 是不是 **VirtualDisplay**（按类名判断，避开隐藏 API 的具体类型）。
+     *
+     * `ActivityViewHost.mDisplay` 是**承载面自己所在的显示器**（桌面那屏），
+     * `mVirtualDisplay` 才是虚拟显示器 —— 两者都叫 Display，
+     * 只能靠类名区分。
+     */
+    private fun isVirtualDisplay(display: android.view.Display): Boolean =
+        display.javaClass.name.contains("VirtualDisplay", ignoreCase = true) ||
+            runCatching {
+                display.javaClass.getMethod("getVirtualDisplayId").invoke(display) as Int
+            }.getOrNull()?.let { it > 0 } == true
 
     /**
      * 释放承载面。

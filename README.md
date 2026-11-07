@@ -3191,3 +3191,117 @@ object NavSplitPlacement {
   logcat 显示全屏往返时 `relaunchAfterResize()` 会**杀掉重启**高德的
   `UsbFillActivity` / `MainMapActivity`，黑屏就是这个重绘窗口。
   **既有问题，本轮未修**，在此记录以免下一轮再被它绊住。
+
+---
+
+## 第130轮：修复画中画黑屏
+
+> 用户诉求：「修复黑屏问题」。
+> 现象：画中画黑屏，要「全屏一次再还原画中画」才看得到。
+
+### 根因：黑屏**从来没被桌面发现过**
+
+第129轮排查撞见黑屏，查下来是**一整条链子断了**：
+
+| # | 断点 | 说明 |
+|---|---|---|
+| 1 | **探针从来没工作过** | 取不到 surface 时旧代码是**静默 return**，一个字都不留 → 诊断包里一条采样日志都没有 |
+| 2 | **黑屏因此永远不被发现** | 自愈逻辑从来没被触发过 |
+| 3 | **自愈只有一次机会** | `blackHealDone: Boolean` → 自愈一次不奏效就**永久黑屏** |
+| 4 | **自愈动作只有一档** | 只有「重发一次启动」—— task 真挂在旧 VirtualDisplay 上时救不回来 |
+| 5 | **看门狗多进程判据缺陷** | 只认主进程名 → 高德明明在发导航状态却被判「承载进程不在」→ 反复重发启动打断正常应用 |
+| 6 | **诊断文案共用** | resize-relaunch / 自愈都写「画中画看门狗：…」 → 排障时分不清来源 |
+
+### 关键发现：**像素采样根本看不见 ActivityView 的画面**
+
+采样源从「ActivityView 的 SurfaceView surface」改成「窗口 + 限定矩形」之后采样**成功**了，
+但读到的是 **maxLuma=0 / avgLuma=0** —— 而同一时刻屏幕上高德明明在渲染地图。
+
+| 采样方式 | 结果 |
+|---|---|
+| `PixelCopy.request(window, srcRect, …)` | 成功，但恒为黑（maxLuma=0 / avgLuma=0 / brightPct=0） |
+| `PixelCopy.request(surface, …)` | **result=3** = `ERROR_SOURCE_NO_DATA`，一帧都采不到 |
+
+**原因**：`ActivityView` 内部是 `SurfaceView`，内容画在**独立的 SurfaceFlinger 图层**上；
+窗口自己的缓冲在那个位置是**透明的洞**（SurfaceView 会在窗口上打洞）。
+`PixelCopy` 拷窗口 = 拷窗口缓冲，**拷不到那个图层**。
+
+> 于是「我们看不见应用画面」和「应用画面是黑的」在数据上**完全一样** ——
+> 拿它当判据，实测**把正常的高德判成了黑屏并重启了它**。
+
+### 修复：判据换成**权威信号**
+
+跟 AOSP 官方 `VirtualDisplay Launcher` 示例判活的方式一致：
+
+```
+task.displayId == virtualDisplay.getDisplayId()
+```
+
+> **承载应用的 Activity 还挂在我们的 VirtualDisplay 上吗？**
+> 不在 → 我们的 VirtualDisplay 上什么都没有 → **这就是黑屏的成因本身**。
+
+| 文件 | 改动 |
+|---|---|
+| `ui/pip/PipBlackHeal.kt`（新） | 纯逻辑：判据 + **分级**自愈决策（重发启动 → 重建承载面 → 放弃）+ 冷却 + `isTaskOffDisplay()` |
+| `ui/pip/PipSurface.kt` | `blackHealDone:Boolean` → `blackHealStage:Int`；新增 `rebuildContent()`；`isTaskOnOurDisplay()`；`isProcessAlive()` 改多进程判据；`relaunch(reason)` 带来源；看门狗加**前台闸** |
+| `ui/embed/ActivityEmbed.kt` | `virtualDisplayIdOf()`、`displayIdOfTask()`、`windowOf()` |
+| `ui/pip/PipFrameProbe.kt` | pending 超时复位；采样失败留痕；采样矩形限定到承载面并内缩；判黑加「亮像素占比」「整体很暗」；日志限频 |
+| `core/HomeForeground.kt`（新） | 桌面是否在前台（`MainActivity.onResume/onPause` 维护） |
+
+### 两个必须说清的坑
+
+1. **`ActivityView` 里有两块「display」**：
+   `mHost.mDisplay` 是**承载面自己所在的显示器**（我们桌面的 display 0），
+   `mVirtualDisplay` 才是虚拟显示器。拿错 → **把正常画面判成「任务不在我们的 display 上」**（实测踩过）。
+2. **自愈只能在桌面在前台时做**：
+   用户点「全屏打开」把应用拉到全屏时，它的 task 确实从我们的 VirtualDisplay 搬走了；
+   那时自愈会把应用**抢回画中画**，打断用户正在用的全屏应用（比黑屏更烦人）。
+
+### 分级自愈
+
+| 阶段 | 动作 | 冷却 |
+|---|---|---|
+| 0 | 重发一次启动（轻） | 8s |
+| 1 | **重建承载面**（重：释放旧 VirtualDisplay 再干净重建） | 20s |
+| 2 | **放弃**（绝不无限重启 —— 反复重启比一直黑更烦人） | — |
+
+### 怎么验证
+
+**模拟器端到端**（`emu-verify/y130/`）：
+
+- 健康态：高德在画中画，60 秒内**自愈动作 = 0 次**（旧像素判据在这段时间里会误重启高德）；
+- 故障注入（把 `virtualDisplayIdOf()` 故意取错）：
+  判黑 → 10:53:27 重发启动 → 10:53:48 重建承载面 → 之后 **67 秒不再自愈**（放弃）；
+  **自愈动作总次数 = 2**。
+
+**单测**：全量 **1736 项全绿**（第129轮 1720 → +16）。
+新增 `PipBlackHealTest`（判据 / 分级 / 冷却 / 放弃 / display 判定 12 项）。
+
+**反向验证 9 项全部变红**（`tools/verify_y130_reverse.sh`，可复跑）：
+
+| 反向 | 改法 | 红灯 |
+|---|---|---|
+| 1 | 去掉「任务不在我们的 display 上」这条权威判据 | 1 |
+| 2 | 像素判黑去掉「必须先见过应用画面」这道闸 | 1 |
+| 3 | 自愈不升级（永远停在「重发启动」） | 2 |
+| 4 | 重建过还黑时不放弃（会无限重启） | 2 |
+| 5 | 去掉冷却 | 1 |
+| 6 | 第二级自愈的冷却不递增 | 1 |
+| 7 | display 判据不再「判不准就当没黑」 | 1 |
+| 8 | 像素判黑去掉「亮像素占比」 | 2 |
+| 9 | 采样矩形不往里缩 | 2 |
+
+还原后自检 0 红灯。
+
+### 产物
+
+`dist/CarDesk-platform-ecarx-cardesk-4229.apk` · 4229 / 1.0.1133-system ·
+2263290 字节 · SHA-256 `965606aa6615b4b5f383d5cd477ab2a434003f26e39032d898e4e79303b460b7`
+
+### 已知限制
+
+- **真车（Android 9 / API 28）上 `PixelCopy` 的行为未验证** ——
+  但**判黑已经不依赖像素**了，真车只影响诊断日志，不影响修复。
+- `TaskInfo.displayId`（隐藏字段）与 `ActivityView.mVirtualDisplay` 字段名在 API 28 上需实机确认
+  —— 取不到时判据退化成「不知道」（**不误判**），并在日志里留痕。
+- **没有发 GitHub Release、没有传 R2**（等明确指示）。

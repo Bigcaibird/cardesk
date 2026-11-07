@@ -1,0 +1,25 @@
+=== 证据 C：分级自愈链路（发布版代码 + 故障注入）===
+注入方式：把 ActivityEmbed.virtualDisplayIdOf() 的返回值故意 +1
+          （等价于「承载应用的 task 不在我们的 VirtualDisplay 上」）
+模拟器 emulator-5556 / Android 10 (SDK 29) / 1920x1080
+画中画承载应用：com.autonavi.amapautp.yh
+
+11-07 10:53:27.790 W CarDesk/NavUI: 画中画承载任务不在我们的 VirtualDisplay 上 our=36 tasks=[35] onOurs=false
+11-07 10:53:27.790 W CarDesk/NavUI: 画中画黑屏自愈：重新拉起承载应用 pkg=com.autonavi.amapautp.yh role=主画 reason=承载应用的 Activity 不在我们的 VirtualDisplay 上 streak=0 samples=0
+11-07 10:53:27.791 W CarDesk/NavUI: 画中画重新拉起承载应用 pkg=com.autonavi.amapautp.yh role=主画 by=black-heal
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^ 第 1 级：重发启动（轻）
+11-07 10:53:48.783 W CarDesk/NavUI: 画中画黑屏自愈：重建承载面 pkg=com.autonavi.amapautp.yh role=主画 reason=承载应用的 Activity 不在我们的 VirtualDisplay 上
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^ 第 2 级：重建承载面（重，21s 后，冷却 20s）
+11-07 10:53:48.793 W CarDesk/NavUI: 画中画承载面重建 pkg=com.autonavi.amapautp.yh role=主画
+11-07 10:54:55.649 W CarDesk/NavUI: 画中画承载任务不在我们的 VirtualDisplay 上 our=37 tasks=[36] onOurs=false
+                                    ↑ 重建之后 67 秒内**没有再自愈** → 第 3 级：放弃（绝不无限重启承载应用）
+
+自愈动作总次数 = 2（重发启动 1 次 + 重建承载面 1 次），之后停手。
+
+
+=== 证据 D：修复后的健康态（发布版 4229 / 1.0.1133）===
+11-07 10:55:57.740 I CarDesk/NavUI: [EVT] 画中画显示 pkg=com.autonavi.amapautp.yh app=Amap Auto mode=embedded role=主画
+11-07 10:56:01.310 D CarDesk/NavUI: 画中画承载任务所在 display our=37 tasks=[37] onOurs=true
+                                    ^^^ our == tasks[0] → 任务在我们的 VirtualDisplay 上 → 不判黑
+观察 60 秒：画中画黑屏自愈动作 = 0 次（不再误判、不再误重启高德）
+截图：y130-01-healthy-pip-amap.png

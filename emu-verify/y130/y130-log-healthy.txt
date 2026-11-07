@@ -1,0 +1,2 @@
+11-07 10:55:57.740  5391  5391 I CarDesk/NavUI: [EVT] 画中画显示 pkg=com.autonavi.amapautp.yh app=Amap Auto mode=embedded role=主画
+11-07 10:56:01.310  5391  5391 D CarDesk/NavUI: 画中画承载任务所在 display our=37 tasks=[37] onOurs=true

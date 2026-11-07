@@ -14,6 +14,7 @@ import android.view.ViewTreeObserver
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.Toast
+import com.cardesk.launcher.core.HomeForeground
 import com.cardesk.launcher.core.StartupTrace
 import com.cardesk.launcher.core.dock.GlobalDockService
 import com.cardesk.launcher.core.log.LogTags
@@ -551,6 +552,10 @@ class MainActivity : Activity() {
         // 用自家 Activity 的生命周期做前台判定，**不申请** REAL_GET_TASKS
         // （那要多一个系统权限，而且车机上拿不到）。
         GlobalDockService.onHomeForeground(true)
+        // 第130轮：画中画黑屏自愈只在**桌面在前台**时做 ——
+        // 用户把应用全屏拉出去时，画中画那边的 task 确实不在我们的
+        // VirtualDisplay 上了，那时候自愈会把应用抢回画中画。
+        HomeForeground.isForeground = true
         // 用户可能刚在系统设置里授了悬浮窗权限（pageDock 引导跳转），
         // 回到桌面时补一次启动；没有开关 / 没授权时 ensureStarted 自己会退。
         ensureGlobalDockStarted()
@@ -560,6 +565,8 @@ class MainActivity : Activity() {
         Logx.i(LogTags.APP, "onPause")
         // 桌面退到后台 → 全局窗口该出来了（别的应用现在是前台）。
         GlobalDockService.onHomeForeground(false)
+        // 第130轮：桌面不在前台 → 画中画不做黑屏自愈（别把用户的应用抢回画中画）。
+        HomeForeground.isForeground = false
         super.onPause()
     }
 

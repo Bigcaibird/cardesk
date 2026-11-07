@@ -1,0 +1,21 @@
+=== 证据 A：像素判黑把「正常的高德」误判成黑屏（第130轮修复前的中间版本）===
+模拟器 emulator-5556 / Android 10 (SDK 29) / 1920x1080
+画中画承载应用：com.autonavi.amapautp.yh（高德地图车机版 9.5）
+同一时刻的屏幕截图：y130-02-pixel-falseblack-amap.png（高德地图明明在渲染）
+
+11-07 10:29:24.562 I CarDesk/NavUI: [EVT] 画中画显示 pkg=com.autonavi.amapautp.yh app=Amap Auto mode=embedded role=主画
+11-07 10:29:27.809 W CarDesk/NavUI: 画中画画面采样：状态变化 black=true maxLuma=0 avgLuma=0 brightPct=0 streak=1 rect=237,203,1138,810
+11-07 10:29:39.644 W CarDesk/NavUI: 画中画黑屏自愈：重新拉起承载应用 pkg=com.autonavi.amapautp.yh role=主画 reason=连续黑帧 4 帧 streak=4 unsampleable=0 samples=4
+                                                            ^^^^^^^^^^^^^^ 正常画面被当成黑屏，承载应用被误重启
+
+同一时刻「屏幕截图」上探针采样矩形 (237,203)-(1138,810) 的实测亮度：
+  max=255  avg=40   →  画面明明是亮的，探针却读到 maxLuma=0 / avgLuma=0
+
+原因：ActivityView 内部是 SurfaceView，画面画在独立图层上，
+      窗口自己的缓冲在那个位置是**透明的洞** → PixelCopy 拷窗口拷不到它。
+
+=== 证据 B：直接采 ActivityView 的 SurfaceView surface 也是失败的 ===
+11-07 10:45:18.275 W CarDesk/NavUI: 画中画画面采样未成功 result=3 from=surface rect=
+11-07 10:45:21.227 W CarDesk/NavUI: 画中画画面采样未成功 result=3 from=surface rect=
+11-07 10:45:24.240 W CarDesk/NavUI: 画中画画面采样未成功 result=3 from=surface rect=
+                                    result=3 = PixelCopy.ERROR_SOURCE_NO_DATA（采不到一帧）

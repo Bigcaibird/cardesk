@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1132",
-  "versionCode": 4228,
-  "tag": "v1.0.1132",
-  "name": "CarDesk 4228 / 1.0.1132-system",
-  "notes": "导航页「画中画全屏按钮」改为悬浮叠在画中画画面上：不再独占左侧那条 44px 留白，按钮跟着画中画左右换位一起走；全屏态与悬浮态共用同一套定位参数，位置完全一致。",
-  "publishedAt": "2026-11-07T01:50:44Z",
+  "version": "1.0.1133",
+  "versionCode": 4229,
+  "tag": "v1.0.1133",
+  "name": "CarDesk 4229 / 1.0.1133-system",
+  "notes": "修复画中画黑屏：判据换成「承载任务的 Activity 还挂在我们的 VirtualDisplay 上」（像素采样看不见 ActivityView 画面，实测会把正常的高德误判成黑屏），自愈改为分级：重发启动 → 重建承载面 → 放弃，桌面不在前台时不抢回应用",
+  "publishedAt": "2026-11-07T02:51:53Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4228.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4228.apk",
-    "size": 2254826,
-    "sha256": "b54c74fe90198c9af693d5e7cfe5ab40d3280914b5c5ba021a09edd3f6e32b2a"
+    "name": "CarDesk-platform-ecarx-cardesk-4229.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4229.apk",
+    "size": 2263290,
+    "sha256": "965606aa6615b4b5f383d5cd477ab2a434003f26e39032d898e4e79303b460b7"
   }
 }
