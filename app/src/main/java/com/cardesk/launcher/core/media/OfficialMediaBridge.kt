@@ -168,7 +168,7 @@ object OfficialMediaBridge {
      * 空 = 还没 claim 过。
      *
      * 为什么要记它：claim 是「抢占原车的播放入口」，每 200ms 一次 tick 都抢会把
-     * 原车的播放权来回甩（原厂注释里专门提醒过）。所以**同一个目标只 claim 一次**；
+     * 原车的播放权来回甩（参考工程 UNI 的注释里专门提醒过）。所以**同一个目标只 claim 一次**；
      * 目标换了（用户改了桌面上的媒体源）才再 claim 一次。
      */
     @Volatile
@@ -179,10 +179,10 @@ object OfficialMediaBridge {
      *
      * 由 [MusicSessionTracker] 每轮重扫时同步。
      *
-     * 为什么要它：原厂 `SessionBridge.pushToMediaCenter` 开头就是
+     * 为什么要它：`SessionBridge.pushToMediaCenter` 开头就是
      * `else if (isNativeSystemMediaSource(pkg)) { ...skip... }` ——
-     * **原厂音源在放的时候原厂自己不 claim**。我们照做：
-     * 用户正在听电台时不去抢播放入口，免得把声音切走。
+     * **原厂音源在放的时候不 claim**（官方桌面用的就是这套 SDK）。
+     * 我们照做：用户正在听电台时不去抢播放入口，免得把声音切走。
      */
     @Volatile
     private var nativeSourcePlaying: Boolean = false
@@ -381,7 +381,7 @@ object OfficialMediaBridge {
         controlTarget = next
         Logx.i(LogTags.MEDIA, "OEM 媒体桥兜底方控目标已更新", "target" to next)
         // 第135轮：目标换成一个**三方在线播放器**时，主动 claim 一次
-        // （原厂「启用即 claim」的同款动作 —— 见 [claimIfNeeded]）。
+        // （「启用即 claim」的同款动作 —— 见 [claimIfNeeded]）。
         //
         // 必须在 worker 上做：claim 是同步 Binder 调用。
         if (running) worker.execute { claimIfNeeded("目标变更") }
@@ -391,7 +391,7 @@ object OfficialMediaBridge {
      * 同步「车机原厂音源（爱趣听一类）是不是正在放」（第一百三十五轮）。
      *
      * 由 [MusicSessionTracker] 每轮重扫时调。正在放的时候我们**不 claim** ——
-     * 原厂 `SessionBridge.pushToMediaCenter` 也是这么干的
+     * `SessionBridge.pushToMediaCenter` 也是这么干的
      * （`isNativeSystemMediaSource(pkg)` → skip），别去打断用户正在听的电台。
      */
     fun setNativeSourcePlaying(playing: Boolean) {
@@ -779,7 +779,7 @@ object OfficialMediaBridge {
             reason = if (registered) "" else "原车媒体注册未返回令牌"
             if (registered) {
                 invoke("updateMediaSourceTypeList", token, intArrayOf(ONLINE))
-                // 第135轮：注册成功就**主动 claim 一次**（对齐原厂「启用即 claim」）。
+                // 第135轮：注册成功就**主动 claim 一次**（对齐「启用即 claim」）。
                 //
                 // 没有这一步，「没打开播放器」时原车认为当前音源还是爱趣听 →
                 // 方控不交给我们 → 按键落进空里 → 原车自己把爱趣听拉起来
@@ -808,16 +808,22 @@ object OfficialMediaBridge {
      * `requestPlay(令牌)` = 「这个源请求播放」→ 原车把当前音源切到我们；
      * `updateCurrentSourceType(令牌, 6)` = 「当前音源类型是在线音乐」。
      *
-     * ## 与原厂的一致性
+     * ## 与官方桌面那条路的一致性
      *
-     * 原厂桌面 `SessionBridge.setBridgeEnabled(true)` →
+     * `SessionBridge.setBridgeEnabled(true)` →
      * `pushToMediaCenter(true)` → `t.a()`（claim）+ `t.b()`（声明音源类型）。
      * 我们现在也是「注册成功就 claim」。
+     *
+     * 这条路不是臆造的：`SessionBridge` 虽然打包在第三方 APK（君君桌面）里，
+     * 但**官方桌面 `com.claunchercard` 自己也在调它**
+     * （设置页「桥接开关」→ `setBridgeEnabled`，开机杀完竞品 →
+     * `requestClusterClaimAfterCompetitorKill`）——
+     * 等于车机上被官方桌面认可并使用的那条路。
      *
      * ## 什么时候**不**claim
      *
      * - 目标不在白名单（爱趣听 / 收音机 / USB / 蓝牙）→ 红线，绝不碰；
-     * - 车机原厂音源正在放 → 原厂自己也是 skip 的，别打断用户正在听的电台；
+     * - 车机原厂音源正在放 → 官方桌面走的那条路也是 skip 的，别打断用户正在听的电台；
      * - 这个目标已经 claim 过 → 只 claim 一次，不跟用户手动切源打架。
      */
     private fun claimIfNeeded(reason: String) {

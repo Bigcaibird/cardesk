@@ -195,15 +195,26 @@ object MediaBridgePolicy {
      *
      * ## 为什么需要「主动 claim」
      *
-     * 原厂桌面（`com.ecarx.qq.tool.session.SessionBridge.setBridgeEnabled(true)`）
-     * 在**启用桥**的那一刻就会：
+     * `com.ecarx.qq.tool`（**君君桌面**，第三方）提供了一套 `SessionBridge` 桥 SDK，
+     * 而**官方桌面 `com.claunchercard` 自己也在用这套 SDK**：
+     *
+     * - 启动就 `enableAccessibility("com.ecarx.qq.tool.QQMusicToolService")`；
+     * - 设置页那个「桥接开关 / 连接车机仪表与方控通道」直接调
+     *   `SessionBridge.setBridgeEnabled`（`DesignSettings.java:515/1130`）；
+     * - 开机杀完竞品后调 `SessionBridge.requestClusterClaimAfterCompetitorKill()`。
+     *
+     * `setBridgeEnabled(true)` 做的正是：
      *
      * ```
      * registerMediaCenterSource(); start(); refresh(); pushToMediaCenter(true);
      * ```
      *
      * 而 `pushToMediaCenter(true)` 里的 `t.a()` 就是 claim
-     * —— 也就是原厂的「**启用即 claim**」。
+     * —— 也就是这条路上「**启用即 claim**」。
+     *
+     * 反过来更直白：`setBridgeEnabled(false)` 的日志原文是
+     * 「bridge disabled → MediaCenter unregistered, **OEM source can take over**」
+     * —— **不 claim，音源就归原车**。
      *
      * 我们以前只在「有样本**且正在播**」时才 claim（[shouldAcquire]），
      * 于是「**没打开播放器**」时整条链是断的：
@@ -221,7 +232,7 @@ object MediaBridgePolicy {
      * | --- | --- |
      * | 已注册到原车 | 没注册就没有令牌，claim 无从谈起 |
      * | 目标在白名单（三方在线播放器） | **红线**：原车收音机 / USB / 蓝牙一律不碰 |
-     * | 目标不是原厂音源在放 | 原厂 `pushToMediaCenter` 遇到 `isNativeSystemMediaSource(pkg)` 直接 skip —— 我们照做，别去打断用户正在听的电台 |
+     * | 目标不是原厂音源在放 | `SessionBridge.pushToMediaCenter` 遇到 `isNativeSystemMediaSource(pkg)` 直接 skip —— 官方桌面走的是同一条路，我们照做，别去打断用户正在听的电台 |
      * | 还没 claim 过这个目标 | 只 claim 一次，不跟用户在车机里手动切源来回打架 |
      */
     fun shouldClaim(
@@ -239,9 +250,10 @@ object MediaBridgePolicy {
      *
      * 判据：有一个会话处于播放中，而它的包名**不在**三方在线播放器白名单里。
      *
-     * 原厂口径：原厂 `SessionBridge.pushToMediaCenter` 遇到
-     * `isNativeSystemMediaSource(pkg)` 直接 skip —— **原厂音源在放的时候，
-     * 原厂自己都不 claim**。我们照做，别去打断用户正在听的电台。
+     * 依据：`SessionBridge.pushToMediaCenter` 遇到
+     * `isNativeSystemMediaSource(pkg)` 直接 skip —— **原厂音源在放的时候不 claim**
+     * （官方桌面用的就是这套 SDK，等于车机上被认可的那条路）。
+     * 我们照做，别去打断用户正在听的电台。
      *
      * @param playingPackages 处于播放中的会话包名（可以多几个）
      */

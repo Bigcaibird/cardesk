@@ -3897,20 +3897,68 @@ bridge.reason: 已注册，等待原车接受播放信息
 
 第131轮补的「收到回调后拉起桌面选定播放器」那段代码**根本没机会执行**。
 
-对照原厂：`SessionBridge.setBridgeEnabled(true)` 会
+**把三个主体分清楚，根因就完全闭合了**：
+
+| 主体 | 包名 / 版本 | 是不是官方 | 与 MediaCenter 的关系 |
+|---|---|---|---|
+| **官方桌面** | `com.claunchercard`（`desktop.apk` / `1.0.20273116-session-desktop`） | ✅ 是 | 自己**不**直接注册，但**调君君的 `SessionBridge`** |
+| **君君桌面** | `com.ecarx.qq.tool`（`1.0.01257-lynkco-tool-pro`） | ❌ **第三方** | 提供 `SessionBridge` 这套桥 SDK |
+| **UNI 工程** | `xyz.i4o.uni.launcher` | ❌ 第三方参考工程 | 我们的 `OfficialMediaBridge` 是从它的移植（第87轮） |
+
+关键的一条：**官方桌面那个「桥接开关」默认是关的**
+（`SessionBridge.isBridgeEnabled` 读 `bridge_control/enabled`，默认 **false**），
+而它的设置页原文与我们一字不差：
+
+```java
+// DesignSettings.java:515（官方桌面）
+toggle(linearLayout, "桥接开关", "连接车机仪表与方控通道", SessionBridge.isBridgeEnabled(host), ...);
+// → lambda$buildPage$5 → SessionBridge.setBridgeEnabled(host, z3)
+```
+
+```kotlin
+// SettingsOverlay.pageCluster()（我们）
+switchRow("桥接开关", prefs.flag(KEY_BRIDGE_ENABLED), "连接车机仪表与方控通道") { ... }
+```
+
+**所以「方控唤起爱趣听」不是谁的 bug，是「两边都没 claim」**：
+官方桌面默认不 claim（用户没开它那个开关）→ MediaCenter 的当前音源一直是原车音源；
+我们注册上了但也从不 claim → 原车同样不认我们 → 方控自然落回爱趣听。
+
+对照那条被认可的路：`SessionBridge.setBridgeEnabled(true)` 会
 `registerMediaCenterSource(); start(...); refresh(); pushToMediaCenter(true);`
 —— `pushToMediaCenter(true)` 里的 `t.a()` 就是 claim
 （`t.b()` 声明音源类型、`t.d()` 推 meta）。
-**原厂是「启用即 claim」**，我们是「有歌在放才 claim」。
+反向更直白：`setBridgeEnabled(false)` 的日志原文是
+「bridge disabled → MediaCenter unregistered, **OEM source can take over**」
+—— **不 claim，音源就归原车**。
+**那条路是「启用即 claim」**，我们是「有歌在放才 claim」。
+
+> **出处要说准**（第135轮末修正）：`com.ecarx.qq.tool` 是**君君桌面**（第三方 APK，
+> `1.0.01257-lynkco-tool-pro`），**不是官方桌面**。
+> 官方桌面是 `com.claunchercard`（`desktop.apk` / `1.0.20273116-session-desktop`）——
+> 而**官方桌面自己也在用君君这套 `SessionBridge`**：
+> 启动就 `enableAccessibility("com.ecarx.qq.tool.QQMusicToolService")`，
+> 设置页那个「桥接开关 / 连接车机仪表与方控通道」（`DesignSettings.java:515/1130`）
+> 直接调 `SessionBridge.setBridgeEnabled`，
+> 开机杀完竞品后调 `SessionBridge.requestClusterClaimAfterCompetitorKill()`。
+>
+> 所以这条 claim 口径不是「第三方自己拍脑袋」，而是
+> **官方桌面认可并每天在走的那条路** —— 我们照抄的对象是它。
+>
+> 顺带记一条**官方桌面的做法**（`BootMediaCompetitorKiller`）：
+> 官方桌面开机 1s/5s/15s 会 `am force-stop` 掉
+> `com.ecarx.multimedia` 与 `com.tencent.wecarflow`（爱趣听），
+> 除非用户锁定了 / 上次在放 / 显式保护了它，然后才 claim。
+> **我们不做这件事** —— 强杀原车音源属于越界（红线），我们只 claim 自己的播放入口。
 
 ### 改了什么
 
 | 文件 | 改动 |
 |---|---|
-| `vehicle/DriveModeSwitch.kt`（新，纯逻辑） | 目标合法性 / 「已经是目标」判定 / 冷却 / 跳过原因 / 原厂口径的写入入口 |
+| `vehicle/DriveModeSwitch.kt`（新，纯逻辑） | 目标合法性 / 「已经是目标」判定 / 冷却 / 跳过原因 / 与官方桌面同口径的写入入口 |
 | `vehicle/DriveModeAutoStart.kt`（新） | 执行端：开关 → 目标 → 等车控通道就绪 → 读当前 → 决定 → 写 → 回读确认 |
 | `vehicle/VehicleGateway.kt` | 新增 `writeSelectFunction(func, value)`：**选择型**功能的写入通道（默认只走两参） |
-| `vehicle/AdaptapiGateway.kt` | 覆写 `writeSelectFunction`：**两参优先 → zone 2 → zone 1**（与原厂逐字对齐） |
+| `vehicle/AdaptapiGateway.kt` | 覆写 `writeSelectFunction`：**两参优先 → zone 2 → zone 1**（与官方桌面 `DriveModeController.writeDriveModeAdaptApi` 逐字对齐） |
 | `vehicle/VehicleController.kt` | 手动切驾驶模式也走同一条通道（原来只有两参一条路） |
 | `BootReceiver.kt` / `ui/LauncherView.kt` | 两个触发点：开机广播 / 桌面启动 |
 | `core/Prefs.kt` | 持久化「上次尝试时间 / 上次目标 / 上次结果」 |
@@ -3932,7 +3980,7 @@ bridge.reason: 已注册，等待原车接受播放信息
    「读不到」≠「已经是目标」，这个区分很重要，否则读失败的机器永远切不了。
 
 3. **claim 的红线没松**：只在**目标是三方在线播放器**（白名单）时 claim；
-   **车机原厂音源（爱趣听一类）正在放时不 claim**（原厂 `pushToMediaCenter`
+   **车机原厂音源（爱趣听一类）正在放时不 claim**（`pushToMediaCenter`
    遇到 `isNativeSystemMediaSource(pkg)` 也是直接 skip）；
    **同一个目标只 claim 一次**（claim 是抢播放权，每 tick 都抢会把原车的播放权来回甩）。
    目标口径与方控回调**完全一致**（有歌名用歌名来源，没歌名用用户选的媒体源）。
@@ -3980,6 +4028,10 @@ bridge.reason: 已注册，等待原车接受播放信息
   **必须真车复验**：装包后不打开任何播放器，按方向盘播放键，
   看是不是**桌面选定的那个播放器**起来了（而不是爱趣听）；
   诊断包看 `bridge.claimTarget`（空 = 从没接管过）与 `bridge.callbackCount`（>0 = 原车把按键交给我们了）。
+- **如果真车上 `claimTarget` 有值、但 `callbackCount` 仍是 0** ——
+  说明原车把当前音源判给了**官方桌面**（它也 claim 了同一个 type 6）。
+  官方桌面的桥**默认是关的**，所以正常情况下我们能拿到；
+  真遇到这种冲突，下一步再议（不要学官方桌面去 `force-stop` 别人）。
 - **「已经是目标模式就不写」这条分支在模拟器上走不到** ——
   模拟通道的当前模式只存在内存里，进程一重启就回到「读不到」。
   该分支由 `DriveModeSwitchTest` 钉死。
@@ -3993,7 +4045,7 @@ bridge.reason: 已注册，等待原车接受播放信息
 |---|---|
 | 文件 | `dist/CarDesk-platform-ecarx-cardesk-4233.apk` |
 | versionCode / versionName | 4233 / 1.0.1137-system |
-| 大小 | 2 323 325 字节 |
-| SHA-256 | `7c08bcd3ff4918a6e14a17fb64f3919bbac022c978125bed981b0536ff2ad3ed` |
+| 大小 | 2 323 349 字节 |
+| SHA-256 | `269e93f546ce33489576b6592dcc19ed389e5dae171f2a7c598f27dcc94cb4dd` |
 | 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
 | 单测 | 1871 项全绿（`tools/release.sh` 出包时一并跑的） |

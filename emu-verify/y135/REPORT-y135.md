@@ -77,8 +77,40 @@ bridge.controlTarget: com.tencent.qqmusiccar
 于是「没打开播放器」时：没有样本 → 不 claim → 原车认为当前音源还是爱趣听
 → 方控不交给我们 → **我们连回调都收不到** → 第131轮的「拉起目标播放器」那段代码根本没机会执行。
 
-原厂是「**启用即 claim**」：`SessionBridge.setBridgeEnabled(true)` →
-`pushToMediaCenter(true)` → `t.a()`（claim）。
+那条被认可的路是「**启用即 claim**」：`SessionBridge.setBridgeEnabled(true)` →
+`pushToMediaCenter(true)` → `t.a()`（claim）；
+反向的日志更直白：`setBridgeEnabled(false)` → 「bridge disabled → MediaCenter
+unregistered, **OEM source can take over**」—— **不 claim，音源就归原车**。
+
+> **出处更正（第135轮末）**：`com.ecarx.qq.tool` 是**君君桌面**（第三方），
+> **不是官方桌面**。官方桌面是 `com.claunchercard`（`desktop.apk`），
+> 而**官方桌面自己也在调君君这套 `SessionBridge`**：
+> `ClauncherApp` 启动 `enableAccessibility("com.ecarx.qq.tool.QQMusicToolService")`、
+> 设置页「桥接开关 / 连接车机仪表与方控通道」→ `SessionBridge.setBridgeEnabled`
+> （`DesignSettings.java:515/1130`）、开机杀完竞品 →
+> `SessionBridge.requestClusterClaimAfterCompetitorKill()`。
+> 所以这条 claim 口径 = **官方桌面认可并每天在走的那条路**，不是第三方自己拍脑袋。
+>
+> 另记一条**官方桌面的做法**（`BootMediaCompetitorKiller`）：官方桌面开机 1s/5s/15s
+> 会 `am force-stop` 掉 `com.ecarx.multimedia` 与 `com.tencent.wecarflow`（爱趣听），
+> 除非用户锁定 / 上次在放 / 显式保护了它，然后才 claim。
+> **我们不做强杀**（越过红线），只 claim 自己的播放入口。
+
+### 三个主体分清楚，根因才闭合
+
+| 主体 | 包名 / 版本 | 是不是官方 | 与 MediaCenter 的关系 |
+|---|---|---|---|
+| **官方桌面** | `com.claunchercard`（`desktop.apk` / `1.0.20273116-session-desktop`） | ✅ 是 | 自己不直接注册，但**调君君的 `SessionBridge`** |
+| **君君桌面** | `com.ecarx.qq.tool`（`1.0.01257-lynkco-tool-pro`） | ❌ **第三方** | 提供 `SessionBridge` 桥 SDK |
+| **UNI 工程** | `xyz.i4o.uni.launcher` | ❌ 第三方参考工程 | 我们的 `OfficialMediaBridge` 从它移植（第87轮） |
+
+**官方桌面的「桥接开关」默认是关的**（`bridge_control/enabled` 默认 false），
+而它的开关原文与我们一字不差（`DesignSettings.java:515`）：
+「桥接开关」+「连接车机仪表与方控通道」→ `SessionBridge.setBridgeEnabled`。
+
+⇒ **「方控唤起爱趣听」不是 bug，是「两边都没 claim」**：
+官方桌面默认不 claim → MediaCenter 当前音源一直是原车音源；
+我们注册了但也从不 claim → 原车同样不认我们 → 方控落回爱趣听。
 
 ### 模拟器能验到什么、验不到什么
 
