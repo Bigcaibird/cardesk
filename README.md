@@ -3072,3 +3072,122 @@ qqControl(已发方控命令): N             ← 我们真的把命令发给 QQ 
   模拟器能验的是它前面的一切：开门、采纳、歌名/歌词、以及方控 URI 通道本身。
 - 诊断包里的 `bridge.bound` 在模拟器上是 `false`（没有 ecarx 服务），
   真车上是 `true`；这两者不要混着看。
+
+## 导航页「画中画全屏按钮」改成悬浮叠在画中画上（第 129 轮）
+
+用户反馈（截图红框指认）：**画中画左侧那条全屏按钮，不要单独占一条，
+要悬浮到画中画界面上**。
+
+### 旧实现：按钮挂在导航页本体上，等于独占一条留白
+
+```kotlin
+// NavPage.buildNavSplit() —— 旧代码
+addView(split, LayoutParams(36, 110, Gravity.START or Gravity.CENTER_VERTICAL))
+```
+
+`split` 是画中画那个 `›` 玻璃按钮（点一下把画中画切全屏）。它挂在
+**导航页根 FrameLayout** 的 `START` 位置 —— 也就是**压在 navRow 左边
+那 44px 留白**（`NAV_SIDE_MARGIN`）上，而画中画卡片从 x=44 才开始。
+结果是：
+
+- 屏幕最左边长期空着一条 44px 的竖玻璃条，**这条留白只为这一个按钮而留**；
+- 按钮和画中画画面**分属两块**，视觉上对不齐；
+- 画中画**左右换位**时（`applySidesSwapped` 靠 `navRow` 切 RTL 实现），
+  按钮纹丝不动留在屏幕左边 → 跑到画中画的**对面**去了。
+
+### 新实现：挂进画中画承载面，叠在画面左边缘
+
+```kotlin
+// NavPage.buildNavSplit() —— 现在
+mapCard.addView(split, navSplitParams())
+mapCard.bringChildToFront(split)
+```
+
+`mapCard` 就是**画中画承载面**（地图卡）。按钮进了它里面，
+`Gravity.START or Gravity.CENTER_VERTICAL` → 贴**画中画自己的左边缘**、垂直居中：
+
+- **不再独占任何留白**（左侧那条 44px 变成正常的设计边距，
+  和右侧对称）；
+- **换位时跟着画面走** —— 承载面挪到右边，按钮就跟着挪到右边，
+  永远贴在画面自己的左边缘；
+- **位置与全屏态完全一致** —— 全屏时按钮被提到桌面根容器上，
+  同样在左侧垂直居中，用户不用记两个位置。
+
+> `PipDividerView`（12×144 的玻璃 chip，压在「地图卡 ↔ 右槽」缝上）
+> 是**另一个**控件：单击 = 主画全屏、长按 = 拖比例。
+> 本轮改的是 `navSplit`，两者别混。
+
+### 两态参数收敛到一个纯逻辑对象
+
+「悬浮在画中画上」和「全屏浮在画面上」这两态，按钮的宽 / 高 / gravity
+**必须逐字相同** —— 两处各写一份字面量的话，改了一处忘了另一处，
+用户就会看到「点全屏后按钮跑位了」。
+
+所以抽了 `ui/pip/NavSplitPlacement.kt`（纯逻辑，不碰 View）：
+
+```kotlin
+object NavSplitPlacement {
+    const val WIDTH = 36
+    const val HEIGHT = 110
+    const val GRAVITY = Gravity.START or Gravity.CENTER_VERTICAL
+
+    const val HOST_OVERLAID = HOST_PIP_CARD      // 悬浮态宿主 = 画中画承载面
+    const val HOST_FULLSCREEN = HOST_DESKTOP_ROOT // 全屏态宿主 = 桌面根容器
+
+    fun host(fullscreen: Boolean): String = if (fullscreen) HOST_FULLSCREEN else HOST_OVERLAID
+    fun gravity(fullscreen: Boolean): Int = GRAVITY   // 两态同一个值
+    const val PIP_CARD_LAYOUT_DIRECTION = PipSides.DIR_LTR
+}
+```
+
+`NavPage`（悬浮态）和 `LauncherView.enterPipFullscreen`（全屏态）
+都从这里取参数 —— 两态跑位在编译期就不可能发生。
+
+`PIP_CARD_LAYOUT_DIRECTION` 钉死 **LTR** 是另一条要害：
+画中画左右换位是靠**外层** `navRow` 切 RTL 实现的，承载面自己保持 LTR
+（只换位置、不镜像内容）。承载面一旦被镜像，按钮（`Gravity.START`）
+就会跑到画中画的**右边**去 —— 跟画面错位。
+
+### 怎么验证
+
+`NavSplitOverlayTest`（Robolectric，真实跑一遍布局）直接断言：
+
+```
+按钮挂在画中画承载面上而不是导航页本体
+按钮尺寸与定位参数沿用原值
+按钮压在画中画画面左边缘而不是画外
+全屏往返后按钮回到画中画承载面
+全屏态按钮与悬浮态用同一套定位参数
+画中画左右换位时按钮跟着画面走
+```
+
+**反向验证 6 项全部变红**（`tools/verify_y129_reverse.sh`，可复跑）：
+
+| 反向 | 改法 | 红灯 |
+|---|---|---|
+| 1 | `buildNavSplit` 挂回导航页本体 | 3 |
+| 2 | `attachNavSplit` 放回导航页本体 | 1 |
+| 3 | `HOST_OVERLAID` 改回 `navPage` | 1 |
+| 4 | 全屏态 gravity 与悬浮态不一致 | 2 |
+| 5 | 承载面方向改成 RTL | 2 |
+| 6 | `LauncherView` 全屏态硬编码 gravity | 1 |
+
+还原后自检 0 红灯。模拟器端到端见 `emu-verify/y129/`。
+
+### 已知限制
+
+- 按钮会**遮住画中画画面左边缘 36×110 的一块**，并吃掉该区域的触摸。
+  地图应用左侧竖直居中处通常是空白（实测高德 9.5 该位置是菜单区文字），
+  风险可控，但**真车上没验过**。
+- 高德车机版是**系统弹窗**（登录/升级提示），画中画里弹出来时
+  **会溢出画中画卡**盖到右边的音乐卡上 —— 这是 `ActivityView` 的既有行为，
+  本轮没碰。
+- 取证时撞见「画中画里高德偶发全黑」，查过一轮**确认不是本轮改坏的**：
+  本轮对画中画承载路径**一处没改**（`mapCard.layoutDirection` 的新旧值都是 0；
+  全屏按钮的宽/高/gravity 新旧值分别是 36 / 110 / `START|CENTER_VERTICAL`；
+  `navSplit` 是个纯 `FrameLayout`，不参与 `ActivityView`），
+  而且**同一份 4228 代码**两次跑结果不同（高德进程是遗留的就黑，
+  `am force-stop` 高德后重跑就正常）→ 非确定性。
+  logcat 显示全屏往返时 `relaunchAfterResize()` 会**杀掉重启**高德的
+  `UsbFillActivity` / `MainMapActivity`，黑屏就是这个重绘窗口。
+  **既有问题，本轮未修**，在此记录以免下一轮再被它绊住。

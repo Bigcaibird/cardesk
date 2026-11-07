@@ -32,6 +32,7 @@ import com.cardesk.launcher.core.media.MusicController
 import com.cardesk.launcher.core.media.TrackInfo
 import com.cardesk.launcher.ui.pages.NavPage
 import com.cardesk.launcher.ui.pages.ScenePage
+import com.cardesk.launcher.ui.pip.NavSplitPlacement
 import com.cardesk.launcher.ui.pip.PipSurface
 import com.cardesk.launcher.ui.shell.DockBarView
 import com.cardesk.launcher.ui.shell.EnhancedNavBarView
@@ -1150,9 +1151,15 @@ class LauncherView(context: Context) : FrameLayout(context) {
         // 所以全屏必须有个**看得见的**还原入口。
         navPage.detachNavSplit()?.let { split ->
             navSplitInFullscreen = split
+            // 宽 / 高 / gravity 与「悬浮在画中画上」那态完全一致（第129轮）——
+            // 两态取同一份 [NavSplitPlacement]，用户点全屏后按钮不会跑位。
             content.addView(
                 split,
-                Ui.frame(36, 110, Gravity.START or Gravity.CENTER_VERTICAL),
+                Ui.frame(
+                    NavSplitPlacement.WIDTH,
+                    NavSplitPlacement.HEIGHT,
+                    NavSplitPlacement.gravity(fullscreen = true),
+                ),
             )
             content.bringChildToFront(split)
         }

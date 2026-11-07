@@ -21,6 +21,7 @@ import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.core.media.LyricWindow
 import com.cardesk.launcher.ui.Ui
+import com.cardesk.launcher.ui.pip.NavSplitPlacement
 import com.cardesk.launcher.ui.pip.PipDividerView
 import com.cardesk.launcher.ui.pip.PipRatio
 import com.cardesk.launcher.ui.pip.PipRatioStore
@@ -44,6 +45,8 @@ import com.cardesk.launcher.ui.pip.PipSurface
  *  │ │ （四轮胎压值 / 俯视车身图 / 来源行 / 封面+歌名 / 三行歌词 / 进度 / 控制键）
  *  │ └── card_map2 → 副画 双画：第二路画中画（MainActivity:1453 的第二个）
  *  ├── View navSplit 36×110 玻璃按钮，start|center，chevron 图标
+ *  │        （第129轮：**挂在画中画承载面 mapCard 里**，叠在画面左边缘，
+ *  │          不再独占导航页左侧那条 44px 留白）
  *  └── 画中画分隔条 pipDivider 12×144 玻璃 chip
  *        （单击 = 主画全屏；长按 = 左右拖动调整分屏比例）
  * `
@@ -427,6 +430,15 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
 
     private val mapCard = FrameLayout(context)
 
+    /**
+     * **画中画承载面**（地图卡）—— 只读，供排障 / 单测读取。
+     *
+     * 第129轮起「画中画全屏按钮」（`navSplit`）挂在这个容器里 ——
+     * 悬浮叠在画中画画面左边缘（规则见 [NavSplitPlacement]），
+     * 不再独占导航页左侧那条 44px 留白。
+     */
+    val pipCard: FrameLayout get() = mapCard
+
     /** 来源行（来源菜单据此定位）。 */
     private var sourceRowView: View? = null
 
@@ -558,7 +570,9 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
                 View.LAYOUT_DIRECTION_LTR
             }
             // 子项各自 LTR：卡片内部内容不跟着镜像（MainActivity:1081-1083）
-            mapCard.layoutDirection = View.LAYOUT_DIRECTION_LTR
+            // 第129轮：方向来自 NavSplitPlacement —— 承载面必须 LTR，
+            // 否则按钮（Gravity.START）会跑到画中画的右边，跟画面错位。
+            mapCard.layoutDirection = NavSplitPlacement.PIP_CARD_LAYOUT_DIRECTION
             rightSlot.layoutDirection = View.LAYOUT_DIRECTION_LTR
             navRow.requestLayout()
         }
@@ -919,11 +933,34 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
             Ui.text(context, "›", 26f, Skin.TEXT).apply { gravity = Gravity.CENTER },
             LayoutParams(24, 24, Gravity.CENTER),
         )
-        addView(
-            split,
-            LayoutParams(36, 110, Gravity.START or Gravity.CENTER_VERTICAL),
-        )
+        // 第129轮：**挂进画中画承载面**，叠在画面左边缘。
+        //
+        // 以前它 addView 到导航页本体（NavigationPage 根 FrameLayout）的
+        // START 位置 —— 也就是**独占了 navRow 左边那 44px 留白**
+        // （NAV_SIDE_MARGIN），画中画左侧长期空着一条竖玻璃条。
+        //
+        // 现在它跟着画中画走：
+        // - 画中画左右换位时（`applySidesSwapped` 靠 layoutDirection 实现），
+        //   按钮跟着画中画一起换边，不会跑到画中画对面去；
+        // - 位置与**画中画全屏态**完全一致（都是左侧垂直居中），
+        //   用户不用记两个位置。
+        mapCard.addView(split, navSplitParams())
+        mapCard.bringChildToFront(split)
     }
+
+    /**
+     * 玻璃条在画中画承载面里的定位参数（第129轮）。
+     *
+     * 宽 / 高 / gravity 全部取自 [NavSplitPlacement] —— 全屏态
+     * （`LauncherView.enterPipFullscreen`）也从同一个对象取，
+     * 两态位置天然一致，用户不用记两个位置。
+     */
+    private fun navSplitParams(): LayoutParams =
+        LayoutParams(
+            NavSplitPlacement.WIDTH,
+            NavSplitPlacement.HEIGHT,
+            NavSplitPlacement.gravity(fullscreen = false),
+        )
 
     /**
      * 把左侧玻璃条（`navSplit`）**摘出去** —— 全屏时它要浮在画中画上方当还原按钮。
@@ -946,12 +983,11 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
      */
     fun attachNavSplit() {
         if (!::navSplit.isInitialized) return
-        if (navSplit.parent === this) return
+        if (navSplit.parent === mapCard) return
         (navSplit.parent as? android.view.ViewGroup)?.removeView(navSplit)
-        addView(
-            navSplit,
-            LayoutParams(36, 110, Gravity.START or Gravity.CENTER_VERTICAL),
-        )
+        // 第129轮：放回**画中画承载面**（不是导航页本体）。
+        mapCard.addView(navSplit, navSplitParams())
+        mapCard.bringChildToFront(navSplit)
     }
 
     // ------------------------------------------------------------- 布局刷新

@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1131",
-  "versionCode": 4227,
-  "tag": "v1.0.1131",
-  "name": "CarDesk 4227 / 1.0.1131-system",
-  "notes": "第128轮：QQ 音乐车机版方控修好（诊断包把第126轮的假设证伪了）\n\n【真车诊断包（4226）暴露的三个根因】\n1. 采纳门读错了键：第126轮只读「默认媒体源」default_music_source_v1，\n   而用户是在音乐卡片来源行里选的 QQ 音乐（design_music_source_v1）——\n   真车上后一个键压根没写过，前一个读到的永远是 generic，\n   于是 4 条 QQ 广播「收到=4 采纳=0 丢弃=4」。\n   现在两个源都认（QqBroadcast.shouldAccept / isQqSelected）。\n2. 开门广播（action=100，让 QQ 音乐开始往外挂曲目）一次都没发过：\n   它用同一个错键判条件。今天只要用户选了 QQ 音乐就会发，\n   卡片来源行切换时立刻发。\n3. 原车媒体桥把「注册」和「有歌名」绑死了：register() 要求 sample.available，\n   而 QQ 音乐车机版不发布可用会话 → 歌名只能靠它的广播 → 拿不到歌名就永远注册不上\n   → 原车永远不把方向盘方控交给我们（诊断包：bound=true 但 registered=false、\n   callbackCount=0、registerMusic 一次都没被调用过）。\n\n【这一轮的核心：解耦「方控目标」与「歌名」】\n- 桥只要在跑就注册，不再要求先有歌名；没有样本时也不再注销\n  （注销了原车就把方控收回去，比没注册更难查）。\n- 方控目标 = 歌名的来源包，或用户选的媒体源（兜底目标），\n  由 MusicSessionTracker 定期同步给桥。\n- 抢播放权仍要求「有样本 + 正在播放」，原车收音机 / USB / 蓝牙一律不碰。\n- 目标不在三方在线播放器白名单里就不发（MediaBridgePolicy.acceptsControl）。\n\n【诊断包补强】\n- qqBroadcastMethods: 广播 method 计数表（原来只留最后一条原文，\n  真车上那一条是 update_app_foreground，本来就不含歌名，看完会误判）。\n- qqDoor: 增加「开门命令已发=N」。\n- bridge.controlTarget: 兜底方控目标。\n- 各音乐 App 的已安装版本号（协议对齐用）。\n\n【模拟器实测（真包 QQ 音乐车机版 1.9.8.22，prefs 照搬真车状态）】\n- 开门广播发出 → QQ 侧 setAllowSendOutside, allow=true\n- 广播被采纳（收到=2 采纳=2 丢弃=0，真车旧包是 采纳=0 丢弃=4）\n- 歌名/歌手/时长/进度/播放态/歌词全部上屏（emu-verify/y128/）\n- 方控 URI 通道真正下发到 QQ 音乐：ACTION : 20\n\n【其它】\n- 单测 1708 条全绿（新增 11 条），6 项反向验证逐条确认断言变红。",
-  "publishedAt": "2026-11-06T01:33:44Z",
+  "version": "1.0.1132",
+  "versionCode": 4228,
+  "tag": "v1.0.1132",
+  "name": "CarDesk 4228 / 1.0.1132-system",
+  "notes": "导航页「画中画全屏按钮」改为悬浮叠在画中画画面上：不再独占左侧那条 44px 留白，按钮跟着画中画左右换位一起走；全屏态与悬浮态共用同一套定位参数，位置完全一致。",
+  "publishedAt": "2026-11-07T01:50:44Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4227.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4227.apk",
-    "size": 2254138,
-    "sha256": "a6eed03d6fe9444be0f41ae304944c71b2ac3ed8fbb4a86d6eea0dd204df2882"
+    "name": "CarDesk-platform-ecarx-cardesk-4228.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4228.apk",
+    "size": 2254826,
+    "sha256": "b54c74fe90198c9af693d5e7cfe5ab40d3280914b5c5ba021a09edd3f6e32b2a"
   }
 }
