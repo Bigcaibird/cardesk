@@ -791,9 +791,9 @@ class MusicSessionTracker private constructor() {
         OfficialMediaBridge.setControlTarget(pkg)
         // 第135轮：把「车机原厂音源（爱趣听一类）正在放」告诉桥。
         //
-        // 原厂 `SessionBridge.pushToMediaCenter` 开头就是
+        // `SessionBridge.pushToMediaCenter` 开头就是
         // `else if (isNativeSystemMediaSource(pkg)) { ...skip... }` ——
-        // 原厂音源在放的时候它自己都**不 claim**。我们照做：
+        // 原厂音源在放的时候**不 claim**（官方桌面走的是同一条路）。我们照做：
         // 用户正在听电台时不去抢播放入口，别把声音切走。
         OfficialMediaBridge.setNativeSourcePlaying(nativeSourcePlaying())
     }
