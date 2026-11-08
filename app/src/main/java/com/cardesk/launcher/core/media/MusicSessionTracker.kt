@@ -789,17 +789,17 @@ class MusicSessionTracker private constructor() {
         val id = runCatching { Prefs(ctx).musicSource }.getOrNull().orEmpty()
         val pkg = MediaSources.PRIMARY_PACKAGES[id].orEmpty()
         OfficialMediaBridge.setControlTarget(pkg)
-        // 第135轮：把「车机原厂音源（爱趣听一类）正在放」告诉桥。
+        // 第135轮：把「车机自带音源（爱趣听一类）正在放」告诉桥。
         //
         // `SessionBridge.pushToMediaCenter` 开头就是
         // `else if (isNativeSystemMediaSource(pkg)) { ...skip... }` ——
-        // 原厂音源在放的时候**不 claim**（官方桌面走的是同一条路）。我们照做：
+        // 车机自带音源在放的时候**不 claim**（参考 App（君君桌面）走的是同一条路）。我们照做：
         // 用户正在听电台时不去抢播放入口，别把声音切走。
         OfficialMediaBridge.setNativeSourcePlaying(nativeSourcePlaying())
     }
 
     /**
-     * 系统里有没有**车机原厂音源**（爱趣听一类）正在放（第一百三十五轮）。
+     * 系统里有没有**车机自带音源**（爱趣听一类）正在放（第一百三十五轮）。
      *
      * 判据：有一个会话处于 `PLAYING`，而它的包名**不在**三方在线播放器白名单里
      * （[MediaBridgePolicy.hasNativeSourcePlaying]）。
@@ -1595,7 +1595,7 @@ class MusicSessionTracker private constructor() {
             // —— 第131轮：**没有会话时把目标播放器拉起来** ——
             //
             // 真车现象（用户报的）：没打开任何第三方播放器时按方向盘播放键，
-            // **打开的是爱趣听**（车机原厂音源），而不是桌面选定的那个播放器。
+            // **打开的是爱趣听**（车机自带音源），而不是桌面选定的那个播放器。
             //
             // 原因就在这个分支以前的位置：目标播放器**没在运行** → 没有它的
             // MediaSession → `controller == null` → 以前直接「已过期，忽略」，
@@ -1603,7 +1603,7 @@ class MusicSessionTracker private constructor() {
             //
             // 现在：把目标播放器拉起来（让它自己开始播），方控才真的作用在它身上。
             //
-            // 车机原厂音源（爱趣听一类）**不由我们接管** —— 那是原车自己的 owner
+            // 车机自带音源（爱趣听一类）**不由我们接管** —— 那是原车自己的 owner
             // （见 MediaBridgePolicy 顶部的红线），保持原样。
             if (action == MediaButtonTransport.ACTION_PLAY &&
                 PlayTarget.noSessionAction(source) == PlayTarget.NoSessionAction.SELECTED_SOURCE
@@ -1910,7 +1910,7 @@ class MusicSessionTracker private constructor() {
         val flags = controllerFlags(c)
         // 两条通道分开算：按键通道（dispatchMediaButtonEvent）看 MEDIA_BUTTONS，
         // transport 通道（transportControls.*）看 TRANSPORT_CONTROLS。
-        // 网易云 / 原厂音源常把 actions 留成 0，只有这两位上能看出它们收不收指令。
+        // 网易云 / 车机自带音源常把 actions 留成 0，只有这两位上能看出它们收不收指令。
         val buttons = MediaButtonTransport.canMediaButtons(flags)
         val transport = MediaButtonTransport.canTransport(flags)
         // actions 为 0 时按 flags 补「有效 action 位」，否则幂等决策会一直判 no-action
@@ -2094,10 +2094,10 @@ class MusicSessionTracker private constructor() {
         //
         // 以前这里的目标是「记住的上次播放器」—— 那是**历史**。
         // 真车诊断包实测就是这种错位：用户选了 QQ 音乐，
-        // 上次播的却是车机原厂音源 → 按播放打开的是原厂音源。
+        // 上次播的却是车机自带音源 → 按播放打开的是车机自带音源。
         //
         // 现在目标按 [PlayTarget.resolve] 的优先级来（卡片来源行 → 设置页默认源 →
-        // 记住的播放器 → 默认音乐应用列表），而且**原厂音源不由我们接管**。
+        // 记住的播放器 → 默认音乐应用列表），而且**车机自带音源不由我们接管**。
         val selected = selectedSourcePkg()
         val target = PlayTarget.resolve(
             currentSourcePkg = selected.first,

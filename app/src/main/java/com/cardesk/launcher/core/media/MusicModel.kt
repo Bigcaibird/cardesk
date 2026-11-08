@@ -143,8 +143,8 @@ class LyricTimeline(val lines: List<LyricLine>) {
      * 这一行带逐字时间（[LyricLine.words] 非空）时走 [wipeFractionByWord]：
      * 按「唱完的字数 + 当前字的部分进度」算，擦除边界跟着**实际演唱**走。
      *
-     * 没有逐字时间时才是行级线性 —— **与原厂 APK 的
-     * `MusicManager.computeLineWipeFraction` 公式完全一致**，不猜、不倒退。
+     * 没有逐字时间时才是行级线性 —— **与参考 App（君君桌面）的
+     * `com.claunchercard.manager.MusicManager.computeLineWipeFraction` 公式完全一致**，不猜、不倒退。
      */
     fun wipeFraction(positionMs: Long, index: Int, durationMs: Long = 0L): Float {
         val line = lines.getOrNull(index) ?: return 0f

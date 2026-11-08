@@ -24,7 +24,7 @@ import com.cardesk.launcher.core.log.Logx
  *
  * ## 写入为什么要自己降级
  *
- * 原厂桌面写驾驶模式的顺序（反编译
+ * 参考 App（君君桌面）写驾驶模式的顺序（反编译
  * `com/claunchercard/manager/DriveModeController.writeDriveModeAdaptApi`）：
  *
  * ```
@@ -36,7 +36,7 @@ import com.cardesk.launcher.core.log.Logx
  * ```
  *
  * 我们原来的 [VehicleGateway.writeFunction] **只有两参一条路**，
- * 固件不提供两参重载时直接失败 —— 原厂却能靠 zone 兜底写成功。
+ * 固件不提供两参重载时直接失败 —— 参考 App（君君桌面）却能靠 zone 兜底写成功。
  * 所以这里走 [VehicleGateway.writeSelectFunction]（两参优先 + zone 降级）。
  *
  * ## 这里是纯 Kotlin（不碰 Android 上下文），可在 JVM 单测里覆盖。
@@ -59,10 +59,10 @@ object DriveModeSwitch {
     /**
      * 三参降级时的 zone 顺序。
      *
-     * 照抄原厂 `writeDriveModeAdaptApi`：**先 2 后 1**。
+     * 照抄参考 App（君君桌面） `writeDriveModeAdaptApi`：**先 2 后 1**。
      *
      * 为什么不反过来：zone=2 是这台车（领克 dcy11 / 820A 平台）的驾驶模式 zone，
-     * 原厂把 2 放在 1 前面是有依据的。
+     * 参考 App（君君桌面）把 2 放在 1 前面是有依据的。
      */
     val FALLBACK_ZONES = intArrayOf(2, 1)
 
@@ -156,7 +156,7 @@ object DriveModeSwitch {
      * 写一次驾驶模式。
      *
      * 走 [VehicleGateway.writeSelectFunction]：**两参优先**，
-     * 失败再按 [FALLBACK_ZONES] 降级到三参（与原厂一致）。
+     * 失败再按 [FALLBACK_ZONES] 降级到三参（与参考 App（君君桌面）一致）。
      *
      * @return `true` = 车机收下了这条指令（**不代表模式真的变了**，
      *   真车还要回读确认，见 [VehicleController.verifyDriveMode]）。

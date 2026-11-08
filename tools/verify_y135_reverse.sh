@@ -20,7 +20,7 @@
 #     原因：`MediaBridgePolicy.shouldAcquire` 要求「有样本**且正在播**」才抢播放权；
 #     没在放 → 不 claim → 原车认为当前音源还是爱趣听 → 方控不交给我们
 #     → 我们连回调都收不到 → 第131轮那段「拉起桌面选定播放器」的代码**根本没机会执行**。
-#     原厂 `SessionBridge.setBridgeEnabled(true)` 是「**启用即 claim**」
+#     参考 App（君君桌面） `SessionBridge.setBridgeEnabled(true)` 是「**启用即 claim**」
 #     （`pushToMediaCenter(true)` → `t.a()`）。
 #
 #   下面每一条反向验证都对应一组断言：改坏 → 断言必红 → 还原 → 恢复全绿。
@@ -103,7 +103,7 @@ def func_body(src, header):
     j = src.find("\n    }\n", i)
     return src[i:j] if j > 0 else src[i:i + 6000]
 
-# 1) 真车通道的「选择型写入」必须**两参优先**（原厂口径）
+# 1) 真车通道的「选择型写入」必须**两参优先**（参考 App（君君桌面）口径）
 body = func_body(gw, "override fun writeSelectFunction")
 checks.append((
     'if (m2 != null && invokeBool(m2, f, func, value) == true) {' in body,
@@ -127,7 +127,7 @@ checks.append((
 # 3) 桥：注册成功必须主动 claim 一次
 checks.append((
     has_call(bridge, 'claimIfNeeded("注册成功")'),
-    "OfficialMediaBridge.register 成功后必须主动 claim 一次（对齐原厂「启用即 claim」）",
+    "OfficialMediaBridge.register 成功后必须主动 claim 一次（对齐参考 App（君君桌面）「启用即 claim」）",
 ))
 # claim 必须真的调 requestPlay（用精确片段，避免和 publish() 里的那处混淆）
 cbody = func_body(bridge, "private fun claimIfNeeded")
@@ -139,10 +139,10 @@ checks.append((
     'invoke("updateCurrentSourceType", token, ONLINE)' in cbody,
     "claimIfNeeded 必须调 updateCurrentSourceType（声明当前音源类型）",
 ))
-# 4) 原厂音源在放的信号必须从 tracker 传到桥
+# 4) 车机自带音源在放的信号必须从 tracker 传到桥
 checks.append((
     has_call(tracker, 'OfficialMediaBridge.setNativeSourcePlaying(nativeSourcePlaying())'),
-    "MusicSessionTracker 必须把「原厂音源正在放」同步给桥",
+    "MusicSessionTracker 必须把「车机自带音源正在放」同步给桥",
 ))
 
 bad = [msg for ok, msg in checks if not ok]
@@ -207,7 +207,7 @@ run_tests
 restore
 
 echo
-echo "=== 反向5：zone 降级顺序颠倒（1 先 2 后，与原厂相反）==="
+echo "=== 反向5：zone 降级顺序颠倒（1 先 2 后，与参考 App（君君桌面）相反）==="
 patch "$LOGIC" \
 '    val FALLBACK_ZONES = intArrayOf(2, 1)' \
 '    val FALLBACK_ZONES = intArrayOf(1, 2)'
@@ -215,15 +215,15 @@ run_tests
 restore
 
 echo
-echo "=== 反向6：真车通道不走两参（改成三参优先，与原厂口径相反）==="
+echo "=== 反向6：真车通道不走两参（改成三参优先，与参考 App（君君桌面）口径相反）==="
 patch "$GATEWAY" \
 '        val m2 = findMethod(f, "setFunctionValue", INT, INT)
         val m3 = findMethod(f, "setFunctionValue", INT, INT, INT)
-        // 1) 两参（文档口径，也是原厂的第一选择）
+        // 1) 两参（文档口径，也是参考 App（君君桌面）的第一选择）
         if (m2 != null && invokeBool(m2, f, func, value) == true) {' \
 '        val m2 = findMethod(f, "setFunctionValue", INT, INT)
         val m3 = findMethod(f, "setFunctionValue", INT, INT, INT)
-        // 1) 两参（文档口径，也是原厂的第一选择）
+        // 1) 两参（文档口径，也是参考 App（君君桌面）的第一选择）
         if (false && m2 != null && invokeBool(m2, f, func, value) == true) {'
 check_wiring
 restore
@@ -245,7 +245,7 @@ run_tests
 restore
 
 echo
-echo "=== 反向9：原厂音源在放时也 claim（会把用户正在听的电台切走）==="
+echo "=== 反向9：车机自带音源在放时也 claim（会把用户正在听的电台切走）==="
 patch "$POLICY" \
 '        !nativeSourcePlaying' \
 '        true'
@@ -277,7 +277,7 @@ check_wiring
 restore
 
 echo
-echo "=== 反向13：原厂音源的播放态不传给桥（永远看不到「电台在放」）==="
+echo "=== 反向13：车机自带音源的播放态不传给桥（永远看不到「电台在放」）==="
 patch "$TRACKER" \
 '        OfficialMediaBridge.setNativeSourcePlaying(nativeSourcePlaying())' \
 '        Unit'

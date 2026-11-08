@@ -15,7 +15,7 @@ import org.junit.Test
  *
  * 判据全在纯逻辑里，所以这几条能钉死：
  * - **桌面选定的来源优先**于「记住的上次播放器」（后者是历史）；
- * - **车机原厂音源不由我们接管**（红线：原车收音机 / USB / 蓝牙不碰）；
+ * - **车机自带音源不由我们接管**（红线：原车收音机 / USB / 蓝牙不碰）；
  * - 判不准（没装 / 没有目标）时**宁可不动**。
  */
 class PlayTargetTest {
@@ -32,17 +32,17 @@ class PlayTargetTest {
 
     private val defaults = MediaSources.DEFAULT_MUSIC_PACKAGES
 
-    // ---------------------------------------------------------------- 原厂音源判定
+    // ---------------------------------------------------------------- 车机自带音源判定
 
     @Test
-    fun `爱趣听一类算车机原厂音源`() {
+    fun `爱趣听一类算车机自带音源`() {
         assertTrue(PlayTarget.isCarAudioPkg("com.tencent.wecarflow"))
         assertTrue(PlayTarget.isCarAudioPkg("com.aiquting.radio"))
         assertTrue(PlayTarget.isCarAudioPkg("com.tencent.qqmusictv"))
     }
 
     @Test
-    fun `三方播放器不算车机原厂音源`() {
+    fun `三方播放器不算车机自带音源`() {
         assertFalse(PlayTarget.isCarAudioPkg("com.tencent.qqmusiccar"))
         assertFalse(PlayTarget.isCarAudioPkg("com.netease.cloudmusic.iot"))
         assertFalse(PlayTarget.isCarAudioPkg("com.luna.music.car"))
@@ -57,7 +57,7 @@ class PlayTargetTest {
     }
 
     @Test
-    fun `原厂音源不由我们接管`() {
+    fun `车机自带音源不由我们接管`() {
         assertFalse(PlayTarget.shouldTakeOver("com.tencent.wecarflow"))
         assertTrue(PlayTarget.shouldTakeOver("com.tencent.qqmusiccar"))
     }
@@ -66,7 +66,7 @@ class PlayTargetTest {
 
     @Test
     fun `桌面选定的来源优先于记住的上次播放器`() {
-        // 真车诊断包实测的错位：用户选了 QQ 音乐，上次播的却是原厂音源
+        // 真车诊断包实测的错位：用户选了 QQ 音乐，上次播的却是车机自带音源
         val target = PlayTarget.resolve(
             currentSourcePkg = "com.tencent.qqmusiccar",
             defaultSourcePkg = "",
@@ -102,7 +102,7 @@ class PlayTargetTest {
     }
 
     @Test
-    fun `记住的是原厂音源时跳过它_不要打开爱趣听`() {
+    fun `记住的是车机自带音源时跳过它_不要打开爱趣听`() {
         val target = PlayTarget.resolve(
             currentSourcePkg = "",
             defaultSourcePkg = "",
@@ -161,11 +161,11 @@ class PlayTargetTest {
     }
 
     @Test
-    fun `没有目标或目标是原厂音源时走旧路`() {
-        // 没有目标 → 旧逻辑（车机原厂音源那套 DMT 恢复）
+    fun `没有目标或目标是车机自带音源时走旧路`() {
+        // 没有目标 → 旧逻辑（车机自带音源那套 DMT 恢复）
         assertEquals(PlayTarget.NoSessionAction.FALLBACK, PlayTarget.noSessionAction(""))
         assertEquals(PlayTarget.NoSessionAction.FALLBACK, PlayTarget.noSessionAction(null))
-        // 目标是原厂音源 → 旧逻辑（红线：不碰原车音源）
+        // 目标是车机自带音源 → 旧逻辑（红线：不碰原车音源）
         assertEquals(
             PlayTarget.NoSessionAction.FALLBACK,
             PlayTarget.noSessionAction("com.tencent.wecarflow"),

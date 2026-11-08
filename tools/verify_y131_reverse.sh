@@ -8,7 +8,7 @@
 #   打开的是爱趣听 —— 能不能让方控控制桌面默认选定的播放器？」
 #
 #   修复：没有会话时，播放目标按「卡片来源行 → 设置页默认源 → 记住的播放器
-#   → 默认音乐应用列表」解析，并且**车机原厂音源不由我们接管**。
+#   → 默认音乐应用列表」解析，并且**车机自带音源不由我们接管**。
 #   下面每一条反向验证都对应一组断言：改坏 → 断言必红 → 还原 → 恢复全绿。
 set -u
 cd /Users/roy/Documents/desktopapp/cardesk
@@ -80,7 +80,7 @@ run_tests
 restore
 
 echo
-echo "=== 反向2：不跳过车机原厂音源（爱趣听又会被选中）==="
+echo "=== 反向2：不跳过车机自带音源（爱趣听又会被选中）==="
 patch "$TARGET" \
 '        if (remembered.isNotEmpty() && isInstalled(remembered) && !isCarAudioPkg(remembered)) {' \
 '        if (remembered.isNotEmpty() && isInstalled(remembered)) {'
@@ -96,7 +96,7 @@ run_tests
 restore
 
 echo
-echo "=== 反向4：原厂音源也算我们接管（会去抢原车音源）==="
+echo "=== 反向4：车机自带音源也算我们接管（会去抢原车音源）==="
 patch "$TARGET" \
 '        return !isCarAudioPkg(t)' \
 '        return true'
@@ -104,7 +104,7 @@ run_tests
 restore
 
 echo
-echo "=== 反向5：原厂音源判定失效（认不出爱趣听）==="
+echo "=== 反向5：车机自带音源判定失效（认不出爱趣听）==="
 patch "$TARGET" \
 '        return p.contains("wecarflow") || p.contains("aiquting") || p.contains("qqmusictv")' \
 '        return false'

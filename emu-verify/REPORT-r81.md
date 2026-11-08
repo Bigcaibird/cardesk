@@ -25,7 +25,7 @@
 
 ## 1. 根因：不是公式错，是**信息缺失**
 
-原厂 APK（`com.claunchercard` 的 `MusicManager.computeLineWipeFraction`）与 CarDesk 的公式**完全一致**：
+参考 App（君君桌面）（`com.claunchercard.manager.MusicManager.computeLineWipeFraction`）与 CarDesk 的公式**完全一致**：
 
 ```
 wipe = (播放位置 − 行首) / (下一行首 − 行首)
@@ -100,7 +100,7 @@ wipe = (播放位置 − 行首) / (下一行首 − 行首)
 | `core/media/KugouLyricFetcher.kt` | 旧接口兜底路径也先试 KRC |
 
 **回退口径不变**：没有任何逐字数据时，擦除仍是**行级线性**，
-与原厂 APK 公式完全一致 —— 不猜、不倒退。
+与参考 App（君君桌面）公式完全一致 —— 不猜、不倒退。
 
 **贴词而不是换一份**：各家歌词分段不同（网易云 62 行 / QQ·酷狗 54 行），
 换一份 = 换分段版式（属于另一个改动）。
@@ -179,7 +179,7 @@ pid 3108 -> 3108
 - **真机上的表现**：本轮模拟器验证用的是 AVD `cardesk-aosp`，
   真车（`com.tencent.wecarflow` 网络环境）能否稳定取到酷狗 KRC **未验证**；
 - **QQ 音乐广播那条通道的逐字**：`com.tencent.wecarflow` 实测**不推歌词广播**
-  （原厂文档也这么写），所以 `<n,n,n>` 自校准这条路径在真机上**没有数据可自证**，
+  （参考 App（君君桌面）文档也这么写），所以 `<n,n,n>` 自校准这条路径在真机上**没有数据可自证**，
   这次真正生效的是**酷狗 KRC** 这条通道；
 - **QQ QRC 通道**（需 DES 解密 + `GetPlayLyricInfo` POST）本轮**未实现**，
   不是阻塞项（酷狗已足够），但它是「不带酷狗时」的备选；

@@ -11,7 +11,7 @@ import org.junit.Test
  * ## 为什么要有这组测试
  *
  * QQ 歌词正文里那种 `<n,n,n>` 标签，**三个数字的语义至今没有权威来源**：
- * 原厂 APK 只 `replaceAll` 剥掉、从不解析；参考工程连剥都不剥。
+ * 参考 App（君君桌面）只 `replaceAll` 剥掉、从不解析；参考工程连剥都不剥。
  * 所以 CarDesk **不写死语义**，而是**用数据自证**（绝对 / 相对行首两种口径投票）。
  *
  * 这组测试把「自证」这件事本身钉死：
@@ -240,7 +240,7 @@ class LyricWordTimingTest {
         assertEquals(5000L, timeline.lines[0].words[0].startMs)
     }
 
-    /** 没有标签的普通 LRC ⇒ 不挂词、**行级线性照旧**（与原厂一致，不倒退）。 */
+    /** 没有标签的普通 LRC ⇒ 不挂词、**行级线性照旧**（与参考 App（君君桌面）一致，不倒退）。 */
     @Test
     fun lrcParser_plainLrcFallsBackToLineLevel() {
         val raw = "[00:00.00]怎么我睡不着\n[00:10.00]你也不来救我\n"

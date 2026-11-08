@@ -33,7 +33,7 @@ git log -S issKeepEnabled --oneline
 | 值域 | `{0, 1}` | `docs/ecarx-adapterapi/data/value-domain.md:32` |
 | 支持探针 | `isFunctionSupported` → `PaSsActivation.availability` | `CarFunctionSupportedUtil.java:356` |
 
-原厂桌面 `com.claunchercard` 的 `DriveModeController` 用的就是同一个功能号
+参考 App（君君桌面） `com.claunchercard` 的 `DriveModeController` 用的就是同一个功能号
 （`:21` 常量、`:273` 读、`:511` 写）⇒ 语义一致：`1` = 开着，`0` = 关着。
 
 另一条看着很像的路走不通：驾驶模式的

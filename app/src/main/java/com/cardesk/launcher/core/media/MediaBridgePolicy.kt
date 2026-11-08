@@ -195,15 +195,10 @@ object MediaBridgePolicy {
      *
      * ## 为什么需要「主动 claim」
      *
-     * `com.ecarx.qq.tool`（**君君桌面**，第三方）提供了一套 `SessionBridge` 桥 SDK，
-     * 而**官方桌面 `com.claunchercard` 自己也在用这套 SDK**：
+     * 证据来自**参考 App（君君桌面）** —— 它是同款车机上跑通的另一个桌面，
+     * 用的是同一套原车 MediaCenter SDK（`com.ecarx.sdk.mediacenter`）。
      *
-     * - 启动就 `enableAccessibility("com.ecarx.qq.tool.QQMusicToolService")`；
-     * - 设置页那个「桥接开关 / 连接车机仪表与方控通道」直接调
-     *   `SessionBridge.setBridgeEnabled`（`DesignSettings.java:515/1130`）；
-     * - 开机杀完竞品后调 `SessionBridge.requestClusterClaimAfterCompetitorKill()`。
-     *
-     * `setBridgeEnabled(true)` 做的正是：
+     * 它的 `SessionBridge.setBridgeEnabled(true)` 做的正是：
      *
      * ```
      * registerMediaCenterSource(); start(); refresh(); pushToMediaCenter(true);
@@ -215,6 +210,19 @@ object MediaBridgePolicy {
      * 反过来更直白：`setBridgeEnabled(false)` 的日志原文是
      * 「bridge disabled → MediaCenter unregistered, **OEM source can take over**」
      * —— **不 claim，音源就归原车**。
+     *
+     * ## 出处要说准（别把它当成「官方口径」）
+     *
+     * 参考 App 的包名是 `com.ecarx.qq.tool`，`app_name` 是「君君桌面」——
+     * **它是第三方**（平台签名预装），**不是车机官方桌面**。
+     * 反编译产物里它的 Java 包前缀是 `com.claunchercard.manager.*`，
+     * 那是**同一个 APK 内部**的包名，不是另一个 App
+     * （`inner_dec` / `outer_dec` 两个产物的 manifest package 都是
+     * `com.ecarx.qq.tool`）。
+     *
+     * 所以这里的证据性质是「**另一个第三方桌面在同款车机上就是这么干的**」，
+     * 不是「厂商规定的口径」。我们跟它对齐是因为它跑通过；
+     * **能不能成，最终看真车复验**。
      *
      * 我们以前只在「有样本**且正在播**」时才 claim（[shouldAcquire]），
      * 于是「**没打开播放器**」时整条链是断的：
@@ -232,7 +240,7 @@ object MediaBridgePolicy {
      * | --- | --- |
      * | 已注册到原车 | 没注册就没有令牌，claim 无从谈起 |
      * | 目标在白名单（三方在线播放器） | **红线**：原车收音机 / USB / 蓝牙一律不碰 |
-     * | 目标不是原厂音源在放 | `SessionBridge.pushToMediaCenter` 遇到 `isNativeSystemMediaSource(pkg)` 直接 skip —— 官方桌面走的是同一条路，我们照做，别去打断用户正在听的电台 |
+     * | 目标不是车机自带音源在放 | 参考 App 的 `SessionBridge.pushToMediaCenter` 遇到 `isNativeSystemMediaSource(pkg)` 直接 skip —— 它那么谨慎，我们照做，别去打断用户正在听的电台 |
      * | 还没 claim 过这个目标 | 只 claim 一次，不跟用户在车机里手动切源来回打架 |
      */
     fun shouldClaim(
@@ -246,14 +254,13 @@ object MediaBridgePolicy {
         !nativeSourcePlaying
 
     /**
-     * 系统里有没有**车机原厂音源**（爱趣听一类）正在放（第135轮，纯逻辑，可单测）。
+     * 系统里有没有**车机自带音源**（爱趣听一类）正在放（第135轮，纯逻辑，可单测）。
      *
      * 判据：有一个会话处于播放中，而它的包名**不在**三方在线播放器白名单里。
      *
-     * 依据：`SessionBridge.pushToMediaCenter` 遇到
-     * `isNativeSystemMediaSource(pkg)` 直接 skip —— **原厂音源在放的时候不 claim**
-     * （官方桌面用的就是这套 SDK，等于车机上被认可的那条路）。
-     * 我们照做，别去打断用户正在听的电台。
+     * 依据：参考 App 的 `SessionBridge.pushToMediaCenter` 遇到
+     * `isNativeSystemMediaSource(pkg)` 直接 skip —— **车机自带音源在放的时候不 claim**。
+     * 它是另一个第三方桌面（君君桌面），我们照做，别去打断用户正在听的电台。
      *
      * @param playingPackages 处于播放中的会话包名（可以多几个）
      */
@@ -301,7 +308,7 @@ object MediaBridgePolicy {
         "artwork" -> "仪表封面 Uri"
         "artworkSource" -> "封面来源"
         "claimTarget" -> "已接管的播放入口"
-        "nativeSourcePlaying" -> "原厂音源正在放"
+        "nativeSourcePlaying" -> "车机自带音源正在放"
         "callbackCount" -> "方控/仪表回调次数"
         "lastCallback" -> "最近一次回调"
         "reason" -> "当前状态说明"

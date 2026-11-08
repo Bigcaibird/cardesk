@@ -4,12 +4,12 @@
   "versionCode": 4233,
   "tag": "v1.0.1137",
   "name": "CarDesk 4233 / 1.0.1137-system",
-  "notes": "第135轮：\n1) 自动切换驾驶模式接上执行端（以前只存不执行）。开机广播 + 桌面启动两个触发点，共用 10 分钟冷却；写入按官方桌面口径「两参优先 → zone 2 → zone 1」降级，失败会如实回读确认。\n2) 没打开播放器时方控默认唤起原车爱趣听：桥注册成功后按「启用即 claim」主动接管播放入口（requestPlay + updateCurrentSourceType）。红线不变——只接管三方在线播放器；车机原厂音源在放时不抢；同一个目标只 claim 一次。\n3) 诊断包新增「驾驶模式自动切换」段与 bridge.claimTarget / bridge.nativeSourcePlaying 字段。",
-  "publishedAt": "2026-11-07T13:19:54Z",
+  "notes": "第135轮订正终版：不存在「官方桌面」——com.claunchercard.manager.* 是君君桌面（com.ecarx.qq.tool，第三方）同一 APK 内部包名；全仓术语与证据链按此口径统一",
+  "publishedAt": "2026-11-08T00:08:03Z",
   "apk": {
     "name": "CarDesk-platform-ecarx-cardesk-4233.apk",
     "url": "cardesk/CarDesk-platform-ecarx-cardesk-4233.apk",
-    "size": 2323349,
-    "sha256": "269e93f546ce33489576b6592dcc19ed389e5dae171f2a7c598f27dcc94cb4dd"
+    "size": 2323345,
+    "sha256": "a2911207f7471650fd1d739f5b2331b373a3bf2838f63f002e04699b3e7a35bd"
   }
 }

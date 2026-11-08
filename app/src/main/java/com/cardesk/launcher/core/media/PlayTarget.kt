@@ -8,7 +8,7 @@ package com.cardesk.launcher.core.media
  * 真车现象（用户报的）：
  *
  * > 没打开 QQ 音乐（或任何第三方播放器）时，按方向盘播放键，
- * > **打开的是爱趣听**（车机原厂音源），而不是桌面上选定的那个播放器。
+ * > **打开的是爱趣听**（车机自带音源），而不是桌面上选定的那个播放器。
  *
  * 查下来这条链是这么断的：
  *
@@ -25,9 +25,9 @@ package com.cardesk.launcher.core.media
  *
  * ## 两条不能碰的线
  *
- * 1. **车机原厂音源（爱趣听一类）不由我们接管** ——
+ * 1. **车机自带音源（爱趣听一类）不由我们接管** ——
  *    原车的收音机 / USB / 蓝牙有它们自己的 owner（见 [MediaBridgePolicy] 顶部的红线）。
- *    这里只决定「**三方在线播放器**该谁上」，原厂音源保持原样。
+ *    这里只决定「**三方在线播放器**该谁上」，车机自带音源保持原样。
  * 2. **判据不可靠时宁可不动** —— 拿不到桌面的选择、目标没装、
  *    都按「没有明确目标」处理，绝不乱拉一个 App 出来。
  */
@@ -37,7 +37,7 @@ object PlayTarget {
      * 「没有会话时的播放」走哪条路（见 [noSessionAction]）。
      */
     enum class NoSessionAction {
-        /** 没有明确目标 → 走旧逻辑（车机原厂音源那套 DMT 恢复）。 */
+        /** 没有明确目标 → 走旧逻辑（车机自带音源那套 DMT 恢复）。 */
         FALLBACK,
 
         /** 走桌面选定的媒体源（定向播放 + 把它拉起来）。 */
@@ -45,12 +45,12 @@ object PlayTarget {
     }
 
     /**
-     * 这个包是不是**车机原厂音源**（爱趣听一类）。
+     * 这个包是不是**车机自带音源**（爱趣听一类）。
      *
      * 与 [MusicSessionTracker] 里原来的 `isAiqutingPkg` 同一套判据
      * （`wecarflow` / `aiquting` / `qqmusictv`），抽出来是为了能单测。
      *
-     * 空包名也算「原厂音源」那一类 —— 意思是「**没有明确目标**」，
+     * 空包名也算「车机自带音源」那一类 —— 意思是「**没有明确目标**」，
      * 这时候**不要**由我们去拉起任何东西。
      */
     fun isCarAudioPkg(pkg: String?): Boolean {
@@ -63,7 +63,7 @@ object PlayTarget {
      * 这个目标要不要**由我们接管**（拉起它、给它发播放指令）。
      *
      * @param target 目标包名
-     * @return true = 接管（三方在线播放器）；false = 不接管（车机原厂音源 / 没有目标）
+     * @return true = 接管（三方在线播放器）；false = 不接管（车机自带音源 / 没有目标）
      */
     fun shouldTakeOver(target: String?): Boolean {
         val t = target?.trim().orEmpty()
@@ -77,7 +77,7 @@ object PlayTarget {
      * | 结果 | 含义 |
      * |---|---|
      * | [NoSessionAction.SELECTED_SOURCE] | 走**桌面选定的媒体源**（定向播放 + 拉起它） |
-     * | [NoSessionAction.FALLBACK] | 没有明确目标 → 走旧逻辑（车机原厂音源那套 DMT 恢复） |
+     * | [NoSessionAction.FALLBACK] | 没有明确目标 → 走旧逻辑（车机自带音源那套 DMT 恢复） |
      *
      * @param target [resolve] 算出来的目标包名
      */
@@ -107,7 +107,7 @@ object PlayTarget {
      *    [com.cardesk.launcher.core.Prefs.defaultMusicSource]）
      *    —— 桌面启动时锁定的那个；第 1 条是「通用音乐」时用它；
      * 3. **记住的上次播放器**（`last_music_package`）——
-     *    但**跳过车机原厂音源**（爱趣听一类）：用户明确不要它被打开；
+     *    但**跳过车机自带音源**（爱趣听一类）：用户明确不要它被打开；
      * 4. **默认音乐应用列表**（[MediaSources.DEFAULT_MUSIC_PACKAGES]）——
      *    最后兜底（QQ 音乐车机版 → 爱趣听 → 酷我 → 网易云 → 汽水）。
      *
@@ -115,7 +115,7 @@ object PlayTarget {
      *
      * 「记住的上次播放器」是**历史**，而卡片上的来源是**用户当下的选择**。
      * 真车诊断包实测就是这种错位：用户选了 QQ 音乐，
-     * 但上次播放的是车机原厂音源 → 按播放打开的是原厂音源。
+     * 但上次播放的是车机自带音源 → 按播放打开的是车机自带音源。
      *
      * @param currentSourcePkg 卡片上当前选定的来源对应的包（没装 / 通用音乐 → 空）
      * @param defaultSourcePkg 设置页「默认媒体源」对应的包（没装 / 通用音乐 → 空）
@@ -137,7 +137,7 @@ object PlayTarget {
             if (pkg.isEmpty()) continue
             if (isInstalled(pkg)) return pkg
         }
-        // 3) 记住的上次播放器（跳过车机原厂音源）
+        // 3) 记住的上次播放器（跳过车机自带音源）
         val remembered = rememberedPkg.trim()
         if (remembered.isNotEmpty() && isInstalled(remembered) && !isCarAudioPkg(remembered)) {
             return remembered

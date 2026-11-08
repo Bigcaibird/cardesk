@@ -166,7 +166,7 @@ class MediaButtonTransportTest {
     }
 
     /**
-     * 推广后的通用补位（Lead 第八十七轮复核要求）：**原厂音源**常见
+     * 推广后的通用补位（Lead 第八十七轮复核要求）：**车机自带音源**常见
      * 「实现了 transport 回调、但不 setActions()」—— `actions == 0` 且带
      * `FLAG_HANDLES_TRANSPORT_CONTROLS`。老实现无条件 `pauseTransport()`，
      * 若这里被判 no-action，就是「按暂停没反应」的回归，必须补上。

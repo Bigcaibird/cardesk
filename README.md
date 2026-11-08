@@ -41,7 +41,7 @@ FFT bin，色相会**恒定在 0°**——那是「看着有反应、其实颜�
 逐字时间来自**酷狗 KRC**（`lyrics.kugou.com/download?fmt=krc`，
 base64 → `krc1` 头 → 16 字节循环异或 → zlib 解压），
 行标签是 `[行首,行时长]`、字标签是 `<相对行首偏移,时长,0>`。
-**拿不到逐字数据时仍是行级线性**（与原厂 App 公式一致），不猜、不倒退。
+**拿不到逐字数据时仍是行级线性**（与参考 App（君君桌面）公式一致），不猜、不倒退。
 
 顶部状态栏分三段：**左边**是头像与驾驶模式胶囊，**正中**是**翻页指示圆点**，
 **右边**是**位置（城市）+ 天气**、蓝牙 / WiFi / 信号 / 油量 / 时钟。
@@ -657,16 +657,16 @@ Dock 内部布局本来就是左右两端锚定的（`DockLayout.sections(dockWi
 **白天(37)/黑夜(38)** 挤在同一个 `EXTRA_STATE` 上。桌面原来把 `10019` 一律当「导航状态」，
 `37`/`38` 被静默丢掉（诊断包里能看到 `高德导航状态 state=40/50/51/3/4` 就是这么记的）。
 于是「跟随高德」退而读系统 uiMode —— 而这台车机上**没人写 uiMode**
-（只有官方桌面 `DayNightController.writeAndroidUiNightMode` 会写），读到的永远是死值。
+（只有参考 App（君君桌面） `DayNightController.writeAndroidUiNightMode` 会写），读到的永远是死值。
 
 **根因 2：「跟随光感」读的其实是设置值，不是光。**
 车机日间模式功能值（`0x20150100`）在真车上**恒为 AUTO**（诊断包实测
 `读取属性 func=0x20150100 value=538247427`），AUTO 时它没有明暗信息，只能回落到
 `UiModeManager.nightMode` —— 那是**设置值**（固定 1/2，或 AUTO 时压根读不到），
 不是「当前明暗」。真正的光感是 AdaptAPI 的 `Device.getDayNightMode().getDayNight()`，
-跟随时取车机光照 `Twlibrists`（`OFF`→夜间、`ON`→白天）；官方桌面读明暗走的就是这条。
+跟随时取车机光照 `Twlibrists`（`OFF`→夜间、`ON`→白天）；参考 App（君君桌面）读明暗走的就是这条。
 
-**修完之后的来源链**（与官方 `computeDesiredNightUi` 一致）：
+**修完之后的来源链**（与参考 App（君君桌面）`computeDesiredNightUi` 一致）：
 
 ```
 跟随高德 = 高德广播(10019/37,38) → 车机光感 → 车机日间模式功能值 → 系统 uiMode → 上次应用值
@@ -703,10 +703,10 @@ Dock 内部布局本来就是左右两端锚定的（`DockLayout.sections(dockWi
 - 真正的车况卡是 `ScenePage.drawCarStatusCard()`（标题 `"车况"`），
   **固定画在右侧**（`CAR_STATUS_CARD_TOP=490` / `W=388` / `H=250` / 右对齐 `rightEnd`），
   `onDraw()` 里**无条件**调用，既不在底部卡片行、也不在 `CardLayout.ALL` 里；
-- 官方参考 App 的底部卡 ids 是「快捷 / 媒体 / 空调 / 胎压 / **续航**」
+- 参考 App（君君桌面）的底部卡 ids 是「快捷 / 媒体 / 空调 / 胎压 / **续航**」
   （`tools/ref_cites.json` 引用 `SceneDesktop.BOTTOM_CARD_IDS`），
   我们自己的注释也写着「参考 `SceneDesktop.disableShortClick(sceneCarCard)`（:703）：**续航卡**不可点」
-  —— 说明 `car` 这个 id 在官方那里本来就是**续航卡**，只是我们后来给它错配了「车况」标题；
+  —— 说明 `car` 这个 id 在参考 App（君君桌面）那里本来就是**续航卡**，只是我们后来给它错配了「车况」标题；
 - git 历史：第九十六轮 `8f4c2b6` 引入「续航 ↔ 行程1 位置互换」时，
   注释已经写着「让『续航』排到最左」，但操作的是 `CAR`/`TRIP1` 槽位 —— 语义漂移从那时就埋下了。
 
@@ -2112,10 +2112,10 @@ APK SHA-256 `111731e1727fdfa86f76c4a6512040ecd87f7a72d2b1dd01715b34b53f778bdd`�
 - `force` 只越过 `already-satisfied`；**第八十八轮起 `no-action` 也不再被闸门吞掉**
   （见下面第 6 条：真车上这条闸门直接把用户按下的播放丢掉了）。
 
-### 2. 原厂音源「实现了回调但没 setActions()」的补位
+### 2. 车机自带音源「实现了回调但没 setActions()」的补位
 
 参考工程里这条补丁是给网易云写的（它的 `PlaybackState` 没有 `setActions()`，
-可 transport 回调其实都在）。这轮把它**推广到所有原厂音源**：
+可 transport 回调其实都在）。这轮把它**推广到所有车机自带音源**：
 `actions == 0` 且带 `FLAG_HANDLES_TRANSPORT_CONTROLS` 或 `FLAG_HANDLES_MEDIA_BUTTONS`
 → 只补 `ACTION_PLAY | ACTION_PAUSE`（不补上一首/下一首/进度，避免假装支持）。
 不补的话这些音源在「幂等」这一层会被直接挡死（老实现是无条件下发，反而「能用」）。
@@ -3338,13 +3338,13 @@ return false
 
 同一处毛病在「音乐卡播放键」那条路上也在：目标是「**记住的上次播放器**」（历史），
 而不是「**桌面现在选定的播放器**」（用户当下的选择）——
-真车诊断包实测就是这种错位（用户选了 QQ 音乐，上次播的是原厂音源）。
+真车诊断包实测就是这种错位（用户选了 QQ 音乐，上次播的是车机自带音源）。
 
 ### 改了什么
 
 | 文件 | 改动 |
 |---|---|
-| `core/media/PlayTarget.kt`（新） | 纯逻辑：原厂音源判定 / **播放目标解析** / 走新路还是旧路 / QQ 音乐车机版判定 |
+| `core/media/PlayTarget.kt`（新） | 纯逻辑：车机自带音源判定 / **播放目标解析** / 走新路还是旧路 / QQ 音乐车机版判定 |
 | `core/media/MusicSessionTracker.kt` | ① 方控回调：**没有会话时把目标播放器拉起来**（不再丢弃按键）② `playWithoutSession()`：目标改用 `PlayTarget.resolve` ③ 新增 `selectedSourcePkg()` / `isPackageInstalled()` / `launchMusicApp()` |
 
 **目标解析的优先级**（`PlayTarget.resolve`）：
@@ -3353,10 +3353,10 @@ return false
 |---|---|---|
 | 1 | **卡片上当前选定的来源**（`design_music_source_v1`） | 桌面上一眼能看见的那个 |
 | 2 | **设置页「默认媒体源」**（`default_music_source_v1`） | 桌面启动时锁定的那个 |
-| 3 | **记住的上次播放器**（`last_music_package`） | **跳过车机原厂音源**（用户不要它被打开） |
+| 3 | **记住的上次播放器**（`last_music_package`） | **跳过车机自带音源**（用户不要它被打开） |
 | 4 | **默认音乐应用列表** | 兜底（QQ音乐 → 爱趣听 → 酷我 → 网易云 → 汽水） |
 
-**两条不能碰的线**：车机原厂音源（爱趣听一类）**不由我们接管**
+**两条不能碰的线**：车机自带音源（爱趣听一类）**不由我们接管**
 （原车收音机 / USB / 蓝牙有它们自己的 owner，见 `MediaBridgePolicy` 顶部的红线）；
 判据不可靠（目标没装 / 没有目标）时**宁可不动**，不乱拉 App。
 
@@ -3382,10 +3382,10 @@ return false
 | 反向 | 改法 | 红灯 |
 |---|---|---|
 | 1 | 让「记住的上次播放器」优先于「桌面选定的来源」（旧行为） | 4 |
-| 2 | 不跳过车机原厂音源（爱趣听又会被选中） | 1 |
+| 2 | 不跳过车机自带音源（爱趣听又会被选中） | 1 |
 | 3 | 目标解析不检查安装状态（会拉起没装的 App） | 1 |
-| 4 | 原厂音源也算我们接管（会去抢原车音源） | 2 |
-| 5 | 原厂音源判定失效（认不出爱趣听） | 4 |
+| 4 | 车机自带音源也算我们接管（会去抢原车音源） | 2 |
+| 5 | 车机自带音源判定失效（认不出爱趣听） | 4 |
 | 6 | 去掉「设置页默认源」这一级 | 2 |
 | 7 | 去掉「默认音乐应用列表」兜底 | 2 |
 | 8 | 没有目标时也走「桌面选定媒体源」那条路 | 1 |
@@ -3427,7 +3427,7 @@ return false
 | 值域 | `{0, 1}` | `docs/ecarx-adapterapi/data/value-domain.md:32` |
 | 支持探针 | `isFunctionSupported` → `PaSsActivation.availability` | `CarFunctionSupportedUtil.java:356` |
 
-原厂桌面（`com.claunchercard` 的 `DriveModeController`）用的就是这个功能号：
+参考 App（君君桌面）（`com.claunchercard` 的 `DriveModeController`）用的就是这个功能号：
 
 - `:21` `FUNCTION_ENGINE_STOP_START = 537002240`
 - `:273` `isIssOn()` → `getFunctionValue(...) == 1`
@@ -3859,7 +3859,7 @@ DISPLAY_ICON_URI → ART_URI → ALBUM_ART_URI
 > 那是 `iss_keep_enabled`（发动机启停，功能号 `537002240` / `0x20020100`），
 > 和驾驶模式（`570491136` / `0x22010100`）是两条完全不同的功能。
 
-顺带发现**写入路径也不对**：原厂桌面写驾驶模式的降级顺序是
+顺带发现**写入路径也不对**：参考 App（君君桌面）写驾驶模式的降级顺序是
 （反编译 `com/claunchercard/manager/DriveModeController.writeDriveModeAdaptApi`）：
 
 ```
@@ -3871,7 +3871,7 @@ trySetDriveModeWithZone(f, 1, modeId)                  // 三参 zone=1
 ```
 
 我们的 `VehicleGateway.writeFunction` **只有两参一条路** ——
-固件不提供两参重载时直接失败，原厂却能靠 zone 兜底写成功。
+固件不提供两参重载时直接失败，参考 App（君君桌面）却能靠 zone 兜底写成功。
 
 ### 根因 2：桥注册上了，但从**没 claim** 过
 
@@ -3897,20 +3897,26 @@ bridge.reason: 已注册，等待原车接受播放信息
 
 第131轮补的「收到回调后拉起桌面选定播放器」那段代码**根本没机会执行**。
 
-**把三个主体分清楚，根因就完全闭合了**：
+**把主体分清楚，根因就完全闭合了**：
 
-| 主体 | 包名 / 版本 | 是不是官方 | 与 MediaCenter 的关系 |
+| 主体 | 包名 / 版本 | 身份 | 与 MediaCenter 的关系 |
 |---|---|---|---|
-| **官方桌面** | `com.claunchercard`（`desktop.apk` / `1.0.20273116-session-desktop`） | ✅ 是 | 自己**不**直接注册，但**调君君的 `SessionBridge`** |
-| **君君桌面** | `com.ecarx.qq.tool`（`1.0.01257-lynkco-tool-pro`） | ❌ **第三方** | 提供 `SessionBridge` 这套桥 SDK |
-| **UNI 工程** | `xyz.i4o.uni.launcher` | ❌ 第三方参考工程 | 我们的 `OfficialMediaBridge` 是从它的移植（第87轮） |
+| **参考 App（君君桌面）** | `com.ecarx.qq.tool`（`app_name` = 君君桌面；反编译产物 `desktop.apk` / `1.0.20273116-session-desktop`、`1.0.01257-lynkco-tool-pro`） | **第三方**桌面（平台签名预装） | 自带 `SessionBridge` 桥 SDK |
+| **UNI 工程** | `xyz.i4o.uni.launcher` | 第三方参考工程 | 我们的 `OfficialMediaBridge` 是从它的移植（第87轮） |
 
-关键的一条：**官方桌面那个「桥接开关」默认是关的**
+> **这里根本没有「官方桌面」**（第135轮末修正）：
+> 反编译产物的 manifest `package` 是 `com.ecarx.qq.tool`，
+> 而 `com.claunchercard.manager.*`（`DesignSettings`、`MusicManager`、`DriveModeController`…）
+> 是**同一个 APK 内部**的 Java 包名 —— **不是另一个 App**。
+> `inner_dec` / `outer_dec` 两个产物的 manifest package 都是 `com.ecarx.qq.tool`，
+> `app_name` 都是「君君桌面」；`outer_dec` 只是被 `com.yqsh.protector.shell` 加固过的同款构建。
+
+关键的一条：**君君桌面那个「桥接开关」默认是关的**
 （`SessionBridge.isBridgeEnabled` 读 `bridge_control/enabled`，默认 **false**），
 而它的设置页原文与我们一字不差：
 
 ```java
-// DesignSettings.java:515（官方桌面）
+// DesignSettings.java:515（君君桌面内部包 com.claunchercard.manager）
 toggle(linearLayout, "桥接开关", "连接车机仪表与方控通道", SessionBridge.isBridgeEnabled(host), ...);
 // → lambda$buildPage$5 → SessionBridge.setBridgeEnabled(host, z3)
 ```
@@ -3920,8 +3926,8 @@ toggle(linearLayout, "桥接开关", "连接车机仪表与方控通道", Sessio
 switchRow("桥接开关", prefs.flag(KEY_BRIDGE_ENABLED), "连接车机仪表与方控通道") { ... }
 ```
 
-**所以「方控唤起爱趣听」不是谁的 bug，是「两边都没 claim」**：
-官方桌面默认不 claim（用户没开它那个开关）→ MediaCenter 的当前音源一直是原车音源；
+**所以「方控唤起爱趣听」不是谁的 bug，是「都没 claim」**：
+君君桌面那个开关默认关 → 它默认不 claim → MediaCenter 的当前音源一直是原车音源；
 我们注册上了但也从不 claim → 原车同样不认我们 → 方控自然落回爱趣听。
 
 对照那条被认可的路：`SessionBridge.setBridgeEnabled(true)` 会
@@ -3933,20 +3939,14 @@ switchRow("桥接开关", prefs.flag(KEY_BRIDGE_ENABLED), "连接车机仪表与
 —— **不 claim，音源就归原车**。
 **那条路是「启用即 claim」**，我们是「有歌在放才 claim」。
 
-> **出处要说准**（第135轮末修正）：`com.ecarx.qq.tool` 是**君君桌面**（第三方 APK，
-> `1.0.01257-lynkco-tool-pro`），**不是官方桌面**。
-> 官方桌面是 `com.claunchercard`（`desktop.apk` / `1.0.20273116-session-desktop`）——
-> 而**官方桌面自己也在用君君这套 `SessionBridge`**：
-> 启动就 `enableAccessibility("com.ecarx.qq.tool.QQMusicToolService")`，
-> 设置页那个「桥接开关 / 连接车机仪表与方控通道」（`DesignSettings.java:515/1130`）
-> 直接调 `SessionBridge.setBridgeEnabled`，
-> 开机杀完竞品后调 `SessionBridge.requestClusterClaimAfterCompetitorKill()`。
+> **出处要说准（第135轮末修正）**：上面这条 claim 口径的出处是
+> **参考 App（君君桌面）**（`com.ecarx.qq.tool`，第三方，平台签名预装）——
+> **不是车机厂商规定的口径，也不是什么「官方桌面」的做法**（根本不存在官方桌面）。
+> 证据性质只是「**另一个第三方桌面在同款车机上就是这么干的**」：
+> 跟它对齐是因为它跑通过，**能不能成，最终看真车复验**。
 >
-> 所以这条 claim 口径不是「第三方自己拍脑袋」，而是
-> **官方桌面认可并每天在走的那条路** —— 我们照抄的对象是它。
->
-> 顺带记一条**官方桌面的做法**（`BootMediaCompetitorKiller`）：
-> 官方桌面开机 1s/5s/15s 会 `am force-stop` 掉
+> 顺带记一条**君君桌面的做法**（`BootMediaCompetitorKiller`）：
+> 它开机 1s/5s/15s 会 `am force-stop` 掉
 > `com.ecarx.multimedia` 与 `com.tencent.wecarflow`（爱趣听），
 > 除非用户锁定了 / 上次在放 / 显式保护了它，然后才 claim。
 > **我们不做这件事** —— 强杀原车音源属于越界（红线），我们只 claim 自己的播放入口。
@@ -3955,16 +3955,16 @@ switchRow("桥接开关", prefs.flag(KEY_BRIDGE_ENABLED), "连接车机仪表与
 
 | 文件 | 改动 |
 |---|---|
-| `vehicle/DriveModeSwitch.kt`（新，纯逻辑） | 目标合法性 / 「已经是目标」判定 / 冷却 / 跳过原因 / 与官方桌面同口径的写入入口 |
+| `vehicle/DriveModeSwitch.kt`（新，纯逻辑） | 目标合法性 / 「已经是目标」判定 / 冷却 / 跳过原因 / 与参考 App（君君桌面）同口径的写入入口 |
 | `vehicle/DriveModeAutoStart.kt`（新） | 执行端：开关 → 目标 → 等车控通道就绪 → 读当前 → 决定 → 写 → 回读确认 |
 | `vehicle/VehicleGateway.kt` | 新增 `writeSelectFunction(func, value)`：**选择型**功能的写入通道（默认只走两参） |
-| `vehicle/AdaptapiGateway.kt` | 覆写 `writeSelectFunction`：**两参优先 → zone 2 → zone 1**（与官方桌面 `DriveModeController.writeDriveModeAdaptApi` 逐字对齐） |
+| `vehicle/AdaptapiGateway.kt` | 覆写 `writeSelectFunction`：**两参优先 → zone 2 → zone 1**（与参考 App（君君桌面） `DriveModeController.writeDriveModeAdaptApi` 逐字对齐） |
 | `vehicle/VehicleController.kt` | 手动切驾驶模式也走同一条通道（原来只有两参一条路） |
 | `BootReceiver.kt` / `ui/LauncherView.kt` | 两个触发点：开机广播 / 桌面启动 |
 | `core/Prefs.kt` | 持久化「上次尝试时间 / 上次目标 / 上次结果」 |
 | `core/media/MediaBridgePolicy.kt` | `shouldClaim` + `hasNativeSourcePlaying`（纯逻辑，可单测） |
 | `core/media/OfficialMediaBridge.kt` | 注册成功后**主动 claim 一次**；`claimTarget` / `nativeSourcePlaying` 诊断字段 |
-| `core/media/MusicSessionTracker.kt` | 把「车机原厂音源正在放」同步给桥 |
+| `core/media/MusicSessionTracker.kt` | 把「车机自带音源正在放」同步给桥 |
 | `core/log/Diagnostics.kt` | 诊断包新增「驾驶模式自动切换（第135轮）」段 |
 
 ### 四个关键取舍
@@ -3975,12 +3975,12 @@ switchRow("桥接开关", prefs.flag(KEY_BRIDGE_ENABLED), "连接车机仪表与
    两个触发点共用 **10 分钟冷却**：桌面在一次开机里会被拉起很多次，
    没有冷却就会对着车机连写几十次（写车是同步 Binder）。
 
-2. **写入按原厂口径降级，不猜 zone**：两参（文档口径，也是原厂第一选择）→
-   zone 2 → zone 1，顺序照抄原厂。**读不到当前模式时照样写** ——
+2. **写入按参考 App（君君桌面）的口径降级，不猜 zone**：两参（文档口径，也是它的第一选择）→
+   zone 2 → zone 1，顺序照抄它。**读不到当前模式时照样写** ——
    「读不到」≠「已经是目标」，这个区分很重要，否则读失败的机器永远切不了。
 
 3. **claim 的红线没松**：只在**目标是三方在线播放器**（白名单）时 claim；
-   **车机原厂音源（爱趣听一类）正在放时不 claim**（`pushToMediaCenter`
+   **车机自带音源（爱趣听一类）正在放时不 claim**（`pushToMediaCenter`
    遇到 `isNativeSystemMediaSource(pkg)` 也是直接 skip）；
    **同一个目标只 claim 一次**（claim 是抢播放权，每 tick 都抢会把原车的播放权来回甩）。
    目标口径与方控回调**完全一致**（有歌名用歌名来源，没歌名用用户选的媒体源）。
@@ -4015,11 +4015,11 @@ switchRow("桥接开关", prefs.flag(KEY_BRIDGE_ENABLED), "连接车机仪表与
 | 6 | 真车通道不走两参（接线检查） | 1 |
 | 7 | 执行端不接开机广播（接线检查） | 1 |
 | 8 | claim 不看白名单 | 1 |
-| 9 | 原厂音源在放时也 claim | 1 |
+| 9 | 车机自带音源在放时也 claim | 1 |
 | 10 | 同一个目标反复 claim | 1 |
 | 11 | 注册成功后不主动 claim（接线检查） | 1 |
 | 12 | claim 只声明音源类型、不真的抢播放权（接线检查） | 1 |
-| 13 | 原厂音源的播放态不传给桥（接线检查） | 1 |
+| 13 | 车机自带音源的播放态不传给桥（接线检查） | 1 |
 
 ### 已知限制
 
@@ -4029,9 +4029,9 @@ switchRow("桥接开关", prefs.flag(KEY_BRIDGE_ENABLED), "连接车机仪表与
   看是不是**桌面选定的那个播放器**起来了（而不是爱趣听）；
   诊断包看 `bridge.claimTarget`（空 = 从没接管过）与 `bridge.callbackCount`（>0 = 原车把按键交给我们了）。
 - **如果真车上 `claimTarget` 有值、但 `callbackCount` 仍是 0** ——
-  说明原车把当前音源判给了**官方桌面**（它也 claim 了同一个 type 6）。
-  官方桌面的桥**默认是关的**，所以正常情况下我们能拿到；
-  真遇到这种冲突，下一步再议（不要学官方桌面去 `force-stop` 别人）。
+  说明原车把当前音源判给了**别的 App**（它也 claim 了同一个 type 6）。
+  君君桌面那个桥**默认是关的**，正常情况下我们能拿到；
+  真遇到这种冲突，下一步再议（不要学它去 `force-stop` 别人）。
 - **「已经是目标模式就不写」这条分支在模拟器上走不到** ——
   模拟通道的当前模式只存在内存里，进程一重启就回到「读不到」。
   该分支由 `DriveModeSwitchTest` 钉死。
@@ -4045,7 +4045,7 @@ switchRow("桥接开关", prefs.flag(KEY_BRIDGE_ENABLED), "连接车机仪表与
 |---|---|
 | 文件 | `dist/CarDesk-platform-ecarx-cardesk-4233.apk` |
 | versionCode / versionName | 4233 / 1.0.1137-system |
-| 大小 | 2 323 349 字节 |
-| SHA-256 | `269e93f546ce33489576b6592dcc19ed389e5dae171f2a7c598f27dcc94cb4dd` |
+| 大小 | 2 323 345 字节 |
+| SHA-256 | `a2911207f7471650fd1d739f5b2331b373a3bf2838f63f002e04699b3e7a35bd` |
 | 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
 | 单测 | 1871 项全绿（`tools/release.sh` 出包时一并跑的） |

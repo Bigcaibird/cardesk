@@ -224,7 +224,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
      * `10019` + `EXTRA_STATE` 37（白天）/ 38（黑夜），见 `core/nav/AmapDayNight`。
      *
      * 以前桌面没有接这条信号，「跟随高德」读的是系统 uiMode ——
-     * 那个值在这台车机上没人写（只有官方桌面会写），所以永远是个死值，
+     * 那个值在这台车机上没人写（只有参考 App（君君桌面）会写），所以永远是个死值，
      * 表现就是「桌面切了、高德没切 / 高德切了、桌面没切」。
      */
     private var amapDayNightSignal: Boolean? = null
@@ -1612,7 +1612,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
     /**
      * 把桌面的日夜状态推给高德，让地图跟着切。
      *
-     * **只在桌面不是跟着高德走的时候才推**（官方桌面在「跟随高德」时同样不回写）：
+     * **只在桌面不是跟着高德走的时候才推**（参考 App（君君桌面）在「跟随高德」时同样不回写）：
      * 跟随高德时桌面就是高德的状态，回写等于把高德的「自动」锁死成固定白天/黑夜，
      * 高德以后自己就不切了，桌面也就永远停在旧值上。
      */

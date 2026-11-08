@@ -25,7 +25,7 @@ import org.junit.Test
  * | --- | --- | --- |
  * | 功能号 | `IDriveMode.DM_FUNC_DRIVE_MODE_SELECT` | `570491136`（`0x22010100`） |
  * | 读 zone | 文档 `16-hud-dim-adas.md` §4.3 | 2 |
- * | 原厂写入降级 | `DriveModeController.writeDriveModeAdaptApi` | 两参 → zone 2 → zone 1 |
+ * | 参考 App（君君桌面）写入降级 | `DriveModeController.writeDriveModeAdaptApi` | 两参 → zone 2 → zone 1 |
  */
 class DriveModeSwitchTest {
 
@@ -86,8 +86,8 @@ class DriveModeSwitchTest {
     }
 
     @Test
-    fun `原厂的 zone 降级顺序是 2 再 1`() {
-        // 照抄原厂 DriveModeController.writeDriveModeAdaptApi：
+    fun `参考 App（君君桌面）的 zone 降级顺序是 2 再 1`() {
+        // 照抄参考 App（君君桌面） DriveModeController.writeDriveModeAdaptApi：
         // trySetDriveModeWithZone(f, 2, mode) → trySetDriveModeWithZone(f, 1, mode)
         assertEquals(listOf(2, 1), DriveModeSwitch.FALLBACK_ZONES.toList())
     }

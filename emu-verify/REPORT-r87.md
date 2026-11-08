@@ -19,7 +19,7 @@
 
 | 诉求 | 做了什么 | 状态 |
 |---|---|---|
-| 播放/暂停 | ①幂等 `setPlaying(desired)`（已满足不下发）②原厂音源「有回调没 setActions」补位 ③网易云定向按键通道 ④**方控/仪表 MediaCenter 桥**（原来的死开关接上了） | 代码 + 单测 + 模拟器实测通过；桥的真车链路待验 |
+| 播放/暂停 | ①幂等 `setPlaying(desired)`（已满足不下发）②车机自带音源「有回调没 setActions」补位 ③网易云定向按键通道 ④**方控/仪表 MediaCenter 桥**（原来的死开关接上了） | 代码 + 单测 + 模拟器实测通过；桥的真车链路待验 |
 | Dock 栏 | 前台服务 + 跨应用常驻覆盖窗（112px），原车导航栏两条 policy 分支、桌面回前台自动隐身、长按主页 = 返回、设置页可开关 | 模拟器实测通过；「系统真让出 112px」的 RRO 一档受 ROM 限制，见 §5 |
 | 单测 | **1295 tests / 0 failures / 0 errors**（含新增 55 例：TransportIntent 12、MediaButtonTransport 15、MediaBridgePolicy 10、SystemNavigationPolicy 18、NavInsetsAsset 4） | ✅ |
 | 稳定性 | `check 15`：pid 不变、新墓碑 0、FATAL 0 | ✅ |
@@ -32,7 +32,7 @@
 |---|---|---|---|
 | 播放/暂停下发 | `setPlaying(boolean)`：读当前 `PlaybackState`，**desired == actual 就不发**，只发一次 `toggle-play` | `playPause()` 每次无条件下发（连点 = 翻两次） | `TransportIntent.decide(observed, desired, actions)` 决策后才发；`setPlaying(desired, force)` 唯一入口 |
 | 会话观察 | 对**所有**活跃会话注册 callback（「播放器状态可能在不出现在活跃列表变化时改变」） | 只对选中的那条注册 callback + 2.5s 重扫 | 保持原状（本身已经比 UNI 细），只补决策层 |
-| 网易云 | `PlaybackState` 没有 `setActions()` ⇒ 按 `FLAG_HANDLES_MEDIA_BUTTONS` 判能力，`dispatchMediaButtonEvent(KeyEvent)` **DOWN + UP**（它只消费 UP） | 走 `transportControls`，失败才全局按键 | 新增 `MediaButtonTransport`：网易云定向按键通道；**并把「缺 actions」补位推广到所有原厂音源** |
+| 网易云 | `PlaybackState` 没有 `setActions()` ⇒ 按 `FLAG_HANDLES_MEDIA_BUTTONS` 判能力，`dispatchMediaButtonEvent(KeyEvent)` **DOWN + UP**（它只消费 UP） | 走 `transportControls`，失败才全局按键 | 新增 `MediaButtonTransport`：网易云定向按键通道；**并把「缺 actions」补位推广到所有车机自带音源** |
 | 方控 / 仪表 | `OfficialMediaBridge`：反射注册进原车 MediaCenter（`ONLINE = 6`），回调 `onPlay/onPause/onNext/onPrevious` 转回播放器 | 设置页有「桥接开关」，但**没有任何消费者**（死开关） | `core/media/OfficialMediaBridge.kt` + `MediaBridgePolicy.kt`，开关接上、**即时生效**、无 SDK 优雅降级 |
 | 系统 Dock 替换 | RRO 把系统 `navigation_bar_height` 改成 96dp（四套 qualifier），`IOverlayManager` 启用；`policy_control` 只摘状态栏；窗口 `TYPE_NAVIGATION_BAR_PANEL` | 用 `policy_control immersive.navigation` 把原车 Dock 整条摘掉，**其它应用底部完全空白** | 前台服务 + 覆盖窗；有 RRO 走 2024 精确让位，没 RRO 走 2038 盖住原车 Dock；两条分支都在运行时判 |
 | Dock 跨应用 | `GlobalDockService`（458 行）：一个常驻底栏窗 + 一个复用面板窗，各自一个 FlutterEngine；面板打开时前台任务变了就收起 | 只有 HOME 进程内的 `View`，离开桌面就看不到 | `GlobalDockService`（734 行）+ `GlobalDockPolicyGate`；**HOME 回前台自动隐藏**，离开桌面才显示（避免双 Dock） |
@@ -57,12 +57,12 @@ decide(observedState, desiredPlaying, actions) -> Decision(send, desiredPlaying,
 - 日志（`CarDesk/Media`）：`播放/暂停指令（幂等）` / `播放/暂停指令（幂等）：不下发`，
   带 `desired / state / force / actions / buttons / transport / netease` —— 现场排障直接看这一行。
 
-### 2.2 原厂音源补位（同文件 + `MediaButtonTransport.effectiveActions`）
+### 2.2 车机自带音源补位（同文件 + `MediaButtonTransport.effectiveActions`）
 
 参考工程这条补丁是专门给网易云写的（它「实现了回调但没 `setActions()`」）。
 cardesk 把它**推广**：`actions == 0` 且带 `FLAG_HANDLES_TRANSPORT_CONTROLS`
 或 `FLAG_HANDLES_MEDIA_BUTTONS` ⇒ 只补 `ACTION_PLAY | ACTION_PAUSE`。
-不补的后果很实在：DMT / mediacenter / 爱趣听这类原厂音源会被「幂等」这一层直接挡死
+不补的后果很实在：DMT / mediacenter / 爱趣听这类车机自带音源会被「幂等」这一层直接挡死
 （老实现是无条件下发，反而「能用」）。
 
 ### 2.3 网易云定向按键通道（`core/media/MediaButtonTransport.kt`）
