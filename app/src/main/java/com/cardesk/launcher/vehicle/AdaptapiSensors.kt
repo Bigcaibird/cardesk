@@ -813,6 +813,21 @@ object AdaptapiSensors {
     /** 油量百分比；-1 = 不可读。 */
     fun fuelPercent(): Int = fuelPct.get()
 
+    /**
+     * 油箱容量**原始值**（第136轮新增）；`0` = 读不到。
+     *
+     * 原始值走缓存（[FUEL_CAPACITY_CACHE_MS]），不会每次都去反射车机。
+     * 对外更常用的是 [fuelCapacityLiters]（已经换算成升）。
+     */
+    fun fuelCapacityRaw(): Float = fuelCapacity()
+
+    /**
+     * 油箱容量（**升**）（第136轮新增）；`null` = 读不到。
+     *
+     * 换算口径见 [CarSignalMath.capacityLiters]。
+     */
+    fun fuelCapacityLiters(): Float? = CarSignalMath.capacityLiters(fuelCapacity())
+
     /** 最近一次拿到的油量原始值；[Float.NaN] = 还没拿到过。 */
     fun lastFuelRaw(): Float = lastFuelRaw
 

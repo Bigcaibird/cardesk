@@ -198,6 +198,17 @@ object VehicleStats {
         if (pct == null || pct < 0 || pct > 100) "--" else "$pct%"
 
     /**
+     * 剩余油量文案（第136轮）：`34.1 L`。
+     *
+     * 读不到就显示 `--`（**不显示假的 0 L** —— 那会被看成「油箱空了」）。
+     * 保留一位小数：0.1 L 的精度对「还够不够跑」这个判断刚好够用。
+     */
+    fun formatFuelLiters(liters: Float?): String {
+        if (liters == null || liters.isNaN() || liters < 0f) return "--"
+        return String.format(java.util.Locale.US, "%.1f L", liters)
+    }
+
+    /**
      * 总里程文案：`12480 km`。
      *
      * 超过 1 万公里时加千分位（`12,480 km`），续航文案没这个规则

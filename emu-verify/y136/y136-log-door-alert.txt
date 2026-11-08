@@ -1,0 +1,17 @@
+# 第136轮 车门未关弹窗 · 模拟器日志（emulator-5556，Android 10 / SDK 29 / 1920x1080）
+
+## A. 制造「左前门开」的临时补丁包（4234 临时版，simDoorsClosed = [false,true,true,true]）
+
+11-08 20:18:39.484 I CarDesk/Signal : [EVT] 检测到未关 open=左前门 count=1
+11-08 20:18:39.486 I CarDesk/Setting : [EVT] 打开对话框 dialog=有车门未关 type=DoorAlertDialog
+11-08 20:19:53.204 I CarDesk/Setting : [EVT] 关闭对话框 dialog=有车门未关 type=DoorAlertDialog
+11-08 20:19:53.205 I CarDesk/Signal : [EVT] 车门未关弹窗手动关闭
+11-08 20:20:38.793 I CarDesk/Signal : [EVT] 检测到未关 open=左前门 count=1
+11-08 20:20:38.798 I CarDesk/Setting : [EVT] 打开对话框 dialog=有车门未关 type=DoorAlertDialog
+11-08 20:20:57.436 I CarDesk/Setting : [EVT] 关闭对话框 dialog=有车门未关 type=DoorAlertDialog
+11-08 20:20:57.437 I CarDesk/Signal : [EVT] 车门未关弹窗手动关闭
+
+## B. 换成「四门全关」的临时补丁包后重装启动：这一段**没有任何**「检测到未关 / 打开对话框」记录（= 全关不弹窗）
+
+11-08 20:25:53.265 D CarDesk/App : 状态栏显隐 page=0 hideNavStatus=false visible=true navContentTop=73
+（上面这行是该次运行的最后一条日志，时间戳晚于 20:21:37；全关期间无告警记录）

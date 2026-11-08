@@ -186,6 +186,26 @@ class LauncherView(context: Context) : FrameLayout(context) {
     private var taskList: com.cardesk.launcher.ui.dialogs.TaskListDialog? = null
     private var taskEditor: com.cardesk.launcher.ui.dialogs.TaskEditorDialog? = null
     private var overlayDialog: View? = null
+
+    /**
+     * 「有车门未关」弹窗（第136轮）。
+     *
+     * 单独记一份，而不是靠 `overlayDialog` 的类型判断 ——
+     * 因为这个弹窗会被**自动**关闭（门全关上时），而别的弹窗只会被用户关掉。
+     */
+    private var doorAlertDialog: com.cardesk.launcher.ui.dialogs.DoorAlertDialog? = null
+
+    /**
+     * 用户**手动**关掉过车门告警（第136轮）。
+     *
+     * 手动关掉 = 「我现在知道了，别再弹」。
+     * 这个标记一直有效到**所有部件都关上**为止 ——
+     * 否则用户关掉弹窗后，另一扇门又开了，它会立刻弹回来（很烦）。
+     */
+    private var doorAlertDismissed = false
+
+    /** 上一次记录的「开着的东西」（签名），只在变化时记日志。 */
+    private var doorAlertSignature: String? = null
     private var floatLayer: com.cardesk.launcher.ui.floats.FloatWindowLayer? = null
     private var navSlots: MutableList<NavSlot> = mutableListOf()
     private lateinit var dots: PageDotsView
@@ -2078,6 +2098,94 @@ private fun showCam() {
         if (overlayDialog === dialog) overlayDialog = null
     }
 
+    // --------------------------------------------------------------- 车门未关弹窗（第136轮）
+
+    /**
+     * 车门 / 引擎盖 / 后备箱未关 → 桌面弹窗；全关 → 自动关掉。
+     *
+     * ## 三条规则
+     *
+     * 1. **只提醒「开着」的**（[com.cardesk.launcher.core.DoorAlert.openItems]）：
+     *    读不到（`null`）不算开着 —— 误报一次用户就不信这个提示了。
+     * 2. **全关上自动关闭**：门都关好了还弹着就是噪音。
+     * 3. **手动关闭后不再打扰**：直到所有部件都关上、再次打开才重新弹。
+     *
+     * ## 为什么不在这里直接 `showOverlayDialog`
+     *
+     * 桌面可能已经开着别的浮层（驾驶模式面板、设置页…）。
+     * 那个浮层正开着的时候**不抢**它 —— 等它关掉、下一轮刷新再弹，
+     * 否则用户正在操作的东西会被车门弹窗糊一脸。
+     */
+    private fun syncDoorAlert(info: com.cardesk.launcher.vehicle.VehicleInfo) {
+        val items = com.cardesk.launcher.core.DoorAlert.openItems(
+            info.doorsClosed,
+            info.hoodClosed,
+            info.trunkClosed,
+        )
+        val dialog = doorAlertDialog
+
+        if (items.isEmpty()) {
+            // 全关上 → 自动关闭弹窗，并允许下一次重新提醒。
+            if (dialog != null) {
+                Logx.event(LogTags.SIGNAL, "车门未关弹窗自动关闭")
+                closeOverlayDialog(dialog)
+                doorAlertDialog = null
+            }
+            doorAlertDismissed = false
+            doorAlertSignature = null
+            return
+        }
+
+        // 只在「开着的东西」变化时记日志（每秒都跑，不能刷屏）。
+        val signature = items.joinToString(",") { it.kind.name + it.index }
+        if (signature != doorAlertSignature) {
+            doorAlertSignature = signature
+            Logx.event(
+                LogTags.SIGNAL, "检测到未关",
+                "open" to com.cardesk.launcher.core.DoorAlert.summary(items),
+                "count" to items.size,
+            )
+        }
+
+        // 已经弹着 → 内容跟着变（又多开了一扇门 / 关掉了一扇）。
+        if (dialog != null) {
+            dialog.update(
+                items,
+                info.doorsClosed,
+                info.windowsOpen,
+                info.hoodClosed,
+                info.trunkClosed,
+                prefs.carModel,
+            )
+            return
+        }
+
+        // 用户手动关过 → 这一轮不再打扰。
+        if (doorAlertDismissed) return
+
+        // 别的浮层正开着 → 不抢，下一轮再试。
+        if (overlayDialog != null) return
+
+        val created = com.cardesk.launcher.ui.dialogs.DoorAlertDialog(
+            context,
+            pal,
+            items,
+            info.doorsClosed,
+            info.windowsOpen,
+            info.hoodClosed,
+            info.trunkClosed,
+            prefs.carModel,
+        )
+        created.onClose = {
+            closeOverlayDialog(created)
+            doorAlertDialog = null
+            doorAlertDismissed = true
+            Logx.event(LogTags.SIGNAL, "车门未关弹窗手动关闭")
+        }
+        showOverlayDialog(created)
+        doorAlertDialog = created
+    }
+
     // --------------------------------------------------------------- Dock 快捷应用（第五十四轮）
 
     /**
@@ -2966,6 +3074,8 @@ private fun showCam() {
         scenePage.fuelPercent = info.fuelPercent
         statusBar.fuelPercent = info.fuelPercent ?: ShellStatusBar.FUEL_UNKNOWN_VALUE
         scenePage.bind(info, state, prefs.wallpaper)
+        // 第136轮：车门 / 盖未关 → 桌面弹窗提示（全关自动关、可手动关）。
+        syncDoorAlert(info)
         // 引导卡每秒重算一次 —— 红绿灯读秒要按秒往下走，
         // 信号超时（超过 TTL 没收到新帧）也要在这一轮里消失。
         // 第 100 轮：**每轮都刷**，巡航卡没有 navGuideRaw 也要能更新/过期。

@@ -61,6 +61,14 @@ class MockVehicleGateway(
 
     override fun fuelPercent(): Int? = 62
 
+    /**
+     * 模拟油箱容量（升）（第136轮新增）。
+     *
+     * 真车实测这台车是 **55.26 L**（`analysis/findings/09-fuel-sensor-fix.md`），
+     * 模拟器上按同一个数走，桌面卡片显示的「剩余油量升数」才和真车同量纲。
+     */
+    val simFuelCapacityLiters: Float = 55.26f
+
     override fun ambientTempC(): Float? = simAmbientTemp
 
     override fun tirePressures(): FloatArray? = simTirePressure.copyOf()

@@ -277,4 +277,48 @@ class CarSignalMathTest {
     fun `候选为空返回 0`() {
         assertEquals(0, CarSignalMath.resolvePropertyId(intArrayOf(), setOf(1)))
     }
+
+    // ------------------------------------------------------------ 第136轮：剩余油量（升）
+
+    /**
+     * 真车实测：容量原始值 **55263**（0.001 L 单位）= 55.26 L
+     * （`analysis/findings/09-fuel-sensor-fix.md`：油量 21000 → 38%，
+     * 反推容量 55263，领克 01 油箱容积对得上）。
+     */
+    @Test
+    fun `油箱容量：大于 200 的按千分之一升单位换算成升`() {
+        assertEquals(55.263f, CarSignalMath.capacityLiters(55263f)!!, 0.001f)
+    }
+
+    @Test
+    fun `油箱容量：不超过 200 的本来就是升`() {
+        assertEquals(45f, CarSignalMath.capacityLiters(45f)!!, 0.001f)
+    }
+
+    @Test
+    fun `油箱容量读不到就没有升数（不猜）`() {
+        assertNull(CarSignalMath.capacityLiters(0f))
+        assertNull(CarSignalMath.capacityLiters(-1f))
+        assertNull(CarSignalMath.capacityLiters(Float.NaN))
+        assertNull(CarSignalMath.capacityLiters(Float.MIN_VALUE))
+    }
+
+    @Test
+    fun `剩余油量：百分比乘容量`() {
+        // 38% × 55.263 L = 21.0 L（与原始值 21000 = 21.0 L 一致）
+        assertEquals(21.0f, CarSignalMath.fuelLiters(38, 55263f)!!, 0.05f)
+        assertEquals(34.263f, CarSignalMath.fuelLiters(62, 55263f)!!, 0.05f)
+    }
+
+    @Test
+    fun `剩余油量：百分比读不到就没有升数`() {
+        assertNull(CarSignalMath.fuelLiters(null, 55263f))
+        assertNull(CarSignalMath.fuelLiters(-1, 55263f))
+    }
+
+    @Test
+    fun `剩余油量：容量读不到就没有升数（不能显示假的 0 L）`() {
+        assertNull(CarSignalMath.fuelLiters(38, 0f))
+        assertNull(CarSignalMath.fuelLiters(0, 0f))
+    }
 }

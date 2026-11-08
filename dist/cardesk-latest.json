@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1137",
-  "versionCode": 4233,
-  "tag": "v1.0.1137",
-  "name": "CarDesk 4233 / 1.0.1137-system",
-  "notes": "第135轮匿名化：文档与代码里的第三方 App 标识全部去掉（统一写「对标 App」），技术证据（类名 / 方法名 / 功能号 / 行号）保留；运行时行为不变（仅隐藏状态栏开关的键名去标识）",
-  "publishedAt": "2026-11-08T00:31:35Z",
+  "version": "1.0.1138",
+  "versionCode": 4234,
+  "tag": "v1.0.1138",
+  "name": "CarDesk 4234 / 1.0.1138-system",
+  "notes": "第136轮：①车门未关弹窗提醒（具体到对应车门；全关自动关闭；可手动关闭；样式沿用车门车窗卡的车模）；②续航卡新增具体剩余油量（升），续航≤100km 用黄色、≤50km 用红色提示。",
+  "publishedAt": "2026-11-08T12:26:57Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4233.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4233.apk",
-    "size": 2323405,
-    "sha256": "71d69577621c4842eabc70c4d3d3beaeb6ab0903e6ec5d87430086712601e34f"
+    "name": "CarDesk-platform-ecarx-cardesk-4234.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4234.apk",
+    "size": 2333465,
+    "sha256": "8b111eb64d0377d96c5841d440f0309e466cd431170f0319e521af7ea36cf994"
   }
 }

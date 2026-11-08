@@ -299,6 +299,57 @@ object CarSignalMath {
     }
 
     /**
+     * 油箱容量原始值 → **升**（第136轮新增，纯函数）。
+     *
+     * ## 单位口径（真车实测，`analysis/findings/09-fuel-sensor-fix.md`）
+     *
+     * 这台车机 `getCarInfoFloat(INFO_FUEL_CAPACITY = 2097408)` 读到的容量是
+     * **55263**，同一条通道的油量原始值是 **21000**（对应 38%）。
+     * 反推 `21000 / 0.38 ≈ 55263` —— 两者**同单位**，
+     * 且 `55263 / 1000 = 55.263 L` 正好是领克 01 的油箱容积（0.001 L 单位）。
+     *
+     * 但 [fuelPercent] 一直兼容「容量直接给升」的车型（`<= 200`），
+     * 所以这里也保留那条分支：
+     *
+     * - `capacity > 200` → 按 **0.001 L** 单位，除以 1000；
+     * - `0 < capacity <= 200` → 已经是**升**，直接用。
+     *
+     * @return null 表示容量读不到（**不猜**）
+     */
+    fun capacityLiters(capacityRaw: Float): Float? {
+        if (capacityRaw.isNaN() || capacityRaw == Float.MIN_VALUE) return null
+        if (capacityRaw <= 0f) return null
+        return if (capacityRaw > 200f) capacityRaw / 1000f else capacityRaw
+    }
+
+    /**
+     * 剩余油量（升）（第136轮新增，纯函数）。
+     *
+     * 口径：**百分比 × 油箱容量（升）**。
+     *
+     * ## 为什么用百分比反推，而不是直接用原始值除以 1000
+     *
+     * 油量原始值有**两种形态**（见 [fuelPercent] 的换算分支）：
+     * 有时是 0.001 L 单位（真车实测 21000），有时是「已经归一化的百分比」。
+     * 直接除以 1000 在第二种形态下会得到 0.0 L —— **错得离谱还不报错**。
+     *
+     * 而百分比是桌面**已经在显示**的那个数（卡片上的 `燃料剩余 · 62%`），
+     * 用它乘容量得到升数，口径与卡片上其它数字**自洽**，
+     * 也顺带把「原始值的两种形态」这层复杂度挡在外面。
+     *
+     * 真车实测校核：`38% × 55.263 L = 21.0 L`，与原始值 `21000`（= 21.0 L）一致。
+     *
+     * @param percent 油量百分比；`null` / 负数 = 读不到
+     * @param capacityRaw 油箱容量原始值（见 [capacityLiters]）
+     * @return null 表示算不出（**不显示假的 0 L**）
+     */
+    fun fuelLiters(percent: Int?, capacityRaw: Float): Float? {
+        if (percent == null || percent < 0) return null
+        val cap = capacityLiters(capacityRaw) ?: return null
+        return cap * percent / 100f
+    }
+
+    /**
      * 车端 `ISensor` 推来的**总里程**原始值 → 公里数（单位**确定就是 km**）。
      *
      * ## 为什么这条不能走 [core.VehicleStats.odometerKm] 那套换算

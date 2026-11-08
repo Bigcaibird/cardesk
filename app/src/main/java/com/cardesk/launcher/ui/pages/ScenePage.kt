@@ -2334,218 +2334,21 @@ class ScenePage(context: Context) : View(context) {
      *
      * 坐标一律在设计空间（120 × 240，车头朝上，中心线 x = 60）里算，最后整体缩放到目标框。
      */
+    /**
+     * 俯视车模（第136轮起委托给 [com.cardesk.launcher.core.CarTopPainter]）。
+     *
+     * 车模原来只住在本页（胎压卡 / 车况卡各画一次），
+     * 第136轮「车门未关」弹窗也要画同一台车模 → 提取成公共组件，
+     * 避免两处画法各改各的、慢慢长得不一样。
+     */
     private fun drawCarTop(canvas: Canvas, cx: Float, cy: Float, w: Float, h: Float) {
-        drawCarTop(canvas, carTopFrame(cx, cy, w, h))
+        drawCarTop(canvas, com.cardesk.launcher.core.CarTopPainter.frame(cx, cy, w, h))
     }
 
-    /**
-     * 俯视车模的**画布变换**（设计空间 120×240 → 目标框）。
-     *
-     * 单独抽出来是因为车况卡要在车模上叠加「每个面板的开闭状态」，
-     * 叠加层必须用**和车模完全一致**的变换，否则面板会整体错位。
-     */
-    private data class CarTopFrame(
-        val centerX: Float,
-        val centerY: Float,
-        val scale: Float,
-        val offX: Float,
-        val offY: Float,
-    ) {
-        /** 设计空间 x → 画布 x。 */
-        fun px(x: Float): Float = offX + x * scale
-
-        /** 设计空间 y → 画布 y。 */
-        fun py(y: Float): Float = offY + y * scale
-    }
-
-    /** 目标框 → 车模变换（等比缩放，取宽高两个比例里小的那个）。 */
-    private fun carTopFrame(cx: Float, cy: Float, w: Float, h: Float): CarTopFrame {
-        val scale = minOf(
-            w / com.cardesk.launcher.core.CarModels.DESIGN_W,
-            h / com.cardesk.launcher.core.CarModels.DESIGN_H,
-        )
-        return CarTopFrame(
-            centerX = cx,
-            centerY = cy,
-            scale = scale,
-            offX = cx - com.cardesk.launcher.core.CarModels.DESIGN_W * scale / 2f,
-            offY = cy - com.cardesk.launcher.core.CarModels.DESIGN_H * scale / 2f,
-        )
-    }
-
-    private fun drawCarTop(canvas: Canvas, frame: CarTopFrame) {
+    /** 委托给 [com.cardesk.launcher.core.CarTopPainter]（几何由本页的车型决定）。 */
+    private fun drawCarTop(canvas: Canvas, frame: com.cardesk.launcher.core.CarTopPainter.Frame) {
         val geo = com.cardesk.launcher.core.CarTopGeometryFactory.of(carModel)
-        val scale = frame.scale
-        fun px(x: Float) = frame.px(x)
-        fun py(y: Float) = frame.py(y)
-
-        // —— 1. 轮子（垫在车身下面，只探出 6px） ——
-        val tirePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = carColors.tire
-            style = Paint.Style.FILL
-        }
-        val tireEdge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = carColors.tireEdge
-            style = Paint.Style.STROKE
-            strokeWidth = 1f * scale
-        }
-        for (wheel in geo.wheels) {
-            val r = RectF(px(wheel.left), py(wheel.top), px(wheel.right), py(wheel.bottom))
-            canvas.drawRoundRect(r, 5f * scale, 5f * scale, tirePaint)
-            canvas.drawRoundRect(r, 5f * scale, 5f * scale, tireEdge)
-        }
-
-        // —— 2. 车身 ——
-        //
-        // 路径按分段构造
-        // 鼻尖 ─贝塞尔─▶ 肩线 ─直线─▶ 最宽处 ─直线─▶ 后翼子板 ─贝塞尔─▶ 尾端（再镜像回车头）。
-        // 侧腰是**直线**，和车头贝塞尔之间留一个硬肩线 —— 这才是「像车」的关键。
-        val bodyPath = android.graphics.Path()
-        val noseC = geo.noseCubic
-        val tailC = geo.tailCubic
-        val cx = com.cardesk.launcher.core.CarTopGeometryFactory.CENTER_X
-        fun mirrorX(x: Float) = 2f * cx - x
-        bodyPath.moveTo(px(geo.nose.x), py(geo.nose.y))
-        bodyPath.cubicTo(
-            px(noseC.c1.x), py(noseC.c1.y),
-            px(noseC.c2.x), py(noseC.c2.y),
-            px(geo.shoulder.x), py(geo.shoulder.y),
-        )
-        bodyPath.lineTo(px(geo.midTop.x), py(geo.midTop.y))
-        bodyPath.lineTo(px(geo.midBottom.x), py(geo.midBottom.y))
-        bodyPath.cubicTo(
-            px(tailC.c1.x), py(tailC.c1.y),
-            px(tailC.c2.x), py(tailC.c2.y),
-            px(geo.tail.x), py(geo.tail.y),
-        )
-        // 左半（关于中心线镜像）
-        bodyPath.cubicTo(
-            px(mirrorX(tailC.c2.x)), py(tailC.c2.y),
-            px(mirrorX(tailC.c1.x)), py(tailC.c1.y),
-            px(mirrorX(geo.midBottom.x)), py(geo.midBottom.y),
-        )
-        bodyPath.lineTo(px(mirrorX(geo.midTop.x)), py(geo.midTop.y))
-        bodyPath.lineTo(px(mirrorX(geo.shoulder.x)), py(geo.shoulder.y))
-        bodyPath.cubicTo(
-            px(mirrorX(noseC.c2.x)), py(noseC.c2.y),
-            px(mirrorX(noseC.c1.x)), py(noseC.c1.y),
-            px(geo.nose.x), py(geo.nose.y),
-        )
-        bodyPath.close()
-        val half = geo.maxHalf
-        val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.FILL
-            shader = android.graphics.LinearGradient(
-                px(com.cardesk.launcher.core.CarTopGeometryFactory.CENTER_X - half),
-                0f,
-                px(com.cardesk.launcher.core.CarModels.DESIGN_W / 2f + half),
-                0f,
-                intArrayOf(carColors.bodyEdge, carColors.bodyMid, carColors.bodyEdge),
-                floatArrayOf(0f, 0.5f, 1f),
-                android.graphics.Shader.TileMode.CLAMP,
-            )
-        }
-        canvas.drawPath(bodyPath, bodyPaint)
-        bodyPaint.shader = null
-        bodyPaint.style = Paint.Style.STROKE
-        bodyPaint.strokeWidth = 1.5f * scale
-        bodyPaint.color = carColors.bodyEdgeLine
-        canvas.drawPath(bodyPath, bodyPaint)
-
-        // —— 3. 玻璃（前风挡 / 车顶 / 后风挡） ——
-        val glassPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.FILL
-            shader = android.graphics.LinearGradient(
-                0f,
-                py(geo.noseY),
-                0f,
-                py(geo.tailY),
-                intArrayOf(carColors.glassTop, carColors.glassBottom),
-                null,
-                android.graphics.Shader.TileMode.CLAMP,
-            )
-        }
-        canvas.drawPath(glassPath(geo.windshield, true, ::px, ::py), glassPaint)
-        canvas.drawPath(glassPath(geo.rearGlass, false, ::px, ::py), glassPaint)
-
-        // 车顶：玻璃色半透叠在车身上（`setAlpha(128)`）
-        // 让车漆的中线高光透上来，形成「全景天幕」而不是一块死黑。
-        val roofPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = carColors.roof
-            style = Paint.Style.FILL
-        }
-        canvas.drawRoundRect(
-            RectF(px(geo.roof.left), py(geo.roof.top), px(geo.roof.right), py(geo.roof.bottom)),
-            geo.roofRadius * scale,
-            geo.roofRadius * scale,
-            roofPaint,
-        )
-        val roofEdge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = carColors.roofEdge
-            style = Paint.Style.STROKE
-            strokeWidth = 1f * scale
-        }
-        canvas.drawRoundRect(
-            RectF(px(geo.roof.left), py(geo.roof.top), px(geo.roof.right), py(geo.roof.bottom)),
-            geo.roofRadius * scale,
-            geo.roofRadius * scale,
-            roofEdge,
-        )
-
-        // —— 4. 灯组 ——
-        val headPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = carColors.headLight }
-        for (l in geo.headLights) {
-            canvas.drawRoundRect(
-                RectF(px(l.left), py(l.top), px(l.right), py(l.bottom)),
-                2f * scale, 2f * scale, headPaint,
-            )
-        }
-        val tailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = carColors.tailLight }
-        for (l in geo.tailLights) {
-            canvas.drawRoundRect(
-                RectF(px(l.left), py(l.top), px(l.right), py(l.bottom)),
-                2f * scale, 2f * scale, tailPaint,
-            )
-        }
-    }
-
-    /**
-     * 把一块玻璃四边形变成 `Path`。
-     *
-     * 前风挡**上沿是弧**（`cubicTo`），后风挡**下沿是弧**
-     * 这里用 [bulge] 控制鼓出的高度。
-     *
-     * @param bulgeTop true = 上沿鼓（风挡），false = 下沿鼓（后风挡）
-     */
-    private fun glassPath(
-        quad: com.cardesk.launcher.core.GlassQuad,
-        bulgeTop: Boolean,
-        px: (Float) -> Float,
-        py: (Float) -> Float,
-    ): android.graphics.Path {
-        val p = android.graphics.Path()
-        p.moveTo(px(quad.topLeft.x), py(quad.topLeft.y))
-        if (bulgeTop) {
-            val span = quad.topRight.x - quad.topLeft.x
-            p.cubicTo(
-                px(quad.topLeft.x + span * 0.33f), py(quad.topLeft.y - quad.topBulge),
-                px(quad.topLeft.x + span * 0.67f), py(quad.topRight.y - quad.topBulge),
-                px(quad.topRight.x), py(quad.topRight.y),
-            )
-            p.lineTo(px(quad.bottomRight.x), py(quad.bottomRight.y))
-            p.lineTo(px(quad.bottomLeft.x), py(quad.bottomLeft.y))
-        } else {
-            p.lineTo(px(quad.topRight.x), py(quad.topRight.y))
-            p.lineTo(px(quad.bottomRight.x), py(quad.bottomRight.y))
-            val span = quad.bottomRight.x - quad.bottomLeft.x
-            p.cubicTo(
-                px(quad.bottomRight.x - span * 0.33f), py(quad.bottomRight.y + quad.bottomBulge),
-                px(quad.bottomRight.x - span * 0.67f), py(quad.bottomLeft.y + quad.bottomBulge),
-                px(quad.bottomLeft.x), py(quad.bottomLeft.y),
-            )
-        }
-        p.close()
-        return p
+        com.cardesk.launcher.core.CarTopPainter.draw(canvas, frame, geo, carColors)
     }
 
     /**
@@ -2581,7 +2384,8 @@ class ScenePage(context: Context) : View(context) {
         val shown = range?.toString() ?: "--"
         text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         text.textSize = 50f * k
-        text.color = Skin.TEXT
+        // 第136轮：续航按剩余里程分级着色（>100 常态 / ≤100 黄 / ≤50 红）。
+        text.color = rangeValueColor(range)
         val shownW = text.measureText(shown)
         canvas.drawText(shown, x + 22f * k, top + 80f, text)
         text.typeface = Typeface.DEFAULT
@@ -2608,12 +2412,40 @@ class ScenePage(context: Context) : View(context) {
         text.color = Skin.TEXT_DIM
         text.textAlign = Paint.Align.LEFT
         canvas.drawText(
-            fitText("燃料剩余 · ${VehicleStats.formatFuelPercent(fuel)}", w - 44f * k),
+            // 第136轮：除了百分比，再给出**具体剩余升数**（`燃料剩余 · 34.1 L · 62%`）。
+            fitText(fuelSummaryText(info?.fuelLiters, fuel), w - 44f * k),
             x + 22f * k, top + 131f, text,
         )
 
         // `SceneDesktop.disableShortClick(sceneCarCard)`（:703）：续航卡不可点
     }
+
+    /**
+     * 续航数值的颜色（第136轮）。
+     *
+     * 口径见 [com.cardesk.launcher.core.RangeLevel]：
+     * - `> 100 km` → 常态色；
+     * - `50 < r <= 100` → **黄**（[Skin.WARN]，项目的「注意」色）；
+     * - `r <= 50` → **红**（[Skin.DANGER]）；
+     * - 读不到 → 常态色（配 `--`，不靠颜色表达「没有数据」）。
+     */
+    private fun rangeValueColor(rangeKm: Int?): Int =
+        when (com.cardesk.launcher.core.RangeLevel.levelOf(rangeKm)) {
+            com.cardesk.launcher.core.RangeLevel.Level.WARN -> Skin.WARN
+            com.cardesk.launcher.core.RangeLevel.Level.DANGER -> Skin.DANGER
+            else -> Skin.TEXT
+        }
+
+    /**
+     * 续航卡底部的油量文案（第136轮）。
+     *
+     * `燃料剩余 · 34.1 L · 62%`
+     *
+     * 升数来自 [com.cardesk.launcher.vehicle.VehicleInfo.fuelLiters]
+     * （= 百分比 × 油箱容量，读不到容量就没有升数）。
+     */
+    private fun fuelSummaryText(liters: Float?, percent: Int?): String =
+        "燃料剩余 · ${VehicleStats.formatFuelLiters(liters)} · ${VehicleStats.formatFuelPercent(percent)}"
 
     // ---------------------------------------------------------------- 车况卡
 
@@ -2701,7 +2533,7 @@ class ScenePage(context: Context) : View(context) {
         val geo = com.cardesk.launcher.core.CarTopGeometryFactory.of(carModel)
         val statusGeo = com.cardesk.launcher.core.CarStatusGeometryFactory.of(geo)
         val modelCx = (r.left + r.right) / 2f
-        val frame = carTopFrame(
+        val frame = com.cardesk.launcher.core.CarTopPainter.frame(
             modelCx,
             r.top + 40f + CAR_STATUS_MODEL_H / 2f,
             CAR_STATUS_MODEL_W,
@@ -2839,7 +2671,7 @@ class ScenePage(context: Context) : View(context) {
      * 面板在设计空间里只有 9px 宽（折算到画布约 7px），手指根本点不准，
      * 所以往外多扩一圈（车体外侧扩得多、内侧扩得少），保证有个能点到的区域。
      */
-    private fun expandWindowHit(pr: RectF, frame: CarTopFrame): RectF {
+    private fun expandWindowHit(pr: RectF, frame: com.cardesk.launcher.core.CarTopPainter.Frame): RectF {
         val outward = 10f * frame.scale
         val inward = 4f * frame.scale
         val vertical = 8f * frame.scale

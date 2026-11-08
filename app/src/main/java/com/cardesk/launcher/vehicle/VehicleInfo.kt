@@ -28,6 +28,13 @@ data class VehicleInfo(
     val tires: FloatArray = floatArrayOf(240f, 240f, 238f, 235f),
     /** 油量百分比（0..100）；读不到时为 null。。 */
     val fuelPercent: Int? = null,
+    /**
+     * 剩余油量（**升**）（第136轮新增）；`null` = 读不到。
+     *
+     * 口径 = 油量百分比 × 油箱容量（升），见 [CarSignalMath.fuelLiters]。
+     * 桌面续航卡上「燃料剩余 · 34.1 L · 62%」里的那个升数就是它。
+     */
+    val fuelLiters: Float? = null,
     val source: String = "模拟车辆",
     /**
      * 四门是否关闭（主驾/副驾/左后/右后）；真车读不到的那一扇是 null。
@@ -138,6 +145,10 @@ fun currentVehicleInfo(): VehicleInfo {
             gear = gw.gear,
             tires = gw.tirePressures() ?: floatArrayOf(240f, 240f, 238f, 235f),
             fuelPercent = gw.fuelPercent(),
+            fuelLiters = CarSignalMath.fuelLiters(
+                gw.fuelPercent(),
+                CarSignalMath.capacityLiters(gw.simFuelCapacityLiters) ?: 0f,
+            ),
             source = gw.displayName,
             avgFuelConsumption = 6.8,
             tripKm = gw.simTrip2Km,
@@ -214,6 +225,10 @@ fun currentVehicleInfo(): VehicleInfo {
                 driveModeRaw = driveModeRaw,
                 tires = tires ?: floatArrayOf(Float.NaN, Float.NaN, Float.NaN, Float.NaN),
                 fuelPercent = gw.fuelPercent(),
+                fuelLiters = CarSignalMath.fuelLiters(
+                    gw.fuelPercent(),
+                    AdaptapiSensors.fuelCapacityRaw(),
+                ),
                 source = if (range >= 0) "${gw.displayName} + ISensor" else gw.displayName,
                 doorsClosed = body.doors,
                 doorsAllClosed = if (body.valid) body.allClosed else null,
