@@ -181,7 +181,7 @@ object OfficialMediaBridge {
      *
      * 为什么要它：`SessionBridge.pushToMediaCenter` 开头就是
      * `else if (isNativeSystemMediaSource(pkg)) { ...skip... }` ——
-     * **车机自带音源在放的时候不 claim**（参考 App（君君桌面）用的就是这套 SDK）。
+     * **车机自带音源在放的时候不 claim**（对标 App 用的就是这套 SDK）。
      * 我们照做：用户正在听电台时不去抢播放入口，免得把声音切走。
      */
     @Volatile
@@ -808,17 +808,16 @@ object OfficialMediaBridge {
      * `requestPlay(令牌)` = 「这个源请求播放」→ 原车把当前音源切到我们；
      * `updateCurrentSourceType(令牌, 6)` = 「当前音源类型是在线音乐」。
      *
-     * ## 与参考 App（君君桌面）那条路的一致性
+     * ## 与对标 App 那条路的一致性
      *
-     * 参考 App 的 `SessionBridge.setBridgeEnabled(true)` →
+     * 对标 App 的 `SessionBridge.setBridgeEnabled(true)` →
      * `pushToMediaCenter(true)` → `t.a()`（claim）+ `t.b()`（声明音源类型）。
      * 我们现在也是「注册成功就 claim」。
      *
-     * **出处要说准**：参考 App 的包名是 `com.ecarx.qq.tool`、`app_name` 是「君君桌面」——
-     * 它是**另一个第三方桌面**（平台签名预装），**不是车机官方桌面**；
-     * 反编译产物里的 `com.claunchercard.manager.*` 只是**同一个 APK 内部**的
-     * Java 包名（`inner_dec` / `outer_dec` 两个产物的 manifest package
-     * 都是 `com.ecarx.qq.tool`）。
+     * **出处要说准**：对标 App 是**另一个第三方桌面**（平台签名预装）；
+     * 反编译产物里 `DesignSettings` / `MusicManager` / `BootMediaCompetitorKiller`
+     * 这些类都在**同一个 APK 内部**，只是 Java 包前缀与它自己的 `package` 不同；
+     * 两个反编译产物的 manifest `package` 也完全一样（其中一个只是加固壳版本）。
      *
      * 所以这条证据的性质是「**另一个第三方桌面在同款车机上就是这么干的**」，
      * 不是「厂商规定的口径」。我们跟它对齐是因为它跑通过；
@@ -827,7 +826,7 @@ object OfficialMediaBridge {
      * ## 什么时候**不**claim
      *
      * - 目标不在白名单（爱趣听 / 收音机 / USB / 蓝牙）→ 红线，绝不碰；
-     * - 车机自带音源正在放 → 参考 App 也是 skip 的，别打断用户正在听的电台；
+     * - 车机自带音源正在放 → 对标 App 也是 skip 的，别打断用户正在听的电台；
      * - 这个目标已经 claim 过 → 只 claim 一次，不跟用户手动切源打架。
      */
     private fun claimIfNeeded(reason: String) {

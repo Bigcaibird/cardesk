@@ -69,7 +69,7 @@ if (containsKey(DISPLAY_ICON_URI) && !empty) {
 → **取值顺序 `DISPLAY_ICON_URI → ART_URI → ALBUM_ART_URI`**，
 `ART_URI` 是本地裸路径时文件存在才转 `Uri.fromFile`，没图时给 `Uri.parse("")`。
 
-原车桌面自己用 **Glide** 加载这个 Uri（`analysis/inner_jadx` 的
+对标 App 自己用 **Glide** 加载这个 Uri（它的反编译产物里的
 `MusicManager.loadCoverIntoViews(Uri, String)`）→ `content://` / `file://` 都能吃。
 
 ### 2.3 我们的桥漏了什么

@@ -161,7 +161,7 @@ object AmapTrafficLight {
     /**
      * 绿灯帧的**灯态伴随标志**（`greenLightLastSecond`）—— **不是**绿灯剩余秒数。
      *
-     * ## 语义定论（第三方桌面「嘟嘟」生产代码 + UNI 参考实现）
+     * ## 语义定论（第三方桌面生产代码 + UNI 参考实现）
      *
      * 高德 60073 协议里它的取值只有两种：**红=`0`、绿=`3`**。
      * 它跟着灯态走，用来**佐证灯态**，不随时间递减，
@@ -169,7 +169,7 @@ object AmapTrafficLight {
      * 真车实测绿灯读秒一直在 `3 ↔ 2` 之间跳，正是因为它恒为 `3`。
      *
      * 逐行证据：
-     * - `work/dudu/jadx_out/sources/com/dudu/autoui/manage/p194s/p195j/C3691g.java`
+     * - 对标 App 反编译产物里的 `C3691g.java`
      *   的 60073 分支（`onReceive`）：
      *   - 灯态是**成对**判定的：`greenLast == 0 && status == 1` 判红、
      *     `greenLast == 3 && status == 4` 判绿；
@@ -301,7 +301,7 @@ object AmapTrafficLight {
         // `3 → 2 → 3 → 2 …` 的锯齿 —— 正是用户报的「绿灯倒计时不正确」。
         //
         // 字段缺失/negative 时干脆不给读秒（显示层画「—」），
-        // **不拿别的字段顶替**；这与 dudu 的 `red >= 0` 门限一致。
+        // **不拿别的字段顶替**；这与对标 App 的 `red >= 0` 门限一致。
         val countdown = seconds(extras[EXTRA_RED_COUNTDOWN])
         return Signal(
             lamp = lamp,
@@ -321,11 +321,11 @@ object AmapTrafficLight {
      * ## 认不出来时怎么兜底
      *
      * 高德要是改了枚举取值，我们**不猜**它是什么意思，
-     * 按 dudu 的成对条件退到「灯态伴随标志」：
+     * 按对标 App 的成对条件退到「灯态伴随标志」：
      *
-     * - `greenLightLastSecond == 3` ⇒ 正在绿灯（dudu：`greenLast==3 && status==4` 判绿）；
+     * - `greenLightLastSecond == 3` ⇒ 正在绿灯（对标 App：`greenLast==3 && status==4` 判绿）；
      * - 否则若变灯倒计时 > 0 ⇒ 正在等灯，按红灯画
-     *   （dudu 里 `greenLast==0 && status==1` 判红；绿灯那一侧已被上一行判掉）。
+     *   （对标 App 里 `greenLast==0 && status==1` 判红；绿灯那一侧已被上一行判掉）。
      *
      * 这样即使枚举变了，也不会退回到「永远画红灯」那个老毛病。
      * `greenLast` 缺失（老版本高德不带这个字段）时上一行自然跳过，不影响判定。

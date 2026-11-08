@@ -246,7 +246,7 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
             requestGuideData()
             // 高德现在是白天还是黑夜，桌面上车时并不知道（高德不保证主动广播）。
             // 问一次（`13030`），高德会回 `10019` + `EXTRA_STATE=37/38`。
-            // 参考 App（君君桌面）也是启动问一次、10 秒后再问一次，这里照抄。
+            // 对标 App 也是启动问一次、10 秒后再问一次，这里照抄。
             requestDayNightMode()
             main.removeCallbacks(dayNightQuery)
             main.postDelayed(dayNightQuery, DAY_NIGHT_QUERY_DELAY_MS)
@@ -1144,7 +1144,7 @@ class AmapDesktopGuide(context: Context, private val listener: Listener) {
          * 启动后再问一次高德日夜的间隔（毫秒）。
          *
          * 高德刚起来时可能还没准备好回应查询，10 秒后再问一次兜底
-         * （参考 App（君君桌面）也是启动问一次、10 秒后再问一次）。
+         * （对标 App 也是启动问一次、10 秒后再问一次）。
          */
         const val DAY_NIGHT_QUERY_DELAY_MS = 10_000L
 

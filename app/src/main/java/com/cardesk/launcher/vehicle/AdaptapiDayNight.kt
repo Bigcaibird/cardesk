@@ -27,7 +27,7 @@ import java.lang.reflect.Proxy
  * - `registerDayNightModeCallBack()`：车机明暗一变就回调
  *   `onDayNightChanged(显示态)` / `onDayNightModeChange(模式)`。
  *
- * 参考 App（君君桌面）读明暗走的就是这条通道（`DayNightController.readSystemNightUi`）。
+ * 对标 App 读明暗走的就是这条通道（`DayNightController.readSystemNightUi`）。
  *
  * ## 实现方式
  *
@@ -53,7 +53,7 @@ object AdaptapiDayNight {
     /**
      * 光感变化的合并延时（毫秒）。
      *
-     * 参考 App（君君桌面）是 400ms（`scheduleApplyFollowSensorCoalesced`）：车机在明暗边界上
+     * 对标 App 是 400ms（`scheduleApplyFollowSensorCoalesced`）：车机在明暗边界上
      * 会连着推好几帧，不合并会看到配色来回闪。
      */
     private const val DEBOUNCE_MS = 400L

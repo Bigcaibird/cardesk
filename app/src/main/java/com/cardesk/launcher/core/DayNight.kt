@@ -80,7 +80,7 @@ object DayNight {
      *    没有信号时用车机光感，再依次回落到车机日间模式功能值、系统 UI 夜间态、
      *    最后回落到上次应用值 / 夜间。
      *
-     * 这条链与参考 App（君君桌面） `computeDesiredNightUi`（:328-399）一致：
+     * 这条链与对标 App `computeDesiredNightUi`（:328-399）一致：
      * 高德信号 → 系统明暗（AdaptAPI）→ 车机日间模式功能值 → 上次应用值。
      *
      * @param enabled `daynight_enabled`

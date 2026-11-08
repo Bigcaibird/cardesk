@@ -40,7 +40,7 @@ import java.io.FileOutputStream
  * `content://` 由**我们的进程**替别人读，权限只取决于 provider 的导出与权限声明，
  * 与对方 uid 无关 —— 这是唯一能保证「仪表一定读得到」的做法。
  *
- * 原车桌面自己加载这个 Uri 用的是 **Glide**（`analysis/inner_jadx` 里
+ * 对标 App 自己加载这个 Uri 用的是 **Glide**（它的反编译产物里
  * `MusicManager.loadCoverIntoViews(Uri, String)`），Glide 对 `content://` 原生支持。
  *
  * ## 声明

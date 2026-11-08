@@ -195,7 +195,7 @@ object MediaBridgePolicy {
      *
      * ## 为什么需要「主动 claim」
      *
-     * 证据来自**参考 App（君君桌面）** —— 它是同款车机上跑通的另一个桌面，
+     * 证据来自**对标 App** —— 它是同款车机上跑通的另一个桌面，
      * 用的是同一套原车 MediaCenter SDK（`com.ecarx.sdk.mediacenter`）。
      *
      * 它的 `SessionBridge.setBridgeEnabled(true)` 做的正是：
@@ -211,14 +211,12 @@ object MediaBridgePolicy {
      * 「bridge disabled → MediaCenter unregistered, **OEM source can take over**」
      * —— **不 claim，音源就归原车**。
      *
-     * ## 出处要说准（别把它当成「官方口径」）
+     * ## 出处要说准（别把它当成「厂商口径」）
      *
-     * 参考 App 的包名是 `com.ecarx.qq.tool`，`app_name` 是「君君桌面」——
-     * **它是第三方**（平台签名预装），**不是车机官方桌面**。
-     * 反编译产物里它的 Java 包前缀是 `com.claunchercard.manager.*`，
-     * 那是**同一个 APK 内部**的包名，不是另一个 App
-     * （`inner_dec` / `outer_dec` 两个产物的 manifest package 都是
-     * `com.ecarx.qq.tool`）。
+     * 对标 App 是**第三方**桌面（平台签名预装）。
+     * 反编译产物里 `DesignSettings` / `MusicManager` / `DriveModeController`
+     * 这些类都在**同一个 APK 内部**，只是 Java 包前缀与它自己的 `package` 不同；
+     * 两个反编译产物的 manifest `package` 也完全一样（其中一个只是加固壳版本）。
      *
      * 所以这里的证据性质是「**另一个第三方桌面在同款车机上就是这么干的**」，
      * 不是「厂商规定的口径」。我们跟它对齐是因为它跑通过；
@@ -240,7 +238,7 @@ object MediaBridgePolicy {
      * | --- | --- |
      * | 已注册到原车 | 没注册就没有令牌，claim 无从谈起 |
      * | 目标在白名单（三方在线播放器） | **红线**：原车收音机 / USB / 蓝牙一律不碰 |
-     * | 目标不是车机自带音源在放 | 参考 App 的 `SessionBridge.pushToMediaCenter` 遇到 `isNativeSystemMediaSource(pkg)` 直接 skip —— 它那么谨慎，我们照做，别去打断用户正在听的电台 |
+     * | 目标不是车机自带音源在放 | 对标 App 的 `SessionBridge.pushToMediaCenter` 遇到 `isNativeSystemMediaSource(pkg)` 直接 skip —— 它那么谨慎，我们照做，别去打断用户正在听的电台 |
      * | 还没 claim 过这个目标 | 只 claim 一次，不跟用户在车机里手动切源来回打架 |
      */
     fun shouldClaim(
@@ -258,9 +256,9 @@ object MediaBridgePolicy {
      *
      * 判据：有一个会话处于播放中，而它的包名**不在**三方在线播放器白名单里。
      *
-     * 依据：参考 App 的 `SessionBridge.pushToMediaCenter` 遇到
+     * 依据：对标 App 的 `SessionBridge.pushToMediaCenter` 遇到
      * `isNativeSystemMediaSource(pkg)` 直接 skip —— **车机自带音源在放的时候不 claim**。
-     * 它是另一个第三方桌面（君君桌面），我们照做，别去打断用户正在听的电台。
+     * 它是另一个第三方桌面（对标 App），我们照做，别去打断用户正在听的电台。
      *
      * @param playingPackages 处于播放中的会话包名（可以多几个）
      */

@@ -87,7 +87,7 @@ class AmapTrafficLightTest {
     @Test
     fun `官方协议 认不出的灯态按伴随标志和变灯倒计时兜底`() {
         // 高德要是换了枚举取值，我们不猜它是什么意思：
-        // 按 dudu 的成对条件退到灯态伴随标志（绿=3），
+        // 按对标 App 的成对条件退到灯态伴随标志（绿=3），
         // 再退到「变灯倒计时 > 0 ⇒ 正在等灯，按红灯画」。
         val green = AmapTrafficLight.standard(standard(status = 99, greenLastSecond = 3))
         assertEquals(AmapTrafficLight.Lamp.GREEN, green!!.lamp)

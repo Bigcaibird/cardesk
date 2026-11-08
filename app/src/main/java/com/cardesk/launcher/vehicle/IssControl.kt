@@ -15,7 +15,7 @@ import com.cardesk.launcher.core.log.Logx
  * - 读 → `getPaSsActivation`（`CarFunctionValueImpl.java:429`）
  * - 写 → `setCbSsActivation`（`CarFunctionValueImpl.java:1247`）
  *
- * 参考 App（君君桌面）（`com.claunchercard`）的 `DriveModeController` 用的就是它：
+ * 对标 App 的 `DriveModeController` 用的就是它：
  * `FUNCTION_ENGINE_STOP_START = 537002240`，读 `getFunctionValue(...) == 1`
  * 判「开着」，写 `setFunctionValue(..., z ? 1 : 0)`。
  *

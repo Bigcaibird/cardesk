@@ -793,7 +793,7 @@ class MusicSessionTracker private constructor() {
         //
         // `SessionBridge.pushToMediaCenter` 开头就是
         // `else if (isNativeSystemMediaSource(pkg)) { ...skip... }` ——
-        // 车机自带音源在放的时候**不 claim**（参考 App（君君桌面）走的是同一条路）。我们照做：
+        // 车机自带音源在放的时候**不 claim**（对标 App 走的是同一条路）。我们照做：
         // 用户正在听电台时不去抢播放入口，别把声音切走。
         OfficialMediaBridge.setNativeSourcePlaying(nativeSourcePlaying())
     }

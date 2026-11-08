@@ -224,7 +224,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
      * `10019` + `EXTRA_STATE` 37（白天）/ 38（黑夜），见 `core/nav/AmapDayNight`。
      *
      * 以前桌面没有接这条信号，「跟随高德」读的是系统 uiMode ——
-     * 那个值在这台车机上没人写（只有参考 App（君君桌面）会写），所以永远是个死值，
+     * 那个值在这台车机上没人写（只有对标 App 会写），所以永远是个死值，
      * 表现就是「桌面切了、高德没切 / 高德切了、桌面没切」。
      */
     private var amapDayNightSignal: Boolean? = null
@@ -1612,7 +1612,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
     /**
      * 把桌面的日夜状态推给高德，让地图跟着切。
      *
-     * **只在桌面不是跟着高德走的时候才推**（参考 App（君君桌面）在「跟随高德」时同样不回写）：
+     * **只在桌面不是跟着高德走的时候才推**（对标 App 在「跟随高德」时同样不回写）：
      * 跟随高德时桌面就是高德的状态，回写等于把高德的「自动」锁死成固定白天/黑夜，
      * 高德以后自己就不切了，桌面也就永远停在旧值上。
      */
@@ -1859,7 +1859,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
         prefs.lastPage = target
         dots.index = target
         dock.activePage = target
-        // 切页后自绘状态栏的显隐要跟着变（syncJunjunStatusBar：导航页隐藏）
+        // 切页后自绘状态栏的显隐要跟着变（对标 App 的同步逻辑：导航页隐藏）
         applyDockVisibility()
 
         val views = arrayOf<View>(scenePage, navPage)
@@ -2828,12 +2828,12 @@ private fun showCam() {
             }
         }
         // 自绘状态栏的显隐：——
-        // 「隐藏君君状态栏」打开时，**只在导航页（page==1）隐藏**，第一页仍显示
+        // 「隐藏导航页状态栏」打开时，**只在导航页（page==1）隐藏**，第一页仍显示
         // （第三十二轮起桌面只有两页，没有第三页了）。
         // （原车状态栏的隐藏走 `prefs.hideStatus` → policy_control，不影响这一条。）
-        // 第三十七轮：「隐藏君君状态栏」这个开关的**默认值改成 false**（见 `Prefs.hideJunjunStatus`），
+        // 第三十七轮：「隐藏导航页状态栏」这个开关的**默认值改成 false**（见 `Prefs.hideNavStatus`），
         // 所以现在两页都显示状态栏 —— 用户要求「桌面第二页也需要显示状态栏」。
-        val hideBar = page == PAGE_NAV && prefs.hideJunjunStatus
+        val hideBar = page == PAGE_NAV && prefs.hideNavStatus
         statusBar.visibility = if (hideBar) View.GONE else View.VISIBLE
         // 第八十二轮：翻页圆点搬进了**状态栏那一行**的中间，
         // 所以状态栏被隐藏时圆点也要一起隐藏 —— 否则它会孤零零浮在屏幕顶部。
@@ -2873,7 +2873,7 @@ private fun showCam() {
         // 排障场景：状态栏为什么没了 / 内容为什么让了那么多 —— 一眼看出来。
         Logx.d(
             LogTags.APP, "状态栏显隐",
-            "page" to page, "hideJunjunStatus" to prefs.hideJunjunStatus, "visible" to !hideBar,
+            "page" to page, "hideNavStatus" to prefs.hideNavStatus, "visible" to !hideBar,
             "navContentTop" to navTop,
         )
     }

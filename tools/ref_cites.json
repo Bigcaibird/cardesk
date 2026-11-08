@@ -32,8 +32,8 @@
  {
   "file": "app/src/test/java/com/cardesk/launcher/PreviewRenderTest.kt",
   "line": 582,
-  "ref": "参考 App",
-  "context": "* 复刻的是另一个参考 App（`com.dudu.autoui`）的车门示意："
+  "ref": "对标 App",
+  "context": "* 复刻的是另一个对标 App 的车门示意："
  },
  {
   "file": "app/src/test/java/com/cardesk/launcher/ui/MusicPageLogicTest.kt",
@@ -230,26 +230,26 @@
  {
   "file": "app/src/test/java/com/cardesk/launcher/core/DoorSwingTest.kt",
   "line": 10,
-  "ref": "参考 App",
-  "context": "* 复刻的是另一个参考 App（`com.dudu.autoui`）的车门示意："
+  "ref": "对标 App",
+  "context": "* 复刻的是另一个对标 App 的车门示意："
  },
  {
   "file": "app/src/test/java/com/cardesk/launcher/core/JsonLiteTest.kt",
   "line": 12,
-  "ref": "参考 App",
-  "context": "* 槽位与计划任务的持久化格式必须与参考 App 的 `JSONArray` **完全兼容**，"
+  "ref": "对标 App",
+  "context": "* 槽位与计划任务的持久化格式必须与对标 App 的 `JSONArray` **完全兼容**，"
  },
  {
   "file": "app/src/test/java/com/cardesk/launcher/core/NavSlotsLyricTest.kt",
   "line": 10,
-  "ref": "参考 App",
-  "context": "* 参考 App 的歌词只出现在导航栏歌词槽（`item_nav_bar_lyric_slot.xml` /"
+  "ref": "对标 App",
+  "context": "* 对标 App 的歌词只出现在导航栏歌词槽（`item_nav_bar_lyric_slot.xml` /"
  },
  {
   "file": "app/src/test/java/com/cardesk/launcher/core/NavSlotsTest.kt",
   "line": 10,
-  "ref": "对齐参考 App",
-  "context": "* 槽位模型单测：对齐参考 App 的 `NavBarSlot` / `NavBarSettings` 语义"
+  "ref": "对齐对标 App",
+  "context": "* 槽位模型单测：对齐对标 App 的 `NavBarSlot` / `NavBarSettings` 语义"
  },
  {
   "file": "app/src/test/java/com/cardesk/launcher/core/NavSlotsTest.kt",
@@ -266,14 +266,14 @@
  {
   "file": "app/src/test/java/com/cardesk/launcher/core/ProtoLiteTest.kt",
   "line": 10,
-  "ref": "参考 App",
-  "context": "* 背景：另一个参考 App（`com.dudu.autoui`）读 MC / Geely 事件属性时，"
+  "ref": "对标 App",
+  "context": "* 背景：另一个对标 App 读 MC / Geely 事件属性时，"
  },
  {
   "file": "app/src/test/java/com/cardesk/launcher/core/ScheduledTasksTest.kt",
   "line": 9,
-  "ref": "对齐参考 App",
-  "context": "* 计划任务单测：对齐参考 App 的 `TaskScheduler` 语义"
+  "ref": "对齐对标 App",
+  "context": "* 计划任务单测：对齐对标 App 的 `TaskScheduler` 语义"
  },
  {
   "file": "app/src/test/java/com/cardesk/launcher/core/ScheduledTasksTest.kt",
@@ -344,8 +344,8 @@
  {
   "file": "app/src/test/java/com/cardesk/launcher/core/media/CoverArtSearchTest.kt",
   "line": 10,
-  "ref": "参考 `com.claunchercard.manager.CoverArtSearch`",
-  "context": "* 在线封面搜索（参考 `com.claunchercard.manager.CoverArtSearch`）。"
+  "ref": "参考 `CoverArtSearch`",
+  "context": "* 在线封面搜索（参考 `CoverArtSearch`）。"
  },
  {
   "file": "app/src/test/java/com/cardesk/launcher/core/media/LastTrackStoreTest.kt",
@@ -614,8 +614,8 @@
  {
   "file": "app/src/test/java/com/cardesk/launcher/vehicle/AdaptapiBodyTest.kt",
   "line": 123,
-  "ref": "参考 App",
-  "context": "// 第四十五轮：改成**逐门独立**（对齐另一个参考 App 的 `C3274c`）。"
+  "ref": "对标 App",
+  "context": "// 第四十五轮：改成**逐门独立**（对齐另一个对标 App 的 `C3274c`）。"
  },
  {
   "file": "app/src/test/java/com/cardesk/launcher/vehicle/BodyStateTest.kt",
@@ -758,20 +758,20 @@
  {
   "file": "app/src/test/java/com/cardesk/launcher/vehicle/McDoorSignalsTest.kt",
   "line": 12,
-  "ref": "参考 App",
-  "context": "* 参考 App（`com.dudu.autoui`）的 `C3274c` 读五个独立属性："
+  "ref": "对标 App",
+  "context": "* 对标 App 的 `C3274c` 读五个独立属性："
  },
  {
   "file": "app/src/system/AndroidManifest.xml",
   "line": 4,
-  "ref": "参考 App",
-  "context": "使用前提（与参考 App 一致）："
+  "ref": "对标 App",
+  "context": "使用前提（与对标 App 一致）："
  },
  {
   "file": "app/src/system/AndroidManifest.xml",
   "line": 5,
-  "ref": "参考 App",
-  "context": "1) APK 用平台证书签名（本项目用 AOSP platform 测试密钥，指纹与参考 App 的 PLATFORM.RSA 相同）；"
+  "ref": "对标 App",
+  "context": "1) APK 用平台证书签名（本项目用 AOSP platform 测试密钥，指纹与对标 App 的 PLATFORM.RSA 相同）；"
  },
  {
   "file": "app/src/system/AndroidManifest.xml",
@@ -782,26 +782,26 @@
  {
   "file": "app/src/system/AndroidManifest.xml",
   "line": 60,
-  "ref": "参考 App",
-  "context": "与参考 App **完全同名**的通知监听服务（com.ecarx.qq.tool.service.MusicBridgeService）。"
+  "ref": "对标 App",
+  "context": "与对标 App **完全同名**的通知监听服务（com.ecarx.qq.tool.service.MusicBridgeService）。"
  },
  {
   "file": "app/src/system/java/com/ecarx/qq/tool/service/MusicBridgeService.kt",
   "line": 8,
-  "ref": "参考 App",
-  "context": "* 替换版专属：**与参考 App 完全同名的通知监听服务**。"
+  "ref": "对标 App",
+  "context": "* 替换版专属：**与对标 App 完全同名的通知监听服务**。"
  },
  {
   "file": "app/src/main/AndroidManifest.xml",
   "line": 8,
-  "ref": "参考 App",
-  "context": "媒体会话枚举权限（参考 App 也声明了它）。"
+  "ref": "对标 App",
+  "context": "媒体会话枚举权限（对标 App 也声明了它）。"
  },
  {
   "file": "app/src/main/AndroidManifest.xml",
   "line": 16,
-  "ref": "参考 App",
-  "context": "<!-- 参考 App 也声明了它（联网前的连通性判断）；漏声明会让诊断快照里显示「未授予」 -->"
+  "ref": "对标 App",
+  "context": "<!-- 对标 App 也声明了它（联网前的连通性判断）；漏声明会让诊断快照里显示「未授予」 -->"
  },
  {
   "file": "app/src/main/AndroidManifest.xml",
@@ -812,14 +812,14 @@
  {
   "file": "app/src/main/AndroidManifest.xml",
   "line": 27,
-  "ref": "参考 App",
-  "context": "<!-- LAN 传输：参考 App 的传输期保活（WakeLock + WifiLock）需要这三个权限 -->"
+  "ref": "对标 App",
+  "context": "<!-- LAN 传输：对标 App 的传输期保活（WakeLock + WifiLock）需要这三个权限 -->"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/MainActivity.kt",
   "line": 50,
-  "ref": "参考 App",
-  "context": "// 没有豁免就反射不到（参考 App 走的是 targetSdk 29 的口径，我们已对齐）。"
+  "ref": "对标 App",
+  "context": "// 没有豁免就反射不到（对标 App 走的是 targetSdk 29 的口径，我们已对齐）。"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/MainActivity.kt",
@@ -848,8 +848,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/ClimatePage.kt",
   "line": 113,
-  "ref": "参考 App",
-  "context": "// 电源状态副标题（参考 App 的「已关机 / 运行中」）"
+  "ref": "对标 App",
+  "context": "// 电源状态副标题（对标 App 的「已关机 / 运行中」）"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/ClimatePage.kt",
@@ -860,14 +860,14 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/ClimatePage.kt",
   "line": 195,
-  "ref": "参考 App",
-  "context": "// —— MAX 风量（参考 App 的一键最大风量，设计板没画但功能保留）——"
+  "ref": "对标 App",
+  "context": "// —— MAX 风量（对标 App 的一键最大风量，设计板没画但功能保留）——"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/ClimatePage.kt",
   "line": 301,
-  "ref": "参考 App",
-  "context": "// —— 座舱吹风示意（参考 App 的 CabinView，保留功能）——"
+  "ref": "对标 App",
+  "context": "// —— 座舱吹风示意（对标 App 的 CabinView，保留功能）——"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/ClimatePage.kt",
@@ -998,8 +998,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/LanTransferServer.kt",
   "line": 32,
-  "ref": "参考 App",
-  "context": "* 局域网传输：复刻参考 App 的「车机内置 HTTP 服务」。"
+  "ref": "对标 App",
+  "context": "* 局域网传输：复刻对标 App 的「车机内置 HTTP 服务」。"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/LanTransferServer.kt",
@@ -1346,8 +1346,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/LauncherView.kt",
   "line": 53,
-  "ref": "对齐参考 App",
-  "context": "* 桌面根视图（结构对齐参考 App 的 activity_main）："
+  "ref": "对齐对标 App",
+  "context": "* 桌面根视图（结构对齐对标 App 的 activity_main）："
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/LauncherView.kt",
@@ -1736,8 +1736,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/LauncherView.kt",
   "line": 874,
-  "ref": "参考 App",
-  "context": "* 底部导航栏：参考 App 有两套承载（06-F01/F02/F03）——"
+  "ref": "对标 App",
+  "context": "* 底部导航栏：对标 App 有两套承载（06-F01/F02/F03）——"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/LauncherView.kt",
@@ -1772,8 +1772,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/LauncherView.kt",
   "line": 976,
-  "ref": "参考 App",
-  "context": "/** 槽位条点击：动作按参考 App 的 ACTION_* 语义分发。 */"
+  "ref": "对标 App",
+  "context": "/** 槽位条点击：动作按对标 App 的 ACTION_* 语义分发。 */"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/LauncherView.kt",
@@ -1808,8 +1808,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/LauncherView.kt",
   "line": 1211,
-  "ref": "参考 syncJunjunStatusBar",
-  "context": "// 切页后自绘状态栏的显隐要跟着变（参考 syncJunjunStatusBar：导航页隐藏）"
+  "ref": "参考状态栏显隐同步",
+  "context": "// 切页后自绘状态栏的显隐要跟着变（对标 App 的同步逻辑：导航页隐藏）"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/LauncherView.kt",
@@ -1958,8 +1958,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/LauncherView.kt",
   "line": 1951,
-  "ref": "参考 `SceneDesktop.syncJunjunStatusBar:3235-3242`",
-  "context": "// 自绘状态栏的显隐：参考 `SceneDesktop.syncJunjunStatusBar:3235-3242` ——"
+  "ref": "参考 `SceneDesktop` 里状态栏显隐同步那段（:3235-3242）",
+  "context": "// 自绘状态栏的显隐：参考 `SceneDesktop` 里状态栏显隐同步那段（:3235-3242）——"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/LauncherView.kt",
@@ -2246,8 +2246,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/SettingsOverlay.kt",
   "line": 42,
-  "ref": "参考 App",
-  "context": "* 设置浮层，复刻参考 App 的 `page_settings.xml` + `DesignSettings`"
+  "ref": "对标 App",
+  "context": "* 设置浮层，复刻对标 App 的 `page_settings.xml` + `DesignSettings`"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/SettingsOverlay.kt",
@@ -2282,26 +2282,26 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/SettingsOverlay.kt",
   "line": 180,
-  "ref": "参考 App",
-  "context": "// 调试工具（参考 App 没有这一页，是为真机排障加的）"
+  "ref": "对标 App",
+  "context": "// 调试工具（对标 App 没有这一页，是为真机排障加的）"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/SettingsOverlay.kt",
   "line": 193,
-  "ref": "参考 App",
-  "context": "* 设计板把参考 App 的两棵树合成一棵，分组按参考 `DesignSettings` 归并为"
+  "ref": "对标 App",
+  "context": "* 设计板把对标 App 的两棵树合成一棵，分组按参考 `DesignSettings` 归并为"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/SettingsOverlay.kt",
   "line": 193,
   "ref": "参考 `DesignSettings`",
-  "context": "* 设计板把参考 App 的两棵树合成一棵，分组按参考 `DesignSettings` 归并为"
+  "context": "* 设计板把对标 App 的两棵树合成一棵，分组按参考 `DesignSettings` 归并为"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/SettingsOverlay.kt",
   "line": 241,
-  "ref": "参考 App",
-  "context": "// 调试工具（参考 App 没有这一页，是为真机排障加的）"
+  "ref": "对标 App",
+  "context": "// 调试工具（对标 App 没有这一页，是为真机排障加的）"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/SettingsOverlay.kt",
@@ -2534,8 +2534,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/SettingsOverlay.kt",
   "line": 2111,
-  "ref": "参考 App",
-  "context": "* 诊断日志（**参考 App 没有这一页**，是为真机排障加的调试工具）。"
+  "ref": "对标 App",
+  "context": "* 诊断日志（**对标 App 没有这一页**，是为真机排障加的调试工具）。"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/SettingsOverlay.kt",
@@ -2558,8 +2558,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/SettingsOverlay.kt",
   "line": 2371,
-  "ref": "参考 App",
-  "context": "/** 方控桥接开关（复刻版自有的开关位；参考 App 用车机 SDK 的 SessionBridge）。 */"
+  "ref": "对标 App",
+  "context": "/** 方控桥接开关（复刻版自有的开关位；对标 App 用车机 SDK 的 SessionBridge）。 */"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/SettingsOverlay.kt",
@@ -2600,20 +2600,20 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/SettingsOverlay.kt",
   "line": 2399,
-  "ref": "参考 App",
-  "context": "* 共享的 `ToggleSwitch` 是参考 App 的 76×44，这里按设计板单独画一个，"
+  "ref": "对标 App",
+  "context": "* 共享的 `ToggleSwitch` 是对标 App 的 76×44，这里按设计板单独画一个，"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/SourceMenuLayer.kt",
   "line": 19,
-  "ref": "参考 App",
-  "context": "* 媒体来源切换菜单（参考 App 的 `musicSourceMenu` / `sceneSourceMenu` / `navSourceMenu`）。"
+  "ref": "对标 App",
+  "context": "* 媒体来源切换菜单（对标 App 的 `musicSourceMenu` / `sceneSourceMenu` / `navSourceMenu`）。"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/SourceMenuLayer.kt",
   "line": 25,
-  "ref": "对齐参考 App",
-  "context": "* 规格对齐参考 App："
+  "ref": "对齐对标 App",
+  "context": "* 规格对齐对标 App："
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/SourceMenuLayer.kt",
@@ -2624,14 +2624,14 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/SourceMenuLayer.kt",
   "line": 62,
-  "ref": "参考 App",
-  "context": "// 遮罩：参考 App 的 musicSourceScrim 是透明 View，靠 click 事件收起菜单。"
+  "ref": "对标 App",
+  "context": "// 遮罩：对标 App 的 musicSourceScrim 是透明 View，靠 click 事件收起菜单。"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/SourceMenuLayer.kt",
   "line": 112,
-  "ref": "参考 App",
-  "context": "/** 来源品牌色圆点（参考 App 用的是各家的品牌图标，这里用同色圆点表达同一语义）。 */"
+  "ref": "对标 App",
+  "context": "/** 来源品牌色圆点（对标 App 用的是各家的品牌图标，这里用同色圆点表达同一语义）。 */"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/SourceMenuLayer.kt",
@@ -2708,8 +2708,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/widget/LyricMarqueeTextView.kt",
   "line": 16,
-  "ref": "参考 `com.claunchercard.manager.MarqueeHelper`",
-  "context": "* 跑马灯参数（参考 `com.claunchercard.manager.MarqueeHelper`）。"
+  "ref": "参考 `MarqueeHelper`",
+  "context": "* 跑马灯参数（参考 `MarqueeHelper`）。"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/widget/LyricMarqueeTextView.kt",
@@ -2756,8 +2756,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/widget/LyricMarqueeTextView.kt",
   "line": 56,
-  "ref": "参考 `com.claunchercard.manager.MarqueeHelper`",
-  "context": "* 参考 `com.claunchercard.manager.MarqueeHelper` 的行为："
+  "ref": "参考 `MarqueeHelper`",
+  "context": "* 参考 `MarqueeHelper` 的行为："
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/widget/LyricMarqueeTextView.kt",
@@ -2936,14 +2936,14 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/widget/ToggleSwitch.kt",
   "line": 11,
-  "ref": "参考 App",
-  "context": "* 参考 App 的开关外观：76×44 圆角轨 + 36 圆点（DesignSettings 中的 switch helper 尺寸）。"
+  "ref": "对标 App",
+  "context": "* 对标 App 的开关外观：76×44 圆角轨 + 36 圆点（DesignSettings 中的 switch helper 尺寸）。"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/widget/WallpaperRenderer.kt",
   "line": 28,
-  "ref": "参考 App",
-  "context": "* 复刻侧**不复制参考 App 的图片资源**：参考的 9 张里有 4 张是照片素材，"
+  "ref": "对标 App",
+  "context": "* 复刻侧**不复制对标 App 的图片资源**：参考的 9 张里有 4 张是照片素材，"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/embed/ActivityEmbed.kt",
@@ -3002,8 +3002,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/floats/FloatWindowLayer.kt",
   "line": 24,
-  "ref": "对应参考 App",
-  "context": "* 浮窗层，对应参考 App 的 `page_floats` / `item_float_window` / `FloatWindows.java`。"
+  "ref": "对应对标 App",
+  "context": "* 浮窗层，对应对标 App 的 `page_floats` / `item_float_window` / `FloatWindows.java`。"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/floats/FloatWindowLayer.kt",
@@ -3362,8 +3362,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/shell/NavSlotBarView.kt",
   "line": 28,
-  "ref": "参考 App",
-  "context": "* 导航栏槽位条，复刻参考 App `item_nav_bar_*` 九种槽位"
+  "ref": "对标 App",
+  "context": "* 导航栏槽位条，复刻对标 App `item_nav_bar_*` 九种槽位"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/shell/NavSlotBarView.kt",
@@ -3812,8 +3812,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/pip/PipRatioStore.kt",
   "line": 138,
-  "ref": "参考 App",
-  "context": "* 键名与参考一致（`desk_sides_swapped`），参考 App 写过的值也能读到。"
+  "ref": "对标 App",
+  "context": "* 键名与参考一致（`desk_sides_swapped`），对标 App 写过的值也能读到。"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/pip/PipRatioStore.kt",
@@ -4088,8 +4088,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/dialogs/ExtraDialogs.kt",
   "line": 226,
-  "ref": "参考 App",
-  "context": "* 走参考 App 的路径：下载到 cache → `SystemOps.installApk`（PackageInstaller 静默安装），"
+  "ref": "对标 App",
+  "context": "* 走对标 App 的路径：下载到 cache → `SystemOps.installApk`（PackageInstaller 静默安装），"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/dialogs/ExtraDialogs.kt",
@@ -4718,8 +4718,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/pages/ScenePage.kt",
   "line": 167,
-  "ref": "参考 App",
-  "context": "* 但导航栏「槽位条」形态下，参考 App 是把歌词放在**导航栏歌词槽**里的"
+  "ref": "对标 App",
+  "context": "* 但导航栏「槽位条」形态下，对标 App 是把歌词放在**导航栏歌词槽**里的"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/pages/ScenePage.kt",
@@ -5042,8 +5042,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/pages/ScenePage.kt",
   "line": 2053,
-  "ref": "参考 App",
-  "context": "// 复刻的是另一个参考 App（`com.dudu.autoui`）的车门示意："
+  "ref": "对标 App",
+  "context": "// 复刻的是另一个对标 App 的车门示意："
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/ui/pages/ScenePage.kt",
@@ -5270,26 +5270,26 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/AmapAreaInfo.kt",
   "line": 37,
-  "ref": "参考 App",
-  "context": "* ## 与参考 App 的关系"
+  "ref": "对标 App",
+  "context": "* ## 与对标 App 的关系"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/AmapAreaInfo.kt",
   "line": 39,
-  "ref": "参考 App",
-  "context": "* 参考 App（`WeatherDesk`）**没有**这一层 —— 它只读系统定位。"
+  "ref": "对标 App",
+  "context": "* 对标 App（`WeatherDesk`）**没有**这一层 —— 它只读系统定位。"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/AmapAreaInfo.kt",
   "line": 55,
-  "ref": "参考 App",
-  "context": "/** 客户端发给高德的广播 action（参考 App 请求引导数据用的就是这个）。 */"
+  "ref": "对标 App",
+  "context": "/** 客户端发给高德的广播 action（对标 App 请求引导数据用的就是这个）。 */"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/AmapCitySource.kt",
   "line": 35,
-  "ref": "参考 App",
-  "context": "* 参考 App（`WeatherDesk`）**没有**这一层 —— 它只读系统定位。"
+  "ref": "对标 App",
+  "context": "* 对标 App（`WeatherDesk`）**没有**这一层 —— 它只读系统定位。"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/BottomCardOrder.kt",
@@ -5312,14 +5312,14 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/CarCapabilityProbe.kt",
   "line": 14,
-  "ref": "参考 App",
-  "context": "* 参考 App 只走 `LocationManager.getLastKnownLocation()` 这一条路，所以参考在真机上也是拿不到位置的"
+  "ref": "对标 App",
+  "context": "* 对标 App 只走 `LocationManager.getLastKnownLocation()` 这一条路，所以参考在真机上也是拿不到位置的"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/CarCapabilityProbe.kt",
   "line": 17,
-  "ref": "参考 App",
-  "context": "* 车机的定位与天气能力都在 **ECARX AdaptAPI** 里（参考 App 自己就用它读车辆信号："
+  "ref": "对标 App",
+  "context": "* 车机的定位与天气能力都在 **ECARX AdaptAPI** 里（对标 App 自己就用它读车辆信号："
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/CarCapabilityProbe.kt",
@@ -5336,8 +5336,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/CarModels.kt",
   "line": 8,
-  "ref": "参考 App",
-  "context": "* - 参考 App 的胎压卡中间是一张**俯视车模**："
+  "ref": "对标 App",
+  "context": "* - 对标 App 的胎压卡中间是一张**俯视车模**："
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/CarModels.kt",
@@ -5408,8 +5408,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/CarTopGeometry.kt",
   "line": 26,
-  "ref": "参考 App",
-  "context": "* 参考 App 的 `TireTopView.onDraw()`（`TireTopView.java:27-88`）设计空间是"
+  "ref": "对标 App",
+  "context": "* 对标 App 的 `TireTopView.onDraw()`（`TireTopView.java:27-88`）设计空间是"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/CarTopGeometry.kt",
@@ -5432,8 +5432,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/CarWeatherApi.kt",
   "line": 13,
-  "ref": "参考 App",
-  "context": "* 参考 App 的天气是**车机 SDK 优先**的（`WeatherDesk.queryCarService:305-361`）："
+  "ref": "对标 App",
+  "context": "* 对标 App 的天气是**车机 SDK 优先**的（`WeatherDesk.queryCarService:305-361`）："
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/CarWeatherApi.kt",
@@ -5528,8 +5528,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/DayNight.kt",
   "line": 6,
-  "ref": "参考 App",
-  "context": "* 参考 App 的键："
+  "ref": "对标 App",
+  "context": "* 对标 App 的键："
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/DayNight.kt",
@@ -5624,26 +5624,26 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/DoorSwing.kt",
   "line": 8,
-  "ref": "参考 App",
-  "context": "* 参考 App（`com.dudu.autoui`）的车门示意是一张**俯视车模**，4 扇门各自是一块可以"
+  "ref": "对标 App",
+  "context": "* 对标 App 的车门示意是一张**俯视车模**，4 扇门各自是一块可以"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/HiddenApiCompat.kt",
   "line": 28,
-  "ref": "参考 App",
-  "context": "* | 29（**参考 App 的口径**） | 「API 29 及以下支持」的那一档，车机 SDK 多半能拿到 |"
+  "ref": "对标 App",
+  "context": "* | 29（**对标 App 的口径**） | 「API 29 及以下支持」的那一档，车机 SDK 多半能拿到 |"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/JsonLite.kt",
   "line": 8,
-  "ref": "参考 App",
-  "context": "* 参考 App 的槽位与计划任务都用 `JSONArray`/`JSONObject` 持久化"
+  "ref": "对标 App",
+  "context": "* 对标 App 的槽位与计划任务都用 `JSONArray`/`JSONObject` 持久化"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/NavSlots.kt",
   "line": 7,
-  "ref": "对齐参考 App",
-  "context": "* 导航栏槽位模型，对齐参考 App 的 `NavBarSlot` / `NavBarSettings`"
+  "ref": "对齐对标 App",
+  "context": "* 导航栏槽位模型，对齐对标 App 的 `NavBarSlot` / `NavBarSettings`"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/NavSlots.kt",
@@ -5792,8 +5792,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/NavSlots.kt",
   "line": 226,
-  "ref": "参考 App",
-  "context": "* 参考 App 的歌词只出现在导航栏歌词槽（`item_nav_bar_lyric_slot.xml` /"
+  "ref": "对标 App",
+  "context": "* 对标 App 的歌词只出现在导航栏歌词槽（`item_nav_bar_lyric_slot.xml` /"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/NavSlots.kt",
@@ -5852,8 +5852,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/OemDockPolicy.kt",
   "line": 9,
-  "ref": "参考 App",
-  "context": "* 参考 App 用 `settings put global policy_control` 控制原车 Dock 与状态栏："
+  "ref": "对标 App",
+  "context": "* 对标 App 用 `settings put global policy_control` 控制原车 Dock 与状态栏："
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/OemDockPolicy.kt",
@@ -6026,26 +6026,26 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/PlatformProfile.kt",
   "line": 9,
-  "ref": "参考 App",
-  "context": "* 平台/机型识别：参考 App 用「密度 + 屏幕长边」区分 E03 与 820A 两套车机平台"
+  "ref": "对标 App",
+  "context": "* 平台/机型识别：对标 App 用「密度 + 屏幕长边」区分 E03 与 820A 两套车机平台"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/PlatformProfile.kt",
   "line": 35,
-  "ref": "参考 App",
-  "context": "/** 参考 App 在 1280 画布上会把设置面板缩到 1180×880 / 左栏 300。 */"
+  "ref": "对标 App",
+  "context": "/** 对标 App 在 1280 画布上会把设置面板缩到 1180×880 / 左栏 300。 */"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/PlatformProfile.kt",
   "line": 52,
-  "ref": "参考 App",
-  "context": "* 与参考 App 相同的平台判定规则；[override] 允许设置页强制指定平台（0 自动 / 1 E03 / 2 820A），"
+  "ref": "对标 App",
+  "context": "* 与对标 App 相同的平台判定规则；[override] 允许设置页强制指定平台（0 自动 / 1 E03 / 2 820A），"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/Prefs.kt",
   "line": 10,
-  "ref": "参考 App",
-  "context": "* 参考 App 把设置存在 MMKV 里，键名就是功能契约（`DayNightSettings` /"
+  "ref": "对标 App",
+  "context": "* 对标 App 把设置存在 MMKV 里，键名就是功能契约（`DayNightSettings` /"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/Prefs.kt",
@@ -6122,8 +6122,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/Prefs.kt",
   "line": 201,
-  "ref": "参考 App",
-  "context": "* 选中的媒体来源 id（参考 App 的 `design_music_source_v1`，存的是来源文案）。"
+  "ref": "对标 App",
+  "context": "* 选中的媒体来源 id（对标 App 的 `design_music_source_v1`，存的是来源文案）。"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/Prefs.kt",
@@ -6392,8 +6392,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/Prefs.kt",
   "line": 491,
-  "ref": "参考 `DockBarSettings.isHideJunjunStatus`",
-  "context": "* 「隐藏君君状态栏」（参考 `DockBarSettings.isHideJunjunStatus`）。"
+  "ref": "参考 `DockBarSettings` 里那处隐藏状态栏判断",
+  "context": "* 「隐藏导航页状态栏」（参考 `DockBarSettings` 里那处隐藏状态栏判断）。"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/Prefs.kt",
@@ -6416,14 +6416,14 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/Prefs.kt",
   "line": 584,
-  "ref": "参考 App",
-  "context": "* 参考 App 没有这一项（它只读系统定位），复刻侧补上："
+  "ref": "对标 App",
+  "context": "* 对标 App 没有这一项（它只读系统定位），复刻侧补上："
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/Prefs.kt",
   "line": 624,
-  "ref": "沿用参考 App",
-  "context": "/** 通用布尔开关（键名沿用参考 App 的键，便于对照）。 */"
+  "ref": "沿用对标 App",
+  "context": "/** 通用布尔开关（键名沿用对标 App 的键，便于对照）。 */"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/Prefs.kt",
@@ -6506,20 +6506,20 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/ProtoLite.kt",
   "line": 8,
-  "ref": "参考 App",
-  "context": "* 参考 App（`com.dudu.autoui`）读 MC/Geely 事件属性时，属性值是一段"
+  "ref": "对标 App",
+  "context": "* 对标 App 读 MC/Geely 事件属性时，属性值是一段"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/ProtoLite.kt",
   "line": 32,
-  "ref": "参考 App",
-  "context": "* 参考 App 把这个值按「**等于 1 就是开**」解释"
+  "ref": "对标 App",
+  "context": "* 对标 App 把这个值按「**等于 1 就是开**」解释"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/ScheduledTasks.kt",
   "line": 7,
-  "ref": "对齐参考 App",
-  "context": "* 计划任务模型，对齐参考 App 的 `TaskScheduler.ScheduledTask`"
+  "ref": "对齐对标 App",
+  "context": "* 计划任务模型，对齐对标 App 的 `TaskScheduler.ScheduledTask`"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/ScheduledTasks.kt",
@@ -6590,32 +6590,32 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/Skin.kt",
   "line": 11,
-  "ref": "参考 App",
-  "context": "* - **单一强调色**：青绿（夜 `#33C6B4` / 日 `#0F9C8E`），刻意与参考 App 的蓝区分；"
+  "ref": "对标 App",
+  "context": "* - **单一强调色**：青绿（夜 `#33C6B4` / 日 `#0F9C8E`），刻意与对标 App 的蓝区分；"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/Skin.kt",
   "line": 14,
-  "ref": "参考 App",
-  "context": "* 所有图形由本项目自绘，不使用参考 App 的任何图片资源。"
+  "ref": "对标 App",
+  "context": "* 所有图形由本项目自绘，不使用对标 App 的任何图片资源。"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/Skin.kt",
   "line": 25,
-  "ref": "参考 App",
-  "context": "* 参考 App 的桌面主体（场景页/Dock/状态栏/槽位条）在自己 onDraw 里写死颜色，"
+  "ref": "对标 App",
+  "context": "* 对标 App 的桌面主体（场景页/Dock/状态栏/槽位条）在自己 onDraw 里写死颜色，"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/SystemOps.kt",
   "line": 20,
-  "ref": "参考 App",
-  "context": "* 系统能力层：把参考 App（系统 uid + 平台签名）用到的系统能力集中到一处，"
+  "ref": "对标 App",
+  "context": "* 系统能力层：把对标 App（系统 uid + 平台签名）用到的系统能力集中到一处，"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/SystemOps.kt",
   "line": 141,
-  "ref": "参考 AppUpdateManager",
-  "context": "/** 下载并安装（参考 AppUpdateManager 的更新链）。 */"
+  "ref": "对标 AppUpdateManager",
+  "context": "/** 下载并安装（对标 AppUpdateManager 的更新链）。 */"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/SystemOps.kt",
@@ -6680,14 +6680,14 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/TaskReceiver.kt",
   "line": 12,
-  "ref": "参考 App",
-  "context": "* 计划任务到点执行。动作集合与参考 App 的 `TaskScheduler` 对齐："
+  "ref": "对标 App",
+  "context": "* 计划任务到点执行。动作集合与对标 App 的 `TaskScheduler` 对齐："
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/TaskScheduler.kt",
   "line": 17,
-  "ref": "对齐参考 App",
-  "context": "* 计划任务的真实调度，对齐参考 App 的 `TaskScheduler`"
+  "ref": "对齐对标 App",
+  "context": "* 计划任务的真实调度，对齐对标 App 的 `TaskScheduler`"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/TaskScheduler.kt",
@@ -6758,8 +6758,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/VehicleStats.kt",
   "line": 110,
-  "ref": "参考 App",
-  "context": "* 参考 App 自己也没区分：`VehicleSignals.aggregatePosClosed:673-687` 只是把"
+  "ref": "对标 App",
+  "context": "* 对标 App 自己也没区分：`VehicleSignals.aggregatePosClosed:673-687` 只是把"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/VehicleStats.kt",
@@ -6770,8 +6770,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/Wallpapers.kt",
   "line": 18,
-  "ref": "参考 App",
-  "context": "* 参考 App 的 `WallpaperView.NAMES` 是 9 张："
+  "ref": "对标 App",
+  "context": "* 对标 App 的 `WallpaperView.NAMES` 是 9 张："
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/Wallpapers.kt",
@@ -6938,8 +6938,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/WeatherDesk.kt",
   "line": 306,
-  "ref": "对齐参考 App",
-  "context": "* 天气子系统（对齐参考 App 的 `WeatherDesk`）。"
+  "ref": "对齐对标 App",
+  "context": "* 天气子系统（对齐对标 App 的 `WeatherDesk`）。"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/WeatherDesk.kt",
@@ -7166,8 +7166,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/WeatherDesk.kt",
   "line": 1161,
-  "ref": "参考 App",
-  "context": "// 参考 App 的 `p087y/C1577s.java:64-65` 也是**显式点名** \"network\" / \"gps\""
+  "ref": "对标 App",
+  "context": "// 对标 App 的 `p087y/C1577s.java:64-65` 也是**显式点名** \"network\" / \"gps\""
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/WeatherDesk.kt",
@@ -7196,14 +7196,14 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/WeatherDesk.kt",
   "line": 1363,
-  "ref": "参考 App",
-  "context": "* 参考 App 的 `p087y/C1577s.java:64-65` 同样是**显式点名** \"network\"/\"gps\"，"
+  "ref": "对标 App",
+  "context": "* 对标 App 的 `p087y/C1577s.java:64-65` 同样是**显式点名** \"network\"/\"gps\"，"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/nav/AmapDesktopGuide.kt",
   "line": 21,
   "ref": "对齐参考 `AmapDesktopGuide.java`",
-  "context": "* 对齐参考 `AmapDesktopGuide.java`（`analysis/inner_jadx/sources/com/claunchercard/manager/`）："
+  "context": "* 对齐参考 `AmapDesktopGuide.java`（对标 App 的反编译产物）："
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/nav/AmapDesktopGuide.kt",
@@ -7532,8 +7532,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/media/CoverArtSearch.kt",
   "line": 12,
-  "ref": "参考 `com.claunchercard.manager.CoverArtSearch`",
-  "context": "* 在线封面搜索（参考 `com.claunchercard.manager.CoverArtSearch`）。"
+  "ref": "参考 `CoverArtSearch`",
+  "context": "* 在线封面搜索（参考 `CoverArtSearch`）。"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/media/CoverArtSearch.kt",
@@ -7946,20 +7946,20 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/media/MediaSources.kt",
   "line": 7,
-  "ref": "参考 App",
-  "context": "* 9 个固定媒体来源（参考 App：`page_music.xml:53-61` 的 9 行 + `SceneDesktop.packageForSource:1763-1789`）。"
+  "ref": "对标 App",
+  "context": "* 9 个固定媒体来源（对标 App：`page_music.xml:53-61` 的 9 行 + `SceneDesktop.packageForSource:1763-1789`）。"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/media/MediaSources.kt",
   "line": 9,
-  "ref": "对齐参考 App",
-  "context": "* 文案与品牌色逐字对齐参考 App 的 `android:text` / `android:tag`："
+  "ref": "对齐对标 App",
+  "context": "* 文案与品牌色逐字对齐对标 App 的 `android:text` / `android:tag`："
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/media/MediaSources.kt",
   "line": 19,
-  "ref": "参考 App",
-  "context": "/** 菜单顺序 = 参考 App XML 里的行顺序。 */"
+  "ref": "对标 App",
+  "context": "/** 菜单顺序 = 对标 App XML 里的行顺序。 */"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/media/MediaSources.kt",
@@ -7982,8 +7982,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/media/MediaSources.kt",
   "line": 81,
-  "ref": "参考 App",
-  "context": "/** 目标不可用：给出提示文案（参考 App 的三种 Toast）。 */"
+  "ref": "对标 App",
+  "context": "/** 目标不可用：给出提示文案（对标 App 的三种 Toast）。 */"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/media/MediaSources.kt",
@@ -9152,8 +9152,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/media/MusicSessionTracker.kt",
   "line": 1727,
-  "ref": "参考 App",
-  "context": "/** 参考 App 的 9 个固定来源及菜单文案（顺序即菜单顺序）。 */"
+  "ref": "对标 App",
+  "context": "/** 对标 App 的 9 个固定来源及菜单文案（顺序即菜单顺序）。 */"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/media/MusicSessionTracker.kt",
@@ -9188,8 +9188,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/media/NotificationAccess.kt",
   "line": 192,
-  "ref": "参考 App",
-  "context": "* 参考 App 也声明了它。AOSP `MediaSessionService.enforceMediaPermissions()` 的判定是："
+  "ref": "对标 App",
+  "context": "* 对标 App 也声明了它。AOSP `MediaSessionService.enforceMediaPermissions()` 的判定是："
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/core/media/NotificationAccess.kt",
@@ -9656,8 +9656,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/vehicle/AdaptapiTpms.kt",
   "line": 15,
-  "ref": "参考 App",
-  "context": "* 参考 App 的胎压**不是**从属性通道读的，而是走独立的 `TPMS` 接口"
+  "ref": "对标 App",
+  "context": "* 对标 App 的胎压**不是**从属性通道读的，而是走独立的 `TPMS` 接口"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/vehicle/AdaptapiTpms.kt",
@@ -9704,8 +9704,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/vehicle/BodyState.kt",
   "line": 45,
-  "ref": "参考 App",
-  "context": "* 另一个参考 App（`com.dudu.autoui` 的 `C3274c`）的做法是**每一扇门独立维护**："
+  "ref": "对标 App",
+  "context": "* 另一个对标 App（ `C3274c`）的做法是**每一扇门独立维护**："
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/vehicle/BodyState.kt",
@@ -9740,8 +9740,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/vehicle/CarBodySignals.kt",
   "line": 13,
-  "ref": "参考 App",
-  "context": "* 第三十六轮核对《车辆运行数据 API 对照表》时发现：参考 App 的「`car_service` 属性通道」"
+  "ref": "对标 App",
+  "context": "* 第三十六轮核对《车辆运行数据 API 对照表》时发现：对标 App 的「`car_service` 属性通道」"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/vehicle/CarBodySignals.kt",
@@ -9752,8 +9752,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/vehicle/CarBodySignals.kt",
   "line": 151,
-  "ref": "参考 App",
-  "context": "* （口径与另一个参考 App 的 `C3274c` 一致：五个属性各自维护，谁变了就整包发布。）"
+  "ref": "对标 App",
+  "context": "* （口径与另一个对标 App 的 `C3274c` 一致：五个属性各自维护，谁变了就整包发布。）"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/vehicle/CarBodySignals.kt",
@@ -9764,8 +9764,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/vehicle/CarProperties.kt",
   "line": 16,
-  "ref": "参考 App",
-  "context": "* 参考 App 的车身属性读取走的是（`VehicleSignals.bindBodyProperties:347-368`）："
+  "ref": "对标 App",
+  "context": "* 对标 App 的车身属性读取走的是（`VehicleSignals.bindBodyProperties:347-368`）："
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/vehicle/CarProperties.kt",
@@ -9806,8 +9806,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/vehicle/DriveMode.kt",
   "line": 6,
-  "ref": "参考 App",
-  "context": "* 参考 App 从车机的「驾驶模式选择」功能号 `570491136`（zone = 2）读当前模式，"
+  "ref": "对标 App",
+  "context": "* 对标 App 从车机的「驾驶模式选择」功能号 `570491136`（zone = 2）读当前模式，"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/vehicle/DriveMode.kt",
@@ -9866,8 +9866,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/vehicle/EcarxSignals.kt",
   "line": 16,
-  "ref": "参考 App",
-  "context": "* 参考 App 里车门/续航/胎压的降级链是："
+  "ref": "对标 App",
+  "context": "* 对标 App 里车门/续航/胎压的降级链是："
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/vehicle/EcarxSignals.kt",
@@ -9884,8 +9884,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/vehicle/EcarxSignals.kt",
   "line": 69,
-  "ref": "参考 App",
-  "context": "/** 参考 App 的常量（VehicleSignals.java 内联的 id）。 */"
+  "ref": "对标 App",
+  "context": "/** 对标 App 的常量（VehicleSignals.java 内联的 id）。 */"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/vehicle/EcarxSignals.kt",
@@ -10112,20 +10112,20 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/vehicle/McDoorSignals.kt",
   "line": 8,
-  "ref": "参考 App",
-  "context": "* 车门状态的**第四档来源**：MC / Geely 事件属性（参考 App `com.dudu.autoui` 用的那一套）。"
+  "ref": "对标 App",
+  "context": "* 车门状态的**第四档来源**：MC / Geely 事件属性（对标 App 用的那一套）。"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/vehicle/McDoorSignals.kt",
   "line": 12,
-  "ref": "参考 App",
-  "context": "* 参考 App 的车门状态有**两套并行模型**："
+  "ref": "对标 App",
+  "context": "* 对标 App 的车门状态有**两套并行模型**："
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/vehicle/McDoorSignals.kt",
   "line": 34,
-  "ref": "参考 App",
-  "context": "* 参考 App 的车门模型有一个我们缺的特性：**每一扇门独立可读、独立更新**。"
+  "ref": "对标 App",
+  "context": "* 对标 App 的车门模型有一个我们缺的特性：**每一扇门独立可读、独立更新**。"
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/vehicle/McDoorSignals.kt",
@@ -10304,8 +10304,8 @@
  {
   "file": "app/src/main/java/com/cardesk/launcher/vehicle/VehicleIds.kt",
   "line": 8,
-  "ref": "参考 App",
-  "context": "* 参考 App 的「`car_service` 属性通道」其实就是 AOSP 的 **`CarPropertyManager`**："
+  "ref": "对标 App",
+  "context": "* 对标 App 的「`car_service` 属性通道」其实就是 AOSP 的 **`CarPropertyManager`**："
  },
  {
   "file": "app/src/main/java/com/cardesk/launcher/vehicle/VehicleIds.kt",

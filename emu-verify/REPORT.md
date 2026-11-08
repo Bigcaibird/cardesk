@@ -163,7 +163,7 @@ cardesk/tools/push_system_app.sh            # 推 APK + 两条白名单 + reboot
 ## 为让这两条路径可用而改的代码
 
 1. `AndroidManifest.xml` 增加 `android:usesCleartextTraffic="true"`：
-   默认 targetSdk 34 禁止明文 HTTP，导致「在线更新」下载失败（参考 App 的 LAN/OTA 也是 HTTP）。
+   默认 targetSdk 34 禁止明文 HTTP，导致「在线更新」下载失败（对标 App 的 LAN/OTA 也是 HTTP）。
 2. `FloatWindowLayer.tryEmbedActivity` 改为：
    - 构造器三级回退 `(Context, AttributeSet, int)` → `(Context, AttributeSet)` → `(Context)`；
    - 回调类型从 `setCallback` 的方法签名里取（Q 上叫 `ActivityView$StateCallback` 且是**抽象类**，无法用 `Proxy`）；
@@ -174,5 +174,5 @@ cardesk/tools/push_system_app.sh            # 推 APK + 两条白名单 + reboot
 
 - **车控真通道**：`com.ecarx.xui.adaptapi` / `ecarx.car.ECarXCar` 只在领克车机上，模拟器上按设计回退到「模拟车辆」。
 - **360 真实摄像头画面**：需要 `EcarxAVMManager` 与摄像头 HAL。
-- **HUD 蓝牙帧协议**：参考 App 未公开，需实机抓包。
+- **HUD 蓝牙帧协议**：对标 App 未公开，需实机抓包。
 - **媒体会话**：可以验证（通知使用权+MediaSession 已通），但要装带 MediaSession 的音乐 App 才能看到真实封面/歌词。

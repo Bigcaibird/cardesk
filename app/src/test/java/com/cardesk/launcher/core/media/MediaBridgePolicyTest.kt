@@ -241,7 +241,7 @@ class MediaBridgePolicyTest {
 
     @Test
     fun shouldClaim_yesWhenRegisteredAndTargetIsThirdPartyPlayer() {
-        // 参考 App（君君桌面）「启用即 claim」：注册成功 + 目标是三方在线播放器 → 主动接管播放入口。
+        // 对标 App「启用即 claim」：注册成功 + 目标是三方在线播放器 → 主动接管播放入口。
         assertTrue(
             MediaBridgePolicy.shouldClaim(
                 registered = true,
@@ -296,9 +296,9 @@ class MediaBridgePolicyTest {
 
     @Test
     fun shouldClaim_noWhenNativeSourceIsPlaying() {
-        // 参考 App（君君桌面） SessionBridge.pushToMediaCenter 开头就是
+        // 对标 App SessionBridge.pushToMediaCenter 开头就是
         // `else if (isNativeSystemMediaSource(pkg)) { ...skip... }` ——
-        // 用户正在听电台时参考 App（君君桌面）自己都不 claim，我们照做。
+        // 用户正在听电台时对标 App 自己都不 claim，我们照做。
         assertFalse(
             MediaBridgePolicy.shouldClaim(
                 registered = true,
@@ -333,7 +333,7 @@ class MediaBridgePolicyTest {
 
     @Test
     fun hasNativeSourcePlaying_detectsNonThirdPartyPlayingSources() {
-        // 参考 App（君君桌面）口径：车机自带音源（爱趣听一类）在放的时候，参考 App（君君桌面）自己都不 claim。
+        // 对标 App 口径：车机自带音源（爱趣听一类）在放的时候，对标 App 自己都不 claim。
         assertTrue(
             MediaBridgePolicy.hasNativeSourcePlaying(
                 listOf("com.tencent.wecarflow"),

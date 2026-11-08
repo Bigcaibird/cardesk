@@ -51,7 +51,7 @@ object BridgeArtwork {
     /**
      * 这个字符串像不像一个「能直接喂给仪表的图片 Uri」。
      *
-     * 只认四种 scheme（**与原车桌面用 Glide 加载时的实际用法一致**：
+     * 只认四种 scheme（**与对标 App 用 Glide 加载时的实际用法一致**：
      * `content://`（MediaStore albumart）、`file://`（本地文件）、
      * `http(s)://`（网络图）都能加载）：
      *

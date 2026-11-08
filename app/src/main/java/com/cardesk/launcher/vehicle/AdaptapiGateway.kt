@@ -591,7 +591,7 @@ class AdaptapiGateway(private val context: Context) : VehicleGateway {
      * [writeFunction] 只有两参一条路（`setFunctionValue(func, value)`），
      * 找不到两参重载就**直接失败**。
      *
-     * 参考 App（君君桌面）（`com.claunchercard.manager.DriveModeController.writeDriveModeAdaptApi`）
+     * 对标 App（`DriveModeController.writeDriveModeAdaptApi`）
      * 的降级顺序是：
      *
      * ```
@@ -622,7 +622,7 @@ class AdaptapiGateway(private val context: Context) : VehicleGateway {
         }
         val m2 = findMethod(f, "setFunctionValue", INT, INT)
         val m3 = findMethod(f, "setFunctionValue", INT, INT, INT)
-        // 1) 两参（文档口径，也是参考 App（君君桌面）的第一选择）
+        // 1) 两参（文档口径，也是对标 App 的第一选择）
         if (m2 != null && invokeBool(m2, f, func, value) == true) {
             Logx.i(
                 LogTags.VEHICLE,
@@ -635,7 +635,7 @@ class AdaptapiGateway(private val context: Context) : VehicleGateway {
             )
             return true
         }
-        // 2) 三参 zone 降级（参考 App（君君桌面） trySetDriveModeWithZone：zone 2 → zone 1）
+        // 2) 三参 zone 降级（对标 App trySetDriveModeWithZone：zone 2 → zone 1）
         if (m3 != null) {
             for (zone in intArrayOf(2, 1)) {
                 if (invokeBool(m3, f, func, zone, value) == true) {

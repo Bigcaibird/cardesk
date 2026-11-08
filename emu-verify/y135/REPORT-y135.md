@@ -20,8 +20,8 @@ $ git log --oneline -S "start_switch_enabled" -- app/src/main/java
 **全仓只有 `SettingsOverlay` 在写，没有任何执行端** → 典型的「只存不执行」。
 （别和第132轮的 `iss_keep_enabled`（发动机启停，`537002240`）搞混。）
 
-写入路径也不对：参考 App（君君桌面）的
-`com.claunchercard.manager.DriveModeController.writeDriveModeAdaptApi` 是
+写入路径也不对：对标 App 的
+`DriveModeController.writeDriveModeAdaptApi` 是
 **两参优先 → zone 2 → zone 1**，我们的 `writeFunction` 只有两参一条路。
 
 ### 模拟器证据（`emulator-5556`，Android 10 / SDK 29 / 1920×1080）
@@ -83,37 +83,34 @@ bridge.controlTarget: com.tencent.qqmusiccar
 反向的日志更直白：`setBridgeEnabled(false)` → 「bridge disabled → MediaCenter
 unregistered, **OEM source can take over**」—— **不 claim，音源就归原车**。
 
-> **出处要说准（第135轮末修正）**：上面这条 claim 口径的出处是**参考 App（君君桌面）**
-> —— 包名 `com.ecarx.qq.tool`，`app_name` 是「君君桌面」，**第三方**（平台签名预装）。
-> 它的桥 SDK 是 `SessionBridge`，设置页开关在内部包
-> `com.claunchercard.manager.DesignSettings`（`:515/1130`），
-> 开机流程在 `com.claunchercard.manager.BootMediaCompetitorKiller`。
->
-> **不存在「官方桌面」**：`com.claunchercard.manager.*` 是**同一个 APK 内部**的 Java 包名
-> —— `inner_dec` / `outer_dec` 两个反编译产物的 manifest `package` 都是 `com.ecarx.qq.tool`，
-> `app_name` 都是「君君桌面」，`outer_dec` 只是 `com.yqsh.protector.shell` 加固过的同款构建。
+> **证据性质要说准**：上面这条 claim 口径的出处是**对标 App**
+> —— 一个**第三方**桌面（平台签名预装，同款车机上跑通过）。
+> 它的桥 SDK 是 `SessionBridge`，设置页开关在 `DesignSettings`（`:515/1130`），
+> 开机流程在 `BootMediaCompetitorKiller`；
+> 这几个类都在**同一个 APK 内部**，只是 Java 包前缀与它自己的 `package` 不同
+> （两个反编译产物的 manifest `package` 完全一样，其中一个只是加固壳版本）。
 >
 > ⇒ 这条证据的性质是「**另一个第三方桌面在同款车机上就是这么干的**」，
 > **不是厂商规定的口径**；跟它对齐是因为它跑通过，**能不能成最终看真车复验**。
 >
-> 另记一条**君君桌面的做法**（`BootMediaCompetitorKiller`）：它开机 1s/5s/15s
+> 另记一条**对标 App 的做法**（`BootMediaCompetitorKiller`）：它开机 1s/5s/15s
 > 会 `am force-stop` 掉 `com.ecarx.multimedia` 与 `com.tencent.wecarflow`（爱趣听），
 > 除非用户锁定 / 上次在放 / 显式保护了它，然后才 claim。
 > **我们不做强杀**（越过红线），只 claim 自己的播放入口。
 
 ### 主体分清楚，根因才闭合
 
-| 主体 | 包名 / 版本 | 身份 | 与 MediaCenter 的关系 |
-|---|---|---|---|
-| **参考 App（君君桌面）** | `com.ecarx.qq.tool`（`desktop.apk` / `1.0.20273116-session-desktop`；加固版 `1.0.01257-lynkco-tool-pro`） | **第三方**桌面（平台签名预装），**不是车机官方桌面** | 自带 `SessionBridge` 桥 SDK（`com.claunchercard.manager.*` 是它**内部**的 Java 包名） |
-| **UNI 工程** | `xyz.i4o.uni.launcher` | 第三方参考工程 | 我们的 `OfficialMediaBridge` 从它移植（第87轮） |
+| 主体 | 身份 | 与 MediaCenter 的关系 |
+|---|---|---|
+| **对标 App** | **第三方**桌面（平台签名预装，同款车机上跑通过） | 自带 `SessionBridge` 桥 SDK |
+| **UNI 工程** | 第三方参考工程（`xyz.i4o.uni.launcher`） | 我们的 `OfficialMediaBridge` 从它移植（第87轮） |
 
-**君君桌面那个「桥接开关」默认是关的**（`bridge_control/enabled` 默认 false），
+**对标 App 那个「桥接开关」默认是关的**（`bridge_control/enabled` 默认 false），
 而它的开关原文与我们一字不差（`DesignSettings.java:515`）：
 「桥接开关」+「连接车机仪表与方控通道」→ `SessionBridge.setBridgeEnabled`。
 
 ⇒ **「方控唤起爱趣听」不是 bug，是「都没 claim」**：
-君君桌面默认不 claim（用户没开它那个开关）→ MediaCenter 当前音源一直是原车音源；
+对标 App 默认不 claim（用户没开它那个开关）→ MediaCenter 当前音源一直是原车音源；
 我们注册了但也从不 claim → 原车同样不认我们 → 方控落回爱趣听。
 
 ### 模拟器能验到什么、验不到什么

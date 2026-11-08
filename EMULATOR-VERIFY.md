@@ -1,7 +1,7 @@
 # CarDesk 模拟器验证记录
 
 环境：macOS arm64 + Android SDK（本仓库 `toolchain/sdk`），AVD `cardesk` = android-34 / google_apis / arm64-v8a，
-1920×1080 @160dpi（正好命中参考 App 的 820A 判定），headless（`-no-window -gpu swiftshader_indirect`）。
+1920×1080 @160dpi（正好命中对标 App 的 820A 判定），headless（`-no-window -gpu swiftshader_indirect`）。
 
 判定标准：截图 + logcat（FATAL/Exception 计数）+ `dumpsys`/`pm`/`settings` 实际状态，任一失败即记为 ❌。
 
@@ -216,7 +216,7 @@ adb logcat -d | grep -E "手势：单指横滑翻页|切页 "
 | H31 | 逐字歌词取到 | 媒体探针注入 `怎么我睡不着你也不来救我` / 焦迈奇 | logcat 出现 `酷狗 KRC 逐字歌词命中`，且 `wordLines` = 总行数 | ✅ `lines=54 wordLines=54`；`wordTiming=true` |
 | H32 | 擦除随演唱推进 | 钉到 101000ms 截图 | 擦除边界落在**正在唱的那个字**上（不是全行/全暗） | ✅ 逐字 64.6%，边界卡在第 9 个字「不」中间（`r81-new-101000-lyric.png`） |
 | H33 | **歌手唱完当场满格** | 钉到 103497ms（末字 103197ms 结束，下一句 120588ms 才开始） | 整行全亮（100%）；旧包只有 23% | ✅ 新包全亮（`r81-new-103497-lyric.png`）；❌ 旧包「怎么我」三个字亮（`r81-old-103497-lyric.png`） |
-| H34 | 无逐字数据不倒退 | 无网络的歌 / 明文 LRC | 仍走行级线性（与参考 App（君君桌面）公式一致） | ✅ 单测 `lrcParser_plainLrcFallsBackToLineLevel` |
+| H34 | 无逐字数据不倒退 | 无网络的歌 / 明文 LRC | 仍走行级线性（与对标 App 公式一致） | ✅ 单测 `lrcParser_plainLrcFallsBackToLineLevel` |
 | H35 | 判不出来就丢 | 语义判不出的 `<n,n,n>` | **不挂词**、回退行级，绝不瞎挂 | ✅ 单测 `attach_keepsNothingWhenAmbiguous` |
 | H36 | 不闪退 | 连续播放 + 反复换位置 | pid 不变；无 `Fatal signal`；tombstone 不新增 | ✅ pid 3108 → 3108，无崩溃 |
 | H37 | 正式包复验 | 装 `dist/CarDesk-ecarx-cardesk-4146.apk` 重截 | 与开发包一致 | ✅ `r81-release-103497-lyric.png` 全亮 |

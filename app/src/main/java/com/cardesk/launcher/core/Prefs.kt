@@ -1000,23 +1000,26 @@ class Prefs(context: Context) {
         set(v) = setFlag("dockbar_hide_status", v)
 
     /**
-     * 「隐藏君君状态栏」。
+     * 「隐藏导航页状态栏」。
      *
-     * 键名 `dockbar_hide_junjun_status`。
+     * 键名 `dockbar_hide_nav_status`。
      *
      * 第三十七轮：**默认改成关闭（false）**。
      *
      * 默认值是 true，而它的效果是「**只在导航页（第二页）**隐藏自绘状态栏」
-     * （：`i3 == 1 && isHideJunjunStatus()`）。
+     * （对标 App 里是 `i3 == 1 && isHideStatusBar()` 这种写法）。
      * 于是真机上第二页一直没有状态栏 —— 用户要求「桌面第二页也需要显示状态栏」。
      *
      * 这个键我们自己的设置面板里并没有暴露（诊断包的 SharedPreferences 里也没有它），
      * 所以它一直是「默认 true」在生效；现在把默认值翻成 false，
      * 两页都显示状态栏。「键名 + 生效页」语义保持不变。
+     *
+     * 第135轮订正：属性名与键名去掉了对标 App 的名字。
+     * 这个键**只读不写**（全仓没有任何写入点），改名不改变行为。
      */
-    var hideJunjunStatus: Boolean
-        get() = flag("dockbar_hide_junjun_status", false)
-        set(v) = setFlag("dockbar_hide_junjun_status", v)
+    var hideNavStatus: Boolean
+        get() = flag("dockbar_hide_nav_status", false)
+        set(v) = setFlag("dockbar_hide_nav_status", v)
 
     /** 增强导航栏承载样式：0=设计 Dock，1=槽位条 */
     var navStyle: Int

@@ -22,8 +22,8 @@ object CardLayout {
      *
      * ## 为什么持久化 id 还叫 "car"
      *
-     * 这个 id 是**参考 App（君君桌面）**的 `sceneCarCard`（它的底部卡 ids 是
-     * 快捷 / 媒体 / 空调 / 胎压 / **续航**）—— 参考 App（君君桌面）那张 `sceneCarCard`
+     * 这个 id 是**对标 App**的 `sceneCarCard`（它的底部卡 ids 是
+     * 快捷 / 媒体 / 空调 / 胎压 / **续航**）—— 对标 App 那张 `sceneCarCard`
      * 画的就是续航，不是「车况」（我们自己的注释也写着
      * 「参考 `SceneDesktop.disableShortClick(sceneCarCard)`（:703）：续航卡不可点」）。
      *

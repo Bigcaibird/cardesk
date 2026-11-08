@@ -94,7 +94,7 @@ object AdaptapiBody {
     const val BCM_WINDOW_POS = 553845504
 
     /**
-     * 四个门位对应的 zone（**君君那台车**的约定）。
+     * 四个门位对应的 zone（**实测那台车**的约定）。
      *
      * 现在只作为**兜底**：按名解析出来的 zone 优先（见 [AdaptapiConstants]）。
      */
@@ -123,7 +123,7 @@ object AdaptapiBody {
     /**
      * 车门位置功能号。
      *
-     * 按名解析优先（这台车机上 jar 里的值可能与君君那台不同），
+     * 按名解析优先（这台车机上 jar 里的值可能与实测那台不同），
      * 解析不到就用 [BCM_DOOR_POS]。
      */
     fun doorFunc(): Int =

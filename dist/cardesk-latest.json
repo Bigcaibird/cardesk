@@ -4,12 +4,12 @@
   "versionCode": 4233,
   "tag": "v1.0.1137",
   "name": "CarDesk 4233 / 1.0.1137-system",
-  "notes": "第135轮订正终版：不存在「官方桌面」——com.claunchercard.manager.* 是君君桌面（com.ecarx.qq.tool，第三方）同一 APK 内部包名；全仓术语与证据链按此口径统一",
-  "publishedAt": "2026-11-08T00:08:03Z",
+  "notes": "第135轮匿名化：文档与代码里的第三方 App 标识全部去掉（统一写「对标 App」），技术证据（类名 / 方法名 / 功能号 / 行号）保留；运行时行为不变（仅隐藏状态栏开关的键名去标识）",
+  "publishedAt": "2026-11-08T00:27:47Z",
   "apk": {
     "name": "CarDesk-platform-ecarx-cardesk-4233.apk",
     "url": "cardesk/CarDesk-platform-ecarx-cardesk-4233.apk",
-    "size": 2323345,
-    "sha256": "a2911207f7471650fd1d739f5b2331b373a3bf2838f63f002e04699b3e7a35bd"
+    "size": 2323365,
+    "sha256": "4d8b75527405331a3a5ae97cda029388e928ca99f2f9a7ae593c0c98d1839f7b"
   }
 }

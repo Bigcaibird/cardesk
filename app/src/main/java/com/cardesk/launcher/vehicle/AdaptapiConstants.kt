@@ -27,7 +27,7 @@ import com.cardesk.launcher.core.log.Logx
  * 门区 / 窗区住在 **`vehicle` 包**（和 `car` 平级），
  * 之前我们的候选名单只有 `car` 包下的猜测类名，所以一个都找不到。
  *
- * 顺带纠正一个旧结论：门区的值与君君那台车**一致**
+ * 顺带纠正一个旧结论：门区的值与实测那台车**一致**
  * （`DOOR_ROW_1_LEFT=1` / `ROW_1_RIGHT=4` / `ROW_2_LEFT=16` / `ROW_2_RIGHT=64`），
  * 窗区则是 `16 / 32 / 256 / 512`。
  *

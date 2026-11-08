@@ -25,7 +25,7 @@ package com.cardesk.launcher.core
  *   处于「跟随」时取车机光照信号 `Twlibrists`（`OFF`→夜间、`ON`→白天）。
  * - `getDayNightMode()`：`1` 固定白天 / `2` 固定夜间 / `3` 跟随。
  *
- * 参考 App（君君桌面）读明暗走的就是这条通道（`DayNightController.readSystemNightUi`），
+ * 对标 App 读明暗走的就是这条通道（`DayNightController.readSystemNightUi`），
  * 不是 Android 的 `UiModeManager` —— 后者是**设置值**，不是当前明暗。
  *
  * 这里是纯 Kotlin（不碰 Android），可在 JVM 单测里覆盖。
