@@ -4040,7 +4040,7 @@ switchRow("桥接开关", prefs.flag(KEY_BRIDGE_ENABLED), "连接车机仪表与
 |---|---|
 | 文件 | `dist/CarDesk-platform-ecarx-cardesk-4233.apk` |
 | versionCode / versionName | 4233 / 1.0.1137-system |
-| 大小 | 2 323 365 字节 |
-| SHA-256 | `4d8b75527405331a3a5ae97cda029388e928ca99f2f9a7ae593c0c98d1839f7b` |
+| 大小 | 2 323 405 字节 |
+| SHA-256 | `71d69577621c4842eabc70c4d3d3beaeb6ab0903e6ec5d87430086712601e34f` |
 | 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
 | 单测 | 1871 项全绿（`tools/release.sh` 出包时一并跑的） |

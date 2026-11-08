@@ -6,7 +6,7 @@
 
 | 文件 | 包名 | versionCode | versionName | 签名 | SHA-256 |
 | --- | --- | --- | --- | --- | --- |
-| `CarDesk-platform-ecarx-cardesk-4233.apk` | `com.ecarx.cardesk` | **4233** | `1.0.1137-system` | AOSP platform 签名 | `4d8b75527405331a3a5ae97cda029388e928ca99f2f9a7ae593c0c98d1839f7b` |
+| `CarDesk-platform-ecarx-cardesk-4233.apk` | `com.ecarx.cardesk` | **4233** | `1.0.1137-system` | AOSP platform 签名 | `71d69577621c4842eabc70c4d3d3beaeb6ab0903e6ec5d87430086712601e34f` |
 
 > 这是**唯一需要安装**的包。装到 `/system/priv-app/<dir>/` 后重启。
 
