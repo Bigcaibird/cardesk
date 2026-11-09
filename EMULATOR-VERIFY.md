@@ -5,6 +5,139 @@
 
 判定标准：截图 + logcat（FATAL/Exception 计数）+ `dumpsys`/`pm`/`settings` 实际状态，任一失败即记为 ❌。
 
+## 0.0 模拟器版本：**统一用 API 28**（用户要求，第140轮起）
+
+用户要求：**「以后虚拟机测试用 API 28 的虚拟机」**。
+
+为什么 —— 车机（领克 dcy11）跑的是 **Android 9 / API 28**，
+而此前一直用 API 29 的 AOSP 镜像当主力，两边在**系统行为**上并不一致：
+
+- **display 消失时 task 去哪**：API 28 的 `ActivityStackManager` 把该 display 上的 task
+  **搬到默认显示器**；API 29 会把它 finish 掉（随后在新 display 上重建）。
+  第139轮「切日夜时画中画里的导航应用变成全屏」就是这么暴露出来的 ——
+  **API 29 上只能看到「应用被重启」，看不到「变成全屏」**。
+- `ActivityView` 的可用重载、`startActivity` 的落点行为、隐藏 API 白名单也都是随版本变的。
+
+所以从第140轮起，**模拟器走查一律在 API 28 上做**：
+
+| 项 | 值 |
+|---|---|
+| AVD | `cardesk28` |
+| 镜像 | `system-images;android-28;default;arm64-v8a`（**default = AOSP = 平台签名**） |
+| 规格 | 1920×1080 @160dpi / 4 核 / 4 GB RAM（与 `cardesk-aosp` 同规格） |
+| 端口 | **5560**（固定；5554/5556/5558 常被别的 AVD 占着） |
+| 起停 | `bash tools/emu28.sh start` / `wait` / `status` / `stop` |
+
+> **必须是 `default`（AOSP）而不是 `google_apis`** ——
+> 我们的 system 版是**平台签名 + `sharedUserId=android.uid.system` + uid 1000**，
+> google_apis 镜像不是平台签名的，装上去会被系统拒
+> （`INSTALL_FAILED_SHARED_USER_INCOMPATIBLE`），
+> 那样测出来的就不是「同一个包在车机同版本上的行为」了。
+> （实测：`emulator-5558` / `uni-android9` / `dsh28` 这几个 AVD 都是 google_apis，装不了。）
+
+镜像不随仓库走，需要时用 SDK Manager 拉：
+
+```bash
+export JAVA_HOME=<repo>/../toolchain/jdk-17.0.20.1+1/Contents/Home   # sdkmanager 需要 JDK 17
+yes | <repo>/../toolchain/sdk/cmdline-tools/latest/bin/sdkmanager \
+  "system-images;android-28;default;arm64-v8a"
+```
+
+### 0.0.1 API 28 上的已知限制：**第三方车机 App 嵌不进 VirtualDisplay**（实测 + AOSP 源码）
+
+在 `cardesk28` 上实测（2026-11-09，第140轮）：
+
+```
+ActivityView 启动承载应用 pkg=com.autonavi.amapautp.yh api=pendingIntent
+→ dumpsys：MainMapActivity 在 Display #0（主屏），VirtualDisplay（Display #6/7）里是空的
+```
+
+即 **承载应用被拉到了主屏（= 全屏抢屏）**，画中画区域始终是黑的。
+系统日志里**没有任何拒绝/回落告警**（`START u0 {...} from uid 1000` 正常，只是落点不对）。
+
+**根因（AOSP `android-9.0.0_r1` 源码 + 实测双向钉死）**：
+
+1. `services/core/java/com/android/server/am/ActivityStackSupervisor.java`
+
+   ```java
+   boolean canPlaceEntityOnDisplay(int displayId, boolean resizeable, ...) {
+       ...
+       if (!resizeable && !displayConfigMatchesGlobal(displayId)) {
+           // Can't apply wrong configuration to non-resizeable activities.
+           return false;                      // ← 拒绝放到虚拟屏
+       }
+       if (!isCallerAllowedToLaunchOnDisplay(callingPid, callingUid, displayId, activityInfo)) {
+           return false;
+       }
+   ```
+   而 `resizeable` 的来源（`ActivityRecord.canBeLaunchedOnDisplay`）是
+   `task != null ? task.isResizeable() : supportsResizeableMultiWindow()` ——
+   **新启动时取的是 Activity 自己的 `resizeableActivity`**。
+
+2. **AOSP 9 的 `PackageParser` 里，activity 级的 `resizeableActivity` 默认 false，
+   且**不继承** application 级的值**（Android 10 才改成继承）。
+
+3. 高德车机版 9.5 的 manifest（`aapt2 dump xmltree` 实测）：
+   - application 级 `resizeableActivity=true`（**只有这一处**）；
+   - `com.autonavi.amapauto.MainMapActivity` / `com.autonavi.auto.remote.fill.UsbFillActivity`
+     **自己都没声明** `resizeableActivity` → activity 级 = **false**；
+   - `allowEmbedding` **一次都没出现**。
+
+→ **AOSP 9 判定高德「不可调整大小」→ 拒绝放到 VirtualDisplay → 静默回落到默认显示器 → 全屏。**
+→ 而 **Android 10 改了继承规则** → 高德变成可调整大小 → 能落上 VirtualDisplay
+（这正是 API 29 模拟器上画中画能用的原因）。
+
+**所以这是「AOSP 9 + 第三方车机 App」的组合限制，不是我们 App 的 bug** ——
+高德是第三方应用，它的 manifest 我们改不了。
+
+**真车（领克）为什么平时画中画是好的**：车机 ROM 的 `ActivityView`/`ActivityStarter`
+被 OEM 改过（去掉了上面那条 resizeable 校验，或改用别的落点路径）。
+**这条不能拿 AOSP 模拟器的行为去推断真车**。
+
+**实测排除项**（都试过，落点仍然错）：
+
+| 试法 | 结果 |
+|---|---|
+| `ActivityView.startActivity(PendingIntent)`（现有实现） | 落 Display #0 ✗ |
+| 创建 PendingIntent 时就带 `ActivityOptions`（带 launchDisplayId） | 落 Display #0 ✗ |
+| `ActivityView.startActivity(Intent)`（AOSP 9 内部用 `prepareActivityOptions()`，必带 displayId） | 落 Display #0 ✗ |
+| 清空高德数据后**首次**启动（排除「task 在主屏扎根后被复用」） | 落 Display #0 ✗ |
+
+**结论**：API 28 模拟器上「画中画 + 高德」这条线**测不了**，
+因为高德的 activity 不可调整大小，AOSP 9 不允许把它放进虚拟屏。
+要在这台上验证我们的承载链路，得换一个**activity 级声明了 `resizeableActivity=true`** 的应用当承载目标。
+
+**顺带查出一个我们自己的真 bug（待修）**：
+
+`ActivityEmbed.virtualDisplayIdOf()` 在 **API 28 上取不到 displayId** ——
+它只认 `android.view.Display` 类型，而 **AOSP 9 的 `ActivityView` 直接持有
+`android.hardware.display.VirtualDisplay`**（AOSP 10 之后才换成 `Display`）。
+
+后果：API 28 上「承载任务的 task 在不在我们的 display 上」这条**判据是瞎的**
+（`PipSurface.isTaskOnOurDisplay()` 恒为 null → 黑屏自愈的「task 不在 display 上」那一级判不出来）。
+
+修法（低风险，只增强诊断与判据，不改启动路径）：
+在 `virtualDisplayIdOf()` 里补一条 —— 反射取 `mVirtualDisplay.getDisplay()` 再取 `displayId`
+（实测这样能取到：API 28 上 `vid=6/7` 正确）。
+
+### 0.0.2 API 28 模拟器的其它已知差异
+
+- **首次启动会跳「通知使用权」系统设置页**（`Settings$NotificationAccessSettingsActivity`），
+  挡住桌面。授权命令（组件名是 `com.ecarx.qq.tool.service.MusicBridgeService`，见
+  `core/media/NotificationAccess.referenceListenerComponent`）：
+
+  ```bash
+  adb -s emulator-5560 shell cmd notification allow_listener \
+    com.ecarx.cardesk/com.ecarx.qq.tool.service.MusicBridgeService
+  ```
+
+- **画中画要切到导航页才会创建 surface**：停在首页时 surface 不建 → 承载面永远不就绪
+  （日志里是「承载面暂不就绪，转慢速等待」）。
+  `adb shell input swipe 1500 700 500 700 400`（右→左滑）切到第 2 页。
+
+
+
+
 ## 0. 流程要求（第八十轮起，**硬性**）
 
 用户要求：**「以后新功能开发都需要在虚拟机跑一遍结果，并提供截图」**。
