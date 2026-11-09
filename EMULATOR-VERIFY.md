@@ -227,6 +227,19 @@ AOSP 9 的 AMS 就把它放回主屏 → 我们的搬移追不上它的节奏。
 这是「高德 + AOSP 9」的组合行为，**不是我们的代码问题**（车机 ROM 上没这现象）。
 `embedtest` 干净、无首启弹窗、不自己起活动 → 是 API 28 上的**可靠**验证对象。
 
+切换（模拟器上的桌面偏好，一条命令）：
+
+```bash
+# 换成 embedtest 做承载对象
+adb -s emulator-5560 shell "su 0 sed -i 's|<string name=\"pip_app\">com.autonavi.amapautp.yh</string>|<string name=\"pip_app\">com.cardesk.embedtest</string>|' \
+  /data/data/com.ecarx.cardesk/shared_prefs/cardesk.xml"
+# 换回来
+adb -s emulator-5560 shell "su 0 sed -i 's|<string name=\"pip_app\">com.cardesk.embedtest</string>|<string name=\"pip_app\">com.autonavi.amapautp.yh</string>|' \
+  /data/data/com.ecarx.cardesk/shared_prefs/cardesk.xml"
+```
+
+（改完偏好要**重启桌面 App**才生效：`adb shell am force-stop com.ecarx.cardesk` 后重开。）
+
 **启动顺序是红线**（第141轮的教训）：
 
 启动顺序、旗标、Intent **保持 4237 真机验证过的样子**：
