@@ -238,6 +238,14 @@ class LauncherView(context: Context) : FrameLayout(context) {
     private var navGuideSource: com.cardesk.launcher.core.nav.AmapDesktopGuide? = null
 
     /**
+     * 状态栏连接状态采样器（第138轮）。
+     *
+     * 读真机的 WiFi / 热点 / 蓝牙 / 车机 4G 状态，
+     * 按 [com.cardesk.launcher.core.SystemStatusPolicy] 算成图标槽喂给状态栏。
+     */
+    private var systemStatusSampler: com.cardesk.launcher.ui.shell.SystemStatusSampler? = null
+
+    /**
      * 高德广播过来的日夜状态（null = 还没收到过高德的信号）。
      *
      * 这是「跟随高德」的**第一来源**：高德主题一变就会广播
@@ -1785,19 +1793,29 @@ class LauncherView(context: Context) : FrameLayout(context) {
      * 媒体源图标：真 App 图标优先，取不到用自绘符号。
      *
      * 取图标要读 APK 资源 → **后台线程**取，主线程只读缓存。
+     *
+     * 第138轮：**首页与第二页共用这一份图标**。
+     *
+     * 原来只有首页（`scenePage`）有图标，第二页（`navPage`）只有一个品牌色小圆点 ——
+     * 同一个来源在两页画成两个样。现在两边拿的是同一个位图、同一个判定，
+     * 不会出现「同屏不一致」。
      */
     private fun updateMediaSourceIcon(sourceId: String) {
         val kind = com.cardesk.launcher.core.media.MediaSources.iconKind(sourceId)
         scenePage.mediaSourceIconKind = kind
+        // 第二页的来源行图标（同一套逻辑，见 [com.cardesk.launcher.ui.widget.MediaSourceIconView]）。
+        if (::navPage.isInitialized) navPage.sourceId = sourceId
         if (kind != com.cardesk.launcher.core.media.MediaSourceIconKind.APP) {
             // 蓝牙 / USB / 通用音乐没有对应 App，直接用自绘符号。
             scenePage.mediaSourceIcon = null
+            if (::navPage.isInitialized) navPage.sourceIcon = null
             scenePage.invalidate()
             return
         }
         val cached = com.cardesk.launcher.ui.widget.MediaSourceIcons.cached(sourceId)
         if (cached != null) {
             scenePage.mediaSourceIcon = cached
+            if (::navPage.isInitialized) navPage.sourceIcon = cached
             scenePage.invalidate()
             return
         }
@@ -1810,6 +1828,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
                 if (iconLoadingFor == sourceId) {
                     iconLoadingFor = null
                     scenePage.mediaSourceIcon = bmp
+                    if (::navPage.isInitialized) navPage.sourceIcon = bmp
                     scenePage.invalidate()
                 }
             }
@@ -3038,6 +3057,24 @@ private fun showCam() {
         return true
     }
 
+    /**
+     * 启动状态栏连接状态采样（第138轮）。
+     *
+     * 采样在**后台线程**（2 秒一轮），**变了才**回调主线程。
+     * 第一次采样是立刻做的（不等 2 秒）—— 状态栏一上来就该是准的，
+     * 而不是先显示 2 秒「什么都没连」。
+     */
+    private fun startSystemStatusSampling() {
+        if (!::statusBar.isInitialized) return
+        if (systemStatusSampler != null) return
+        val sampler = com.cardesk.launcher.ui.shell.SystemStatusSampler(context)
+        systemStatusSampler = sampler
+        sampler.start { snapshot ->
+            if (!::statusBar.isInitialized) return@start
+            statusBar.systemStatus = snapshot
+        }
+    }
+
     private fun refresh() {
         if (!::statusBar.isInitialized) return
         if (applyDayNightIfChanged()) return
@@ -3517,6 +3554,9 @@ private fun showCam() {
         MusicController.get().addListener(mediaListener)
         // 导航引导数据源跟着窗口生命周期起停
         navGuideSource?.start()
+        // 第138轮：状态栏连接类图标（蜂窝 / WiFi / 热点 / 蓝牙）按**真实状态**显示。
+        // 采样器跟窗口生命周期起停 —— 后台时不用采（车机本来就在省电）。
+        startSystemStatusSampling()
         // 第九十三轮：窗口重建（后台回来 / 重新 addView）时把定时刷新重新挂上 ——
         // onDetachedFromWindow() 里 removeCallbacksAndMessages(null) 会把它清掉。
         if (servicesStarted) {
@@ -3534,6 +3574,9 @@ private fun showCam() {
         handler.removeCallbacksAndMessages(null)
         weatherDesk?.stop()
         navGuideSource?.stop()
+        // 第138轮：连接状态采样一起停（后台线程 + 定时器都收掉）。
+        systemStatusSampler?.stop()
+        systemStatusSampler = null
         // 车机昼夜回调不再往已销毁的视图派发
         com.cardesk.launcher.vehicle.AdaptapiDayNight.detach()
         VehicleController.removeObserver { }

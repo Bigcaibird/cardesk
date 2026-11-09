@@ -4462,3 +4462,211 @@ WCAG 亮度公式算出来，不是估的）。
 > 装在**普通 Google 镜像**（如 `emulator-5558`）上会被拒：
 > `INSTALL_FAILED_SHARED_USER_INCOMPATIBLE` —— 该包是平台签名 + `sharedUserId=android.uid.system`，
 > 装的机器的平台密钥必须一致（车机 / ecarx 平台镜像可以）。
+
+## 第138轮：第二页音乐来源显示 App 图标 + 状态栏连接图标按真实状态显示
+
+> 用户诉求（两条）：
+> 一、现在**第二页**的音乐播放器的媒体来源还是没有显示对应 app 的图标，
+> **同步一下首页音乐卡片的图标显示方案**；
+> 二、桌面状态栏的图标显示如**信号、WiFi、蓝牙、热点**等不太准确，
+> **参考一下 UNI 的逻辑**，优化 cardesk 的状态栏图标显示。
+
+### 需求一 · 第二页音乐卡的媒体来源图标
+
+#### 之前是什么状态
+
+首页音乐卡（第125轮起）已经有**真 App 图标**了：
+QQ音乐 / 网易云 / 酷狗 / 酷我 / 汽水 / 多媒体 取 `PackageManager.getApplicationIcon()`，
+蓝牙 / USB / 通用音乐画**自绘符号**。
+
+但**第二页（导航页）音乐卡**是另一套 —— 它是 **View 布局**（`NavPage`），
+不是 Canvas 自绘，来源行只放了一个 **10px 的品牌色小圆点**：
+
+```
+来源行：[●] QQ音乐 ⌄                    ← 10px 圆点（认不出是哪个 App）
+```
+
+于是同一个来源，首页是 QQ音乐的绿色方块图标，第二页是一个粉色小点 —— **同屏不一致**。
+
+#### 改了什么
+
+把首页那套逻辑做成 **View 版**（`ui/widget/MediaSourceIconView.kt`）：
+
+- **真 App 图标优先**（圆角裁剪，和首页一致），取不到用**自绘符号**；
+- **两页共用同一份缓存**（`MediaSourceIcons.cached`）与**同一个判定**（`MediaSources.iconKind`），
+  不会出现「一个是 App 图标、另一个是小圆点」；
+- `LauncherView.updateMediaSourceIcon()` 现在**同时**喂两页
+  （首页 `scenePage` / 第二页 `navPage`），后台线程取到位图后一起更新。
+
+图标边长取 **24 设计 px**（这一行来源文案是 20px，同一量级，不喧宾夺主）。
+
+#### 走查时抓到的真 bug（局部变量遮蔽字段）
+
+第一版写成了：
+
+```kotlin
+val sourceIconView = MediaSourceIconView(context).apply { … }   // ← 局部变量！
+```
+
+字段 `private lateinit var sourceIconView` 于是**永远没被初始化**，
+外面 `::sourceIconView.isInitialized` 一直是 false ——
+于是 `sourceId` / `sourceIcon` / `sourceLabel` 三处赋值**全被跳过**，
+图标恒定停在默认的「通用音乐」音符（粉色）。
+
+**模拟器上第一眼就看出来了**：来源行画的是粉色音符 + 文案却是「QQ音乐」——
+品牌色对不上，一眼就知道来源 id 没送到。改成赋给字段后正常。
+
+> 这个坑值得记一笔：**Kotlin 里局部同名变量会遮蔽字段**，
+> 而且编译期**完全没有提示**。凡是「字段 + lateinit + isInitialized」这套写法，
+> 赋值处都必须是**字段赋值**，不能顺手写成局部 `val`。
+
+### 需求二 · 状态栏的信号 / WiFi / 蓝牙 / 热点图标
+
+#### 之前是什么状态
+
+状态栏右侧那四个连接图标是**画上去就一直在那**的：
+
+```kotlin
+drawIcon(… drawCellular …)   // 蜂窝
+drawIcon(… drawWifi     …)   // WiFi
+drawIcon(… drawHotspot  …)   // 热点
+drawIcon(… drawBluetooth …)   // 蓝牙
+```
+
+**不管**车机连没连 WiFi、热点开没开、蓝牙开没开、4G 有没有信号，
+四个图标**永远同时亮着**。这就是用户说的「图标显示不太准确」。
+
+#### 参考工程的规则
+
+参考工程 UNI 的状态栏右端图标槽（`widgets/system_status_row.dart` +
+原生 `SystemStatusAdapter.java`）规则是这四条：
+
+1. **蜂窝信号**：`移动网络已知` **且** `当前没连 WiFi` 才显示 ——
+   连了 WiFi 就不该再显示蜂窝信号（两条链路同时亮是误导）；
+2. **热点**：开启才显示；**与 WiFi 互斥**（那边是 `if (hotspot) … else if (wifi)`）；
+3. **WiFi**：**已连接**才显示，图标按信号等级分档（0..4）；
+4. **蓝牙**：`已知` **且** `已开启` 才显示，**已连接**用强调色。
+
+我们把这条规则抽成**纯逻辑** `core/SystemStatusPolicy.kt`（可 JVM 单测），
+绘制层只负责「按级别取颜色、画几格」。
+
+#### 数据从哪来（Android 侧采样器）
+
+`ui/shell/SystemStatusSampler.kt`，后台线程 **2 秒**一轮（与参考工程一致），
+**只在快照变了**时才回调：
+
+| 图标 | 数据源 | 说明 |
+|---|---|---|
+| WiFi | `ConnectivityManager` + `WifiManager` | 连没连 / 等级 `calculateSignalLevel(rssi, 5)` → 0..4 |
+| 热点 | `WifiManager.isWifiApEnabled`（**反射**） | 隐藏 API；读不到 → **不显示**（不猜） |
+| 蓝牙 | `BluetoothAdapter` | 开没开 / 有没有连上（A2DP 或通话任一） |
+| 蜂窝 | **车机 TBox** | 见下 |
+
+**蜂窝信号为什么走车机 TBox 而不是 `TelephonyManager`**：
+`TelephonyManager.getDataNetworkType()` / `getSignalStrength()` 在 Android 9+
+要 `READ_PHONE_STATE`（dangerous 权限，平台签名也拿不到，除非额外 `pm grant`）。
+
+而这台车机的**车机 SDK 本身就带 TBox**（从 `ecarx.adapterapi.jar` 的 dex 里核实过）：
+
+```
+com.ecarx.xui.adaptapi.tbox.TBox.create(Context)
+  ├─ getSignalStrength() : android.telephony.SignalStrength   ← 车机 4G 信号
+  └─ getNetworkType()    : String                            ← 网络类型文案
+```
+
+那个 `SignalStrength` 是**车机给的**（TBOX 侧），
+正好就是原车状态栏那几格信号 —— 这才是「信号」该显示的东西。
+
+**TBox 拿不到时的回落**：默认网络带 `TRANSPORT_CELLULAR` → 也算「在蜂窝网络上」，
+蜂窝图标**照常显示**，只是强度读不到（画弱色空图标）。
+不这么回落的话，模拟器 / 缺 TBox 的机器上状态栏会一个连接图标都没有，
+看着像「车机没网」。
+
+#### 与参考工程的一处刻意不同
+
+参考工程在 WiFi 等级**读不到时按满格画**（`?? 4`）。
+我们不这么做 —— 一直的口径是「**读不到就不猜**」：
+读不到就画**弱色的空图标**，不假装信号好。
+蜂窝同理：移动数据关着 → 0 格；强度读不到 → 弱色空图标。
+
+#### 权限
+
+第52轮 HUD 下线时把蓝牙权限一并撤了（当时没有读取方）。
+这一轮状态栏要读蓝牙状态，`BluetoothAdapter.isEnabled()` /
+`getProfileConnectionState()` 需要 `android.permission.BLUETOOTH`（normal 权限，装机即授予），
+所以**重新声明** `BLUETOOTH`。
+`BLUETOOTH_SCAN` / `BLUETOOTH_CONNECT` 是运行时权限，车机是 Android 9，用不上，也不白要授权。
+
+### 改了什么
+
+| 文件 | 改动 |
+|---|---|
+| `ui/widget/MediaSourceIconView.kt`（新） | 来源图标的 **View 版**：真 App 图标（圆角裁剪）优先，取不到用自绘符号 |
+| `ui/pages/NavPage.kt` | 来源行的小圆点 → `MediaSourceIconView`；新增 `sourceId` / `sourceIcon` 两个对外属性 |
+| `ui/LauncherView.kt` | `updateMediaSourceIcon()` 同时喂两页；新增 `startSystemStatusSampling()` + 采样器生命周期 |
+| `core/SystemStatusPolicy.kt`（新，纯逻辑） | 连接图标的**显示规则**（显示与否 / 强弱分档 / 互斥 / 强调色）+ 快照指纹 |
+| `ui/shell/SystemStatusSampler.kt`（新） | 真机状态采样（WiFi / 热点 / 蓝牙 / 车机 4G），后台 2 秒一轮，变了才回调 |
+| `ui/shell/ShellStatusBar.kt` | 四个固定图标 → 按策略槽位绘制（等级分档、弱色、强调色） |
+| `app/src/main/AndroidManifest.xml` | 重新声明 `android.permission.BLUETOOTH` |
+
+### 验证
+
+**模拟器（`emu-verify/y138/`）**
+
+| 场景 | 证据 | 结果 |
+|---|---|---|
+| 第二页来源图标 | `y138-02-navpage-source-icon.png` | 来源行显示**真 QQ音乐 App 图标**（黄音符方块），不再是粉色小圆点 |
+| 两页一致 | `y138-03-home-music-icon.png` | 首页音乐卡与第二页是**同一个位图**（同一套图标方案） |
+| 状态栏按真实状态 | `y138-01-statusbar.png` | 模拟器实况：WiFi 开着**但没连上**、热点没开、**没有蓝牙适配器**、无车机 TBox → 四个图标只剩**一个弱色空蜂窝图标**，其余三个不画 |
+| 采样日志 | `y138-log-system-status.txt` | `系统状态变化 status=true,false,-1,false,true,true,-1,,false,false,false`（变了才记） |
+
+**单测**：全量 **1928 项全绿**（上版 1908 → +20）：
+`SystemStatusPolicyTest`（新，20 项）。
+
+**反向验证 11 项全部变红**（`tools/verify_y138_reverse.sh`，可复跑）：
+
+| 反向 | 改法 | 红灯 |
+|---|---|---|
+| 1 | 连了 WiFi 也显示蜂窝信号 | 2 |
+| 2 | 热点与 WiFi 同时显示（不互斥） | 1 |
+| 3 | 蓝牙没开也显示 | 2 |
+| 4 | 蓝牙已连接不强调 | 1 |
+| 5 | WiFi 等级读不到按满格 | 1 |
+| 6 | 移动数据关掉时蜂窝仍显示满格 | 1 |
+| 7 | 导航页来源行又用回小圆点 | 3（接线） |
+| 8 | 来源图标 View 又被局部变量遮蔽 | 1（接线） |
+| 9 | LauncherView 不把图标喂给导航页 | 1（接线） |
+| 10 | 状态栏又画四个固定图标 | 1（接线） |
+| 11 | 不启动状态采样 | 1（接线） |
+
+脚本本身也复核过（**第一版有三条假绿，已修**）：
+接线断言原先用「行里出现某段文本」判断，
+结果**函数定义处**、**被注释掉的调用点**都能把它骗过去
+（反向 7 / 8 / 9 / 11 改坏了却照样绿灯）。
+现在改成**精确文本 + 剥掉行注释**再比对，钉在**调用点**而不是同名函数上。
+
+### 已知限制
+
+- **真车还没验**：模拟器没有车机 TBox、也没有连上的 WiFi / 蓝牙，
+  所以「车机 4G 几格信号」「WiFi 已连接分几档」「蓝牙已连接高亮」这三段
+  **只能靠单测 + 源码走查**，**必须真车复验**。
+- **热点的判断依赖隐藏 API**（`WifiManager.isWifiApEnabled`）：
+  system 变体有 hidden API 白名单（`system-patch/hiddenapi-package-whitelist.xml`），
+  读得到；普通安装包读不到时按「没开」处理（**不显示**热点图标，不误报）。
+- **状态栏图标会随状态增减**，位置不是固定的：
+  连了 WiFi 就不画蜂窝、热点开着就不画 WiFi —— 这是规则的必然结果
+  （参考工程也是动态的）。「位置/天气」那一段会跟着往右让位。
+- **蓝牙适配器取不到时**（模拟器就是这样）会打一条限频告警（60 秒一条），
+  便于区分「蓝牙没开」和「根本没读到蓝牙」。
+- **没有发 GitHub Release、没有传 R2**（等明确指示）。
+
+### 产物
+
+| 项 | 值 |
+|---|---|
+| 文件 | `dist/CarDesk-platform-ecarx-cardesk-4236.apk` |
+| versionCode / versionName | 4236 / 1.0.1140-system |
+| 大小 | 2 343 449 字节 |
+| SHA-256 | `9161fa0831775b6b326a054be38a5d1e26ed3049aa360165c909794c633a9a5c` |
+| 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
+| 单测 | 1928 项全绿（`tools/release.sh` 出包时一并跑的） |

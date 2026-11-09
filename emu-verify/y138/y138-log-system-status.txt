@@ -1,0 +1,28 @@
+# 第138轮 模拟器日志（emulator-5556，Android 10 / SDK 29 / 1920x1080）
+
+## 状态栏连接状态采样（后台线程 2 秒一轮，**变了才记**）
+
+11-09 16:54:56.288 I CarDesk/Sys : 系统状态变化 status=true,false,-1,false,true,true,-1,,false,false,false
+11-09 16:55:56.547 W CarDesk/Sys : 蓝牙适配器取不到 hint=系统没有蓝牙或服务没起来
+11-09 16:56:03.618 W CarDesk/Sys : 蓝牙适配器取不到 hint=系统没有蓝牙或服务没起来
+11-09 16:56:03.618 D CarDesk/Sys : 车机 TBox 取不到，蜂窝信号图标不显示 cls=com.ecarx.xui.adaptapi.tbox.TBox
+11-09 16:56:03.619 I CarDesk/Sys : 系统状态变化 status=true,false,-1,false,true,true,-1,,false,false,false
+11-09 16:57:03.798 W CarDesk/Sys : 蓝牙适配器取不到 hint=系统没有蓝牙或服务没起来
+11-09 16:58:03.915 W CarDesk/Sys : 蓝牙适配器取不到 hint=系统没有蓝牙或服务没起来
+11-09 16:59:04.017 W CarDesk/Sys : 蓝牙适配器取不到 hint=系统没有蓝牙或服务没起来
+
+## 字段口径
+
+`status` 的字段顺序：`wifiKnown,wifiConnected,wifiLevel,hotspotOn,mobileKnown,mobileEnabled,mobileLevel,mobileLabel,btKnown,btEnabled,btConnected`
+
+### 模拟器实况
+
+- WiFi：**开着但没连上**（模拟器默认走的是 LTE 蜂窝，`TYPE_WIFI` 并不处于 CONNECTED）→ 不画 WiFi 图标
+- 热点：没开 → 不画热点图标
+- 蓝牙：**没有适配器**（这个 AVD 没起蓝牙服务）→ 不画蓝牙图标
+- 车机 TBox：模拟器没有车机 SDK → 拿不到车机 4G 强度；
+  但默认网络带 `TRANSPORT_CELLULAR` → **回落判定为「在蜂窝网络上」**，
+  于是画一个**弱色空信号图标**（强度读不到，不假装有信号）
+
+> 16:54:00 那条 `mobileKnown=false` 是**加回落之前**的第一版采样；
+> 16:54:56 起 `mobileKnown=true` 就是加了回落之后的形态。

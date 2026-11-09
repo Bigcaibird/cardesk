@@ -22,7 +22,15 @@
       蓝牙权限（BLUETOOTH / BLUETOOTH_ADMIN / BLUETOOTH_SCAN / BLUETOOTH_CONNECT）
       原本只服务于 HUD 设备扫描，现在没有任何调用方，一并撤掉 ——
       车机是 Android 9，BLUETOOTH_SCAN 属于运行时权限，留着只是白要授权。
+
+      第138轮：状态栏的**蓝牙图标改成按真实状态显示**
+      （开没开 / 连没连，见 `ui/shell/SystemStatusSampler`），
+      `BluetoothAdapter.isEnabled()` / `getProfileConnectionState()` 需要
+      `BLUETOOTH`（normal 权限，装机即授予）。
+      只加 `BLUETOOTH` —— `BLUETOOTH_SCAN` / `BLUETOOTH_CONNECT` 是运行时权限，
+      车机是 Android 9，用不上，也不白要授权。
     -->
+    <uses-permission android:name="android.permission.BLUETOOTH" />
     <!-- 天气子系统（WeatherDesk）：需要定位权限才能取到设备位置做天气查询-->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />

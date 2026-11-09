@@ -70,6 +70,33 @@ class ShellStatusBar(context: Context) : View(context) {
     var fuelPercent: Int = FUEL_UNKNOWN_VALUE
         set(v) { field = v; invalidate() }
 
+    /**
+     * 连接类图标（蜂窝 / WiFi / 热点 / 蓝牙）的**真实状态**（第138轮）。
+     *
+     * 之前这四个图标是「画上去就一直亮着」的 —— 不管连没连 WiFi、热点开没开，
+     * 四个图标永远同时显示，这就是用户说的「图标显示不太准确」。
+     *
+     * 现在改成：采样器（`SystemStatusSampler`）读真机状态，
+     * 按 [SystemStatusPolicy] 的规则算出**要画哪几个、几格、什么颜色**，
+     * 这里只负责画。
+     */
+    var systemStatus: com.cardesk.launcher.core.SystemStatusPolicy.Snapshot =
+        com.cardesk.launcher.core.SystemStatusPolicy.Snapshot()
+        set(v) {
+            if (field == v) return
+            field = v
+            statusSlots = com.cardesk.launcher.core.SystemStatusPolicy.slots(v)
+            invalidate()
+        }
+
+    /**
+     * 由 [systemStatus] 算出的图标槽（**从右往左**排）。
+     *
+     * 单独存一份是为了不在每帧 `onDraw` 里重算（这一行每秒要重绘很多次）。
+     */
+    private var statusSlots: List<com.cardesk.launcher.core.SystemStatusPolicy.Slot> =
+        com.cardesk.launcher.core.SystemStatusPolicy.slots(systemStatus)
+
     /** 时钟文案（外部直接给字符串时用这个）。 */
     var clockText: String = "20:35"
         set(v) { field = v; invalidate() }
@@ -293,14 +320,16 @@ class ShellStatusBar(context: Context) : View(context) {
         drawIcon(canvas, x - FUEL_ICON, cy - FUEL_ICON / 2f, FUEL_ICON) { drawFuelIcon(it, 0f, 0f) }
         x -= FUEL_ICON + ICON_GAP
 
-        drawIcon(canvas, x - ICON, cy - ICON / 2f, ICON) { drawCellular(it, 0f, 0f) }
-        x -= ICON + ICON_GAP
-        drawIcon(canvas, x - ICON, cy - ICON / 2f, ICON) { drawWifi(it, 0f, 0f) }
-        x -= ICON + ICON_GAP
-        drawIcon(canvas, x - ICON, cy - ICON / 2f, ICON) { drawHotspot(it, 0f, 0f) }
-        x -= ICON + ICON_GAP
-        drawIcon(canvas, x - ICON, cy - ICON / 2f, ICON) { drawBluetooth(it, 0f, 0f) }
-        x -= ICON + ICON_GAP
+        // 连接类图标（第138轮）：按真实状态显示。
+        //
+        // 之前这里是**四个固定图标**（蜂窝 / WiFi / 热点 / 蓝牙）无条件画出来，
+        // 看上去永远是「全都连着」—— 这就是「图标显示不太准确」的根源。
+        // 现在由 [SystemStatusPolicy] 决定画哪几个、几格、什么颜色：
+        // 连了 WiFi 就不画蜂窝、热点开着就不画 WiFi、蓝牙没开就不画蓝牙。
+        for (slot in statusSlots) {
+            drawIcon(canvas, x - ICON, cy - ICON / 2f, ICON) { drawStatusSlot(it, slot) }
+            x -= ICON + ICON_GAP
+        }
 
         // 第八十二轮：**位置 + 天气并入右侧图标行**（原来是单独中置的一段）。
         //
@@ -447,7 +476,12 @@ class ShellStatusBar(context: Context) : View(context) {
         canvas.restore()
     }
 
-    private fun drawBluetooth(canvas: Canvas, x: Float, y: Float) {
+    /**
+     * 蓝牙（[SystemStatusPolicy.Kind.BLUETOOTH]）。
+     *
+     * @param emphasized 已连接 → 强调色；只是「已开启」→ 弱色。
+     */
+    private fun drawBluetooth(canvas: Canvas, x: Float, y: Float, emphasized: Boolean) {
         val p = Path().apply {
             moveTo(x + 8f, y + 1f)
             lineTo(x + 18f, y + 9f)
@@ -455,17 +489,25 @@ class ShellStatusBar(context: Context) : View(context) {
             lineTo(x + 8f, y + 25f)
             lineTo(x + 18f, y + 17f)
         }
-        canvas.drawPath(p, iconPaint)
-        canvas.drawLine(x + 4f, y + 8f, x + 14f, y + 18f, iconPaint)
-        canvas.drawLine(x + 4f, y + 18f, x + 14f, y + 8f, iconPaint)
-        canvas.drawLine(x + 8f, y + 1f, x + 8f, y + 25f, iconPaint)
+        val paint = Paint(iconPaint)
+        paint.color = if (emphasized) Skin.ACCENT else Skin.TEXT_DIM
+        canvas.drawPath(p, paint)
+        canvas.drawLine(x + 4f, y + 8f, x + 14f, y + 18f, paint)
+        canvas.drawLine(x + 4f, y + 18f, x + 14f, y + 8f, paint)
+        canvas.drawLine(x + 8f, y + 1f, x + 8f, y + 25f, paint)
     }
 
-    private fun drawHotspot(canvas: Canvas, x: Float, y: Float) {
+    /**
+     * 热点（[SystemStatusPolicy.Kind.HOTSPOT]）。
+     *
+     * 开启的热点用**强调色**（原来就是 `ACCENT_LIGHT`，保持不变）。
+     */
+    private fun drawHotspot(canvas: Canvas, x: Float, y: Float, emphasized: Boolean) {
         val c = Paint(iconFill)
-        c.color = Skin.ACCENT_LIGHT
+        c.color = if (emphasized) Skin.ACCENT_LIGHT else Skin.TEXT_DIM
         canvas.drawCircle(x + 13f, y + 13f, 4.5f, c)
         val arc = Paint(iconPaint)
+        arc.color = c.color
         arc.strokeWidth = 2.4f
         tmp.set(x + 3f, y + 3f, x + 23f, y + 23f)
         canvas.drawArc(tmp, 200f, 140f, false, arc)
@@ -473,24 +515,70 @@ class ShellStatusBar(context: Context) : View(context) {
         canvas.drawArc(tmp, 205f, 130f, false, arc)
     }
 
-    private fun drawWifi(canvas: Canvas, x: Float, y: Float) {
-        val c = Paint(iconFill).apply { color = Skin.TEXT }
+    /**
+     * WiFi（[SystemStatusPolicy.Kind.WIFI]）。
+     *
+     * ## 分档
+     *
+     * - `level >= 0`：一个点 + `min(level, 3)` 段弧（**level 0 = 只有点**，没弧）；
+     * - `level == -1`（读不到）：只画点，**弱色** —— 不假装满格。
+     *
+     * 参考工程在读不到时是按满格画的，我们不这么做（见 [SystemStatusPolicy] 的说明）。
+     */
+    private fun drawWifi(canvas: Canvas, x: Float, y: Float, level: Int) {
+        val known = level >= 0
+        val color = if (known) Skin.TEXT else Skin.TEXT_DIM
+        val c = Paint(iconFill).apply { this.color = color }
         canvas.drawCircle(x + 13f, y + 21f, 2.6f, c)
-        for (i in 0..2) {
+        val arcCount = if (known) level.coerceIn(0, 3) else 0
+        val arc = Paint(iconPaint)
+        arc.color = color
+        for (i in 0 until arcCount) {
             val inset = 9f - i * 4.5f
             tmp.set(x + inset, y + (10f - i * 4.5f), x + 26f - inset, y + (26f - i * 4.5f))
-            canvas.drawArc(tmp, 225f, 90f, false, iconPaint)
+            canvas.drawArc(tmp, 225f, 90f, false, arc)
         }
     }
 
-    private fun drawCellular(canvas: Canvas, x: Float, y: Float) {
-        val c = Paint(iconFill).apply { color = Skin.TEXT }
+    /**
+     * 蜂窝信号（[SystemStatusPolicy.Kind.CELLULAR]）。
+     *
+     * - `level >= 0`：`level` 根亮条，其余是**弱色空条**；
+     * - `level == -1`（读不到）：四根全是弱色（不假装有信号）。
+     */
+    private fun drawCellular(canvas: Canvas, x: Float, y: Float, level: Int) {
+        val known = level >= 0
+        val on = Paint(iconFill).apply { color = Skin.TEXT }
+        val off = Paint(iconFill).apply { color = Skin.TEXT_DIM }
         for (i in 0..3) {
             val h = 6f + i * 5f
             canvas.drawRoundRect(
                 RectF(x + i * 6.5f, y + 22f - h, x + i * 6.5f + 4f, y + 22f),
-                2f, 2f, c,
+                2f, 2f,
+                if (known && i < level) on else off,
             )
+        }
+    }
+
+    /**
+     * 画一个状态槽（第138轮）。
+     *
+     * 槽的种类 / 等级 / 是否强调都由 [SystemStatusPolicy] 决定，
+     * 这里只做「怎么画」。
+     */
+    private fun drawStatusSlot(
+        canvas: Canvas,
+        slot: com.cardesk.launcher.core.SystemStatusPolicy.Slot,
+    ) {
+        when (slot.kind) {
+            com.cardesk.launcher.core.SystemStatusPolicy.Kind.CELLULAR ->
+                drawCellular(canvas, 0f, 0f, slot.level)
+            com.cardesk.launcher.core.SystemStatusPolicy.Kind.WIFI ->
+                drawWifi(canvas, 0f, 0f, slot.level)
+            com.cardesk.launcher.core.SystemStatusPolicy.Kind.HOTSPOT ->
+                drawHotspot(canvas, 0f, 0f, slot.emphasized)
+            com.cardesk.launcher.core.SystemStatusPolicy.Kind.BLUETOOTH ->
+                drawBluetooth(canvas, 0f, 0f, slot.emphasized)
         }
     }
 

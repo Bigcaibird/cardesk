@@ -69,7 +69,39 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
      * 音乐来源名（`musicSource`）。
      */
     var sourceLabel: String = "通用音乐"
-        set(v) { field = v; if (::sourceText.isInitialized) sourceText.text = v }
+        set(v) {
+            field = v
+            if (::sourceText.isInitialized) sourceText.text = v
+            // 第138轮：文案还决定自绘符号的**品牌色**，图标要跟着换色。
+            if (::sourceIconView.isInitialized) sourceIconView.sourceLabel = v
+        }
+
+    /**
+     * 音乐来源 **id**（第138轮）。
+     *
+     * 来源行要显示**对应 App 的图标**（真图标优先，取不到用自绘符号），
+     * 而图标种类由 **id** 决定（`MediaSources.iconKind`）——
+     * 文案只用来取品牌色。所以 id 和文案要分开给。
+     */
+    var sourceId: String = com.cardesk.launcher.core.media.MediaSources.GENERIC_ID
+        set(v) {
+            if (field == v) return
+            field = v
+            if (::sourceIconView.isInitialized) sourceIconView.sourceId = v
+        }
+
+    /**
+     * 音乐来源的**真实 App 图标**（第138轮）；null = 取不到 → 画自绘符号。
+     *
+     * 与首页音乐卡**共用同一份缓存**（`MediaSourceIcons.cached`），
+     * 两页不会出现「一个是 App 图标、另一个是小圆点」的同屏不一致。
+     */
+    var sourceIcon: android.graphics.Bitmap? = null
+        set(v) {
+            if (field === v) return
+            field = v
+            if (::sourceIconView.isInitialized) sourceIconView.icon = v
+        }
 
     /** 播放状态文案（缺省「已暂停」）。 */
     var musicState: String = "已暂停"
@@ -408,6 +440,8 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
     // ------------------------------------------------------------------ 内部
 
     private lateinit var sourceText: TextView
+    /** 来源行的**图标**（第138轮）：真 App 图标优先，取不到用自绘符号。 */
+    private lateinit var sourceIconView: com.cardesk.launcher.ui.widget.MediaSourceIconView
     private lateinit var musicStateText: TextView
     private lateinit var titleText: TextView
     private lateinit var artistText: TextView
@@ -715,9 +749,23 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.START or Gravity.CENTER_VERTICAL
         }
+        // 第138轮：原来这里是一个 10px 的品牌色小圆点 ——
+        // 「看得出是哪家，但认不出是哪个 App」。
+        // 现在换成与首页音乐卡同一套的来源图标（真 App 图标优先，取不到用自绘符号）。
+        //
+        // 注意：这里必须**赋给字段**，不能写 `val sourceIconView = …` ——
+        // 局部变量会**遮蔽**字段，字段就永远没被初始化，
+        // 外面 `::sourceIconView.isInitialized` 一直是 false，
+        // 于是 sourceId / sourceIcon / sourceLabel 三处赋值全被跳过
+        // （图标永远是默认的「通用音乐」音符）。
+        sourceIconView = com.cardesk.launcher.ui.widget.MediaSourceIconView(context).apply {
+            sourceId = this@NavPage.sourceId
+            sourceLabel = this@NavPage.sourceLabel
+            icon = this@NavPage.sourceIcon
+        }
         sourceRow.addView(
-            View(context).apply { background = Skin.oval(Skin.ACCENT) },
-            LinearLayout.LayoutParams(10, 10).apply { rightMargin = 10 },
+            sourceIconView,
+            LinearLayout.LayoutParams(SOURCE_ICON_SIZE, SOURCE_ICON_SIZE).apply { rightMargin = 8 },
         )
         sourceText = Ui.text(context, sourceLabel, 20f, Skin.TEXT_SOFT)
         sourceRow.addView(sourceText, LinearLayout.LayoutParams(-2, -2))
@@ -1115,6 +1163,14 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
 
         /** 组合卡：来源行顶部偏移。 */
         const val COMBINED_SOURCE_TOP = 22
+
+        /**
+         * 来源行**图标**的边长（设计 px，第138轮）。
+         *
+         * 原来这里是一个 10px 的品牌色小圆点；换成真 App 图标后要画得清楚一点，
+         * 取 **24**（与这一行 20px 的来源文案同一量级，不喧宾夺主）。
+         */
+        const val SOURCE_ICON_SIZE = 24
 
         /** 组合卡：专辑封面上边缘。 */
         const val COMBINED_ART_TOP = 66
