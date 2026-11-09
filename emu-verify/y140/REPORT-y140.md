@@ -1,9 +1,31 @@
 # 第140轮 模拟器验证报告：API 28 上画中画承载链路 + 黑屏判据修复
 
+> ⚠️ **第141轮更正（必读）**：下面 ① 里的
+> 「**高德的画中画是正常的**」这个结论**是错的**。
+>
+> 用户当时指出：「你提供的截图里，**高德是全屏的**」—— **用户是对的**。
+> 第141轮用**权威判据**（窗口的 `mDisplayId`）重新取证后确认：
+>
+> ```
+> Window{… com.autonavi.amapautp.yh/com.autonavi.amapauto.MainMapActivity}:
+>     mDisplayId=0 stackId=30          ← 主屏！不是虚拟屏
+> ```
+>
+> 本报告当时用的 `dumpsys activity activities` 里的 `ResumedActivity`
+> **不能**判定嵌入（它会出现在虚拟屏段，但窗口可能仍在主屏）；
+> 权威判据是 `dumpsys window windows` 的 `mDisplayId` +
+> `dumpsys window displays` 的 token 列表。
+> 根因是 **AOSP 9 的 AMS 不肯把新建的 task 放到请求的 display 上**
+> （车机 ROM 会）—— **ROM 差异，不是代码问题**（4237 在真机上是好的）。
+> 详见 `emu-verify/y141/REPORT-y141.md`。
+>
+> 下面 ②③ 两条仍然成立。
+
 > 结论先行：
-> ① **车机就是 Android 9 / API 28**（与模拟器同版本），实测在 API 28 模拟器上
->    **高德的画中画是正常的** —— 之前「模拟器上高德进不了画中画」的判断是**错的**，
->    错因是那次实验的身份不同（详见「三、更正」）；
+> ① **车机就是 Android 9 / API 28**（与模拟器同版本）——
+>    ~~实测在 API 28 模拟器上高德的画中画是正常的~~
+>    **第141轮更正：不是正常的。** 当时那个判断用错了判据，
+>    详见下面的更正框与 `emu-verify/y141/REPORT-y141.md`；
 > ② 但顺着这条线查出一个**真 bug**：画中画黑屏的权威判据在 API 28 上**恒为「不知道」**，
 >    也就是「黑屏自愈」那一整级在车机上等于没生效 —— 这一轮修好了；
 > ③ 顺带修掉一个隐患：启动承载应用时我们自己造的那份 `ActivityOptions`
@@ -187,7 +209,7 @@ adb -s emulator-5560 shell am broadcast \
 | 全量单测 | **1951 项全绿**（1937 → +14，新增 `VirtualDisplayIdResolverTest`） |
 | 反向验证 | **14 项全红**（`tools/verify_y140_reverse.sh`），还原后恢复全绿 |
 | 脚本自身复核 | 断言用**精确文本**并**剥掉行注释**（XML 另剥 `<!-- -->`）；第 13 项专门把模块声明**注释掉**验证断言不会被注释骗过；编译不过时也**当红**处理（不会假绿） |
-| API 28 实测 | 高德 / embedtest 均进虚拟屏；`vid` 取到；切日夜 task 与 display 均不变 |
+| API 28 实测 | **第141轮更正**：`vid` 取到 ✓；切日夜 task 与 display 均不变 ✓；但「高德 / embedtest 均进虚拟屏」**是错的** —— 当时用 `ResumedActivity` 判定，窗口其实在 display 0 |
 | API 29 回归 | 高德仍进虚拟屏（`vid=77`），第139轮行为未回归 |
 
 ## 八、还没做的 / 待复验

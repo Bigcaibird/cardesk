@@ -43,7 +43,33 @@ yes | <repo>/../toolchain/sdk/cmdline-tools/latest/bin/sdkmanager \
   "system-images;android-28;default;arm64-v8a"
 ```
 
-### 0.0.1 API 28 上的画中画：**能测**，但必须从桌面 App 里发起（实测更正，第140轮）
+### 0.0.1 API 28 上的画中画：**能测**，但必须从桌面 App 里发起（第140轮；**第141轮再更正**）
+
+> ⚠️ **第141轮再次更正（必读）**：本节说「从桌面 App 里发起，高德**能**进虚拟屏」——
+> **这句是错的**。用户当时指出「你提供的截图里，**高德是全屏的**」，**用户是对的**。
+>
+> 错因是**判据用错了**：本节当时拿 `dumpsys activity activities` 的
+> `ResumedActivity` 判定「进了虚拟屏」，但**那一行不能证明嵌入** ——
+> 它会出现在虚拟屏那一段，而**窗口可能仍在主屏上**。
+>
+> **权威判据**（第141轮确立）：
+>
+> ```bash
+> # ① 窗口到底在哪个屏
+> adb -s emulator-5560 shell dumpsys window windows \
+>   | grep -A2 "Window{.*embedtest" | grep -E "Window\{|mDisplayId"
+> # ② 虚拟屏上到底有没有窗口（token 列表为空 = 没嵌进去）
+> adb -s emulator-5560 shell dumpsys window displays \
+>   | grep -A6 "Display: mDisplayId=2[0-9]"
+> ```
+>
+> 实测（修复前）：`mDisplayId=0`（主屏）+ 虚拟屏 token 列表**为空**
+> → **承载应用全屏抢屏，画中画那块是黑的**。
+>
+> 根因：**AOSP 9 的 AMS 不会把新建的 task 放到请求的 display 上**
+> （`findTaskLocked` 跨屏找 affinity 匹配，目标 display 只是「优先」不是「限定」）；
+> **车机 ROM 会** → 这是 **ROM 差异，不是我们的代码问题**（4237 在真机上是好的）。
+> 修法见 0.0.4。
 
 > ⚠️ **本节结论在第140轮被实测推翻了**（下面写的是更正后的版本）。
 > 之前写的「第三方车机 App 嵌不进 VirtualDisplay」是**测试方法的假象**，不是产品限制。
@@ -85,16 +111,21 @@ adb -s emulator-5560 shell dumpsys package com.ecarx.cardesk | grep -E "userId|I
 「目标 Activity 必须声明 `android:allowEmbedded`」的检查 →
 高德的 manifest 里 `allowEmbedded` **一次都没有** → **被静默拒绝** → 回落主显示器。
 
-### 实测：从桌面 App 里发起，高德**能**进虚拟屏（API 28）
+### 实测（**第141轮更正**）：从桌面 App 里发起，高德**仍然没进**虚拟屏（API 28）
 
 ```
 ActivityTaskManager: START u0 {… pkg=com.autonavi.amapautp.yh cmp=…/UsbFillActivity} from uid 1000
-dumpsys activity activities:
-  Display #13 (activities from top to bottom):
-    ResumedActivity: ActivityRecord{… com.autonavi.amapautp.yh/com.autonavi.amapauto.MainMapActivity t30}
+dumpsys window windows:                    ← 权威判据（不是 activity activities）
+  Window{… com.autonavi.amapautp.yh/com.autonavi.amapauto.MainMapActivity}:
+      mDisplayId=0 stackId=30              ← **主屏**，不是虚拟屏
+dumpsys window displays:
+  Display: mDisplayId=21
+    Application tokens in top down Z order:
+      （空）                               ← 虚拟屏上什么都没有
 ```
 
-截图：`emu-verify/y140/y140-01-amap28-embedded.png`（高德画在导航页里）。
+截图 `emu-verify/y140/y140-01-amap28-embedded.png` 之所以「看着像嵌进去了」：
+导航页的地图卡是**透明洞**，透出的是**背后主屏上全屏运行的承载应用**。
 
 ### 由此得到的**操作纪律**
 
@@ -160,6 +191,48 @@ adb -s emulator-5560 install -r embedtest/build/outputs/apk/debug/embedtest-debu
 
 
 
+
+### 0.0.4 API 28 上的画中画：第141轮起**真嵌入**（启动之后把 task 搬到虚拟屏）
+
+第141轮的实现：**启动路径一个字没改**，启动成功之后**补一脚**：
+
+| 情况 | 动作 |
+|---|---|
+| task 已经在我们的虚拟屏上 | 什么都不做（车机上的常态） |
+| task 不在 | `IActivityManager.moveStackToDisplay(stackId, 我们的虚拟屏 id)` 搬过来 |
+
+- **API 28（AOSP 9）**：`moveStackToDisplay` —— 设备 framework 里数过字符串，
+  `moveStackToDisplay` 命中 2 次、`moveTaskToDisplay` 命中 **0** 次；
+- **API 29+**：`moveTaskToDisplay`（AOSP 10 才有，官方示例用的就是它）。
+
+**验嵌入的权威判据**（第141轮确立，以后别再用 `ResumedActivity` 判）：
+
+```bash
+# ① 窗口在哪个屏
+adb -s emulator-5560 shell dumpsys window windows \
+  | grep -A2 "Window{.*embedtest" | grep -E "Window\{|mDisplayId"
+# ② 虚拟屏上有没有窗口（token 列表为空 = 没嵌进去）
+adb -s emulator-5560 shell dumpsys window displays \
+  | grep -A6 "Display: mDisplayId=2[0-9]"
+# ③ 栈归属
+adb -s emulator-5560 shell am stack list | grep -B1 embedtest
+```
+
+**通过标准**：①的 `mDisplayId` == 我们的虚拟屏 id，且②的 token 列表**非空**。
+
+**模拟器上请用 `embedtest` 验，不要用高德**：
+
+高德进程会**自己**起 `MainMapActivity`（`flg=0x10000000` NEW_TASK，**不带** displayId），
+AOSP 9 的 AMS 就把它放回主屏 → 我们的搬移追不上它的节奏。
+这是「高德 + AOSP 9」的组合行为，**不是我们的代码问题**（车机 ROM 上没这现象）。
+`embedtest` 干净、无首启弹窗、不自己起活动 → 是 API 28 上的**可靠**验证对象。
+
+**启动顺序是红线**（第141轮的教训）：
+
+启动顺序、旗标、Intent **保持 4237 真机验证过的样子**：
+`startActivity(PendingIntent)` → `startActivityForResult(Intent, int)` → `startActivity(Intent)`。
+第140轮曾把 API 28 改成「先 `startActivity(Intent)`」—— 第141轮**已回退**。
+`tools/verify_y141_reverse.sh` 的反向 1 项专门盯这条。
 
 ## 0. 流程要求（第八十轮起，**硬性**）
 

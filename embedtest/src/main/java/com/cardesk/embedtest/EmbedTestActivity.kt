@@ -1,7 +1,10 @@
 package com.cardesk.embedtest
 
 import android.app.Activity
+import android.app.ActivityManager
+import android.content.Context
 import android.graphics.Color
+import android.view.Display
 import android.os.Bundle
 import android.view.Gravity
 import android.widget.LinearLayout
@@ -29,6 +32,9 @@ import android.widget.TextView
  */
 class EmbedTestActivity : Activity() {
 
+    /** 根容器（诊断时要读它的 display）。 */
+    private lateinit var root: LinearLayout
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -46,8 +52,15 @@ class EmbedTestActivity : Activity() {
             gravity = Gravity.CENTER
             setBackgroundColor(Color.parseColor("#0F6C4A"))
         }
+        val where = TextView(this).apply {
+            text = "所在 display：待测量"
+            setTextColor(Color.parseColor("#BFF3E2"))
+            textSize = 14f
+            gravity = Gravity.CENTER
+            setBackgroundColor(Color.parseColor("#0F6C4A"))
+        }
 
-        val root = LinearLayout(this).apply {
+        root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             setBackgroundColor(Color.parseColor("#0F6C4A"))
@@ -67,6 +80,13 @@ class EmbedTestActivity : Activity() {
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                 ),
             )
+            addView(
+                where,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ),
+            )
         }
         setContentView(root)
 
@@ -74,6 +94,45 @@ class EmbedTestActivity : Activity() {
         root.post {
             val dm = resources.displayMetrics
             size.text = "承载面尺寸：${dm.widthPixels}×${dm.heightPixels} @${dm.densityDpi}dpi"
+            where.text = describeDisplay()
+        }
+    }
+
+    /**
+     * 报告「我到底在哪个 display 上」。
+     *
+     * ## 两条口径，各说各的
+     *
+     * | 口径 | 是什么 | API 28 上可用吗 |
+     *---|---|---|
+     * | **task 的 displayId** | AMS 记的 task 归属 | **不可用** —— AOSP 9 的 `RunningTaskInfo` **根本没有这个字段**（AOSP 10 才加） |
+     * | **`View.getDisplay()`** | 这个 View 的窗口挂在哪块屏上 | **可用** —— 实测真嵌入时返回虚拟屏 id（16），落到主屏时返回 0 |
+     *
+     * 第140轮曾以为「`View.getDisplay()` 在 API 28 上恒返回默认屏、不可信」——
+     * **那是没量准**：第141轮实测，它返回的是**窗口真实所在的那块屏**。
+     * （`ViewRootImpl` 拿不到 display 时才退化成 `Display.DEFAULT_DISPLAY`，
+     * 那是「窗口还没挂到虚拟屏」的情形。）
+     *
+     * 所以这里：先试 task 口径（API 29+ 能读到），读不到就用 View 口径，
+     * 并**标明用的是哪一条** —— 别让排障的人把两条口径搞混。
+     */
+    private fun describeDisplay(): String {
+        val taskDisplayId = runCatching {
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+            val task = am?.getRunningTasks(10)
+                ?.firstOrNull { it.baseActivity?.packageName == packageName }
+            task?.javaClass?.getField("displayId")?.getInt(task)
+        }.getOrNull()
+
+        if (taskDisplayId != null) {
+            val kind = if (taskDisplayId == Display.DEFAULT_DISPLAY) " ← 主屏，不是虚拟屏" else " ← 虚拟屏"
+            return "所在 display：#$taskDisplayId（task 归属）$kind"
+        }
+        val d = root?.display
+        return if (d == null) {
+            "所在 display：读不到（task / View 两条路都失败）"
+        } else {
+            "所在 display：#${d.displayId}（View 口径：窗口挂在这块屏上）"
         }
     }
 }

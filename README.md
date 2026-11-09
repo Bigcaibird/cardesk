@@ -4830,7 +4830,30 @@ VirtualDisplay 的 display id 换了一个（#67 → #68），
 > 用户诉求：「以后虚拟机测试用 API 28 的虚拟机」——
 > 车机就是 Android 9 / API 28，模拟器口径必须跟真车一致。
 
-### 先更正一个错判：模拟器上高德的画中画**其实是好的**
+> ⚠️ **第141轮更正（必读）**：下面「模拟器上高德的画中画**其实是好的**」这个结论
+> **是错的**，第141轮已推翻。
+>
+> 用户当时指出：「你提供的截图里，**高德是全屏的**」—— **用户是对的**。
+> 重新取证（`dumpsys window windows` 看窗口的 `mDisplayId`）后确认：
+>
+> ```
+> Window{… com.autonavi.amapautp.yh/com.autonavi.amapauto.MainMapActivity}:
+>     mDisplayId=0 stackId=30          ← 落在**主屏**，不是虚拟屏
+> ```
+>
+> `dumpsys activity activities` 里那行 `ResumedActivity` **不能**用来判定嵌入
+> （它会出现在虚拟屏段，但窗口可能仍在主屏）——
+> **权威判据是窗口的 `mDisplayId` + `dumpsys window displays` 的 token 列表**。
+> 当时那张截图之所以「看着像嵌进去了」，是因为导航页的地图卡是**透明洞**，
+> 透出的是**背后主屏上全屏运行的承载应用**。
+>
+> 根因：**AOSP 9 的 AMS 不会把新建的 task 放到请求的 display 上**
+> （`ActivityStackSupervisor.findTaskLocked(r, displayId)` 跨屏找 affinity 匹配，
+> 目标 display 只是「优先」不是「限定」）；**车机 ROM 则会**。
+> → **这是 ROM 差异，不是我们的启动路径有问题**（4237 在真机上是好的）。
+> 修法见[第141轮](#第141轮api-28-上画中画真嵌入启动之后把-task-搬到虚拟屏)。
+
+### ~~先更正一个错判：模拟器上高德的画中画**其实是好的**~~（第141轮已推翻，见上）
 
 第140轮开工时的判断是「AOSP 9 会拒绝把高德放进虚拟屏」，依据是
 `ActivityStackSupervisor.canPlaceEntityOnDisplay()` 里那条 `resizeable` 校验
@@ -4979,3 +5002,214 @@ AOSP 的实现内部用 `prepareActivityOptions()`，**一定带 displayId**。
 > **真车（领克，API 28）仍需复验**：修的是判据与启动参数，
 > 真车是 OEM ROM，`ActivityView` 内部结构可能与 AOSP 不同
 > （所以 `virtualDisplayIdOf` 保留了「公开方法 → 自持 `mVirtualDisplay` → `mHost`」多路兜底）。
+
+---
+
+## 第141轮：API 28 上画中画**真嵌入**（启动之后把 task 搬到虚拟屏）
+
+> 起因：用户在第140轮的截图里指出「**高德是全屏的**」—— **用户是对的**。
+> 重新取证后确认：**4237 在真车上画中画是好的** → **启动路径没问题**，
+> 问题是 **AOSP 9 官方模拟器**的 AMS 不肯把 task 放到请求的 display 上。
+> 所以这一轮**没有动启动路径**，而是在启动**之后**补一脚。
+
+### 一、先把第140轮的结论更正掉
+
+第140轮写「模拟器上高德的画中画其实是好的」——**错的**。当时用的判据是：
+
+```
+dumpsys activity activities:
+  Display #13:
+    ResumedActivity: ActivityRecord{… com.autonavi.amapautp.yh/…MainMapActivity t30}
+```
+
+**这行不能用来判定嵌入**：它会出现在虚拟屏那一段，但**窗口可能仍在主屏上**。
+
+**权威判据**（第141轮确立，以后都按这个判）：
+
+```bash
+# ① 窗口到底在哪个屏
+adb -s emulator-5560 shell dumpsys window windows | grep -A2 "Window{.*amapauto" | grep -E "Window\{|mDisplayId"
+# ② 虚拟屏上到底有没有窗口（token 列表为空 = 没嵌进去）
+adb -s emulator-5560 shell dumpsys window displays | grep -A6 "Display: mDisplayId=2[0-9]"
+```
+
+实测（API 28，修复前）：
+
+```
+Window{… com.autonavi.amapautp.yh/com.autonavi.amapauto.MainMapActivity}:
+    mDisplayId=0 stackId=30          ← 主屏！不是虚拟屏
+Display: mDisplayId=21
+  Application tokens in top down Z order:
+    （空）                          ← 虚拟屏上一个窗口都没有
+```
+
+> 当时那张截图之所以「看着像嵌进去了」：导航页的地图卡是**透明洞**，
+> 透出的是**背后主屏上全屏运行的承载应用**。
+
+### 二、根因：**ROM 差异**，不是代码问题
+
+**车机 ROM 会把 task 放到请求的 display 上，AOSP 9 官方模拟器不会。**
+
+AOSP 9（`android-9.0.0_r1`）的 `ActivityStackSupervisor.findTaskLocked(r, displayId)`：
+
+```java
+for (int displayNdx = mActivityDisplays.size() - 1; displayNdx >= 0; --displayNdx) {
+    final ActivityDisplay display = mActivityDisplays.valueAt(displayNdx);
+    for (int stackNdx = display.getChildCount() - 1; stackNdx >= 0; --stackNdx) {
+        final ActivityStack stack = display.getChildAt(stackNdx);
+        …
+        if (mTmpFindTaskResult.r != null) {
+            if (!mTmpFindTaskResult.matchedByRootAffinity) {
+                return mTmpFindTaskResult.r;
+            } else if (mTmpFindTaskResult.r.getDisplayId() == displayId) {
+                affinityMatch = mTmpFindTaskResult.r;      // ← 只有这一支才「优先」目标 display
+            }
+        }
+    }
+}
+return affinityMatch;      // ← 跨屏的 affinity 匹配**照样**被返回
+```
+
+也就是说：**目标 display 只是「优先」，不是「限定」**；
+AOSP 9 在新建 task 时又会退回默认显示器 → 承载应用**全屏抢屏**，画中画那块是空的。
+
+**交叉验证（同一台模拟器，同一个 AMS）**：
+
+```bash
+# 服务层显式指定 display → 落点正确
+$ adb shell am stack start 21 -n com.cardesk.embedtest/.EmbedTestActivity
+  → displayId=21 stacks=1              ✓ 放得上去
+# 我们自己的启动（带 launchDisplayId）→ 落回主屏
+$ adb shell dumpsys window windows | grep -A2 "Window{.*embedtest"
+    mDisplayId=0                        ✗
+```
+
+→ **AMS 有能力放，是「怎么放」的问题**。
+
+### 三、修法：启动**之后**补一脚，把 task 搬到我们的虚拟屏
+
+**启动路径一个字都没改**（顺序、旗标、Intent 全部保持 4237 真机验证过的样子）。
+只在启动成功之后看一眼：
+
+| 情况 | 动作 |
+|---|---|
+| task **已经在**我们的虚拟屏上 | **什么都不做**（**车机上的常态** → 零行为变化） |
+| task **不在** | 搬到我们的虚拟屏（**AOSP 9 模拟器上的常态**） |
+
+搬移用的是 **AOSP 9 真实存在的** AMS 方法：
+
+| API | 方法 | 依据 |
+|---|---|---|
+| 28（AOSP 9） | `IActivityManager.moveStackToDisplay(stackId, displayId)` | 设备 framework 里 `moveStackToDisplay` 命中 2 次、`moveTaskToDisplay` 命中 **0** 次 |
+| 29+ | `moveTaskToDisplay(taskId, displayId, toFront)` | AOSP 10 才有；官方 `VirtualDisplay Launcher` 示例用的就是它 |
+
+> 官方 `VirtualDisplay Launcher` 示例的做法也是**启动后再搬**
+> （`ActivityManager.moveTaskToDisplay(taskId, virtualDisplayId, true)`）。
+
+**「在不在我们的屏上」这条判据，在 API 28 上不能靠 `displayId`** ——
+第141轮把设备上的真实字段打了出来：
+
+```
+baseActivity, configuration, description, id, lastActiveTime, numActivities,
+numRunning, resizeMode, stackId, supportsSplitScreenMultiWindow, thumbnail, topActivity
+```
+
+**AOSP 9 的 `RunningTaskInfo` 连 `displayId` 都没有**（AOSP 10 才加）！
+所以 API 28 上改用**第二套证据**：任务的**显示配置**（`RunningTaskInfo.configuration`）：
+
+| 任务配置的**宽度** | 结论 |
+|---|---|
+| 跟我们的虚拟屏一样（906） | **在** → 不搬 |
+| 跟主屏一样（1920） | **不在** → 搬 |
+| 两边都不像 | **不知道** → **不搬**（宁可不动，也不能误搬） |
+
+**为什么只比宽度**：三个高度口径互相对不上（屏 1080 / app 区 968 / 任务配置 944 ——
+差的是状态栏、导航栏），拿高度比必然误判；**宽度不受系统装饰影响**（1920 vs 906）。
+
+### 四、顺带修掉一个**真 bug**：第130轮的判据在 API 28 上**从来没生效过**
+
+`PipSurface.isTaskOnOurDisplay()` 里原来写着：
+
+```kotlin
+it.baseActivity?.packageName == pkg || it.baseIntent.getPackage() == pkg
+```
+
+`RunningTaskInfo.baseIntent` 这个字段 **AOSP 9 里不存在**（API 29 才移除），
+而我们的编译目标更高 → Kotlin 把它编译成**直接的字段访问** → 运行就是：
+
+```
+java.lang.NoSuchFieldError: No field baseIntent of type Landroid/content/Intent;
+    in class Landroid/app/ActivityManager$RunningTaskInfo
+    at com.cardesk.launcher.ui.pip.PipSurface.isTaskOnOurDisplay(PipSurface.kt:748)
+```
+
+只要任务列表里有**别的包**（第一个条件不成立）就会走到第二个条件 → **抛异常**
+→ **每轮看门狗都失败** → 「画中画黑屏自愈」那一整级在车机（API 28）上**等于没有**。
+
+改用 `baseActivity` / `topActivity`（AOSP 9 有，且是公开 API）。
+
+### 五、验证结果（API 28 模拟器，`emulator-5560`）
+
+**embedtest（干净的测试承载应用）——真嵌入成功**：
+
+```
+Window{… com.cardesk.embedtest/com.cardesk.embedtest.EmbedTestActivity}:
+    mDisplayId=16 stackId=34          ← 虚拟屏！
+
+$ adb shell am stack list
+  Stack id=34 bounds=[0,0][906,867] displayId=16
+    taskId=73: com.cardesk.embedtest/…EmbedTestActivity
+
+$ adb shell dumpsys window displays | grep -A6 "Display: mDisplayId=16"
+  Application tokens in top down Z order:
+    taskId=73 → appTokens=[… EmbedTestActivity …]     ← 虚拟屏上真的有窗口
+```
+
+日志：
+
+```
+承载任务快照 pkg=com.cardesk.embedtest our=16 task=73 stack=30 display=null
+    size=1920x944 ourSize=906x867 mainSize=1920x1080
+承载任务搬到我们的虚拟屏 pkg=com.cardesk.embedtest api=STACK_TO_DISPLAY task=73 stack=30 to=16
+承载任务搬移完成 pkg=com.cardesk.embedtest reason=已搬到我们的虚拟屏
+```
+
+### 六、对车机的影响：**零行为变化**
+
+- 启动路径没动（4237 真机验证过的顺序，第一条红线）；
+- 搬移**只在确证「不在我们屏上」时才发**——车机上是常态 → **一次 AMS 调用都不发**；
+- 「不知道」一律**不搬**；
+- 搬移期间看门狗**暂缓判黑**（否则会把「正在搬」误判成黑屏 → 重启承载应用）。
+
+### 七、这一轮**没有**做的
+
+- **没有**改启动顺序/旗标/Intent（第140轮曾动过，第141轮**已回退**）；
+- **没有**改画中画其它历史问题（黑屏自愈分级、尺寸变化重载一律照旧）；
+- **没有**在 API 28 上启用「黑屏自愈」判据（`displayId` 读不到 → 仍按「不知道」处理，
+  宁可漏判也不能误判**重启用户正在用的应用**）；
+- **没有**发 GitHub Release、**没有**传 R2（等明确指示）。
+
+### 八、遗留
+
+- **高德在 AOSP 9 模拟器上会自己把 task 拉回主屏**：
+  高德进程自己起 `MainMapActivity`（`flg=0x10000000` NEW_TASK）时**不带** displayId，
+  AMS 就把它放回主屏 → 我们的搬移追不上它的节奏。
+  **这属于「高德 + AOSP 9」的组合行为**，不是我们的代码问题；
+  车机 ROM 上没有这个现象（用户实测高德画中画正常）。
+  → 模拟器上验画中画请用 **`embedtest`**（干净、无首启弹窗、不自己起活动）。
+- **真车（领克，API 28）必须复验**：这一轮改的是「启动之后补一脚」，
+  车机上应当**一次都不触发**（task 本来就在我们的屏上），
+  但「判据用的是显示配置宽度」这条在真车上的取值需要确认。
+
+### 九、产物
+
+| 项 | 值 |
+|---|---|
+| 文件 | `dist/CarDesk-platform-ecarx-cardesk-4239.apk` |
+| versionCode / versionName | 4239 / 1.0.1143-system |
+| 大小 | 2 359 645 字节 |
+| SHA-256 | `b1c0edd48a533aa476fccf267ce7ce41facba66596742a18343ab2badc8ca016` |
+| 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
+| 单测 | 1967 项全绿（新增 `HostTaskMigratorTest` 14 项） |
+| 反向验证 | `tools/verify_y141_reverse.sh` —— 10 项全红、还原后全绿 |
+| 报告 | `emu-verify/y141/REPORT-y141.md` |

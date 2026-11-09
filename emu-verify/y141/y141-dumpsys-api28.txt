@@ -1,0 +1,33 @@
+=== dumpsys window windows（承载应用窗口的 displayId）===
+  Window #7 Window{dec60e4 u0 com.autonavi.amapautp.yh/com.autonavi.amapauto.MainMapActivity}:
+    mDisplayId=0 stackId=46 mSession=Session{f25e938 14879:u0a10073} mClient=android.os.BinderProxy@46f2c77
+  Window #9 Window{50e8606 u0 com.cardesk.embedtest/com.cardesk.embedtest.EmbedTestActivity}:
+    mDisplayId=19 stackId=49 mSession=Session{46014eb 15378:u0a10075} mClient=android.os.BinderProxy@e9008e1
+  mObscuringWindow=Window{50e8606 u0 com.cardesk.embedtest/com.cardesk.embedtest.EmbedTestActivity}
+
+=== am stack list（栈归属）===
+  taskId=75: com.autonavi.amapautp.yh/com.autonavi.auto.remote.fill.UsbFillActivity bounds=[0,0][1920,1080] userId=0 visible=false topActivity=ComponentInfo{com.autonavi.amapautp.yh/com.autonavi.amapauto.MainMapActivity}
+  taskId=78: com.cardesk.embedtest/com.cardesk.embedtest.EmbedTestActivity bounds=[0,0][906,867] userId=0 visible=true topActivity=ComponentInfo{com.cardesk.embedtest/com.cardesk.embedtest.EmbedTestActivity}
+
+=== dumpsys window displays（虚拟屏 token 列表）===
+  Display: mDisplayId=19
+  Application tokens in top down Z order:
+    mStackId=49
+    mDeferRemoval=false
+    mBounds=[0,0][906,867]
+      taskId=78
+        mBounds=[0,0][906,867]
+        mdr=false
+        appTokens=[AppWindowToken{6abba7e token=Token{b77e439 ActivityRecord{c760400 u0 com.cardesk.embedtest/.EmbedTestActivity t78}}}]
+        mTempInsetBounds=[0,0][0,0]
+          Activity #0 AppWindowToken{6abba7e token=Token{b77e439 ActivityRecord{c760400 u0 com.cardesk.embedtest/.EmbedTestActivity t78}}}
+            windows=[Window{50e8606 u0 com.cardesk.embedtest/com.cardesk.embedtest.EmbedTestActivity}]
+            windowType=2 hidden=false hasVisible=true
+            app=true mVoiceInteraction=false
+            task={taskId=78 appTokens=[AppWindowToken{6abba7e token=Token{b77e439 ActivityRecord{c760400 u0 com.cardesk.embedtest/.EmbedTestActivity t78}}}] mdr=false}
+             mFillsParent=true mOrientation=-1
+            hiddenRequested=false mClientHidden=false reportedDrawn=true reportedVisible=true
+            mNumInterestingWindows=1 mNumDrawnWindows=1 inPendingTransaction=false allDrawn=true lastAllDrawn=true)
+            startingData=com.android.server.wm.SplashScreenStartingData@c1db4b5 removed=false firstWindowDrawn=true mIsExiting=false
+            controller=AppWindowContainerController{ token=Token{b77e439 ActivityRecord{c760400 u0 com.cardesk.embedtest/.EmbedTestActivity t78}} mContainer=AppWindowToken{6abba7e token=Token{b77e439 ActivityRecord{c760400 u0 com.cardesk.embedtest/.EmbedTestActivity t78}}} mListener=ActivityRecord{c760400 u0 com.cardesk.embedtest/.EmbedTestActivity t78}}
+  (空)

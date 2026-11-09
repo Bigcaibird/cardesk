@@ -25,6 +25,7 @@ import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.ui.Ui
 import com.cardesk.launcher.ui.embed.ActivityEmbed
+import com.cardesk.launcher.ui.embed.HostTaskMigration
 
 /**
  * 画中画（PIP）承载面。
@@ -738,14 +739,32 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
     private fun isTaskOnOurDisplay(pkg: String): Boolean? {
         if (pkg.isBlank()) return null
         val v = content ?: return null
+        // 第141轮：**正在把 task 搬到我们的虚拟屏上** → 一律按「不知道」处理。
+        //
+        // 搬完之前，承载应用的 task 确实**不在**我们的屏上（它还在主屏等着被搬）。
+        // 这时候判成「黑屏」→ **重启承载应用** → 越搬越乱。
+        if (HostTaskMigration.isMigrating(pkg)) return null
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return null
         val tasks = runCatching { am.getRunningTasks(MAX_RUNNING_TASKS) }.getOrNull() ?: return null
         if (tasks.isEmpty()) return null
         val ourId = ActivityEmbed.virtualDisplayIdOf(v)
         logOurDisplayId(ourId)
         if (ourId == null) return null
+        // 第141轮修的**真 bug**：这里原来写的是
+        // `it.baseActivity?.packageName == pkg || it.baseIntent.getPackage() == pkg`。
+        //
+        // `RunningTaskInfo.baseIntent` 这个字段 **AOSP 9（AOSP 9 的 TaskInfo 里没有）**
+        // —— 它在 API 29 才被移除，而我们的编译目标是更高的 SDK，
+        // 于是 Kotlin 把它编译成**直接的字段访问** → 在 API 28 上运行就是
+        // `NoSuchFieldError: No field baseIntent`。
+        //
+        // 后果：只要任务列表里有**别的包**（第一个条件不成立），
+        // 就会走到第二个条件 → **抛异常** → 整个判据每轮看门狗都失败
+        // → 「画中画黑屏判据」在车机（API 28）上**从来没生效过**。
+        //
+        // 改用 `baseActivity` / `topActivity`（这两个字段 AOSP 9 有，且是公开 API）。
         val mine = tasks.filter {
-            it.baseActivity?.packageName == pkg || it.baseIntent.getPackage() == pkg
+            it.baseActivity?.packageName == pkg || it.topActivity?.packageName == pkg
         }
         // 还没找到我们的 task → 不知道（交给进程看门狗那条路）
         if (mine.isEmpty()) return null

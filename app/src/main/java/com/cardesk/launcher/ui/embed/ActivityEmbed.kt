@@ -344,6 +344,16 @@ object ActivityEmbed {
      * 承载面就绪后启动承载应用（**只启动一次**）。
      *
      * 启动 API 的顺序见类注释：带 displayId 的优先。
+     *
+     * ## 第141轮补的一脚：启动之后**把 task 搬到我们的虚拟屏**
+     *
+     * 启动顺序、旗标、Intent **一个字都没改**（车机验证过的路径保持原样）。
+     * 只是在启动成功之后补一次「**它到底落在哪个屏上**」的检查：
+     *
+     * - 已经在我们的虚拟屏上 → 什么都不做（**车机上的常态**）；
+     * - 不在 → 搬过来（**AOSP 9 模拟器上的常态**）。
+     *
+     * 详见 [HostTaskMigration]。
      */
     fun startActivity(view: View, intent: Intent) {
         val pkg = intent.`package`
@@ -351,11 +361,13 @@ object ActivityEmbed {
         // —— 1) 隐藏 API：startActivity(PendingIntent, ActivityOptions) ——
         if (startViaPendingIntent(view, intent)) {
             Logx.i(LogTags.NAV_UI, "ActivityView 启动承载应用", "pkg" to pkg, "api" to "pendingIntent")
+            HostTaskMigration.schedule(view, pkg)
             return
         }
         // —— 2) startActivityForResult(Intent, int)（API 29 上带 displayId）——
         if (startViaIntentForResult(view, intent)) {
             Logx.i(LogTags.NAV_UI, "ActivityView 启动承载应用", "pkg" to pkg, "api" to "startActivityForResult")
+            HostTaskMigration.schedule(view, pkg)
             return
         }
         // —— 3) 兜底：startActivity(Intent) ——
@@ -374,6 +386,7 @@ object ActivityEmbed {
             } else {
                 Logx.i(LogTags.NAV_UI, "ActivityView 启动承载应用", "pkg" to pkg, "api" to "startActivity")
             }
+            HostTaskMigration.schedule(view, pkg)
         }.onFailure {
             Logx.w(LogTags.NAV_UI, "ActivityView 启动承载应用失败", it, "pkg" to pkg)
         }
