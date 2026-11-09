@@ -36,6 +36,8 @@ import com.cardesk.launcher.core.Shape
 import com.cardesk.launcher.core.Skin
 import com.cardesk.launcher.core.apkstore.ApkEntry
 import com.cardesk.launcher.core.apkstore.ApkStore
+import com.cardesk.launcher.cluster.ClusterLyricColors
+import com.cardesk.launcher.cluster.ClusterLyricsService
 import com.cardesk.launcher.core.log.LogLevel
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
@@ -85,7 +87,6 @@ class SettingsOverlay(
     var onVehicleSource: (() -> Unit)? = null
     var onEditNavSlots: (() -> Unit)? = null
     var onShowTasks: (() -> Unit)? = null
-    var onShowLayoutDialog: (() -> Unit)? = null
 
     /** 桌面卡片布局（顺序/尺寸/显隐）变了：让场景页立刻重排。 */
     var onCardLayoutChanged: (() -> Unit)? = null
@@ -216,7 +217,8 @@ class SettingsOverlay(
         NavGroup(
             "界面显示",
             listOf(
-                NavItem("layout", "仪表歌词"),
+                NavItem("desktoplyric", "桌面歌词"),
+                NavItem("clusterlyric", "仪表歌词"),
                 NavItem("dock", "Dock 状态栏"),
                 NavItem("quickapps", "Dock 快捷应用"),
             ),
@@ -241,6 +243,28 @@ class SettingsOverlay(
      * 离开当前页时要做的清理（第七十轮：氛围灯页要退订实时频谱）。
      */
     private var pageTeardown: (() -> Unit)? = null
+
+    /**
+     * 「投射目标」的屏幕列表容器（第一百三十七轮）。
+     *
+     * 点选了某块屏要把「●」挪过去，所以要能**就地重建**这一段，
+     * 而不是每次都重建整页（那样会丢掉滚动位置）。
+     */
+    private var clusterDisplayList: LinearLayout? = null
+
+    /** 「投射状态」那段文字（第一百三十七轮）。 */
+    private var clusterStatusText: TextView? = null
+
+    /**
+     * 打开歌词颜色选择器（第一百三十七轮）。
+     *
+     * 复用现成的 [com.cardesk.launcher.ui.dialogs.ColorPickerDialog]
+     * —— 设置页自己是个 View，不是弹层，起不了 `DialogSheet`，
+     * 所以取色器还是由桌面那边开（和「卡片颜色」同一套路）。
+     *
+     * @param slot 0 = 主歌词，1 = 副歌词。
+     */
+    var onShowClusterLyricColor: ((Int) -> Unit)? = null
 
     override fun onDetachedFromWindow() {
         // 面板被关掉时同样要摘监听 —— 否则会一直持有这一页的视图
@@ -274,8 +298,9 @@ class SettingsOverlay(
                 NavItem("wallpaper", "壁纸"),
                 NavItem("cardstyle", "卡片风格"),
                 NavItem("cards", "桌面卡片"),
+                NavItem("desktoplyric", "桌面歌词"),
+                NavItem("clusterlyric", "仪表歌词"),
                 NavItem("dualpip", "双画中画"),
-                NavItem("layout", "仪表歌词"),
                 NavItem("dock", "Dock 状态栏"),
                 NavItem("quickapps", "Dock 快捷应用"),
             ),
@@ -294,6 +319,7 @@ class SettingsOverlay(
                 NavItem("ambient", "氛围灯"),
                 NavItem("p360", "360 环影"),
                 NavItem("autostop", "启停控制"),
+                NavItem("carinfo", "车辆信息"),
                 NavItem("hotspot", "自动热点"),
                 NavItem("adb", "ADB 调试"),
             ),
@@ -616,7 +642,9 @@ class SettingsOverlay(
             "autostop" -> pageAutostop()
             "hotspot" -> pageHotspot()
             "adb" -> pageAdb()
-            "layout" -> pageLayout()
+            "desktoplyric" -> pageDesktopLyric()
+            "clusterlyric" -> pageClusterLyric()
+            "carinfo" -> pageCarInfo()
             "dock" -> pageDock()
             "quickapps" -> pageDockQuickApps()
             "oemsettings" -> pageOemSettings()
@@ -2172,12 +2200,24 @@ class SettingsOverlay(
     }
 
     /** 仪表歌词 + 桌面歌词字号 + 胎压。 */
-    private fun pageLayout() {
-        section("壁纸")
-        pickerRow("桌面壁纸", com.cardesk.launcher.core.Wallpapers.name(prefs.wallpaper)) {
-            select("wallpaper")
-        }
-        section("桌面歌词字号")
+    /**
+     * 桌面歌词（case "desktoplyric"）。
+     *
+     * ## 为什么单独开一页（第一百三十七轮）
+     *
+     * 以前这些设置和仪表歌词、壁纸、胎压、车模挤在同一个页面里
+     * （当时那个页面的导航名字叫「仪表歌词」，内容却大半是桌面歌词），
+     * 仪表歌词的真正入口还藏在页面最底下那个「打开布局参数对话框…」按钮里 ——
+     * **入口名字和内容对不上**，用户根本不知道去哪找。
+     *
+     * 第一百三十七轮起拆成三页，各归各位：
+     * - 「桌面歌词」= 这一页（桌面**自己**屏幕上显示的歌词）；
+     * - 「仪表歌词」= [pageClusterLyric]（**投到副屏**的歌词）；
+     * - 「车辆信息」= [pageCarInfo]（胎压 / 车模 / 数据源）。
+     */
+    private fun pageDesktopLyric() {
+        section("导航栏歌词槽字号")
+        note("Dock 状态栏里那条歌词（收起 / 展开两种形态）。")
         sliderRow("收起·主歌词", prefs.deskCompactMainSp, 14, 64, " px") {
             val from = prefs.deskCompactMainSp
             prefs.deskCompactMainSp = it
@@ -2270,6 +2310,278 @@ class SettingsOverlay(
             layoutOptions.firstOrNull { it.key == prefs.sceneLyricLayout }?.positionHint ?: "",
         )
         note("放大后一句能显示的字会变少（屏幕就那么宽）。")
+    }
+
+    /**
+     * 仪表歌词（case "clusterlyric"）。
+     *
+     * ## 这一页是什么
+     *
+     * 把歌词**投到副屏**（仪表 / 副驾屏）上显示 —— 与 [pageDesktopLyric]
+     * 的桌面歌词是**两套完全不同的画面**：
+     *
+     * | | 桌面歌词 | 仪表歌词 |
+     * |---|---|---|
+     * | 显示在哪 | 桌面自己的屏幕 | **另一块屏**（副屏） |
+     * | 数据来源 | 桌面卡片 | 同一个 `MusicController`（同源） |
+     * | 字号键 | `desk_desk_*_sp` | `desk_overlay_main_sp` / `desk_overlay_sub_sp` |
+     * | 颜色 | 跟随桌面主题 | **跟随日夜两套**（见 `ClusterLyricColors`） |
+     *
+     * 第一百三十三轮这些设置做在 `DesktopLayoutDialog` 里，藏在
+     * 那个叫「仪表歌词」的页面最底下的一个按钮里 —— 名字对不上、藏得深、
+     * 还和桌面歌词字号混在一处。第一百三十七轮起全部搬到这里，
+     * 和桌面歌词**彻底分开**。
+     */
+    private fun pageClusterLyric() {
+        // —— 总开关 ——
+        section("投射")
+        switchRow("仪表 Overlay 歌词", prefs.clusterOverlayEnabled, "把歌词贴到副屏（仪表 / 副驾屏）") {
+            val from = prefs.clusterOverlayEnabled
+            prefs.clusterOverlayEnabled = it
+            logSetting("desk_cluster_overlay", "仪表 Overlay 歌词", from, it)
+            // 开关一变就**立刻**生效：开 → 起服务去加窗；关 → 拆窗停服务。
+            // 不靠「应用」按钮 —— 用户点了开关就该马上看到结果，
+            // 否则「勾上了但什么都没发生」是这一页最容易招投诉的地方。
+            ClusterLyricsService.apply(context)
+            refreshClusterStatus()
+            // 开了却一块副屏都没有 → 立刻说清楚，别让用户以为是自己选错了。
+            if (it && ClusterLyricsService.displays(context).isEmpty()) {
+                Toast.makeText(
+                    context,
+                    "这台车机没有向应用暴露副屏，歌词无处可投",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+
+        // —— 投射目标 ——
+        section("投射目标")
+        val list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(list, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
+        clusterDisplayList = list
+        rebuildClusterDisplayList()
+        actionButton("刷新屏幕列表") {
+            rebuildClusterDisplayList()
+            refreshClusterStatus()
+        }
+
+        // —— 投射状态 ——
+        section("投射状态")
+        val statusText = Ui.text(context, "", 22f, pal.textDim)
+        body.addView(statusText, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
+        clusterStatusText = statusText
+        actionButton("刷新状态") { refreshClusterStatus() }
+
+        // —— 面板位置与样式 ——
+        section("面板位置与样式")
+        sliderRow("水平位置", prefs.overlayXPct, 0, 100, "%") {
+            val from = prefs.overlayXPct
+            prefs.overlayXPct = it
+            logSettingDebug("desk_overlay_x", "水平位置", from, it)
+            liveClusterRefresh()
+        }
+        sliderRow("垂直位置", prefs.overlayYPct, 0, 100, "%") {
+            val from = prefs.overlayYPct
+            prefs.overlayYPct = it
+            logSettingDebug("desk_overlay_y", "垂直位置", from, it)
+            liveClusterRefresh()
+        }
+        sliderRow("显示行数", prefs.clusterRows, 1, 3, " 行") {
+            val from = prefs.clusterRows
+            prefs.clusterRows = it
+            logSettingDebug("desk_cluster_rows", "显示行数", from, it)
+            liveClusterRefresh()
+        }
+        chipRow("面板样式", listOf("胶囊", "纯文字", "发光"), prefs.clusterStyle) { next ->
+            val from = prefs.clusterStyle
+            prefs.clusterStyle = next
+            logSetting("desk_cluster_style", "面板样式", from, next)
+            liveClusterRefresh()
+        }
+        sliderRow("模块宽度", prefs.overlayWidthPct, 30, 100, "%") {
+            val from = prefs.overlayWidthPct
+            prefs.overlayWidthPct = it
+            logSettingDebug("desk_overlay_w", "模块宽度", from, it)
+            liveClusterRefresh()
+        }
+        sliderRow("仪表背景透明度", prefs.overlayBgAlpha, 0, 100, "%") {
+            val from = prefs.overlayBgAlpha
+            prefs.overlayBgAlpha = it
+            logSettingDebug("desk_overlay_bg_alpha", "仪表背景透明度", from, it)
+            liveClusterRefresh()
+        }
+        note(
+            "0% = 不画底板，歌词直接落在仪表画面上（默认）。\n" +
+                "仪表底色太亮、字看不清时，把这里拉上去加一层底。",
+        )
+        sliderRow("主歌词字号", prefs.overlayMainSp, 12, 72, " px") {
+            val from = prefs.overlayMainSp
+            prefs.overlayMainSp = it
+            logSettingDebug("desk_overlay_main_sp", "主歌词字号", from, it)
+            liveClusterRefresh()
+        }
+        sliderRow("副歌词字号", prefs.overlaySubSp, 8, 48, " px") {
+            val from = prefs.overlaySubSp
+            prefs.overlaySubSp = it
+            logSettingDebug("desk_overlay_sub_sp", "副歌词字号", from, it)
+            liveClusterRefresh()
+        }
+
+        // —— 歌词颜色（第一百三十七轮：默认跟随日夜）——
+        section("歌词颜色")
+        note(
+            "默认跟随日夜：夜间用浅青配深色仪表，日间用深青配白色仪表，两套都够清楚。\n" +
+                "自己挑过颜色就以你挑的为准（不再跟随日夜）。",
+        )
+        pickerRow("主歌词颜色", clusterLyricColorLabel(0)) { onShowClusterLyricColor?.invoke(0) }
+        pickerRow("副歌词颜色", clusterLyricColorLabel(1)) { onShowClusterLyricColor?.invoke(1) }
+        actionButton("恢复跟随日夜") {
+            val fromMain = prefs.clusterLyricMainColor
+            val fromSub = prefs.clusterLyricSubColor
+            prefs.clusterLyricMainColor = 0
+            prefs.clusterLyricSubColor = 0
+            logSetting("desk_cluster_lyric_main_color", "主歌词颜色", fromMain, 0)
+            logSetting("desk_cluster_lyric_sub_color", "副歌词颜色", fromSub, 0)
+            liveClusterRefresh()
+            // 两行的标签要跟着变（从「#xxxxxx」变回「跟随日夜 · #xxxxxx」）——
+            // 重建整页最省事，也不容易漏掉某一行。
+            select("clusterlyric")
+        }
+    }
+
+    /**
+     * 重建「投射目标」的屏幕列表（第一百三十七轮）。
+     *
+     * 列表项就是这台车机**真正暴露给应用**的屏 ——
+     * 不是「车机物理上有几块屏」，而是「Android 侧能看到几块」。
+     * 这个差别很关键：仪表常常由独立 SoC / 总线驱动，
+     * 对系统而言它压根不是一块 `Display`，那就**画不上去**。
+     */
+    private fun rebuildClusterDisplayList() {
+        val list = clusterDisplayList ?: return
+        list.removeAllViews()
+        val rows = ClusterLyricsService.displays(context)
+        if (rows.isEmpty()) {
+            list.addView(
+                Ui.text(
+                    context,
+                    "这台车机没有向应用暴露副屏。\n" +
+                        "如果仪表由独立 SoC / 总线驱动，第三方窗口画不上去 —— 这不是设置问题。",
+                    20f,
+                    pal.textFaint,
+                ),
+                LinearLayout.LayoutParams(-1, -2),
+            )
+            return
+        }
+        rows.forEach { r ->
+            val selected = r.id == prefs.clusterDisplayId ||
+                (
+                    prefs.clusterDisplayId <= 0 && r.name.isNotEmpty() &&
+                        r.name.equals(prefs.clusterDisplayName, ignoreCase = true)
+                    )
+            val line = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                isClickable = true
+            }
+            line.addView(
+                Ui.text(
+                    context,
+                    (if (selected) "● " else "○ ") + r.label,
+                    24f,
+                    // 选中态用强调色（不是 accentInk —— 那是压在强调色**底**上的字色，
+                    // 这里行底是透明的，用它会变成深底深字）。
+                    if (selected) pal.accent else pal.text,
+                    bold = selected,
+                ),
+                LinearLayout.LayoutParams(0, -2, 1f),
+            )
+            if (r.presentation) {
+                line.addView(
+                    Ui.text(context, "副屏", 20f, pal.textFaint),
+                    LinearLayout.LayoutParams(-2, -2).also { it.rightMargin = 18 },
+                )
+            }
+            line.setOnClickListener {
+                val from = prefs.clusterDisplayId
+                prefs.clusterDisplayId = r.id
+                prefs.clusterDisplayName = r.name
+                logSetting("desk_cluster_display_id", "投射目标屏", from, r.id)
+                // 选完就生效：不用等「应用」。
+                ClusterLyricsService.refresh(context)
+                rebuildClusterDisplayList()
+                refreshClusterStatus()
+            }
+            list.addView(line, LinearLayout.LayoutParams(-1, 72))
+        }
+    }
+
+    /** 就地刷新（不改窗口连接）。 */
+    private fun liveClusterRefresh() {
+        ClusterLyricsService.refresh(context)
+        refreshClusterStatus()
+    }
+
+    /** 刷新「投射状态」那段文字。 */
+    private fun refreshClusterStatus() {
+        val tv = clusterStatusText ?: return
+        val status = ClusterLyricsService.status(context)
+        val report = status["report"] as? String ?: "未启用"
+        val target = status["displayName"] as? String ?: ""
+        val track = status["track"] as? String ?: ""
+        val artist = status["artist"] as? String ?: ""
+        val lines = status["lyricLines"] as? Int ?: 0
+        tv.text = buildString {
+            append("状态：").append(report)
+            append('\n')
+            append("目标屏：").append(if (target.isEmpty()) "未选择" else target)
+            append('\n')
+            append("曲目：").append(if (track.isEmpty()) "—" else "$track / $artist")
+            append('\n')
+            append("歌词：").append(if (lines > 0) "$lines 行" else "无")
+        }
+    }
+
+    /**
+     * 歌词颜色那一行的取值文案（第一百三十七轮）。
+     *
+     * 没挑过颜色（`0`）时显示「跟随日夜 · #xxxxxx」——
+     * 把**当前这套日夜会用的实际色值**一起写出来。
+     * 光写「跟随日夜」四个字，用户点进去之前不知道到底会是什么颜色；
+     * 而这一页要解决的正是「日间看不清」，色值透明比「跟随」两个字有用得多。
+     */
+    private fun clusterLyricColorLabel(slot: Int): String {
+        val c = if (slot == 0) prefs.clusterLyricMainColor else prefs.clusterLyricSubColor
+        if (c != 0) return String.format("#%06X", c and 0xFFFFFF)
+        // 用**投射服务同一个解析器**算当前是白天还是晚上 ——
+        // 否则这里显示的色值和实际投到仪表上的可能对不上（第一百三十七轮）。
+        val night = com.cardesk.launcher.core.NightResolver.resolve(prefs, context)
+        val effective = if (slot == 0) ClusterLyricColors.main(night) else ClusterLyricColors.sub(night)
+        return "跟随日夜 · " + String.format("#%06X", effective and 0xFFFFFF)
+    }
+
+    /**
+     * 取色器选完颜色后刷新「歌词颜色」两行的标签（第一百三十七轮）。
+     *
+     * 取色器是**另一个弹层**（桌面那边开的），选完回到设置页时
+     * 这两行的标签还是旧的色值，得主动刷一遍。
+     */
+    fun refreshClusterLyricColorLabels() {
+        select("clusterlyric")
+    }
+
+    /**
+     * 车辆信息（case "carinfo"）。
+     *
+     * ## 为什么从「仪表歌词」页里搬出来
+     *
+     * 胎压数字字号、车模编号、车辆数据源这三项**都不是歌词**，
+     * 它们管的是桌面上那块车况卡片（第134~136轮做的车门提醒 / 续航分级配色
+     * 也都落在同一块卡片上）。它们混在「仪表歌词」页里，
+     * 是这一页名字与内容对不上的根源之一 —— 搬到这里归位。
+     */
+    private fun pageCarInfo() {
         section("胎压")
         sliderRow("胎压数字字号", prefs.deskTpmsValueSp, 10, 48, " px") {
             val from = prefs.deskTpmsValueSp
@@ -2290,7 +2602,6 @@ class SettingsOverlay(
             onVehicleSource?.invoke()
         }
         note("切换后立即生效。")
-        actionButton("打开布局参数对话框…") { onShowLayoutDialog?.invoke() }
     }
 
     /** Dock 状态栏（case "dock"）+ 增强导航栏 / 槽位。 */

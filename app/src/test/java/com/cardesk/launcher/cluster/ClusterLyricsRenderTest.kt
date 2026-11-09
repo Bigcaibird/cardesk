@@ -4,10 +4,9 @@ import android.app.Activity
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.view.View
-import android.widget.FrameLayout
 import com.cardesk.launcher.core.Palettes
 import com.cardesk.launcher.core.Prefs
-import com.cardesk.launcher.ui.dialogs.DesktopLayoutDialog
+import com.cardesk.launcher.ui.SettingsOverlay
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -24,8 +23,8 @@ import java.io.FileOutputStream
  * ## 为什么要有这个
  *
  * 真机上这块屏是**看不见摸不着**的（它在副驾前面 / 仪表后面），
- * 截图只能截到主屏 —— 面板长什么样、位置对不对、擦除高亮有没有画出来，
- * 只能靠这里渲一张出来看。
+ * 截图只能截到主屏 —— 面板长什么样、位置对不对、擦除高亮有没有画出来、
+ * **日间模式下的颜色够不够亮**，只能靠这里渲一张出来看。
  *
  * 产物写到 cardesk/preview/ 下：
  *
@@ -35,8 +34,9 @@ import java.io.FileOutputStream
  * | `31-cluster-plain.png` | 纯文字样式 |
  * | `32-cluster-glow.png` | 发光样式 |
  * | `33-cluster-empty.png` | 空态（没在播） |
- * | `34-cluster-settings.png` | 仪表歌词设置页（含投射目标 / 投射状态 / 位置 / 行数 / 样式） |
+ * | `34-cluster-settings.png` | 仪表歌词设置页（含投射目标 / 投射状态 / 位置 / 行数 / 样式 / 颜色） |
  * | `35-cluster-plate.png` | 底板透明度拉到 70% 的样子（这个选项还在，仪表底色太亮时用） |
+ * | `36-cluster-day.png` | **日间模式**：白色仪表底 + 深青歌词（第一百三十七轮） |
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w1920dp-h1080dp-land")
@@ -58,12 +58,11 @@ class ClusterLyricsRenderTest {
     /** 副歌词字号（sp）。 */
     private val subSp = 18f
 
-    private val accent = 0xFF7FE3D4.toInt()
-
-    private val muted = 0xFF9FB4BB.toInt()
-
-    /** 仪表自己的底色（模拟仪表盘面）。 */
+    /** 仪表自己的底色（模拟**夜间**仪表盘面）。 */
     private val clusterBg = 0xFF1A2430.toInt()
+
+    /** 仪表自己的底色（模拟**日间**仪表盘面 —— 白色）。 */
+    private val clusterDayBg = 0xFFFFFFFF.toInt()
 
     @Test
     fun 三种样式各渲一张() {
@@ -118,22 +117,46 @@ class ClusterLyricsRenderTest {
         )
     }
 
+    /**
+     * 日间模式：白色仪表底 + 深青歌词（第一百三十七轮）。
+     *
+     * 这张图就是用户反馈的那件事的**证据**：
+     * 第一百三十三轮只有一套浅青配色，落在白底上基本看不见；
+     * 现在日间走深青，落在白色仪表上一眼就清楚。
+     */
     @Test
-    fun 设置页渲一张() {
+    fun 日间模式渲一张() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        shotPanel(
+            activity,
+            ClusterLyricsView.STYLE_PLAIN,
+            ClusterLyricSnapshot(
+                title = "晴天",
+                playing = true,
+                previousText = "故事的小黄花",
+                currentText = "从出生那年就飘着",
+                nextText = "童年的荡秋千",
+                wipe = 0.45f,
+                lyricLines = 64,
+            ),
+            0,
+            "36-cluster-day.png",
+            night = false,
+            bg = clusterDayBg,
+        )
+    }
+
+    @Test
+    fun 仪表歌词设置页渲一张() {
         val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
         val prefs = Prefs(activity.applicationContext)
-        val dialog = DesktopLayoutDialog(activity, Palettes.night, prefs)
-        val host = FrameLayout(activity)
-        host.addView(
-            dialog,
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT,
-            ),
-        )
-        activity.setContentView(host)
-        shot(host, 1920, 1080, "34-cluster-settings.png")
-        assertTrue("设置页应该渲染出内容", host.width > 0)
+        // 第一百三十七轮起这些设置不再是独立对话框，而是设置页里的「仪表歌词」页 ——
+        // 所以这里渲染的是真正的设置页（不是另做一个长得像的）。
+        val overlay = SettingsOverlay(activity, prefs, Palettes.night)
+        activity.setContentView(overlay)
+        overlay.showPageKey("clusterlyric")
+        shot(overlay, 1920, 1080, "34-cluster-settings.png")
+        assertTrue("设置页应该渲染出内容", overlay.width > 0)
     }
 
     /**
@@ -142,6 +165,9 @@ class ClusterLyricsRenderTest {
      * 位置用**真实的几何函数**算（[ClusterPanelGeometry]），
      * 所以这张图里的位置就等于真车上的位置 ——
      * 这也正是把几何抽成纯 Kotlin 类的意义。
+     *
+     * @param night 用夜间配色还是日间配色（[ClusterLyricColors]）。
+     * @param bg 仪表自己的底色（夜间深色 / 日间白色）。
      */
     private fun shotPanel(
         activity: Activity,
@@ -149,19 +175,21 @@ class ClusterLyricsRenderTest {
         snapshot: ClusterLyricSnapshot,
         bgAlphaPercent: Int,
         name: String,
+        night: Boolean = true,
+        bg: Int = clusterBg,
     ) {
         val view = ClusterLyricsView(activity)
         val mainPx = mainSp * density
         val subPx = subSp * density
-        // 底板颜色跟服务里 `backgroundOf` 同一套算法：alpha = 百分比。
+        // 底板颜色跟服务里 `backgroundOf` 同一套算法：alpha = 百分比，底色跟着日夜翻。
         val alpha = (255 * bgAlphaPercent / 100f).toInt().coerceIn(0, 255)
         view.configure(
             mainPx,
             subPx,
             ClusterPanelGeometry.DEFAULT_ROWS,
-            accent,
-            muted,
-            (alpha shl 24) or 0x00101820,
+            ClusterLyricColors.main(night),
+            ClusterLyricColors.sub(night),
+            (alpha shl 24) or (ClusterLyricColors.plate(night) and 0x00FFFFFF),
             style,
         )
         view.snapshot = snapshot
@@ -178,7 +206,7 @@ class ClusterLyricsRenderTest {
 
         val bmp = Bitmap.createBitmap(clusterWidth, clusterHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
-        canvas.drawColor(clusterBg)
+        canvas.drawColor(bg)
         canvas.translate(origin[0].toFloat(), origin[1].toFloat())
         view.draw(canvas)
         save(bmp, name)

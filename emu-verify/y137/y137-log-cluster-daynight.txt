@@ -1,0 +1,9 @@
+11-09 09:43:50.584 16353 16369 I TestRunner: run started: 2 tests
+11-09 09:43:50.586 16353 16369 I TestRunner: started: 日夜切换后副屏上的歌词颜色会跟着换(com.cardesk.launcher.cluster.ClusterLyricsCastTest)
+11-09 09:43:50.723 16353 16353 I CarDesk/Cluster: 歌词已投到副屏 display=CarDesk 测试仪表 displayId=20 size=1920x720 density=1.5 panel=1920x155
+11-09 09:44:05.511 16353 16353 I CarDesk/Cluster: 日夜态变化，重配歌词颜色 night=false
+11-09 09:44:06.387 16353 16369 I TestRunner: finished: 日夜切换后副屏上的歌词颜色会跟着换(com.cardesk.launcher.cluster.ClusterLyricsCastTest)
+11-09 09:44:06.410 16353 16369 I TestRunner: started: 歌词窗口能挂到第二块屏上并且真的画出东西(com.cardesk.launcher.cluster.ClusterLyricsCastTest)
+11-09 09:44:06.488 16353 16353 I CarDesk/Cluster: 歌词已投到副屏 display=CarDesk 测试仪表 displayId=21 size=1920x720 density=1.5 panel=1920x155
+11-09 09:44:07.016 16353 16369 I TestRunner: finished: 歌词窗口能挂到第二块屏上并且真的画出东西(com.cardesk.launcher.cluster.ClusterLyricsCastTest)
+11-09 09:44:07.024 16353 16369 I TestRunner: run finished: 2 tests, 0 failed, 0 ignored

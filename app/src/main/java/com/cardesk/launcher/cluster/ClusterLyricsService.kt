@@ -22,6 +22,7 @@ import android.view.WindowManager
 import com.cardesk.launcher.MainActivity
 import com.cardesk.launcher.R
 import com.cardesk.launcher.core.Prefs
+import com.cardesk.launcher.core.NightResolver
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.core.media.MusicController
@@ -82,6 +83,14 @@ class ClusterLyricsService : Service() {
         /** 附着探针的节流（5s）。 */
         private const val HEALTH_RETRY_MS = 5_000L
 
+        /**
+         * 日夜态的轮询间隔（毫秒）。
+         *
+         * 读一次要走一次车控通道（Binder），所以不能每次喂数（700ms）都读。
+         * 日夜态本来就是低频变化（一天几次），2 秒的延迟人眼察觉不到。
+         */
+        private const val NIGHT_POLL_MS = 2_000L
+
         /** 样式：胶囊底板。 */
         const val STYLE_PILL = ClusterLyricsView.STYLE_PILL
 
@@ -91,11 +100,17 @@ class ClusterLyricsService : Service() {
         /** 样式：发光。 */
         const val STYLE_GLOW = ClusterLyricsView.STYLE_GLOW
 
-        /** 默认强调色（青绿）。 */
-        const val DEFAULT_ACCENT = 0xFF7FE3D4.toInt()
+        /**
+         * 默认强调色（青绿）。
+         *
+         * **只剩夜间这一档了** —— 第一百三十七轮起默认配色跟着日夜走，
+         * 日间用深青 `0xFF0C5F57`（白底上才看得清）。
+         * 完整的日夜两套在 [ClusterLyricColors]。
+         */
+        const val DEFAULT_ACCENT = ClusterLyricColors.NIGHT_MAIN
 
-        /** 默认弱文字色。 */
-        const val DEFAULT_MUTED = 0xFF9FB4BB.toInt()
+        /** 默认弱文字色（同样只剩夜间这一档，见 [ClusterLyricColors]）。 */
+        const val DEFAULT_MUTED = ClusterLyricColors.NIGHT_SUB
 
         /** 通知栏「停止投射」的 action。 */
         const val ACTION_STOP = "com.cardesk.launcher.action.CLUSTER_LYRICS_STOP"
@@ -315,6 +330,25 @@ class ClusterLyricsService : Service() {
     /** 上一次做「附着探针」的时间戳（毫秒）。 */
     private var lastHealthRetry = 0L
 
+    /**
+     * **解析出来**的日夜态（`null` = 还没解析过）。
+     *
+     * 由 [isNight] 维护，按 [NIGHT_POLL_MS] 限流刷新。
+     */
+    private var resolvedNight: Boolean? = null
+
+    /**
+     * **当前这套配色**是按哪个日夜态配的。
+     *
+     * 解析出来的日夜态（[resolvedNight]）和配色用的（这个）**不是一回事**：
+     * 解析是「现在几点、是白天还是晚上」，配色是「上一次重配时用的是哪套」。
+     * 两者不一致就说明该换色了。
+     */
+    private var styledNight: Boolean? = null
+
+    /** 上一次读日夜态的时刻（毫秒），用来限流。 */
+    private var lastNightCheckAt = 0L
+
     private val frameCallback = Choreographer.FrameCallback {
         frameScheduled = false
         tick()
@@ -463,6 +497,24 @@ class ClusterLyricsService : Service() {
      */
     private fun pump() {
         val snapshot = readSnapshot()
+        // 日夜态变了 → 换一套配色（第一百三十七轮）。
+        //
+        // 放在这里而不是「桌面切主题时主动来通知服务」：
+        // 服务是**独立于桌面可见性**的前台服务，桌面可能根本没在跑
+        // （用户切到音乐 App 去了），靠喂数这一条心跳自己发现变化更稳。
+        //
+        // 而且判定走的是 [NightResolver] —— **不依赖桌面活着**，
+        // 开机广播独立拉起服务时也能判出当前是白天还是晚上。
+        val night = isNight()
+        if (panel != null && night != styledNight) {
+            Logx.i(
+                LogTags.CLUSTER,
+                "日夜态变化，重配歌词颜色",
+                "night" to night,
+            )
+            styledNight = night
+            restyle()
+        }
         if (panel != null && snapshot != lastDrawn) {
             lastDrawn = snapshot
             panel?.snapshot = snapshot
@@ -686,6 +738,8 @@ class ClusterLyricsService : Service() {
                 backgroundOf(prefs),
                 styleOf(prefs),
             )
+            // 记下这次配色的日夜态，免得刚挂上就被 [pump] 当成「变了」又重配一遍。
+            styledNight = resolvedNight
 
             val width = ClusterPanelGeometry.width(metrics.widthPixels, prefs.overlayWidthPct / 100f)
             val height = ClusterPanelGeometry.height(mainPx, subPx, rows)
@@ -791,17 +845,58 @@ class ClusterLyricsService : Service() {
 
     // ------------------------------------------------------------ 配色
 
+    /**
+     * 当前是夜间吗？
+     *
+     * **走 [NightResolver] —— 和桌面主题同一个解析器**（第一百三十七轮）。
+     *
+     * 最初这里读的是 [Skin.isNight]（桌面主题的单例），看着够简单，实测有两个坑：
+     *
+     * 1. **桌面没起来时那个值是死的** —— 开机广播会**独立**把本服务拉起来，
+     *    那时桌面还没跑过一次，`Skin.apply()` 从没被调过，
+     *    `Skin.isNight` 停在初始值（夜间）⇒ 白天的白色仪表上投的是浅青字，
+     *    跟用户反馈的「日间不明显」一模一样。
+     * 2. **桌面被销毁后那个值会过期** —— 每秒的刷新循环停了，
+     *    `Skin.isNight` 冻在最后一次的值上。
+     *
+     * 所以改成各自去问同一个解析器：高德那路信号放在
+     * [NightResolver.amapNightUi] 里**共享**，
+     * 两边看到的是同一个值，不会出现「桌面是日间、仪表歌词是夜间」。
+     *
+     * ## 读一次要一次车控通道
+     *
+     * 车机日间模式功能值是走 Binder 读的，所以**不能每次喂数都读**。
+     * 这里限流到 [NIGHT_POLL_MS]（2 秒）一次 —— 日夜态本来就是低频变化，
+     * 2 秒的延迟人眼完全察觉不到。
+     */
+    private fun isNight(): Boolean {
+        val now = now()
+        val cached = resolvedNight
+        if (cached != null && now - lastNightCheckAt < NIGHT_POLL_MS) {
+            return cached
+        }
+        lastNightCheckAt = now
+        val night = NightResolver.resolve(Prefs(applicationContext), applicationContext)
+        resolvedNight = night
+        return night
+    }
+
     private fun accentOf(prefs: Prefs): Int =
-        if (prefs.clusterLyricMainColor != 0) prefs.clusterLyricMainColor else DEFAULT_ACCENT
+        ClusterLyricColors.resolveMain(isNight(), prefs.clusterLyricMainColor)
 
     private fun mutedOf(prefs: Prefs): Int =
-        if (prefs.clusterLyricSubColor != 0) prefs.clusterLyricSubColor else DEFAULT_MUTED
+        ClusterLyricColors.resolveSub(isNight(), prefs.clusterLyricSubColor)
 
-    /** 底板颜色：alpha 由「仪表背景透明度」百分比换算。 */
+    /**
+     * 底板颜色：alpha 由「仪表背景透明度」百分比换算，**底色本身也跟着日夜翻**。
+     *
+     * 夜间是深底板配亮字，日间是浅底板配深字 ——
+     * 不翻的话日间会变成「深字压深底板」，一样看不清。
+     */
     private fun backgroundOf(prefs: Prefs): Int {
         if (prefs.overlayBgAlpha <= 0) return 0x00000000
         val alpha = (255 * prefs.overlayBgAlpha / 100f).toInt().coerceIn(0, 255)
-        return (alpha shl 24) or 0x00101820
+        return (alpha shl 24) or (ClusterLyricColors.plate(isNight()) and 0x00FFFFFF)
     }
 
     private fun styleOf(prefs: Prefs): Int = when (prefs.clusterStyle) {

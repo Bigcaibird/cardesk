@@ -21,7 +21,10 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 /**
- * 第 117 轮：**首页中央歌词的布局可切**（设置 → 桌面设置 → 仪表歌词 → 首页中央歌词）。
+ * 第 117 轮：**首页中央歌词的布局可切**（设置 → 桌面歌词 → 首页中央歌词）。
+ *
+ * 第 137 轮：这一页从原来的「仪表歌词」页里拆出来，独立成「桌面歌词」页 ——
+ * 页面 key 从 `layout` 变成 `desktoplyric`。
  *
  * 这条用例走的是**真的点击路径**：
  * 点设置页里的「KTV 两行」→ 偏好落盘 → 设置页预览条跟着变 → 桌面也跟着变。
@@ -54,7 +57,7 @@ class SettingsLyricLayoutTest {
         val overlay = findField<SettingsOverlay>(launcher, "settings")
         assertNotNull("设置页应该打开了", overlay)
         // 翻到「桌面设置」那一页（歌词设置在里面）。
-        (overlay as SettingsOverlay).showPageKey("layout")
+        (overlay as SettingsOverlay).showPageKey("desktoplyric")
         shadowOf(Looper.getMainLooper()).idle()
 
         // 建页时的说明文案 = 三行的说明
@@ -108,7 +111,7 @@ class SettingsLyricLayoutTest {
         call(launcher!!, "showSettings")
         shadowOf(Looper.getMainLooper()).idle()
         val overlay = findField<SettingsOverlay>(launcher, "settings")!!
-        overlay.showPageKey("layout")
+        overlay.showPageKey("desktoplyric")
         shadowOf(Looper.getMainLooper()).idle()
 
         // 默认就该是三行

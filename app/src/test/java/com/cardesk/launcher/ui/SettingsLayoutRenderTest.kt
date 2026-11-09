@@ -58,10 +58,15 @@ class SettingsLayoutRenderTest {
         shot(decor, overlay, "lan", "x09-settings-lan.png")
         // 第七十轮：新增「氛围灯」页（频谱预览 + 颜色设置）
         shot(decor, overlay, "ambient", "x10-settings-ambient.png")
-        // 第114轮：「仪表歌词」页新增「首页中央歌词 · 字号缩放」滑杆
-        shot(decor, overlay, "layout", "y29-settings-lyric-scale.png")
+        // 第114轮：「首页中央歌词 · 字号缩放」滑杆（当时在「仪表歌词」页里）
+        // 第137轮：那一页拆成独立的「桌面歌词」页，页面 key 从 layout 变成 desktoplyric。
+        shot(decor, overlay, "desktoplyric", "y29-settings-lyric-scale.png")
+        // 第137轮：新增「仪表歌词」页（副屏投射），与桌面歌词彻底分开。
+        shot(decor, overlay, "clusterlyric", "y31-settings-cluster-lyric.png")
+        // 第137轮：胎压 / 车模 / 数据源从「仪表歌词」页搬到「车辆信息」页。
+        shot(decor, overlay, "carinfo", "y32-settings-carinfo.png")
         // 第115轮：滑杆上面那条**歌词预览条**（在页面下方，要滚一点才看得到）
-        overlay.showPageKey("layout")
+        overlay.showPageKey("desktoplyric")
         shadowOf(Looper.getMainLooper()).idle()
         findField<android.widget.ScrollView>(overlay, "bodyScroll")?.scrollTo(0, 700)
         shadowOf(Looper.getMainLooper()).idle()
@@ -69,7 +74,9 @@ class SettingsLayoutRenderTest {
         decor.draw(Canvas(previewBmp))
         FileOutputStream(File(dir, "y30-settings-lyric-preview.png"))
             .use { previewBmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
-        // —— 滚到底：看免责声明与车辆信息
+        // —— 滚到底：看「桌面歌词」页的末尾
+        // （第137轮：原先这一页底部的「胎压 / 车模编号 / 车辆数据源」
+        //  已经搬去「车辆信息」页了，见上面的 y32-settings-carinfo.png）
         val scroll = findField<android.widget.ScrollView>(overlay, "bodyScroll")
         scroll?.scrollTo(0, 100000)
         shadowOf(Looper.getMainLooper()).idle()

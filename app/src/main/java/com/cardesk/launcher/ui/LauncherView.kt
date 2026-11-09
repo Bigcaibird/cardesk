@@ -555,8 +555,11 @@ class LauncherView(context: Context) : FrameLayout(context) {
 
                     override fun onDayNight(nightUi: Boolean) {
                         // 高德把自己切成了白天/黑夜 → 桌面立刻跟上（别等 1 秒的定时刷新）。
+                        // 同时把信号写进共享的 [NightResolver] ——
+                        // 仪表歌词投射服务也用它，两边不会一个日一个夜（第一百三十七轮）。
                         if (amapDayNightSignal == nightUi) return
                         amapDayNightSignal = nightUi
+                        com.cardesk.launcher.core.NightResolver.onAmapDayNight(nightUi)
                         Logx.i(LogTags.THEME, "高德日夜状态变化", "night" to nightUi)
                         applyDayNightIfChanged()
                     }
@@ -1660,31 +1663,9 @@ class LauncherView(context: Context) : FrameLayout(context) {
      * - 每个来源读不到时按优先级回落到下一个。
      */
     private fun resolveNight(): Boolean {
-        val cal = Calendar.getInstance()
-        // 三个来源，按优先级交给 DayNight 排：
-        // 跟随高德 = 高德信号 → 车机光感 → 车机日间模式 → 系统 UI 夜间态；
-        // 跟随光感 = 车机光感 → 车机日间模式 → 系统 UI 夜间态。
-        //
-        // 车机光感走 AdaptAPI 的昼夜通道（`AdaptapiDayNight`）：车机日间模式功能值
-        // 在真车上恒为 AUTO，而 AUTO 的明暗只能从这条通道拿（`Twlibrists` 真光照）。
-        val lightNight = com.cardesk.launcher.vehicle.AdaptapiDayNight.nightUi()
-        val carNight = carDayModeNight()
-        val sysNight = systemNightMode()
-        val night = com.cardesk.launcher.core.DayNight.resolveNightUi(
-            enabled = prefs.dayNightEnabled,
-            mode = prefs.dayNightMode,
-            minuteOfDay = com.cardesk.launcher.core.DayNight.minuteOfDay(
-                cal.get(Calendar.HOUR_OF_DAY),
-                cal.get(Calendar.MINUTE),
-            ),
-            dayStartMin = prefs.dayStartMin,
-            nightStartMin = prefs.nightStartMin,
-            amapNightUi = amapDayNightSignal,
-            sensorNightUi = lightNight,
-            carNightUi = carNight,
-            systemNightUi = sysNight,
-            lastAppliedNightUi = prefs.lastAppliedNight(),
-        )
+        // 统一走 [NightResolver] —— 仪表歌词投射服务用的是同一个解析器，
+        // 两边看到的高德信号、设置项完全一样，不会劈叉（第一百三十七轮）。
+        val night = com.cardesk.launcher.core.NightResolver.resolve(prefs, context)
         val last = prefs.lastAppliedNight()
         if (last != night) {
             Logx.i(
@@ -1694,9 +1675,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
                 "was" to last,
                 "enabled" to prefs.dayNightEnabled,
                 "mode" to prefs.dayNightMode,
-                "amap" to amapDayNightSignal,
-                "sensor" to lightNight,
-                "car" to carNight,
+                "amap" to com.cardesk.launcher.core.NightResolver.amapNightUi,
             )
             prefs.setLastAppliedNight(night)
         }
@@ -2623,12 +2602,7 @@ private fun showCam() {
             closeSettings()
             showTasks()
         }
-        overlay.onShowLayoutDialog = {
-            val dialog = com.cardesk.launcher.ui.dialogs.DesktopLayoutDialog(context, pal, prefs)
-            dialog.onApplied = { onSettingsApplied() }
-            dialog.onClose = { closeOverlayDialog(dialog) }
-            showOverlayDialog(dialog)
-        }
+        overlay.onShowClusterLyricColor = { slot -> showClusterLyricColorPicker(slot) }
         overlay.onShowUpdate = {
             val dialog = com.cardesk.launcher.ui.dialogs.UpdateDialog(context, pal)
             dialog.onClose = { closeOverlayDialog(dialog) }
@@ -2863,6 +2837,53 @@ private fun showCam() {
                     prefs.cardColor = color
                     closeOverlayDialog(this)
                     applyCardStyle()
+                }
+                onClose = { closeOverlayDialog(this) }
+            },
+        )
+    }
+
+    /**
+     * 仪表歌词颜色选择器（第一百三十七轮）。
+     *
+     * 复用现成的 [com.cardesk.launcher.ui.dialogs.ColorPickerDialog]，
+     * 「恢复默认」= **跟随日夜**（写 0）。
+     *
+     * 取色器打开时显示的是**当前实际会用的那个色** ——
+     * 用户没挑过颜色时那套是跟着日夜的（夜间浅青 / 日间深青），
+     * 直接把当前这套喂给取色器，滑杆的位置才落在真正的颜色上。
+     *
+     * @param slot 0 = 主歌词，1 = 副歌词。
+     */
+    fun showClusterLyricColorPicker(slot: Int) {
+        val picked = if (slot == 0) prefs.clusterLyricMainColor else prefs.clusterLyricSubColor
+        val current = if (picked != 0) {
+            picked
+        } else {
+            // 跟投射服务用**同一个解析器**算日夜 ——
+            // 取色器打开时显示的色，必须就是实际会投出去的那个色。
+            val night = com.cardesk.launcher.core.NightResolver.resolve(prefs, context)
+            if (slot == 0) {
+                com.cardesk.launcher.cluster.ClusterLyricColors.main(night)
+            } else {
+                com.cardesk.launcher.cluster.ClusterLyricColors.sub(night)
+            }
+        }
+        showOverlayDialog(
+            com.cardesk.launcher.ui.dialogs.ColorPickerDialog(
+                context,
+                pal,
+                current,
+                title = if (slot == 0) "主歌词颜色" else "副歌词颜色",
+                defaultColor = 0,
+            ).apply {
+                onPicked = { color ->
+                    if (slot == 0) prefs.clusterLyricMainColor = color else prefs.clusterLyricSubColor = color
+                    closeOverlayDialog(this)
+                    // 颜色改了要立刻投出去（服务活着就原地改样式）。
+                    com.cardesk.launcher.cluster.ClusterLyricsService.refresh(context)
+                    // 设置页那两行的标签要跟着变（色值 / 「跟随日夜」）。
+                    settings?.refreshClusterLyricColorLabels()
                 }
                 onClose = { closeOverlayDialog(this) }
             },
