@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1143",
-  "versionCode": 4239,
-  "tag": "v1.0.1143",
-  "name": "CarDesk 4239 / 1.0.1143-system",
+  "version": "1.0.1144",
+  "versionCode": 4240,
+  "tag": "v1.0.1144",
+  "name": "CarDesk 4240 / 1.0.1144-system",
   "notes": "第141轮：API 28 画中画真嵌入（启动之后把承载 task 搬到虚拟屏，AOSP 9 的 moveStackToDisplay）+ 修掉 RunningTaskInfo.baseIntent 让第130轮黑屏判据在 API 28 上每轮抛异常的问题。启动路径保持 4237 真机验证过的顺序不变。",
-  "publishedAt": "2026-11-09T14:56:16Z",
+  "publishedAt": "2026-11-09T15:03:02Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4239.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4239.apk",
-    "size": 2359645,
-    "sha256": "b1c0edd48a533aa476fccf267ce7ce41facba66596742a18343ab2badc8ca016"
+    "name": "CarDesk-platform-ecarx-cardesk-4240.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4240.apk",
+    "size": 2359713,
+    "sha256": "3c783389b0f67600fcd9645688ba043da3df9f86484a70da726d5c9455c9f6ce"
   }
 }

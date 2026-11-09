@@ -210,5 +210,5 @@ object HostTaskMigrator {
     }
 
     /** 最多试几次。 */
-    const val MAX_ATTEMPTS = 5
+    const val MAX_ATTEMPTS = 8
 }

@@ -117,6 +117,11 @@ startActivity(PendingIntent) → startActivityForResult(Intent, int) → startAc
 | task **不在** | `moveStackToDisplay(stackId, 我们的虚拟屏 id)` 搬过来 |
 | **不知道** | **不搬**（宁可不动，也不能误搬一个本来就在对地方的 task） |
 
+**搬完还要再验一次**：AMS 调用没报错 **≠** task 真留在虚拟屏上
+（实测：高德进程自己起活动时会把 task 又拉回主屏）→
+所以搬完**再验一次**，还在 → 收工；不在 → 继续追（最多 8 次、约 13 秒）。
+日志也据此改口：**只有验证通过**才记「承载任务已在我们的虚拟屏上」。
+
 ### 「在不在我们的屏上」这条判据（API 28 上不能靠 displayId）
 
 第141轮把设备上 `RunningTaskInfo` 的**真实字段**打了出来：
@@ -244,8 +249,18 @@ ActivityManager: START u0 {flg=0x10000000 cmp=com.autonavi.amapautp.yh/…MainMa
   （车机的虚拟屏尺寸与我们模拟器不同）。
 - **高德在模拟器上**仍然是全屏抢屏（原因见 6.2）→ 模拟器上用 `embedtest` 验。
 
-## 九、截图
+## 九、截图 / 产物
 
 | 文件 | 内容 |
 |---|---|
 | `emu-verify/y141/y141-01-embedtest-embedded.png` | API 28 上 **embedtest 真嵌在画中画里**（导航页左侧） |
+| `emu-verify/y141/y141-log-api28.txt` | 搬移与承载面日志 |
+| `emu-verify/y141/y141-dumpsys-api28.txt` | `dumpsys` 取证（窗口 displayId / 栈归属 / 虚拟屏 token） |
+
+| 产物 | 值 |
+|---|---|
+| 文件 | `dist/CarDesk-platform-ecarx-cardesk-4240.apk` |
+| versionCode / versionName | 4240 / 1.0.1144-system |
+| 大小 | 2 359 713 字节 |
+| SHA-256 | `3c783389b0f67600fcd9645688ba043da3df9f86484a70da726d5c9455c9f6ce` |
+| 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |

@@ -5205,10 +5205,10 @@ $ adb shell dumpsys window displays | grep -A6 "Display: mDisplayId=16"
 
 | 项 | 值 |
 |---|---|
-| 文件 | `dist/CarDesk-platform-ecarx-cardesk-4239.apk` |
-| versionCode / versionName | 4239 / 1.0.1143-system |
-| 大小 | 2 359 645 字节 |
-| SHA-256 | `b1c0edd48a533aa476fccf267ce7ce41facba66596742a18343ab2badc8ca016` |
+| 文件 | `dist/CarDesk-platform-ecarx-cardesk-4240.apk` |
+| versionCode / versionName | 4240 / 1.0.1144-system |
+| 大小 | 2 359 713 字节 |
+| SHA-256 | `3c783389b0f67600fcd9645688ba043da3df9f86484a70da726d5c9455c9f6ce` |
 | 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
 | 单测 | 1967 项全绿（新增 `HostTaskMigratorTest` 14 项） |
 | 反向验证 | `tools/verify_y141_reverse.sh` —— 10 项全红、还原后全绿 |

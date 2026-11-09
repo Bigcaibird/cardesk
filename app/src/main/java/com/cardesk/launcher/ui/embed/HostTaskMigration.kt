@@ -123,7 +123,10 @@ object HostTaskMigration {
         val r = runOnce(view, pkg)
         when (r) {
             Result.DONE -> finish(pkg, moved = true, reason = "已在我们的虚拟屏上")
-            Result.MOVED -> finish(pkg, moved = true, reason = "已搬到我们的虚拟屏")
+            // 搬完**不等于搬稳了** —— AMS 调用没报错 ≠ task 真留在虚拟屏上。
+            // （实测：高德进程自己起活动时会把 task 又拉回主屏。）
+            // 所以搬完**再验一次**：还在 → 收工；不在 → 继续追。
+            Result.MOVED -> scheduleNext(view, pkg, attempt, "已搬一次，再验一次是否搬稳")
             Result.NOT_FOUND -> scheduleNext(view, pkg, attempt, "还没找到承载应用的 task")
             Result.NO_DISPLAY_ID -> scheduleNext(view, pkg, attempt, "取不到我们的虚拟屏 id")
             Result.UNKNOWN_DISPLAY -> scheduleNext(view, pkg, attempt, "读不到 task 的 displayId（判据不可用）")

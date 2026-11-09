@@ -1,33 +1,36 @@
 === dumpsys window windows（承载应用窗口的 displayId）===
-  Window #7 Window{dec60e4 u0 com.autonavi.amapautp.yh/com.autonavi.amapauto.MainMapActivity}:
-    mDisplayId=0 stackId=46 mSession=Session{f25e938 14879:u0a10073} mClient=android.os.BinderProxy@46f2c77
-  Window #9 Window{50e8606 u0 com.cardesk.embedtest/com.cardesk.embedtest.EmbedTestActivity}:
-    mDisplayId=19 stackId=49 mSession=Session{46014eb 15378:u0a10075} mClient=android.os.BinderProxy@e9008e1
-  mObscuringWindow=Window{50e8606 u0 com.cardesk.embedtest/com.cardesk.embedtest.EmbedTestActivity}
+  Window #9 Window{7ec8288 u0 com.cardesk.embedtest/com.cardesk.embedtest.EmbedTestActivity}:
+    mDisplayId=24 stackId=75 mSession=Session{70df517 16053:u0a10075} mClient=android.os.BinderProxy@ce1fe2b
+  Window #10 Window{cfb0271 u0 com.autonavi.amapautp.yh/com.autonavi.amapauto.MainMapActivity}:
+    mDisplayId=23 stackId=76 mSession=Session{6583d8a 16153:u0a10073} mClient=android.os.BinderProxy@8665818
+  mObscuringWindow=Window{7ec8288 u0 com.cardesk.embedtest/com.cardesk.embedtest.EmbedTestActivity}
 
 === am stack list（栈归属）===
-  taskId=75: com.autonavi.amapautp.yh/com.autonavi.auto.remote.fill.UsbFillActivity bounds=[0,0][1920,1080] userId=0 visible=false topActivity=ComponentInfo{com.autonavi.amapautp.yh/com.autonavi.amapauto.MainMapActivity}
-  taskId=78: com.cardesk.embedtest/com.cardesk.embedtest.EmbedTestActivity bounds=[0,0][906,867] userId=0 visible=true topActivity=ComponentInfo{com.cardesk.embedtest/com.cardesk.embedtest.EmbedTestActivity}
+  taskId=85: com.autonavi.amapautp.yh/com.autonavi.auto.remote.fill.UsbFillActivity bounds=[0,0][906,867] userId=0 visible=true topActivity=ComponentInfo{com.autonavi.amapautp.yh/com.autonavi.amapauto.MainMapActivity}
+  taskId=86: com.cardesk.embedtest/com.cardesk.embedtest.EmbedTestActivity bounds=[0,0][906,867] userId=0 visible=true topActivity=ComponentInfo{com.cardesk.embedtest/com.cardesk.embedtest.EmbedTestActivity}
 
 === dumpsys window displays（虚拟屏 token 列表）===
-  Display: mDisplayId=19
+  Display: mDisplayId=23
   Application tokens in top down Z order:
-    mStackId=49
+    mStackId=76
     mDeferRemoval=false
     mBounds=[0,0][906,867]
-      taskId=78
+      taskId=85
         mBounds=[0,0][906,867]
         mdr=false
-        appTokens=[AppWindowToken{6abba7e token=Token{b77e439 ActivityRecord{c760400 u0 com.cardesk.embedtest/.EmbedTestActivity t78}}}]
+        appTokens=[AppWindowToken{32ca16e token=Token{1c150e9 ActivityRecord{9637570 u0 com.autonavi.amapautp.yh/com.autonavi.amapauto.MainMapActivity t85}}}]
         mTempInsetBounds=[0,0][0,0]
-          Activity #0 AppWindowToken{6abba7e token=Token{b77e439 ActivityRecord{c760400 u0 com.cardesk.embedtest/.EmbedTestActivity t78}}}
-            windows=[Window{50e8606 u0 com.cardesk.embedtest/com.cardesk.embedtest.EmbedTestActivity}]
+          Activity #0 AppWindowToken{32ca16e token=Token{1c150e9 ActivityRecord{9637570 u0 com.autonavi.amapautp.yh/com.autonavi.amapauto.MainMapActivity t85}}}
+            windows=[Window{cfb0271 u0 com.autonavi.amapautp.yh/com.autonavi.amapauto.MainMapActivity}]
             windowType=2 hidden=false hasVisible=true
             app=true mVoiceInteraction=false
-            task={taskId=78 appTokens=[AppWindowToken{6abba7e token=Token{b77e439 ActivityRecord{c760400 u0 com.cardesk.embedtest/.EmbedTestActivity t78}}}] mdr=false}
-             mFillsParent=true mOrientation=-1
+            task={taskId=85 appTokens=[AppWindowToken{32ca16e token=Token{1c150e9 ActivityRecord{9637570 u0 com.autonavi.amapautp.yh/com.autonavi.amapauto.MainMapActivity t85}}}] mdr=false}
+             mFillsParent=true mOrientation=2
             hiddenRequested=false mClientHidden=false reportedDrawn=true reportedVisible=true
             mNumInterestingWindows=1 mNumDrawnWindows=1 inPendingTransaction=false allDrawn=true lastAllDrawn=true)
-            startingData=com.android.server.wm.SplashScreenStartingData@c1db4b5 removed=false firstWindowDrawn=true mIsExiting=false
-            controller=AppWindowContainerController{ token=Token{b77e439 ActivityRecord{c760400 u0 com.cardesk.embedtest/.EmbedTestActivity t78}} mContainer=AppWindowToken{6abba7e token=Token{b77e439 ActivityRecord{c760400 u0 com.cardesk.embedtest/.EmbedTestActivity t78}}} mListener=ActivityRecord{c760400 u0 com.cardesk.embedtest/.EmbedTestActivity t78}}
+            startingData=null removed=false firstWindowDrawn=true mIsExiting=false
+            controller=AppWindowContainerController{ token=Token{1c150e9 ActivityRecord{9637570 u0 com.autonavi.amapautp.yh/com.autonavi.amapauto.MainMapActivity t85}} mContainer=AppWindowToken{32ca16e token=Token{1c150e9 ActivityRecord{9637570 u0 com.autonavi.amapautp.yh/com.autonavi.amapauto.MainMapActivity t85}}} mListener=ActivityRecord{9637570 u0 com.autonavi.amapautp.yh/com.autonavi.amapauto.MainMapActivity t85}}
   (空)
+  Display: mDisplayId=24
+  Application tokens in top down Z order:
+    mStackId=75
