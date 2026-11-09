@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1140",
-  "versionCode": 4236,
-  "tag": "v1.0.1140",
-  "name": "CarDesk 4236 / 1.0.1140-system",
-  "notes": "第138轮：①第二页音乐卡的媒体来源补上对应 App 图标（与首页同一套图标方案）；②状态栏连接图标按真实状态显示（信号/WiFi/蓝牙/热点，含强弱分档与互斥规则，参考 UNI 的口径）。",
-  "publishedAt": "2026-11-09T09:02:33Z",
+  "version": "1.0.1141",
+  "versionCode": 4237,
+  "tag": "v1.0.1141",
+  "name": "CarDesk 4237 / 1.0.1141-system",
+  "notes": "第139轮：切换日夜模式时高德从画中画变成全屏 —— 换肤重建改成承载面「搬家」而不是「拆掉」，VirtualDisplay 全程不死，承载应用不再被搬到主屏抢屏、也不再被重启。",
+  "publishedAt": "2026-11-09T11:59:49Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4236.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4236.apk",
-    "size": 2343449,
-    "sha256": "9161fa0831775b6b326a054be38a5d1e26ed3049aa360165c909794c633a9a5c"
+    "name": "CarDesk-platform-ecarx-cardesk-4237.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4237.apk",
+    "size": 2346709,
+    "sha256": "935c5fa931599901480dda93c0519208294787d3325532a5f19d9cd0efdf1dba"
   }
 }

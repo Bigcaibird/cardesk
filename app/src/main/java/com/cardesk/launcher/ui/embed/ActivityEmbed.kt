@@ -317,6 +317,29 @@ object ActivityEmbed {
     // ------------------------------------------------------------------ 启动
 
     /**
+     * 抑制「surface 重建时重新拉起承载应用」**一次**（第139轮）。
+     *
+     * ## 为什么需要
+     *
+     * 换肤重建时我们把承载面**整体搬个家**
+     * （旧的 `ActivityView` 挂到新的承载面上，见 `PipSurface.detachContent`）。
+     * 搬家过程中 surface 必然销毁重建一次 ——
+     * 而承载应用的 task 一直好好的挂在**同一个 `VirtualDisplay`** 上，
+     * 重新拉起只会让它**从头再跑一遍**
+     * （高德退回首页、正在导航的路线断掉）。
+     *
+     * 所以搬家的那一次重建要抑制掉。
+     * 真正掉线（承载应用被系统回收）时仍然要重新拉起 ——
+     * 那是看门狗 / 黑屏自愈那条路，不受这里影响。
+     *
+     * @param view 正在搬家的承载 View
+     */
+    fun suppressNextRelaunch(view: View) {
+        val starter = synchronized(starters) { starters[view] } ?: return
+        starter.suppressRelaunchOnce()
+    }
+
+    /**
      * 承载面就绪后启动承载应用（**只启动一次**）。
      *
      * 启动 API 的顺序见类注释：带 displayId 的优先。
@@ -453,6 +476,18 @@ object ActivityEmbed {
         /** surface 创建过几次（第一次是正常启动，之后都是「重建」）。 */
         private var surfaceCreatedCount = 0
 
+        /**
+         * 「下一次 surface 重建不重新拉起承载应用」（第139轮搬家用）。
+         *
+         * 只生效一次 —— 用掉就清掉，绝不长期挂着。
+         */
+        private var suppressRelaunchOnce = false
+
+        /** 搬家用的抑制开关（见 [ActivityEmbed.suppressNextRelaunch]）。 */
+        fun suppressRelaunchOnce() {
+            suppressRelaunchOnce = true
+        }
+
         fun begin() {
             beginAt = System.currentTimeMillis()
             handler.postDelayed(poll, READY_POLL_MS)
@@ -481,6 +516,21 @@ object ActivityEmbed {
         fun onSurfaceCreated() {
             surfaceCreatedCount++
             if (cancelled) return
+            if (suppressRelaunchOnce) {
+                // 抑制**只生效一次**，用掉就清掉（否则会误伤后面真正的自愈）。
+                suppressRelaunchOnce = false
+                if (started) {
+                    // 已经启动过 → 这次重建是「我们自己搬家」造成的，
+                    // 承载应用的 task 还在原来的 VirtualDisplay 上 → 不用重新拉起。
+                    Logx.i(
+                        LogTags.NAV_UI,
+                        "承载面搬家（换肤重建），不重新拉起承载应用",
+                        "pkg" to pkg,
+                        "times" to surfaceCreatedCount,
+                    )
+                    return
+                }
+            }
             if (!started) {
                 // 还没启动过 → surface 建好了 = VirtualDisplay 建出来了 → 立刻试一次
                 if (stopped) {

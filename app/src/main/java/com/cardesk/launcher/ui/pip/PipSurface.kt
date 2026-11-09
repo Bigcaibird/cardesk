@@ -227,6 +227,15 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
     val currentPackage: String get() = packageName
 
     /**
+     * 现在**真的有承载内容**吗（第139轮）。
+     *
+     * 和 [currentPackage] 的区别：包名记着不代表画面还在 ——
+     * 换肤重建时我们会把承载内容**摘走**（[detachContent]），
+     * 那之后包名还在、但承载内容已经不在别人手上了。
+     */
+    val hasContent: Boolean get() = content != null
+
+    /**
      * 切换到某个应用的画中画。
      *
      * 同包名且承载面还在就直接复用
@@ -312,6 +321,91 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
             "pkg" to pkg,
             "app" to label,
             "mode" to "fallback",
+            "role" to role,
+        )
+        return true
+    }
+
+    /**
+     * 把承载内容**摘出来**（**不释放** `VirtualDisplay`），交给别的承载面接管（第139轮）。
+     *
+     * ## 为什么要有「摘 / 接」这一对
+     *
+     * 换肤重建（`LauncherView.build`）以前是「先 `release` 旧承载面、再建新的」，
+     * 而 [release] 会**销毁旧的 `VirtualDisplay`** ——
+     * 挂在它上面的承载应用 task 会被系统**搬到主显示器**
+     * （Android 9 的 `ActivityStackManager` 就是这么处理的；
+     * AOSP 的 VirtualDisplay Launcher 示例也是靠 `moveTaskToDisplay`
+     * 把 task 从默认显示器搬回虚拟显示器）。
+     *
+     * → 高德的 task 被搬到 display 0 → **高德从画中画变成全屏抢屏**
+     * （用户第139轮报的现象），画中画那边只剩一块黑。
+     *
+     * 现在改成「**摘走 → 释放外壳 → 交给新承载面**」：
+     * `VirtualDisplay` 全程不死，承载应用的 task 一直在我们的 display 上
+     * → 既不会被搬到主屏抢屏，也不会被重启（正在导航的路线不中断）。
+     *
+     * ## 注意
+     *
+     * 1. 摘的时候**不能**调 [ActivityEmbed.release] —— 那一脚就是销毁 `VirtualDisplay`；
+     * 2. 搬家过程中 surface 会销毁重建一次，那一次**不重新拉起**承载应用
+     *    （见 [ActivityEmbed.suppressNextRelaunch]）——
+     *    否则高德会被**从头再跑一遍**（退回首页、导航中断）。
+     *
+     * @return 摘出来的承载 View（没有承载内容时返回 null）
+     */
+    fun detachContent(): View? {
+        val v = content ?: return null
+        content = null
+        frameProbe = null
+        stopWatchdog()
+        (v.parent as? ViewGroup)?.removeView(v)
+        // 搬家必然让 surface 销毁重建一次 —— 那一轮**不重新拉起**承载应用。
+        ActivityEmbed.suppressNextRelaunch(v)
+        Logx.i(
+            LogTags.NAV_UI,
+            "画中画承载面摘出（VirtualDisplay 保留）",
+            "pkg" to packageName,
+            "role" to role,
+        )
+        return v
+    }
+
+    /**
+     * 接管 [detachContent] 摘出来的承载内容（第139轮）。
+     *
+     * 接管之后这块承载面**就是原来那块** —— `VirtualDisplay`、承载应用的 task
+     * 全都没变，所以画面是连续的（不会黑一下，也不会把应用重启一遍）。
+     *
+     * @param view 摘出来的承载 View
+     * @param pkg 它承载的应用包名
+     * @return true = 接管成功
+     */
+    fun adoptContent(view: View, pkg: String): Boolean {
+        if (content != null) return false
+        packageName = pkg
+        launchIntent = runCatching {
+            context.packageManager.getLaunchIntentForPackage(pkg)
+                ?.addFlags(ActivityEmbed.PIP_LAUNCH_FLAGS)
+        }.getOrNull()
+        content = view
+        ready = true
+        addView(view, insetParams())
+        placeholder.visibility = View.GONE
+        // 圆角 / 图层顺序：跟 [embedContent] 一样
+        // （换肤之后圆角可能变了，要重套一次）。
+        RoundClip.apply(view, cornerRadius)
+        RoundClip.applySurfaceZOrder(view)
+        frameProbe = PipFrameProbe(view)
+        blackHealStage = PipBlackHeal.STAGE_NONE
+        post { syncVirtualDisplay() }
+        startWatchdog()
+        Logx.event(
+            LogTags.NAV_UI,
+            "画中画显示",
+            "pkg" to pkg,
+            "app" to labelOf(pkg),
+            "mode" to "transferred",
             "role" to role,
         )
         return true

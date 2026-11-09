@@ -4670,3 +4670,157 @@ com.ecarx.xui.adaptapi.tbox.TBox.create(Context)
 | SHA-256 | `9161fa0831775b6b326a054be38a5d1e26ed3049aa360165c909794c633a9a5c` |
 | 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
 | 单测 | 1928 项全绿（`tools/release.sh` 出包时一并跑的） |
+
+## 第139轮：切换日夜模式时高德从画中画变成全屏（承载面「搬家」而不是「拆掉」）
+
+> 用户诉求：这个版本，在切换日夜模式时，高德会突然从画中画变成全屏，
+> 你通过虚拟机复现修复一下。
+
+### 复现：模拟器上怎么触发
+
+模拟器 `emulator-5556`（Android 10 / SDK 29）上装平台签名包，
+把桌面设成**跟随高德**（`daynight_enabled=true`、`daynight_mode=0`），
+再用**高德自己的日夜广播**触发切换（比点设置页开关更贴近用户场景）：
+
+```bash
+adb -s emulator-5556 shell am broadcast \
+  -a AUTONAVI_STANDARD_BROADCAST_SEND --ei KEY_TYPE 10019 --ei EXTRA_STATE 37
+```
+
+`EXTRA_STATE=37` 是白天、`38` 是黑夜 —— 与高德协议里
+`AndroidProtocolExe.sendAutoStatus` 的 `case 37/38` 一致（见 `core/nav/AmapDayNight.kt`）。
+
+> 踩过的坑：第一次广播**漏了 `KEY_TYPE=10019`**，
+> 于是走的是「忽略高德广播 keyType=-1」分支 —— **桌面根本没换肤**，
+> 只有高德自己收到了广播、画面变了。
+> 看起来像复现了，其实复现的是另一件事。
+
+### 根因：换肤重建时**销毁了承载高德的 VirtualDisplay**
+
+换肤（切日夜）是 `applyTheme()` → `build()`，而 `build()` 会把整棵 UI 树重建。
+第十二轮为此加了一句：**重建前先 `releasePipSurfaces("重建前")`**，
+把旧的 `ActivityView` + `VirtualDisplay` 拆掉 —— 解决的是
+「旧 VirtualDisplay 泄漏」+「新承载面黑屏」。
+
+但 `release` 的代价是：**旧的 `VirtualDisplay` 一被销毁，
+挂在它上面的承载应用 task 就会离开那块虚拟屏**。
+Android 9（真车 API 28）的 `ActivityStackManager` 在 display 消失时
+会把该 display 上的 task **搬到默认显示器**；
+AOSP 官方的 VirtualDisplay Launcher 示例也是靠 `moveTaskToDisplay`
+把 task 从默认显示器搬回虚拟显示器的 —— 同一个道理。
+
+→ **高德的 task 被搬到 display 0 → 高德全屏抢屏**，画中画那边只剩一块黑。
+这正是用户看到的现象。
+
+模拟器（API 29）上的行为略有不同，但**根因是同一条**：
+
+```
+19:31:17.383 主题切换 night=false wasNight=true
+19:31:17.418 画中画承载面释放 pkg=com.autonavi.amapautp.yh role=主画 reason=重建前
+19:31:17.535 尝试 ActivityView 嵌入 pkg=com.autonavi.amapautp.yh sdk=29   ← 重建了 VirtualDisplay
+19:31:17.663 承载面就绪，启动承载应用 pkg=com.autonavi.amapautp.yh by=surface
+19:31:17.693 ActivityView 启动承载应用 pkg=com.autonavi.amapautp.yh api=pendingIntent
+```
+
+同瞬间的**系统日志**把因果链摆得很清楚：
+
+```
+DisplayManagerService: Display device removed: ActivityViewVirtualDisplay@… 1287 x 867
+ActivityTaskManager : finishAllActivitiesLocked: finishing ActivityRecord{… MainMapActivity t792} immediately
+```
+
+`dumpsys activity activities` 对照：**切一次日夜，
+VirtualDisplay 的 display id 换了一个（#67 → #68），
+高德的 task id 也换了一个（t790 → t791）** ——
+也就是**承载面被整个重建、承载应用被重启了一遍**。
+在 API 29 上系统会把 task 顺手搬回新 display，所以画面看着还在；
+在真车（API 28）上它就留在主显示器上不动了 —— 这就是「变成全屏」。
+
+### 修法：换肤重建改成「摘走 → 释放外壳 → 交给新承载面」
+
+换肤只该影响**我们自己的**外观，承载应用根本不该被牵动。
+所以换肤重建时**不拆**旧承载面，而是把它**摘下来交给新的承载面接管**：
+
+| 步骤 | 动作 | 结果 |
+|---|---|---|
+| 1 | `PipSurface.detachContent()` —— 把承载面（`ActivityView`）**摘出来**，**不调** `ActivityEmbed.release` | `VirtualDisplay` 不死，高德的 task 不动 |
+| 2 | `releasePipSurfaces("重建前")` —— 释放的是**空壳** | 旧外壳不泄漏（第十二轮要解决的问题仍然解决） |
+| 3 | 新 `NavPage` 建好后 `PipSurface.adoptContent()` —— 把承载面接上 | 画面连续，不黑一下 |
+| 4 | 末尾 `refreshPip()` 看到「这个包名已经承载着」→ **直接复用** | 不会重新建 VirtualDisplay、不会重启高德 |
+
+搬家过程中 surface 必然销毁重建一次 —— 那一轮**不重新拉起承载应用**
+（`ActivityEmbed.suppressNextRelaunch`）：
+承载应用的 task 一直好好的挂在**同一个 VirtualDisplay** 上，
+重新拉起只会让它**从头再跑一遍**（高德退回首页、正在导航的路线断掉）。
+
+### 处置策略抽成纯逻辑（`core/PipRebuildPolicy.kt`）
+
+「主画搬不搬 / 副画搬不搬 / 搬完要不要重新拉起」有三条分支，
+每一条都对应一种画中画坏掉的用户可见故障，抽成纯 Kotlin 便于 JVM 单测逐条钉死：
+
+| 场景 | 处置 | 为什么 |
+|---|---|---|
+| 主画有承载内容 | **TRANSFER**（搬家） | 释放 = 销毁 VirtualDisplay = 高德被搬到主屏 |
+| 主画没有承载内容 | RELEASE | 没东西可搬 |
+| 副画 + 双画开着 + 选了应用 | **TRANSFER** | 副画同样会被拆掉 VirtualDisplay |
+| 副画 + 双画关了 / 没选应用 | RELEASE | 这块承载面本来就不该存在（留着就是泄漏） |
+| 搬家之后 surface 重建 | **不重新拉起** | task 还在原 VirtualDisplay 上，重拉 = 高德重启 |
+| 释放之后 surface 重建 | 重新拉起 | 承载面整个换掉了 |
+
+### 模拟器对照（修复前 / 修复后）
+
+同一台 `emulator-5556`、同一套偏好、同一条广播：
+
+| | 修复前（4236） | 修复后（4237） |
+|---|---|---|
+| VirtualDisplay id | #67 → **#68**（重建） | #73 → **#73**（没动） |
+| 高德 task id | t790 → **t791**（重启） | t801 → **t801**（没动） |
+| 日志 | `尝试 ActivityView 嵌入` + `ActivityView 启动承载应用` | `画中画承载面摘出（VirtualDisplay 保留）` + `画中画显示 mode=transferred` + `承载面搬家（换肤重建），不重新拉起承载应用` |
+| 画面 | 承载应用被重启（画面重来） | 画面连续，高德的导航提示（50 米）一直在 |
+
+截图见 `emu-verify/y139/`：
+`y139-01/02`（修复前切日夜前后）、`y139-03/04`（修复后切日夜前后）、
+`y139-05`（修复后 · 画中画**全屏态**切日夜）、
+`y139-06`（修复后 · **双画**切日夜，主画副画都走搬家）。
+日志见 `y139-log-before-fix.txt` / `y139-log-after-fix.txt`。
+
+边界也走了两遍：
+
+- **画中画全屏态**切日夜：全屏态保留，高德画面连续（承载面在 `content` 根容器上，搬家逻辑一样成立）；
+- **双画**切日夜：主画、副画**都**走搬家，两个应用的 display id 与 task id 都不变
+  （副画那块的 `VirtualDisplay` 同样会被拆，所以也必须搬）。
+
+### 怎么验证
+
+- **全量单测 1937 项全绿**（1928 → +9，新增 `PipRebuildPolicyTest`）；
+- **反向验证 13 项全红**（`tools/verify_y139_reverse.sh`）：
+  逐条把实现改回旧行为（主画直接释放 / 副画不看双画开关 / 先释放再摘 /
+  摘了不接 / 摘的时候顺手 `ActivityEmbed.release` / 搬家后又重新拉起 …），
+  确认对应断言**必红**，还原后恢复全绿；
+- 脚本自身也复核过：断言一律用**精确文本**并**剥掉行注释**，
+  第 12 条反向项专门把调用**注释掉**验证断言不会被注释骗过（`verify_y139_reverse.sh` 反向12）；
+- 模拟器三档走查：单画 / 画中画全屏态 / 双画。
+
+### 这一轮没做的
+
+- **没有**改画中画其它历史问题（黑屏自愈分级、尺寸变化重载等一律照旧）；
+- **没有**动「跟着高德 / 固定白天黑夜」那套日夜来源的判定逻辑；
+- **没有**发 GitHub Release、**没有**传 R2（等明确指示）。
+
+### 产物
+
+| 项 | 值 |
+|---|---|
+| 文件 | `dist/CarDesk-platform-ecarx-cardesk-4237.apk` |
+| versionCode / versionName | 4237 / 1.0.1141-system |
+| 大小 | 2 346 709 字节 |
+| SHA-256 | `935c5fa931599901480dda93c0519208294787d3325532a5f19d9cd0efdf1dba` |
+| 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
+| 单测 | 1937 项全绿（`tools/release.sh` 出包时一并跑的） |
+
+> **真车（领克，API 28）仍需复验**：模拟器是 API 29，
+> 系统在 display 消失时对 task 的处理与 Android 9 不完全一样
+> （API 29 会把 task 顺手搬回新 display，API 28 不会 ——
+> 这正是真车上「变成全屏」而模拟器上只是「重启」的原因）。
+> 本轮的修法让 **task 根本不离开那块 VirtualDisplay**，
+> 两边行为应当一致，但真车结论以实车为准。

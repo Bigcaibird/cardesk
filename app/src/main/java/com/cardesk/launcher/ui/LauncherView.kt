@@ -818,14 +818,32 @@ class LauncherView(context: Context) : FrameLayout(context) {
             prefs.wallpaper = index
             scenePage.showWallpaperHint()
         }
-        // 第十二轮：换肤重建前**先释放旧的画中画承载面**。
+        // 第139轮：换肤重建时，旧的画中画承载面**不拆** —— 先「摘」下来，交给新的承载面接着用。
         //
-        // 不释放的话会出两件事：
+        // 第十二轮的修法是「重建前先 `release` 旧承载面」，它解决的是两件事：
         // 1. 旧的 `ActivityView` + `VirtualDisplay` 泄漏，反复切日夜会攒出一堆残留 task；
-        // 2. **新承载面黑屏**（用户报的现象）：高德的 task 还挂在旧 VirtualDisplay 上，
+        // 2. 新承载面黑屏 —— 高德的 task 还挂在旧 VirtualDisplay 上，
         //    新承载面用同一套 `NEW_TASK | RESET_TASK_IF_NEEDED` 旗标再启动一次高德时，
-        //    系统会把**旧 task 拉到前台** —— 旧 task 在旧 display 上 → 新承载面只剩一块黑。
-        //    用户绕法是「全屏一次再还原」（那条路会重新下发启动，把 task 搬过来）。
+        //    系统会把**旧 task 拉到前台**（旧 task 在旧 display 上）→ 新承载面只剩一块黑。
+        //
+        // 但 `release` 的代价是：**它会销毁旧的 `VirtualDisplay`**，
+        // 而挂在它上面的承载应用 task 会被系统**搬到主显示器**
+        // （Android 9 的 `ActivityStackManager` 就是这么处理的；
+        // AOSP 的 VirtualDisplay Launcher 示例也是靠 `moveTaskToDisplay`
+        // 把 task 从默认显示器搬回虚拟显示器）。
+        //
+        // → 高德的 task 被搬到 display 0 → **高德从画中画变成全屏抢屏**
+        // （用户第139轮报的现象），画中画那边只剩一块黑。
+        //
+        // 现在改成「**摘走 → 释放外壳 → 交给新承载面**」：
+        // `VirtualDisplay` 全程不死，高德的 task 一直在我们的 display 上，
+        // 既不会被搬到主屏抢屏，也不会被重启（正在导航的路线不中断）。
+        //
+        // 处置方式由 [com.cardesk.launcher.core.PipRebuildPolicy] 定（纯逻辑，可单测）。
+        //
+        // **顺序不能反**：必须先「摘」再「释放」——
+        // 先释放的话承载内容就没了，摘不出来，高德会被重启一遍（老毛病）。
+        val carried = carryOutPipSurfaces()
         releasePipSurfaces("重建前")
         content.removeAllViews()
 
@@ -915,6 +933,18 @@ class LauncherView(context: Context) : FrameLayout(context) {
             // 单击 → 左右换位并保存；长按 → 打开画中画应用选择器。
             onPipSwapSides = { navPage.toggleSidesSwapped() }
             onPipPickApp = { showPipPicker(false) }
+        }
+        // 第139轮：把换肤前**摘出来**的承载面交给新的承载面。
+        //
+        // 这一步做完，承载应用（高德）的 task 一直挂在**原来那个 VirtualDisplay** 上
+        // —— 它既不会被搬到主屏抢屏，也不会被重启一遍。
+        // 交给新承载面之后，末尾的 `refreshPip()` 会看到「这个包名已经承载着」→ 直接复用，
+        // 不会再走一遍「新建 VirtualDisplay + 重新启动应用」。
+        carried.main?.let { carried ->
+            navPage.pip.adoptContent(carried.view, carried.pkg)
+        }
+        carried.secondary?.let { carried ->
+            navPage.pipSecondary.adoptContent(carried.view, carried.pkg)
         }
         // 抽屉是**浮层**，不是整页
         drawerPage = DrawerPage(context, pal).apply {
@@ -2565,6 +2595,67 @@ private fun showCam() {
         if (!::navPage.isInitialized) return
         navPage.pip.release(reason)
         navPage.pipSecondary.release(reason)
+    }
+
+    /**
+     * 换肤重建时**摘出来**的承载内容（第139轮）。
+     *
+     * @param view 承载面（`ActivityView`）本身 —— 带着它的 `VirtualDisplay`
+     * @param pkg 它承载的应用包名
+     */
+    private class CarriedPip(val view: View, val pkg: String)
+
+    /** 换肤重建时摘出来的主画 + 副画（没有的那块是 null）。 */
+    private class CarriedPips(val main: CarriedPip?, val secondary: CarriedPip?)
+
+    /**
+     * 把旧承载面上的承载内容**摘出来**（**不释放** `VirtualDisplay`），交给新承载面接管。
+     *
+     * ## 为什么不是直接 `release`
+     *
+     * `release` 会**销毁 `VirtualDisplay`** ——
+     * 挂在它上面的承载应用 task 会被系统**搬到主显示器**
+     * → 高德从画中画变成**全屏抢屏**（用户第139轮报的现象）。
+     *
+     * 摘走则 `VirtualDisplay` 全程不死，承载应用的 task 一直在我们的 display 上。
+     *
+     * @param surface 旧承载面
+     * @param action 处置方式（[com.cardesk.launcher.core.PipRebuildPolicy] 判定）
+     * @return 摘出来了就返回它；按策略要释放 / 本来就没有内容 → null
+     */
+    private fun carryOutPipSurface(
+        surface: com.cardesk.launcher.ui.pip.PipSurface,
+        action: com.cardesk.launcher.core.PipRebuildPolicy.Action,
+    ): CarriedPip? {
+        // 策略说「释放」→ 不摘，交给 `releasePipSurfaces` 正常拆掉
+        // （副画关掉了的时候就该拆 —— 留着就是泄漏）。
+        if (action == com.cardesk.launcher.core.PipRebuildPolicy.Action.RELEASE) return null
+        val pkg = surface.currentPackage
+        val view = surface.detachContent() ?: return null
+        return CarriedPip(view, pkg)
+    }
+
+    /**
+     * 换肤重建：把主画 + 副画的承载内容**一起摘出来**（第139轮）。
+     *
+     * 必须在 `releasePipSurfaces("重建前")` **之前**调用 ——
+     * 先释放的话承载内容已经被清掉了，摘不出来（高德会被重启一遍）。
+     */
+    private fun carryOutPipSurfaces(): CarriedPips {
+        if (!::navPage.isInitialized) return CarriedPips(null, null)
+        val main = carryOutPipSurface(
+            navPage.pip,
+            com.cardesk.launcher.core.PipRebuildPolicy.mainAction(navPage.pip.hasContent),
+        )
+        val secondary = carryOutPipSurface(
+            navPage.pipSecondary,
+            com.cardesk.launcher.core.PipRebuildPolicy.secondaryAction(
+                navPage.pipSecondary.hasContent,
+                prefs.dualPip,
+                prefs.pip2App,
+            ),
+        )
+        return CarriedPips(main, secondary)
     }
 
     /**

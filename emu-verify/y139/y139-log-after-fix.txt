@@ -1,0 +1,23 @@
+# 第139轮 · 修复后（CarDesk 4237 / 1.0.1141）切日夜时的日志
+#
+# 模拟器 emulator-5556（Android 10 / SDK 29），桌面 = 跟随高德（daynight_mode=0）
+# 触发：adb shell am broadcast -a AUTONAVI_STANDARD_BROADCAST_SEND --ei KEY_TYPE 10019 --ei EXTRA_STATE 37
+#
+# 对照点：**没有**「尝试 ActivityView 嵌入」、**没有**「ActivityView 启动承载应用」——
+#        VirtualDisplay 没重建，高德没被重启；
+#      系统侧也不再有「Display device removed / finishAllActivitiesLocked」。
+
+## 桌面日志（CarDesk）
+11-09 19:52:06.172 I CarDesk/Theme : 日夜态变化 night=false was=true enabled=true mode=0 amap=false
+11-09 19:52:06.190 I CarDesk/Theme : 主题切换 night=false wasNight=true accent=0
+11-09 19:52:06.203 I CarDesk/NavUI : 画中画承载面摘出（VirtualDisplay 保留） pkg=com.autonavi.amapautp.yh role=主画
+11-09 19:52:06.203 I CarDesk/NavUI : 画中画承载面释放 pkg=com.autonavi.amapautp.yh role=主画 reason=重建前
+11-09 19:52:06.234 I CarDesk/NavUI : [EVT] 画中画显示 pkg=com.autonavi.amapautp.yh app=Amap Auto mode=transferred role=主画
+11-09 19:52:06.400 I CarDesk/NavUI : 承载面搬家（换肤重建），不重新拉起承载应用 pkg=com.autonavi.amapautp.yh times=2
+
+## 承载面与 task 的对照（dumpsys activity activities）
+
+切日夜前：Display #73  com.autonavi.amapautp.yh/com.autonavi.amapauto.MainMapActivity t801
+切日夜后：Display #73  com.autonavi.amapautp.yh/com.autonavi.amapauto.MainMapActivity t801
+
+（display id 与 task id 都没变 → 高德的 task 一直在我们的 VirtualDisplay 上）
