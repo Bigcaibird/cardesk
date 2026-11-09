@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    「可被嵌入」的测试承载应用（第140轮）。
+
+    关键两条（缺一不可）：
+      · android:resizeableActivity="true"  —— **activity 级**。
+        AOSP 9（车机 API 28）要求被放进 VirtualDisplay 的 Activity 自己声明这一条，
+        且**不继承** application 级的值。高德车机版正是栽在这里。
+      · android:allowEmbedded="true"      —— 允许被别的应用嵌进虚拟屏。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.cardesk.embedtest">
+
+    <application
+        android:allowBackup="false"
+        android:label="嵌入测试"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.Material.NoActionBar">
+
+        <activity
+            android:name=".EmbedTestActivity"
+            android:exported="true"
+            android:allowEmbedded="${allowEmbedded}"
+            android:resizeableActivity="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

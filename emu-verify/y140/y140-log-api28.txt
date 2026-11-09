@@ -1,0 +1,116 @@
+11-09 21:24:57.329  8158  8158 D CarDesk/NavUI: 高德导航状态（未变化） state=40
+11-09 21:24:59.060  1628  1652 I DisplayManagerService: Display device removed: DisplayDeviceInfo{"ActivityViewVirtualDisplay@233438392": uniqueId="virtual:com.ecarx.cardesk,1000,ActivityViewVirtualDisplay@233438392,0", 1287 x 867, modeId 15, defaultModeId 15, supportedModes [{id=15, width=1287, height=867, fps=60.0}], colorMode 0, supportedColorModes [0], HdrCapabilities null, density 160, 160.0 x 160.0 dpi, appVsyncOff 0, presDeadline 16666666, touch NONE, rotation 0, type VIRTUAL, state OFF, owner com.ecarx.cardesk (uid 1000), FLAG_OWN_CONTENT_ONLY}
+11-09 21:25:00.638  1628  3836 I ActivityManager: START u0 {act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10200000 cmp=com.ecarx.cardesk/com.cardesk.launcher.MainActivity} from uid 2000
+11-09 21:25:01.492  8334  8334 D CarDesk/NavUI: 画中画比例读取 dual=false key=desk_primary_ratio_normal_v1 raw=0.71030045 value=0.71030045 default=0.71030045
+11-09 21:25:01.506  8334  8334 I CarDesk/NavUI: 画中画内容留白 top=0 bottom=0 fullscreen=false
+11-09 21:25:01.507  8334  8334 D CarDesk/NavUI: 画中画比例读取 dual=false key=desk_primary_ratio_normal_v1 raw=0.71030045 value=0.71030045 default=0.71030045
+11-09 21:25:01.507  8334  8334 D CarDesk/NavUI: 画中画分屏比例变化 ratio=0.71030045 dual=false
+11-09 21:25:02.352  8334  8334 I CarDesk/NavUI: 启动导航引导数据源 registered=true action=AUTONAVI_STANDARD_BROADCAST_SEND
+11-09 21:25:02.361  8334  8334 I CarDesk/NavUI: 请求高德引导数据 targets=com.autonavi.amapauto
+11-09 21:25:02.696  8334  8334 D CarDesk/NavUI: 刷新画中画 pkg=com.cardesk.embedtest pkg2= dual=false
+11-09 21:25:02.701  8334  8334 I CarDesk/NavUI: 尝试 ActivityView 嵌入 pkg=com.cardesk.embedtest sdk=28
+11-09 21:25:02.705  8334  8334 D CarDesk/NavUI: ActivityView 回调是抽象类，改用轮询探测承载面 cb=android.app.ActivityView$StateCallback
+11-09 21:25:02.706  8334  8334 I CarDesk/NavUI: ActivityView 嵌入成功 pkg=com.cardesk.embedtest
+11-09 21:25:02.706  8334  8334 D CarDesk/NavUI: SurfaceView 圆角 API 不可用（改用父级裁剪） radius=28.0
+11-09 21:25:02.707  8334  8334 I CarDesk/NavUI: [EVT] 画中画显示 pkg=com.cardesk.embedtest app=嵌入测试 mode=embedded role=主画
+11-09 21:25:02.707  8334  8334 D CarDesk/NavUI: 画中画清空（原本没有承载应用） role=副画
+11-09 21:25:02.752  1628  1999 I DisplayManagerService: Display device added: DisplayDeviceInfo{"ActivityViewVirtualDisplay@130789324": uniqueId="virtual:com.ecarx.cardesk,1000,ActivityViewVirtualDisplay@130789324,0", 1287 x 867, modeId 16, defaultModeId 16, supportedModes [{id=16, width=1287, height=867, fps=60.0}], colorMode 0, supportedColorModes [0], HdrCapabilities null, density 160, 160.0 x 160.0 dpi, appVsyncOff 0, presDeadline 16666666, touch NONE, rotation 0, type VIRTUAL, state ON, owner com.ecarx.cardesk (uid 1000), FLAG_OWN_CONTENT_ONLY}
+11-09 21:25:02.790  1628  1652 I ActivityManager: Override config changes=20005df8 {0.0 ?mcc?mnc ?localeList ?layoutDir sw867dp w1287dp h867dp 160dpi xlrg land ?uimode ?night finger qwerty/v/v -nav/h winConfig={ mBounds=Rect(0, 0 - 1287, 867) mAppBounds=Rect(0, 0 - 1287, 867) mWindowingMode=fullscreen mActivityType=undefined}} for displayId=15
+11-09 21:25:02.796  8334  8334 D CarDesk/NavUI: 承载面首次就绪 pkg=com.cardesk.embedtest times=1 vid=15
+11-09 21:25:02.800  8334  8334 D CarDesk/NavUI: ActivityView 同步 VirtualDisplay 尺寸 w=1287 h=867
+11-09 21:25:02.802  8334  8334 I CarDesk/NavUI: 承载面就绪，启动承载应用 pkg=com.cardesk.embedtest by=surface w=1287 h=867
+11-09 21:25:02.803  1628  1999 I ActivityManager: START u0 {act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10200000 pkg=com.cardesk.embedtest cmp=com.cardesk.embedtest/.EmbedTestActivity} from uid 1000
+11-09 21:25:02.819  8334  8334 I CarDesk/NavUI: ActivityView 启动承载应用 pkg=com.cardesk.embedtest api=pendingIntent
+11-09 21:25:02.820  1628  1999 E ActivityManager: applyOptionsLocked: Unknown animationType=0
+11-09 21:25:03.001  8334  8334 I CarDesk/NavUI: 高德导航状态 state=4
+11-09 21:25:03.002  8334  8334 D CarDesk/NavUI: 高德导航状态（未变化） state=4
+11-09 21:25:03.516  1628  1652 I DisplayManagerService: Display device changed state: "ActivityViewVirtualDisplay@130789324", OFF
+11-09 21:25:03.525  8334  8334 D CarDesk/NavUI: 承载面销毁 pkg=com.cardesk.embedtest times=1
+11-09 21:25:06.356  8334  8334 I CarDesk/NavUI: 丢弃无效的导航引导数据 keyType=12205 icon=-1 seg=-1 keys=EXTRA_GEOLOCATION,KEY_TYPE
+11-09 21:25:07.360  8334  8334 I CarDesk/NavUI: 高德导航状态 state=40
+11-09 21:25:11.385  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:25:16.385  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:25:17.391  8334  8334 D CarDesk/NavUI: 高德导航状态（未变化） state=40
+11-09 21:25:21.391  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:25:26.407  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:25:27.408  8334  8334 D CarDesk/NavUI: 高德导航状态（未变化） state=40
+11-09 21:25:31.425  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:25:36.440  8334  8334 I CarDesk/NavUI: 丢弃无效的导航引导数据 keyType=12205 icon=-1 seg=-1 keys=EXTRA_GEOLOCATION,KEY_TYPE
+11-09 21:25:37.441  8334  8334 D CarDesk/NavUI: 高德导航状态（未变化） state=40
+11-09 21:25:41.442  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:25:46.452  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:25:47.453  8334  8334 D CarDesk/NavUI: 高德导航状态（未变化） state=40
+11-09 21:25:51.469  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:25:56.474  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:25:57.477  8334  8334 D CarDesk/NavUI: 高德导航状态（未变化） state=40
+11-09 21:26:01.483  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:26:02.450  8334  8334 I CarDesk/NavUI: 画中画承载面摘出（VirtualDisplay 保留） pkg=com.cardesk.embedtest role=主画
+11-09 21:26:02.450  8334  8334 I CarDesk/NavUI: 画中画承载面释放 pkg=com.cardesk.embedtest role=主画 reason=重建前
+11-09 21:26:02.454  8334  8334 D CarDesk/NavUI: 画中画比例读取 dual=false key=desk_primary_ratio_normal_v1 raw=0.71030045 value=0.71030045 default=0.71030045
+11-09 21:26:02.459  8334  8334 I CarDesk/NavUI: 画中画内容留白 top=0 bottom=0 fullscreen=false
+11-09 21:26:02.460  8334  8334 D CarDesk/NavUI: 画中画比例读取 dual=false key=desk_primary_ratio_normal_v1 raw=0.71030045 value=0.71030045 default=0.71030045
+11-09 21:26:02.460  8334  8334 D CarDesk/NavUI: 画中画分屏比例变化 ratio=0.71030045 dual=false
+11-09 21:26:02.461  8334  8334 D CarDesk/NavUI: SurfaceView 圆角 API 不可用（改用父级裁剪） radius=28.0
+11-09 21:26:02.461  8334  8334 I CarDesk/NavUI: [EVT] 画中画显示 pkg=com.cardesk.embedtest app=嵌入测试 mode=transferred role=主画
+11-09 21:26:02.481  8334  8334 D CarDesk/NavUI: 刷新画中画 pkg=com.cardesk.embedtest pkg2= dual=false
+11-09 21:26:02.481  8334  8334 D CarDesk/NavUI: 画中画已承载该包名，复用当前画面 pkg=com.cardesk.embedtest role=主画
+11-09 21:26:02.481  8334  8334 D CarDesk/NavUI: 画中画清空（原本没有承载应用） role=副画
+11-09 21:26:04.281  8334  8334 D CarDesk/NavUI: 车道线数据为空，忽略
+11-09 21:26:06.490  8334  8334 I CarDesk/NavUI: 丢弃无效的导航引导数据 keyType=12205 icon=-1 seg=-1 keys=EXTRA_GEOLOCATION,KEY_TYPE
+11-09 21:26:07.497  8334  8334 D CarDesk/NavUI: 高德导航状态（未变化） state=40
+11-09 21:26:11.503  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:26:16.516  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:26:17.524  8334  8334 D CarDesk/NavUI: 高德导航状态（未变化） state=40
+11-09 21:26:21.528  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:26:26.540  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:26:27.541  8334  8334 D CarDesk/NavUI: 高德导航状态（未变化） state=40
+11-09 21:26:31.548  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:26:36.573  8334  8334 I CarDesk/NavUI: 丢弃无效的导航引导数据 keyType=12205 icon=-1 seg=-1 keys=EXTRA_GEOLOCATION,KEY_TYPE
+11-09 21:26:37.572  8334  8334 D CarDesk/NavUI: 高德导航状态（未变化） state=40
+11-09 21:26:41.587  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:26:46.612  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:26:47.613  8334  8334 D CarDesk/NavUI: 高德导航状态（未变化） state=40
+11-09 21:26:51.629  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:26:56.659  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:26:57.666  8334  8334 D CarDesk/NavUI: 高德导航状态（未变化） state=40
+11-09 21:27:01.670  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:27:06.676  8334  8334 I CarDesk/NavUI: 丢弃无效的导航引导数据 keyType=12205 icon=-1 seg=-1 keys=EXTRA_GEOLOCATION,KEY_TYPE
+11-09 21:27:07.679  8334  8334 D CarDesk/NavUI: 高德导航状态（未变化） state=40
+11-09 21:27:08.275  8334  8334 D CarDesk/NavUI: 车道线数据为空，忽略
+11-09 21:27:11.691  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:27:16.711  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:27:17.712  8334  8334 D CarDesk/NavUI: 高德导航状态（未变化） state=40
+11-09 21:27:21.731  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:27:26.747  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:27:27.756  8334  8334 D CarDesk/NavUI: 高德导航状态（未变化） state=40
+11-09 21:27:31.766  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:27:36.784  8334  8334 I CarDesk/NavUI: 丢弃无效的导航引导数据 keyType=12205 icon=-1 seg=-1 keys=EXTRA_GEOLOCATION,KEY_TYPE
+11-09 21:27:37.788  8334  8334 D CarDesk/NavUI: 高德导航状态（未变化） state=40
+11-09 21:27:41.807  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:27:46.832  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:27:47.835  8334  8334 D CarDesk/NavUI: 高德导航状态（未变化） state=40
+11-09 21:27:51.836  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:27:56.854  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:27:57.857  8334  8334 D CarDesk/NavUI: 高德导航状态（未变化） state=40
+11-09 21:28:01.870  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:28:06.878  8334  8334 I CarDesk/NavUI: 丢弃无效的导航引导数据 keyType=12205 icon=-1 seg=-1 keys=EXTRA_GEOLOCATION,KEY_TYPE
+11-09 21:28:07.879  8334  8334 D CarDesk/NavUI: 高德导航状态（未变化） state=40
+11-09 21:28:11.902  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:28:12.277  8334  8334 D CarDesk/NavUI: 车道线数据为空，忽略
+11-09 21:28:16.915  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:28:17.917  8334  8334 D CarDesk/NavUI: 高德导航状态（未变化） state=40
+11-09 21:28:21.914  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:28:26.923  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:28:27.928  8334  8334 D CarDesk/NavUI: 高德导航状态（未变化） state=40
+11-09 21:28:31.940  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:28:36.948  8334  8334 I CarDesk/NavUI: 丢弃无效的导航引导数据 keyType=12205 icon=-1 seg=-1 keys=EXTRA_GEOLOCATION,KEY_TYPE
+11-09 21:28:37.947  8334  8334 D CarDesk/NavUI: 高德导航状态（未变化） state=40
+11-09 21:28:41.959  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:28:46.981  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:28:47.980  8334  8334 D CarDesk/NavUI: 高德导航状态（未变化） state=40
+11-09 21:28:51.994  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:28:57.015  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:28:58.025  8334  8334 D CarDesk/NavUI: 高德导航状态（未变化） state=40
+11-09 21:29:02.038  8334  8334 D CarDesk/NavUI: 丢弃无效的导航引导数据（重复） keyType=12205 icon=-1 seg=-1
+11-09 21:29:07.049  8334  8334 I CarDesk/NavUI: 丢弃无效的导航引导数据 keyType=12205 icon=-1 seg=-1 keys=EXTRA_GEOLOCATION,KEY_TYPE
+11-09 21:29:08.052  8334  8334 D CarDesk/NavUI: 高德导航状态（未变化） state=40

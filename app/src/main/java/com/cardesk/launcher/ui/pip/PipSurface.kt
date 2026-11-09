@@ -561,6 +561,9 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
     /** 上一次「承载任务是否在我们的 display 上」（变化时总记日志）。 */
     private var lastTaskOnOurDisplay: Boolean? = null
 
+    /** 上一次解析出来的「我们的 VirtualDisplay id」（变化时总记日志，见 [logOurDisplayId]）。 */
+    private var lastOurDisplayId: Int? = null
+
     private val watchdog = object : Runnable {
         override fun run() {
             handler.postDelayed(this, WATCHDOG_INTERVAL_MS)
@@ -738,7 +741,9 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return null
         val tasks = runCatching { am.getRunningTasks(MAX_RUNNING_TASKS) }.getOrNull() ?: return null
         if (tasks.isEmpty()) return null
-        val ourId = ActivityEmbed.virtualDisplayIdOf(v) ?: return null
+        val ourId = ActivityEmbed.virtualDisplayIdOf(v)
+        logOurDisplayId(ourId)
+        if (ourId == null) return null
         val mine = tasks.filter {
             it.baseActivity?.packageName == pkg || it.baseIntent.getPackage() == pkg
         }
@@ -751,6 +756,43 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
         val off = PipBlackHeal.isTaskOffDisplay(ourId, taskIds)
         logTaskDisplay(ourId, taskIds, !off)
         return !off
+    }
+
+    /**
+     * 「我们这个 VirtualDisplay 的 id」诊断日志（**限频**：变化时才记）。
+     *
+     * ## 为什么单独记一行
+     *
+     * 判据「承载任务的 displayId == 我们的 displayId」要成立，
+     * 先得**拿到我们自己的 displayId**。
+     *
+     * 第140轮查出：API 28（车机同版本）上以前**恒取不到**（AOSP 9 的
+     * `ActivityView` 持有的是 `android.hardware.display.VirtualDisplay`，
+     * 不是 `android.view.Display`）→ 判据整条失效，而**日志上一行都没有**
+     * （取不到就直接 return null，什么都不记）—— 这种「静默失效」最难查。
+     *
+     * 所以这里把「解析结果」单独记一行：**变化时才记**（看门狗 3s 一轮，
+     * 不能每轮都记），取不到时记 WARN（那是真故障）。
+     */
+    private fun logOurDisplayId(id: Int?) {
+        if (id == lastOurDisplayId) return
+        lastOurDisplayId = id
+        if (id == null) {
+            Logx.w(
+                LogTags.NAV_UI,
+                "取不到画中画虚拟显示器 id（黑屏判据不可用）",
+                "pkg" to packageName,
+                "role" to role,
+            )
+        } else {
+            Logx.d(
+                LogTags.NAV_UI,
+                "画中画虚拟显示器 id",
+                "our" to id,
+                "pkg" to packageName,
+                "role" to role,
+            )
+        }
     }
 
     /**

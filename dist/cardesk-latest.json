@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1141",
-  "versionCode": 4237,
-  "tag": "v1.0.1141",
-  "name": "CarDesk 4237 / 1.0.1141-system",
-  "notes": "第139轮：切换日夜模式时高德从画中画变成全屏 —— 换肤重建改成承载面「搬家」而不是「拆掉」，VirtualDisplay 全程不死，承载应用不再被搬到主屏抢屏、也不再被重启。",
-  "publishedAt": "2026-11-09T11:59:49Z",
+  "version": "1.0.1142",
+  "versionCode": 4238,
+  "tag": "v1.0.1142",
+  "name": "CarDesk 4238 / 1.0.1142-system",
+  "notes": "第140轮：API 28（车机同版本）上画中画黑屏判据修复（能取到 VirtualDisplay 的 displayId 了）+ 启动承载应用的 ActivityOptions 补上 launchDisplayId + 新增可嵌入的测试承载应用模块（不进正式包）",
+  "publishedAt": "2026-11-09T13:33:40Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4237.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4237.apk",
-    "size": 2346709,
-    "sha256": "935c5fa931599901480dda93c0519208294787d3325532a5f19d9cd0efdf1dba"
+    "name": "CarDesk-platform-ecarx-cardesk-4238.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4238.apk",
+    "size": 2348941,
+    "sha256": "a3dca6e8b6650af79988ee9e10cf4685cd2ea510f2178dc1679dd8306e174bfa"
   }
 }

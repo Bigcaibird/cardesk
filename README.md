@@ -4824,3 +4824,158 @@ VirtualDisplay 的 display id 换了一个（#67 → #68），
 > 这正是真车上「变成全屏」而模拟器上只是「重启」的原因）。
 > 本轮的修法让 **task 根本不离开那块 VirtualDisplay**，
 > 两边行为应当一致，但真车结论以实车为准。
+
+## 第140轮：API 28（车机同版本）上画中画判据修复 + 可嵌入测试承载应用
+
+> 用户诉求：「以后虚拟机测试用 API 28 的虚拟机」——
+> 车机就是 Android 9 / API 28，模拟器口径必须跟真车一致。
+
+### 先更正一个错判：模拟器上高德的画中画**其实是好的**
+
+第140轮开工时的判断是「AOSP 9 会拒绝把高德放进虚拟屏」，依据是
+`ActivityStackSupervisor.canPlaceEntityOnDisplay()` 里那条 `resizeable` 校验
+（高德车机版只在 **application** 级声明 `resizeableActivity`）。
+**实测推翻了它**：
+
+```
+$ adb -s emulator-5560 shell dumpsys package com.ecarx.cardesk | grep userId
+    userId=1000                              ← 我们自己是 system 身份
+$ adb -s emulator-5560 shell dumpsys package com.ecarx.cardesk | grep INTERNAL
+      android.permission.INTERNAL_SYSTEM_WINDOW: granted=true
+```
+
+AOSP 9 的 `isCallerAllowedToLaunchOnDisplay()` **第一步**就查 `INTERNAL_SYSTEM_WINDOW`：
+
+```java
+final int startAnyPerm = mService.checkPermission(INTERNAL_SYSTEM_WINDOW, callingPid, callingUid);
+if (startAnyPerm == PERMISSION_GRANTED) {
+    Slog.d(TAG, "Launch on display check: allow launch any on display");
+    return true;                       // ← 直接放行，后面 allowEmbedded 那段根本走不到
+}
+```
+
+我们 App 在车机上是**平台签名 + `sharedUserId=android.uid.system`** → uid 1000 →
+这个权限有 → **高德不需要在 manifest 里声明 `allowEmbedded` 也能被嵌进虚拟屏**。
+
+实测（API 28 模拟器）：
+
+```
+ActivityTaskManager: START u0 {… pkg=com.autonavi.amapautp.yh cmp=…/UsbFillActivity} from uid 1000
+dumpsys activity activities:
+  Display #13 (activities from top to bottom):
+    ResumedActivity: ActivityRecord{… com.autonavi.amapautp.yh/com.autonavi.amapauto.MainMapActivity t30}
+```
+
+截图里高德就画在导航页里（`emu-verify/y140/y140-01-amap28-embedded.png`）。
+
+之前那次之所以看到「落回 Display #0」，是**测试方法**的问题：
+那次是**用 adb（shell 身份）**去启的 —— shell 没有 `INTERNAL_SYSTEM_WINDOW`，
+而高德的 manifest 里 `allowEmbedded` **一次都没有** → 被系统**静默拒绝** → 回落主屏。
+**不是产品的差异，是身份的差异**（已写进 `EMULATOR-VERIFY.md`：
+验画中画必须从桌面 App 里发起，不能用 `adb shell am start` 代替）。
+
+### 本轮修的真 bug：黑屏判据在 API 28 上**恒为「不知道」**
+
+顺着这条线查出一个更值钱的问题。
+
+画中画黑屏的**权威判据**是 AOSP 官方 `VirtualDisplay Launcher` 示例那套：
+
+```
+task.displayId == virtualDisplay.getDisplayId()
+```
+
+前半句（承载应用的 task 在哪个 display 上）我们读得到；
+后半句（**我们自己的** VirtualDisplay 是哪个 id）——
+`ActivityEmbed.virtualDisplayIdOf()` 在 **API 28 上恒返回 `null`**。
+
+**根因**（AOSP 9 `android-9.0.0_r1` 的 `core/java/android/app/ActivityView.java`）：
+
+```java
+import android.hardware.display.VirtualDisplay;
+private VirtualDisplay mVirtualDisplay;
+…
+options.setLaunchDisplayId(mVirtualDisplay.getDisplay().getDisplayId());
+```
+
+`android.hardware.display.VirtualDisplay` **不是** `android.view.Display`
+（它是个 final 类，里面包着一个 `Display`）——
+旧代码只认 `android.view.Display` → **API 28 上永远取不到 id**。
+
+后果：**「黑屏自愈」那一整级在车机上等于没生效**，
+而且是**静默失效**（取不到就 `return null`，日志一行都没有）。
+
+### 修法：取舍规则抽成纯逻辑（`core/VirtualDisplayIdResolver.kt`）
+
+| 规则 | 为什么 |
+|---|---|
+| 只认**已确认是虚拟显示器**的候选 | 第130轮的坑：`mHost.mDisplay` 是**桌面那块屏**，认了它 → 跟任何 task 都对不上 → 把正常画面判成黑屏并**误重启了承载应用** |
+| `displayId <= 0` 丢弃 | `0` 是主显示器，虚拟屏不会是 0 |
+| 等于**我们自己窗口所在 display** 的丢弃 | 车机是多屏的 |
+| 拿不准 → `null` | **宁可漏判也不能误判** —— 误判的代价是重启用户正在用的应用 |
+
+两个新函数都用**按方法名反射**实现（不引用任何 `android.*` 类型）→ **可进 JVM 单测**：
+`displayIdOfVirtualDisplayLike()` 认两种形态（本身是 `Display` / 是**壳**，先 `getDisplay()`）；
+`looksLikeVirtualDisplay()` 看**简单类名**（全名会把外层类名也算进来 → 误判）。
+
+### 顺带修的隐患：两参重载的 `ActivityOptions` 没带 `launchDisplayId`
+
+`ActivityView.startActivity(PendingIntent, ActivityOptions)` **用的是调用方给的 options**。
+我们以前传 `makeCustomAnimation(ctx, 0, 0)` —— **没有 `launchDisplayId`**：
+一旦某个 ROM 上这个重载按我们给的 options 来，承载应用就落到**默认显示器** = **全屏抢屏**
+（第139轮那个症状的同款）。现在改成 `makeBasic()` + `setLaunchDisplayId(我们的 id)`；
+拿不到 id 就不用这条路。单参重载（`startActivity(PendingIntent)`）兜底 ——
+AOSP 的实现内部用 `prepareActivityOptions()`，**一定带 displayId**。
+
+### 新增 `embedtest`：可被嵌入的测试承载应用
+
+高德带一堆首启引导、权限弹窗、导航协议广播，**做不了干净的承载目标**；
+而且它一旦状态不对，就分不清是「我们的链路坏了」还是「高德没准备好」。
+
+`embedtest` 是**独立 APK**（`com.cardesk.embedtest`）：
+`allowEmbedded="true"` + `resizeableActivity="true"`（activity 级），
+画面是**纯色 + 大号字 + 当前承载面尺寸** → 截图一眼认出是它；
+`allowEmbedded` 可切换（`-PembedtestAllowEmbedded=false`）做 A/B 实验；
+**不进正式包**（`release.sh` 只取正式包的 APK，反向验证第 14 项专门盯这条）。
+
+### 模拟器验证（API 28 / `emulator-5560`）
+
+| 项 | 结果 |
+|---|---|
+| 承载面就绪日志 | `承载面首次就绪 pkg=com.cardesk.embedtest times=1 vid=15` —— **修复前这里是 null** |
+| 高德的落点 | `Display #13/#14/#15` 上 `ResumedActivity` = 高德 ✅ |
+| 切日夜（高德广播 `EXTRA_STATE=38`） | 日志 `画中画承载面摘出（VirtualDisplay 保留）` + `承载面释放 reason=重建前`；**task id 与 display id 都没变** → 第139轮的修复在 API 28 上成立 ✅ |
+| API 29 回归 | `vid=77`，高德仍 Resumed 在 `Display #77` ✅ |
+
+### 怎么验证
+
+- **全量单测 1951 项全绿**（1937 → +14，新增 `VirtualDisplayIdResolverTest`）；
+- **反向验证 14 项全红**（`tools/verify_y140_reverse.sh`）：
+  逐条把实现改回旧行为（不再剥壳 / 不排除 `id<=0` / 不排除自家 display /
+  不要求「已确认是虚拟显示器」 / 改看全类名 / 不走 `pick` / 退回只认 `Display` /
+  options 不带 displayId / 顺序反了 / 日志不记 vid / embedtest 不声明 allowEmbedded /
+  把模块声明注释掉 / release.sh 收进测试包），确认对应断言**必红**，还原后恢复全绿；
+- 脚本自身也复核过：断言一律用**精确文本**并**剥掉行注释**（XML 另剥 `<!-- -->`），
+  第 13 项专门把模块声明**注释掉**验证断言不会被注释骗过；
+  **编译不过时也当红**处理（不会因为「跑不起来」而假绿）。
+
+### 这一轮没做的
+
+- **没有**改画中画其它历史问题（黑屏自愈分级、尺寸变化重载一律照旧）；
+- **没有**动「跟着高德 / 固定白天黑夜」那套日夜来源的判定逻辑；
+- **没有**发 GitHub Release、**没有**传 R2（等明确指示）。
+
+### 产物
+
+| 项 | 值 |
+|---|---|
+| 文件 | `dist/CarDesk-platform-ecarx-cardesk-4238.apk` |
+| versionCode / versionName | 4238 / 1.0.1142-system |
+| 大小 | 2 348 941 字节 |
+| SHA-256 | `a3dca6e8b6650af79988ee9e10cf4685cd2ea510f2178dc1679dd8306e174bfa` |
+| 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
+| 单测 | 1951 项全绿（`tools/release.sh` 出包时一并跑的） |
+| 测试承载应用 | `embedtest/build/outputs/apk/debug/embedtest-debug.apk`（**独立**，不进 `dist/`） |
+
+> **真车（领克，API 28）仍需复验**：修的是判据与启动参数，
+> 真车是 OEM ROM，`ActivityView` 内部结构可能与 AOSP 不同
+> （所以 `virtualDisplayIdOf` 保留了「公开方法 → 自持 `mVirtualDisplay` → `mHost`」多路兜底）。

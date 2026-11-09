@@ -21,3 +21,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "CarDesk"
 include(":app")
+// 第140轮：「可被嵌入」的测试承载应用（API 28 上验证画中画承载链路用）。
+// 独立 APK，不进正式包；见 embedtest/build.gradle.kts。
+include(":embedtest")

@@ -43,82 +43,79 @@ yes | <repo>/../toolchain/sdk/cmdline-tools/latest/bin/sdkmanager \
   "system-images;android-28;default;arm64-v8a"
 ```
 
-### 0.0.1 API 28 上的已知限制：**第三方车机 App 嵌不进 VirtualDisplay**（实测 + AOSP 源码）
+### 0.0.1 API 28 上的画中画：**能测**，但必须从桌面 App 里发起（实测更正，第140轮）
 
-在 `cardesk28` 上实测（2026-11-09，第140轮）：
+> ⚠️ **本节结论在第140轮被实测推翻了**（下面写的是更正后的版本）。
+> 之前写的「第三方车机 App 嵌不进 VirtualDisplay」是**测试方法的假象**，不是产品限制。
+
+### 现象（更正前）
+
+在 `cardesk28` 上用 **adb（shell 身份）** 启承载应用时：
 
 ```
 ActivityView 启动承载应用 pkg=com.autonavi.amapautp.yh api=pendingIntent
 → dumpsys：MainMapActivity 在 Display #0（主屏），VirtualDisplay（Display #6/7）里是空的
 ```
 
-即 **承载应用被拉到了主屏（= 全屏抢屏）**，画中画区域始终是黑的。
 系统日志里**没有任何拒绝/回落告警**（`START u0 {...} from uid 1000` 正常，只是落点不对）。
 
-**根因（AOSP `android-9.0.0_r1` 源码 + 实测双向钉死）**：
+### 真实原因：**身份不同**，不是 manifest 不同
 
-1. `services/core/java/com/android/server/am/ActivityStackSupervisor.java`
+AOSP 9 的 `ActivityStackSupervisor.isCallerAllowedToLaunchOnDisplay()` **第一步**就查权限：
 
-   ```java
-   boolean canPlaceEntityOnDisplay(int displayId, boolean resizeable, ...) {
-       ...
-       if (!resizeable && !displayConfigMatchesGlobal(displayId)) {
-           // Can't apply wrong configuration to non-resizeable activities.
-           return false;                      // ← 拒绝放到虚拟屏
-       }
-       if (!isCallerAllowedToLaunchOnDisplay(callingPid, callingUid, displayId, activityInfo)) {
-           return false;
-       }
-   ```
-   而 `resizeable` 的来源（`ActivityRecord.canBeLaunchedOnDisplay`）是
-   `task != null ? task.isResizeable() : supportsResizeableMultiWindow()` ——
-   **新启动时取的是 Activity 自己的 `resizeableActivity`**。
+```java
+final int startAnyPerm = mService.checkPermission(INTERNAL_SYSTEM_WINDOW, callingPid, callingUid);
+if (startAnyPerm == PERMISSION_GRANTED) {
+    Slog.d(TAG, "Launch on display check: allow launch any on display");
+    return true;                       // ← 直接放行
+}
+// 下面才会去查目标 Activity 的 FLAG_ALLOW_EMBEDDED（即 manifest 里的 android:allowEmbedded）
+```
 
-2. **AOSP 9 的 `PackageParser` 里，activity 级的 `resizeableActivity` 默认 false，
-   且**不继承** application 级的值**（Android 10 才改成继承）。
+我们 App 在车机上是**平台签名 + `sharedUserId=android.uid.system`** → **uid 1000** →
+`INTERNAL_SYSTEM_WINDOW` 有 → **直接放行**：
 
-3. 高德车机版 9.5 的 manifest（`aapt2 dump xmltree` 实测）：
-   - application 级 `resizeableActivity=true`（**只有这一处**）；
-   - `com.autonavi.amapauto.MainMapActivity` / `com.autonavi.auto.remote.fill.UsbFillActivity`
-     **自己都没声明** `resizeableActivity` → activity 级 = **false**；
-   - `allowEmbedding` **一次都没出现**。
+```bash
+adb -s emulator-5560 shell dumpsys package com.ecarx.cardesk | grep -E "userId|INTERNAL_SYSTEM_WINDOW"
+    userId=1000
+      android.permission.INTERNAL_SYSTEM_WINDOW: granted=true
+```
 
-→ **AOSP 9 判定高德「不可调整大小」→ 拒绝放到 VirtualDisplay → 静默回落到默认显示器 → 全屏。**
-→ 而 **Android 10 改了继承规则** → 高德变成可调整大小 → 能落上 VirtualDisplay
-（这正是 API 29 模拟器上画中画能用的原因）。
+**adb（shell，uid 2000）没有这个权限** → 走到后面那条
+「目标 Activity 必须声明 `android:allowEmbedded`」的检查 →
+高德的 manifest 里 `allowEmbedded` **一次都没有** → **被静默拒绝** → 回落主显示器。
 
-**所以这是「AOSP 9 + 第三方车机 App」的组合限制，不是我们 App 的 bug** ——
-高德是第三方应用，它的 manifest 我们改不了。
+### 实测：从桌面 App 里发起，高德**能**进虚拟屏（API 28）
 
-**真车（领克）为什么平时画中画是好的**：车机 ROM 的 `ActivityView`/`ActivityStarter`
-被 OEM 改过（去掉了上面那条 resizeable 校验，或改用别的落点路径）。
-**这条不能拿 AOSP 模拟器的行为去推断真车**。
+```
+ActivityTaskManager: START u0 {… pkg=com.autonavi.amapautp.yh cmp=…/UsbFillActivity} from uid 1000
+dumpsys activity activities:
+  Display #13 (activities from top to bottom):
+    ResumedActivity: ActivityRecord{… com.autonavi.amapautp.yh/com.autonavi.amapauto.MainMapActivity t30}
+```
 
-**实测排除项**（都试过，落点仍然错）：
+截图：`emu-verify/y140/y140-01-amap28-embedded.png`（高德画在导航页里）。
 
-| 试法 | 结果 |
-|---|---|
-| `ActivityView.startActivity(PendingIntent)`（现有实现） | 落 Display #0 ✗ |
-| 创建 PendingIntent 时就带 `ActivityOptions`（带 launchDisplayId） | 落 Display #0 ✗ |
-| `ActivityView.startActivity(Intent)`（AOSP 9 内部用 `prepareActivityOptions()`，必带 displayId） | 落 Display #0 ✗ |
-| 清空高德数据后**首次**启动（排除「task 在主屏扎根后被复用」） | 落 Display #0 ✗ |
+### 由此得到的**操作纪律**
 
-**结论**：API 28 模拟器上「画中画 + 高德」这条线**测不了**，
-因为高德的 activity 不可调整大小，AOSP 9 不允许把它放进虚拟屏。
-要在这台上验证我们的承载链路，得换一个**activity 级声明了 `resizeableActivity=true`** 的应用当承载目标。
+- **验画中画必须从桌面 App 里发起**（切到导航页 → 桌面自己 `startActivity`），
+  **不能**用 `adb shell am start --display N` 代替 —— 那是 shell 身份，权限路径完全不同，
+  测出来的落点是**假的**；
+- 想用**干净的承载目标**（不受高德首启引导/权限弹窗干扰），
+  用 `embedtest`（见下条 0.0.3）。
 
-**顺带查出一个我们自己的真 bug（待修）**：
+### 0.0.1.1 第140轮修的真 bug：`virtualDisplayIdOf()` 在 API 28 上恒取不到 id
 
-`ActivityEmbed.virtualDisplayIdOf()` 在 **API 28 上取不到 displayId** ——
-它只认 `android.view.Display` 类型，而 **AOSP 9 的 `ActivityView` 直接持有
-`android.hardware.display.VirtualDisplay`**（AOSP 10 之后才换成 `Display`）。
+`ActivityEmbed.virtualDisplayIdOf()` 只认 `android.view.Display`，
+而 **AOSP 9 的 `ActivityView` 持有的是 `android.hardware.display.VirtualDisplay`**
+（它不是 `Display`，是包着一个 `Display` 的壳）→ **API 28 上恒为 `null`**。
 
-后果：API 28 上「承载任务的 task 在不在我们的 display 上」这条**判据是瞎的**
-（`PipSurface.isTaskOnOurDisplay()` 恒为 null → 黑屏自愈的「task 不在 display 上」那一级判不出来）。
+后果：API 28（= 车机）上「承载任务的 task 在不在我们的 display 上」这条
+**判据是瞎的**（`PipSurface.isTaskOnOurDisplay()` 恒为 null →
+黑屏自愈的「task 不在 display 上」那一级判不出来），而且**静默失效**、日志一行都没有。
 
-修法（低风险，只增强诊断与判据，不改启动路径）：
-在 `virtualDisplayIdOf()` 里补一条 —— 反射取 `mVirtualDisplay.getDisplay()` 再取 `displayId`
-（实测这样能取到：API 28 上 `vid=6/7` 正确）。
+第140轮已修（新增 `core/VirtualDisplayIdResolver.kt`，反射 `mVirtualDisplay.getDisplay()`），
+修完 API 28 上日志能看到 `承载面首次就绪 … vid=15`，与系统的 `Display #15` 对得上。
 
 ### 0.0.2 API 28 模拟器的其它已知差异
 
@@ -134,6 +131,32 @@ ActivityView 启动承载应用 pkg=com.autonavi.amapautp.yh api=pendingIntent
 - **画中画要切到导航页才会创建 surface**：停在首页时 surface 不建 → 承载面永远不就绪
   （日志里是「承载面暂不就绪，转慢速等待」）。
   `adb shell input swipe 1500 700 500 700 400`（右→左滑）切到第 2 页。
+
+### 0.0.3 `embedtest`：可被嵌入的测试承载应用（第140轮新增）
+
+高德带一堆首启引导、权限弹窗、导航协议广播，**做不了干净的承载目标**；
+用它做对照实验时，分不清是「我们的链路坏了」还是「高德没准备好」。
+
+`embedtest` 是**独立 APK**（`com.cardesk.embedtest`），**不进正式包**：
+
+```bash
+# 构建（带 allowEmbedded / 不带，做 A/B 实验）
+gradle :embedtest:assembleDebug
+gradle :embedtest:assembleDebug -PembedtestAllowEmbedded=false
+
+# 装到 API 28 模拟器
+adb -s emulator-5560 install -r embedtest/build/outputs/apk/debug/embedtest-debug.apk
+
+# 让画中画承载它：写 pip_app 偏好（见 0.0.4 的写法），再切到导航页
+```
+
+它的画面是**纯色 + 大号字 + 当前承载面尺寸** → 截图一眼能认出是它，
+不用去分辨是高德还是别的画面。切日夜前后对比时，
+「画面连续 + task id 不变」就是承载面没被拆的直接证据。
+
+> 它声明了 `android:allowEmbedded="true"` + `android:resizeableActivity="true"`（activity 级），
+> 所以在**没有** `INTERNAL_SYSTEM_WINDOW` 的身份下也能进虚拟屏 ——
+> 这正好是它跟高德的差别，也是当初做它的原因。
 
 
 

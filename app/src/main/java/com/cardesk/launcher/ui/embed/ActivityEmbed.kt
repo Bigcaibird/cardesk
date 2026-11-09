@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.View
+import com.cardesk.launcher.core.VirtualDisplayIdResolver
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 
@@ -346,7 +347,6 @@ object ActivityEmbed {
      */
     fun startActivity(view: View, intent: Intent) {
         val pkg = intent.`package`
-        val ctx = view.context
 
         // —— 1) 隐藏 API：startActivity(PendingIntent, ActivityOptions) ——
         if (startViaPendingIntent(view, intent)) {
@@ -394,21 +394,42 @@ object ActivityEmbed {
             PendingIntent.getActivity(ctx, intent.`package`?.hashCode() ?: 0, intent, PIP_PENDING_INTENT_FLAGS)
         }.getOrNull() ?: return false
 
-        // 带 ActivityOptions 的重载优先（同款）
-        val options = runCatching {
-            val m = Class.forName("android.app.ActivityOptions")
-                .getMethod("makeCustomAnimation", android.content.Context::class.java, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
-            m.invoke(null, ctx, 0, 0)
-        }.getOrNull()
-        if (options != null) {
-            val ok = runCatching {
-                view.javaClass
-                    .getMethod("startActivity", PendingIntent::class.java, Class.forName("android.app.ActivityOptions"))
-                    .invoke(view, pending, options)
-            }.isSuccess
-            if (ok) return true
+        // ① 两参重载 `startActivity(PendingIntent, ActivityOptions)`（**优先**，第139轮验过这条路）。
+        //
+        // 关键：**它用的是我们传进去的 options**，所以 options 里**必须带 launchDisplayId**。
+        // 第140轮以前这里传的是 `makeCustomAnimation(ctx, 0, 0)` —— 里面没有 launchDisplayId
+        // → 一旦某些 ROM 上这个重载真的按我们给的 options 来，
+        // 承载应用就会落到**默认显示器** = **全屏抢屏**（第139轮那个症状的同款）。
+        //
+        // 拿不到我们这个 VirtualDisplay 的 id 就不用这条路（宁可换一条，也别把应用丢到主屏）。
+        val vid = virtualDisplayIdOf(view)
+        if (vid != null) {
+            val options = runCatching {
+                val cls = Class.forName("android.app.ActivityOptions")
+                val opts = cls.getMethod("makeBasic").invoke(null)
+                cls.getMethod("setLaunchDisplayId", Int::class.javaPrimitiveType).invoke(opts, vid)
+                opts
+            }.getOrNull()
+            if (options != null) {
+                val ok = runCatching {
+                    view.javaClass
+                        .getMethod("startActivity", PendingIntent::class.java, Class.forName("android.app.ActivityOptions"))
+                        .invoke(view, pending, options)
+                }.isSuccess
+                if (ok) return true
+            }
         }
-        // 单参重载
+
+        // ② 单参重载 `startActivity(PendingIntent)`。
+        //
+        // AOSP 的实现（android-9.0.0_r1 实测有）内部是：
+        // ```java
+        // final ActivityOptions options = prepareActivityOptions();
+        // pendingIntent.send(..., options.toBundle());
+        // ```
+        // `prepareActivityOptions()` 里就是
+        // `options.setLaunchDisplayId(mVirtualDisplay.getDisplay().getDisplayId())`
+        // → **launchDisplayId 一定带上了** → 承载应用一定落在我们的 VirtualDisplay 上。
         return runCatching {
             view.javaClass.getMethod("startActivity", PendingIntent::class.java).invoke(view, pending)
         }.isSuccess
@@ -544,7 +565,17 @@ object ActivityEmbed {
                         "pkg" to pkg,
                     )
                 }
-                Logx.d(LogTags.NAV_UI, "承载面首次就绪", "pkg" to pkg, "times" to surfaceCreatedCount)
+                Logx.d(
+                    LogTags.NAV_UI,
+                    "承载面首次就绪",
+                    "pkg" to pkg,
+                    "times" to surfaceCreatedCount,
+                    // 顺带记下我们这个 VirtualDisplay 的 id（第140轮）：
+                    // 这是黑屏判据的另一半 —— 拿不到它，判据整条失效。
+                    // API 28 上以前恒为 null（ActivityView 持有的是
+                    // android.hardware.display.VirtualDisplay，不是 android.view.Display）。
+                    "vid" to virtualDisplayIdOf(view),
+                )
                 handler.post { attempt("surface") }
                 return
             }
@@ -694,7 +725,7 @@ object ActivityEmbed {
     }.getOrNull()
 
     /**
-     * 取承载面所在 **VirtualDisplay 的 displayId**（第130轮）。
+     * 取承载面所在 **VirtualDisplay 的 displayId**（第130轮；第140轮补 API 28）。
      *
      * ## 为什么需要它
      *
@@ -703,6 +734,23 @@ object ActivityEmbed {
      *
      * 这跟 AOSP 官方 `VirtualDisplay Launcher` 示例判活的方式一致：
      * `task.displayId == virtualDisplay.getDisplayId()`。
+     *
+     * ## 第140轮补上的洞：API 28 上这一路以前是**恒空**的
+     *
+     * AOSP 9（`android-9.0.0_r1`）的 `android.app.ActivityView`：
+     *
+     * ```java
+     * import android.hardware.display.VirtualDisplay;
+     * private VirtualDisplay mVirtualDisplay;
+     * // 用的时候是：
+     * options.setLaunchDisplayId(mVirtualDisplay.getDisplay().getDisplayId());
+     * ```
+     *
+     * `android.hardware.display.VirtualDisplay` **不是** `android.view.Display`
+     * （它是个 final 类，里面包着一个 `Display`）——
+     * 旧代码只认 `android.view.Display`，所以在 API 28（车机系统）上
+     * **永远取不到 displayId** → 判据恒为「不知道」
+     * → **黑屏自愈那一整级在车机上等于没生效**。
      *
      * ## 取 displayId 的坑（第130轮实测踩过）
      *
@@ -715,51 +763,56 @@ object ActivityEmbed {
      * 所以取值的顺序是：公开方法 → `mVirtualDisplay` → `mHost.mVirtualDisplay`
      * → **只有当它确实是 VirtualDisplay 时**才用 `mHost.mDisplay`。
      *
+     * 取舍规则全在纯逻辑里（[VirtualDisplayIdResolver]），这里只负责「探」。
+     *
      * @return null = 取不到（判据不可用，调用方必须按「不知道」处理）
      */
     fun virtualDisplayIdOf(view: View): Int? {
+        val candidates = ArrayList<VirtualDisplayIdResolver.Candidate>(4)
+
         // 1) 公开方法（API 30+）
         val publicId = runCatching {
             view.javaClass.getMethod("getVirtualDisplayId").invoke(view) as Int
         }.getOrNull()
-        if (publicId != null && publicId > 0) return publicId
+        candidates += VirtualDisplayIdResolver.Candidate(
+            VirtualDisplayIdResolver.Source.PUBLIC_API,
+            publicId,
+            confirmedVirtual = true,
+        )
+
         // 2) ActivityView 自己持有的 mVirtualDisplay
+        //    AOSP 9 起它是 android.hardware.display.VirtualDisplay（**不是** Display），
+        //    所以交给解析器剥一层取 id。
         val own = findField(view, "mVirtualDisplay")?.let { readField(it, view) }
-        if (own is android.view.Display) {
-            val id = runCatching { own.displayId }.getOrNull()
-            if (id != null && id > 0) return id
-        }
-        // 3) mHost.mVirtualDisplay
+        candidates += VirtualDisplayIdResolver.Candidate(
+            VirtualDisplayIdResolver.Source.OWN_VIRTUAL_DISPLAY,
+            VirtualDisplayIdResolver.displayIdOfVirtualDisplayLike(own),
+            confirmedVirtual = true,
+        )
+
+        // 3) mHost.mVirtualDisplay（API 27 及更早的 ActivityViewHost）
+        // 4) mHost.mDisplay —— **必须确认它是 VirtualDisplay**
+        //    （ActivityViewHost.mDisplay 是承载面自己所在的显示器，不是虚拟显示器）
         val host = findField(view, "mHost")?.let { readField(it, view) }
         if (host != null) {
-            val field = findField(host, "mVirtualDisplay")
-            val display = field?.let { readField(it, host) } as? android.view.Display
-            val id = runCatching { display?.displayId }.getOrNull()
-            if (id != null && id > 0) return id
-            // 4) mHost.mDisplay —— **必须确认它是 VirtualDisplay**
-            //    （ActivityView 自己的 mDisplay 是我们桌面的显示器，不是虚拟显示器）
-            val mDisplay = findField(host, "mDisplay")
-            val m = mDisplay?.let { readField(it, host) }
-            if (m is android.view.Display && isVirtualDisplay(m)) {
-                val mid = runCatching { m.displayId }.getOrNull()
-                if (mid != null && mid > 0) return mid
-            }
+            val hostVirtual = findField(host, "mVirtualDisplay")?.let { readField(it, host) }
+            candidates += VirtualDisplayIdResolver.Candidate(
+                VirtualDisplayIdResolver.Source.HOST_VIRTUAL_DISPLAY,
+                VirtualDisplayIdResolver.displayIdOfVirtualDisplayLike(hostVirtual),
+                confirmedVirtual = true,
+            )
+            val hostDisplay = findField(host, "mDisplay")?.let { readField(it, host) }
+            candidates += VirtualDisplayIdResolver.Candidate(
+                VirtualDisplayIdResolver.Source.HOST_DISPLAY,
+                VirtualDisplayIdResolver.displayIdOfVirtualDisplayLike(hostDisplay),
+                confirmedVirtual = VirtualDisplayIdResolver.looksLikeVirtualDisplay(hostDisplay),
+            )
         }
-        return null
-    }
 
-    /**
-     * 这个 Display 是不是 **VirtualDisplay**（按类名判断，避开隐藏 API 的具体类型）。
-     *
-     * `ActivityViewHost.mDisplay` 是**承载面自己所在的显示器**（桌面那屏），
-     * `mVirtualDisplay` 才是虚拟显示器 —— 两者都叫 Display，
-     * 只能靠类名区分。
-     */
-    private fun isVirtualDisplay(display: android.view.Display): Boolean =
-        display.javaClass.name.contains("VirtualDisplay", ignoreCase = true) ||
-            runCatching {
-                display.javaClass.getMethod("getVirtualDisplayId").invoke(display) as Int
-            }.getOrNull()?.let { it > 0 } == true
+        // 我们自己的窗口所在那块屏（车机是多屏的）—— 拿来排除「误把自己当成虚拟屏」
+        val ownDisplayId = runCatching { view.display?.displayId }.getOrNull()
+        return VirtualDisplayIdResolver.pick(candidates, ownDisplayId)
+    }
 
     /**
      * 释放承载面。
