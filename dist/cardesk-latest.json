@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1144",
-  "versionCode": 4240,
-  "tag": "v1.0.1144",
-  "name": "CarDesk 4240 / 1.0.1144-system",
-  "notes": "第141轮：API 28 画中画真嵌入（启动之后把承载 task 搬到虚拟屏，AOSP 9 的 moveStackToDisplay）+ 修掉 RunningTaskInfo.baseIntent 让第130轮黑屏判据在 API 28 上每轮抛异常的问题。启动路径保持 4237 真机验证过的顺序不变。",
-  "publishedAt": "2026-11-09T15:03:02Z",
+  "version": "1.0.1146",
+  "versionCode": 4242,
+  "tag": "v1.0.1146",
+  "name": "CarDesk 4242 / 1.0.1146-system",
+  "notes": "修复：①桌面 Dock 的风量键点击恢复为弹出空调页面（此前被全局 Dock 窗口接管成「风量+1」，在导航等其它应用里仍直调风量）；②仪表歌词加对比描边并调整日夜配色，压在高德地图底色上也分得开（深字不再陷进 POI 标签、浅字不再混进青色路网）；③修复仪表歌词「面板样式」切换无效果（胶囊/纯文字/发光点哪个都变成胶囊，胶囊样式现在自带描边底板）。",
+  "publishedAt": "2026-11-10T09:48:58Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4240.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4240.apk",
-    "size": 2359713,
-    "sha256": "3c783389b0f67600fcd9645688ba043da3df9f86484a70da726d5c9455c9f6ce"
+    "name": "CarDesk-platform-ecarx-cardesk-4242.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4242.apk",
+    "size": 2363113,
+    "sha256": "94e97bc6fcd705b4333bb6386533d3ea37a2c115bd58db644a5504f53c307649"
   }
 }
