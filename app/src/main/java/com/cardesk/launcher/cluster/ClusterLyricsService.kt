@@ -101,6 +101,14 @@ class ClusterLyricsService : Service() {
         const val STYLE_GLOW = ClusterLyricsView.STYLE_GLOW
 
         /**
+         * 「胶囊」样式在底板透明度滑杆为 0 时的**兜底浓度**（百分比）。
+         *
+         * 没有它，默认配置（滑杆 0%）下「胶囊」和「纯文字」画出来一模一样，
+         * 切样式等于没切（第一百四十三轮）。
+         */
+        const val PILL_PLATE_FLOOR = 40
+
+        /**
          * 默认强调色（青绿）。
          *
          * **只剩夜间这一档了** —— 第一百三十七轮起默认配色跟着日夜走，
@@ -671,6 +679,7 @@ class ClusterLyricsService : Service() {
                 accentOf(prefs), mutedOf(prefs),
                 backgroundOf(prefs),
                 styleOf(prefs),
+                haloOf(prefs),
             )
             val params = view.layoutParams as? WindowManager.LayoutParams
             if (params == null) {
@@ -737,6 +746,7 @@ class ClusterLyricsService : Service() {
                 accentOf(prefs), mutedOf(prefs),
                 backgroundOf(prefs),
                 styleOf(prefs),
+                haloOf(prefs),
             )
             // 记下这次配色的日夜态，免得刚挂上就被 [pump] 当成「变了」又重配一遍。
             styledNight = resolvedNight
@@ -892,17 +902,47 @@ class ClusterLyricsService : Service() {
      *
      * 夜间是深底板配亮字，日间是浅底板配深字 ——
      * 不翻的话日间会变成「深字压深底板」，一样看不清。
+     *
+     * ## 「胶囊」样式自带一档底板（第一百四十三轮）
+     *
+     * 「仪表背景透明度」的默认值是 **0%**，而底板 alpha 为 0 时根本不画 ——
+     * 于是「胶囊」样式在默认配置下**和「纯文字」长得一模一样**，
+     * 用户切样式等于没切。
+     *
+     * 所以「胶囊」样式在滑杆为 0 时也留一层**淡底板**（[PILL_PLATE_FLOOR]）：
+     * 胶囊的形态本来就是这个样式存在的理由，不该因为滑杆在 0 就消失。
      */
     private fun backgroundOf(prefs: Prefs): Int {
-        if (prefs.overlayBgAlpha <= 0) return 0x00000000
-        val alpha = (255 * prefs.overlayBgAlpha / 100f).toInt().coerceIn(0, 255)
+        var percent = prefs.overlayBgAlpha
+        if (percent <= 0 && styleOf(prefs) == STYLE_PILL) {
+            percent = PILL_PLATE_FLOOR
+        }
+        if (percent <= 0) return 0x00000000
+        val alpha = (255 * percent / 100f).toInt().coerceIn(0, 255)
         return (alpha shl 24) or (ClusterLyricColors.plate(isNight()) and 0x00FFFFFF)
     }
 
-    private fun styleOf(prefs: Prefs): Int = when (prefs.clusterStyle) {
-        "plain" -> STYLE_PLAIN
-        "glow" -> STYLE_GLOW
+    /**
+     * 面板样式：存储值 → [ClusterLyricsView] 的样式常量。
+     *
+     * 归一化交给 [ClusterLyricStyles] —— 它同时认英文键和中文标签，
+     * 老机器上存着中文标签（第一百三十七轮那个 bug）也能正确还原。
+     */
+    private fun styleOf(prefs: Prefs): Int = when (ClusterLyricStyles.normalize(prefs.clusterStyle)) {
+        ClusterLyricStyles.PLAIN -> STYLE_PLAIN
+        ClusterLyricStyles.GLOW -> STYLE_GLOW
         else -> STYLE_PILL
+    }
+
+    /**
+     * 描边色：**关掉**时给 `0`（不描边），开着时跟随日夜取相反明度的那一套。
+     *
+     * 白天套白边、夜里套黑边 —— 字底下不管压着地图的浅底还是深底，
+     * 描边都把字的轮廓「拔」出来（见 [ClusterLyricColors] 的第一百四十二轮说明）。
+     */
+    private fun haloOf(prefs: Prefs): Int {
+        if (!prefs.clusterHalo) return 0
+        return ClusterLyricColors.halo(isNight())
     }
 
     private fun now(): Long = System.currentTimeMillis()

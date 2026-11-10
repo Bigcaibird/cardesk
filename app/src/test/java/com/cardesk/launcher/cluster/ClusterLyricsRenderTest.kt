@@ -3,6 +3,7 @@ package com.cardesk.launcher.cluster
 import android.app.Activity
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Paint
 import android.view.View
 import com.cardesk.launcher.core.Palettes
 import com.cardesk.launcher.core.Prefs
@@ -30,13 +31,15 @@ import java.io.FileOutputStream
  *
  * | 文件 | 内容 |
  * | --- | --- |
- * | `30-cluster-pill.png` | **默认**：胶囊样式 + 底板透明度 0 → 歌词直接落在仪表画面上（**没有灰底**） |
- * | `31-cluster-plain.png` | 纯文字样式 |
- * | `32-cluster-glow.png` | 发光样式 |
+ * | `30-cluster-pill.png` | **默认**：胶囊样式（自带 40% 淡底板，见 `PILL_PLATE_FLOOR`）+ 深色仪表底 |
+ * | `31-cluster-plain.png` | 纯文字样式（无底板） |
+ * | `32-cluster-glow.png` | 发光样式（无底板 + 光晕；软件画布不渲染光晕，真机才有） |
  * | `33-cluster-empty.png` | 空态（没在播） |
  * | `34-cluster-settings.png` | 仪表歌词设置页（含投射目标 / 投射状态 / 位置 / 行数 / 样式 / 颜色） |
  * | `35-cluster-plate.png` | 底板透明度拉到 70% 的样子（这个选项还在，仪表底色太亮时用） |
- * | `36-cluster-day.png` | **日间模式**：白色仪表底 + 深青歌词（第一百三十七轮） |
+ * | `36-cluster-day.png` | **日间模式**：浅色底 + 深青歌词（第一百三十七轮） |
+ * | `37-cluster-map-day.png` | 日间高德**地图**底色上的样子（第一百四十二轮） |
+ * | `38-cluster-map-night.png` | 夜间高德**地图**底色上的样子（第一百四十二轮） |
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w1920dp-h1080dp-land")
@@ -78,7 +81,7 @@ class ClusterLyricsRenderTest {
             wipe = 0.45f,
             lyricLines = 64,
         )
-        shotPanel(activity, ClusterLyricsView.STYLE_PILL, snapshot, 0, "30-cluster-pill.png")
+        shotPanel(activity, ClusterLyricsView.STYLE_PILL, snapshot, 40, "30-cluster-pill.png")
         shotPanel(activity, ClusterLyricsView.STYLE_PLAIN, snapshot, 0, "31-cluster-plain.png")
         shotPanel(activity, ClusterLyricsView.STYLE_GLOW, snapshot, 0, "32-cluster-glow.png")
     }
@@ -157,6 +160,237 @@ class ClusterLyricsRenderTest {
         overlay.showPageKey("clusterlyric")
         shot(overlay, 1920, 1080, "34-cluster-settings.png")
         assertTrue("设置页应该渲染出内容", overlay.width > 0)
+        // 「文字描边」开关（第一百四十二轮）必须真的在这一页里 ——
+        // 页面是可滚动的，静态预览只能看到首屏，所以这里直接查视图树。
+        assertTrue(
+            "设置页里找不到「文字描边」开关",
+            findText(overlay, "文字描边"),
+        )
+    }
+
+    /** 在视图树里找有没有文字命中 [needle] 的 TextView（页面可滚动，首屏看不到也查得到）。 */
+    private fun findText(root: android.view.View, needle: String): Boolean {
+        if (root is android.widget.TextView && root.text?.contains(needle) == true) return true
+        if (root is android.view.ViewGroup) {
+            for (i in 0 until root.childCount) {
+                if (findText(root.getChildAt(i), needle)) return true
+            }
+        }
+        return false
+    }
+
+    // ------------------------------------------------------------ 地图底色（第一百四十二轮）
+
+    /**
+     * 落在**高德地图**上的样子（第一百四十二轮）。
+     *
+     * 之前所有的预览都是「纯色仪表盘面」（白 / 深灰），
+     * 而真机上那块屏画的是**地图** —— 日间米白底 + 绿地 + 深色 POI 标签，
+     * 夜间深蓝黑底 + 青蓝路网 + 亮色路名。
+     *
+     * 这两张图就是「深字陷进深色 POI 标签里 / 浅字混进青色路网里」的现场，
+     * 以及加了对比描边之后的样子。
+     */
+    @Test
+    fun 压在地图上渲两张() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        val snapshot = ClusterLyricSnapshot(
+            title = "晴天",
+            artist = "周杰伦",
+            sourceLabel = "netease",
+            playing = true,
+            previousText = "故事的小黄花",
+            currentText = "从出生那年就飘着",
+            nextText = "童年的荡秋千",
+            wipe = 0.45f,
+            lyricLines = 64,
+        )
+        shotPanel(
+            activity,
+            ClusterLyricsView.STYLE_PLAIN,
+            snapshot,
+            0,
+            "37-cluster-map-day.png",
+            night = false,
+            backdrop = ::drawMapDay,
+            halo = ClusterLyricColors.halo(false),
+        )
+        shotPanel(
+            activity,
+            ClusterLyricsView.STYLE_PLAIN,
+            snapshot,
+            0,
+            "38-cluster-map-night.png",
+            night = true,
+            backdrop = ::drawMapNight,
+            halo = ClusterLyricColors.halo(true),
+        )
+    }
+
+    /**
+     * 描边是「在地图上还看得清」的**唯一保证** —— 用像素级判据钉死它。
+     *
+     * 判据不是「颜色常量算出来够不够」（那是 [ClusterLyricColorsTest] 的事），
+     * 而是**真的渲染一遍**，数一数「和底色分得开」的像素多了多少：
+     *
+     * - 底色取**最难读的那块**：日间用 POI 标签的深灰蓝，夜间用路线的饱和青蓝；
+     * - 有描边 → 字外圈多出一圈对比色 → 分得开的像素暴涨；
+     * - 没描边 → 深字压在深灰蓝上只有 1.4 : 1，几乎一个都分不开。
+     *
+     * 颜色写错、描边没接上、或者哪天把描边 pass 删了，这条都会红。
+     */
+    @Test
+    fun 描边让字在地图底色上分得开() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        val snapshot = ClusterLyricSnapshot(
+            title = "晴天",
+            playing = true,
+            previousText = "故事的小黄花",
+            currentText = "从出生那年就飘着",
+            nextText = "童年的荡秋千",
+            wipe = 0.45f,
+            lyricLines = 64,
+        )
+        // 日间最难读的底：POI 标签的深灰蓝。
+        val dayBg = 0xFF5A6B7A.toInt()
+        val dayOn = renderPanel(activity, snapshot, false, dayBg, halo = ClusterLyricColors.halo(false))
+        val dayOff = renderPanel(activity, snapshot, false, dayBg, halo = 0)
+        // 夜间最难读的底：路线的饱和青蓝。
+        val nightBg = 0xFF00C8FF.toInt()
+        val nightOn = renderPanel(activity, snapshot, true, nightBg, halo = ClusterLyricColors.halo(true))
+        val nightOff = renderPanel(activity, snapshot, true, nightBg, halo = 0)
+
+        val dayOnCount = separated(dayOn, dayBg)
+        val dayOffCount = separated(dayOff, dayBg)
+        val nightOnCount = separated(nightOn, nightBg)
+        val nightOffCount = separated(nightOff, nightBg)
+
+        assertTrue("日间加描边后分得开的像素太少：$dayOnCount", dayOnCount > dayOffCount * 3)
+        assertTrue("夜间加描边后分得开的像素太少：$nightOnCount", nightOnCount > nightOffCount * 3)
+        assertTrue("日间描边根本没画出来", dayOnCount > 500)
+        assertTrue("夜间描边根本没画出来", nightOnCount > 500)
+    }
+
+    /** 数一数和底色对比度 ≥ 4.5 : 1 的像素有多少个。 */
+    private fun separated(bmp: Bitmap, bg: Int): Int {
+        var count = 0
+        val pixels = IntArray(bmp.width * bmp.height)
+        bmp.getPixels(pixels, 0, bmp.width, 0, 0, bmp.width, bmp.height)
+        for (p in pixels) {
+            if (contrast(p, bg) >= 4.5) count++
+        }
+        return count
+    }
+
+    /** WCAG 相对亮度 + 对比度（和 [ClusterLyricColorsTest] 同一套算法）。 */
+    private fun contrast(a: Int, b: Int): Double {
+        fun channel(v: Int): Double {
+            val s = v / 255.0
+            return if (s <= 0.03928) s / 12.92 else Math.pow((s + 0.055) / 1.055, 2.4)
+        }
+        fun lum(color: Int): Double {
+            val r = channel(color ushr 16 and 0xFF)
+            val g = channel(color ushr 8 and 0xFF)
+            val bl = channel(color and 0xFF)
+            return 0.2126 * r + 0.7152 * g + 0.0722 * bl
+        }
+        val l1 = lum(a)
+        val l2 = lum(b)
+        return (maxOf(l1, l2) + 0.05) / (minOf(l1, l2) + 0.05)
+    }
+
+    /**
+     * 三个样式必须**真的画出不同的东西**（第一百四十三轮）。
+     *
+     * 之前的 bug 是「点了样式没反应」—— 而这里要防的是它复发：
+     * 「胶囊」和「纯文字」如果画出来一样，用户切样式就等于没切。
+     *
+     * 判据用像素：同一个面板、同一个底色，
+     * 「胶囊」多出来的那一大片底板必须让画面里**变化过的像素**暴涨。
+     *
+     * （「发光」在软件画布上画不出光晕 —— `setShadowLayer` 只在硬件加速下生效，
+     * 真机的面板窗口带 `FLAG_HARDWARE_ACCELERATED`，所以这里只断言前两者。）
+     */
+    @Test
+    fun 胶囊和纯文字画出来不一样() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        val snapshot = ClusterLyricSnapshot(
+            title = "晴天",
+            playing = true,
+            previousText = "故事的小黄花",
+            currentText = "从出生那年就飘着",
+            nextText = "童年的荡秋千",
+            wipe = 0.45f,
+            lyricLines = 64,
+        )
+        val bg = 0xFF1A2430.toInt()
+        val pill = renderPanel(
+            activity = activity,
+            snapshot = snapshot,
+            night = true,
+            bg = bg,
+            style = ClusterLyricsView.STYLE_PILL,
+            bgAlphaPercent = 40,
+            halo = ClusterLyricColors.halo(true),
+        )
+        val plain = renderPanel(
+            activity = activity,
+            snapshot = snapshot,
+            night = true,
+            bg = bg,
+            style = ClusterLyricsView.STYLE_PLAIN,
+            bgAlphaPercent = 40,
+            halo = ClusterLyricColors.halo(true),
+        )
+        val pillChanged = changed(pill, bg)
+        val plainChanged = changed(plain, bg)
+        assertTrue(
+            "胶囊（$pillChanged）和纯文字（$plainChanged）画出来一样，样式切换等于没切",
+            pillChanged > plainChanged * 2,
+        )
+    }
+
+    /** 数一数画面里有多少像素和底色不一样（底板 + 字 + 描边）。 */
+    private fun changed(bmp: Bitmap, bg: Int): Int {
+        var count = 0
+        val pixels = IntArray(bmp.width * bmp.height)
+        bmp.getPixels(pixels, 0, bmp.width, 0, 0, bmp.width, bmp.height)
+        for (p in pixels) {
+            if ((p and 0xFFFFFF) != (bg and 0xFFFFFF)) count++
+        }
+        return count
+    }
+
+    /** 高德**日间**地图的替身：米白底 + 绿地 + 水系 + 深色 POI 标签块。 */
+    private fun drawMapDay(canvas: Canvas, w: Int, h: Int) {        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        canvas.drawColor(0xFFF2EFE6.toInt())
+        // 绿地
+        paint.color = 0xFFD6E8C8.toInt()
+        canvas.drawRect(0f, h * 0.40f, w * 0.30f, h.toFloat(), paint)
+        // 水系
+        paint.color = 0xFFA8D5F0.toInt()
+        canvas.drawRect(w * 0.70f, 0f, w * 0.86f, h.toFloat(), paint)
+        // 白色道路（横穿）
+        paint.color = 0xFFFFFFFF.toInt()
+        canvas.drawRect(0f, h * 0.52f, w.toFloat(), h * 0.60f, paint)
+        // 深色 POI 标签块 —— 歌词正好压在上面（日间最难读的那种底）
+        paint.color = 0xFF5A6B7A.toInt()
+        canvas.drawRect(w * 0.12f, h * 0.70f, w * 0.88f, h * 0.96f, paint)
+    }
+
+    /** 高德**夜间**地图的替身：深蓝黑底 + 深蓝路网 + 饱和青蓝路线 + 浅蓝 POI 块。 */
+    private fun drawMapNight(canvas: Canvas, w: Int, h: Int) {
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        canvas.drawColor(0xFF0C1018.toInt())
+        // 路网
+        paint.color = 0xFF2A3550.toInt()
+        canvas.drawRect(0f, h * 0.46f, w.toFloat(), h * 0.54f, paint)
+        // 饱和青蓝的导航路线 —— 旧配色的浅青字和它几乎同亮度（1.29 : 1）
+        paint.color = 0xFF00C8FF.toInt()
+        canvas.drawRect(0f, h * 0.66f, w.toFloat(), h * 0.72f, paint)
+        // 浅蓝 POI 标签块
+        paint.color = 0xFF8FA6C0.toInt()
+        canvas.drawRect(w * 0.20f, h * 0.78f, w * 0.80f, h * 0.96f, paint)
     }
 
     /**
@@ -168,6 +402,8 @@ class ClusterLyricsRenderTest {
      *
      * @param night 用夜间配色还是日间配色（[ClusterLyricColors]）。
      * @param bg 仪表自己的底色（夜间深色 / 日间白色）。
+     * @param halo 描边色（`0` = 不描边）。
+     * @param backdrop 底色画法（传了就是「画一张地图当底」）。
      */
     private fun shotPanel(
         activity: Activity,
@@ -177,7 +413,38 @@ class ClusterLyricsRenderTest {
         name: String,
         night: Boolean = true,
         bg: Int = clusterBg,
+        // 默认就是产品默认：描边开着（第一百四十二轮）。
+        halo: Int = ClusterLyricColors.halo(night),
+        backdrop: ((Canvas, Int, Int) -> Unit)? = null,
     ) {
+        val bmp = renderPanel(
+            activity = activity,
+            snapshot = snapshot,
+            night = night,
+            bg = bg,
+            style = style,
+            bgAlphaPercent = bgAlphaPercent,
+            halo = halo,
+            backdrop = backdrop,
+        )
+        save(bmp, name)
+    }
+
+    /**
+     * 渲染一块面板并把结果留在内存里（给像素级判据用）。
+     *
+     * @param backdrop 底色画法；传 `null` 就是一块纯色底。
+     */
+    private fun renderPanel(
+        activity: Activity,
+        snapshot: ClusterLyricSnapshot,
+        night: Boolean,
+        bg: Int,
+        style: Int = ClusterLyricsView.STYLE_PLAIN,
+        bgAlphaPercent: Int = 0,
+        halo: Int = 0,
+        backdrop: ((Canvas, Int, Int) -> Unit)? = null,
+    ): Bitmap {
         val view = ClusterLyricsView(activity)
         val mainPx = mainSp * density
         val subPx = subSp * density
@@ -191,6 +458,7 @@ class ClusterLyricsRenderTest {
             ClusterLyricColors.sub(night),
             (alpha shl 24) or (ClusterLyricColors.plate(night) and 0x00FFFFFF),
             style,
+            halo,
         )
         view.snapshot = snapshot
 
@@ -207,9 +475,10 @@ class ClusterLyricsRenderTest {
         val bmp = Bitmap.createBitmap(clusterWidth, clusterHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         canvas.drawColor(bg)
+        backdrop?.invoke(canvas, clusterWidth, clusterHeight)
         canvas.translate(origin[0].toFloat(), origin[1].toFloat())
         view.draw(canvas)
-        save(bmp, name)
+        return bmp
     }
 
     /** 渲染一整屏。 */

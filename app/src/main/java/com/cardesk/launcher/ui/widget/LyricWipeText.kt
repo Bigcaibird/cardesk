@@ -46,6 +46,11 @@ object LyricWipeText {
      * @param leftX **左对齐**时的文字左边缘 x（<=0 表示不左对齐，按 [cx] 居中）。
      *        第119轮 KTV 式两行是「错落阶梯」，每一行都从自己的左边缘起排，
      *        不是居中 —— 擦除高亮也得跟着从左边画。
+     * @param haloColor **描边色**（`0` = 不描边）。字形外圈先套一圈这个颜色，
+     *        用来把字从**任意底色**里「拔」出来 —— 仪表歌词压在地图上时全靠它。
+     * @param haloWidth 描边宽度（px，画在字形轮廓上，可见宽度约为它的一半）。
+     * @param glowRadius 正文光晕半径（px，`0` = 不发光）。
+     * @param glowColor 正文光晕颜色。
      */
     fun draw(
         canvas: Canvas,
@@ -61,6 +66,10 @@ object LyricWipeText {
         scrollable: Boolean = false,
         marqueeOffset: Float = 0f,
         leftX: Float = 0f,
+        haloColor: Int = 0,
+        haloWidth: Float = 0f,
+        glowRadius: Float = 0f,
+        glowColor: Int = 0,
     ) {
         if (text.isEmpty()) return
         val oldColor = paint.color
@@ -77,6 +86,30 @@ object LyricWipeText {
             else -> cx - tw / 2f
         }
 
+        // 0) 描边：字形外圈先套一圈对比色，**再**画正文。
+        //
+        // 顺序很重要 —— 描边是「垫在字底下」的，必须先画，
+        // 否则会把正文的笔画盖掉一半。
+        //
+        // 描边这一遍**不吃光晕**：光晕是给正文的，
+        // 让描边也带一层光晕会糊成一团（白天尤其明显：白描边套深青光晕）。
+        if (haloWidth > 0f && haloColor != 0) {
+            val oldStyle = paint.style
+            val oldStroke = paint.strokeWidth
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = haloWidth
+            paint.color = haloColor
+            paint.clearShadowLayer()
+            canvas.drawText(shown, x0, baseline, paint)
+            paint.style = oldStyle
+            paint.strokeWidth = oldStroke
+        }
+
+        // 正文光晕（可选）：套在描边**外面**的一层柔光。
+        if (glowRadius > 0f && glowColor != 0) {
+            paint.setShadowLayer(glowRadius, 0f, 0f, glowColor)
+        }
+
         // 1) 整行暗色
         paint.color = inactiveColor
         canvas.drawText(shown, x0, baseline, paint)
@@ -85,6 +118,7 @@ object LyricWipeText {
         if (f <= 0f) {
             paint.color = oldColor
             paint.textAlign = oldAlign
+            paint.clearShadowLayer()
             return
         }
 
@@ -110,6 +144,8 @@ object LyricWipeText {
 
         paint.color = oldColor
         paint.textAlign = oldAlign
+        // 光晕是这一笔「借」给正文的，不能留给下一行/下一个控件。
+        paint.clearShadowLayer()
     }
 
     /** 超宽时按中间省略（与 TextView 的 `ellipsize=END` 接近，但保留开头）。 */

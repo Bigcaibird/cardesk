@@ -105,6 +105,157 @@ class ClusterLyricColorsTest {
         )
     }
 
+    // ------------------------------------------------------------ 地图底色（第一百四十二轮）
+
+    /**
+     * 高德地图的代表性底色。
+     *
+     * 这些不是「猜的灰」，是高德日间 / 夜间两套配色里**真实存在的元素色**：
+     * 日间是米白底 + 绿地 + 深色 POI 标签；夜间是深蓝黑底 + 青蓝路网 + 亮色 POI 字，
+     * 另外两套配色里都有那个**饱和的青蓝**（路线 / 路网 / POI 图标）。
+     *
+     * 歌词就压在这堆颜色上面 —— 之前只按「白底 / 黑底」配过，
+     * 落到地图上就成了「深字陷进深色 POI 标签里」「浅字混进青色路网里」。
+     */
+    private object MapColors {
+        /** 日间：陆地米白底。 */
+        const val DAY_LAND = 0xFFF2EFE6.toInt()
+
+        /** 日间：绿地（浅绿）。 */
+        const val DAY_PARK = 0xFFD6E8C8.toInt()
+
+        /** 日间：POI 标签的深灰蓝 —— 深色字撞上它就「陷进去」。 */
+        const val DAY_POI = 0xFF5A6B7A.toInt()
+
+        /** 日间：水系（浅蓝）。 */
+        const val DAY_WATER = 0xFFA8D5F0.toInt()
+
+        /** 夜间：陆地深蓝黑底。 */
+        const val NIGHT_LAND = 0xFF0C1018.toInt()
+
+        /** 夜间：路网（深蓝灰）。 */
+        const val NIGHT_ROAD = 0xFF2A3550.toInt()
+
+        /** 夜间：POI 标签的浅蓝灰 —— 浅色字撞上它就「混进去」。 */
+        const val NIGHT_POI = 0xFF8FA6C0.toInt()
+
+        /** 两套配色里都有的**饱和青蓝**（路线 / 路网 / POI 图标）。 */
+        const val CYAN = 0xFF00C8FF.toInt()
+
+        /** 夜间：金色路名。 */
+        const val NIGHT_GOLD = 0xFFC8A45C.toInt()
+    }
+
+    @Test
+    fun 日间配色压在地图上也分得开() {
+        val backgrounds = listOf(
+            MapColors.DAY_LAND,
+            MapColors.DAY_PARK,
+            MapColors.DAY_POI,
+            MapColors.DAY_WATER,
+        )
+        for (bg in backgrounds) {
+            assertSeparated(
+                "日间主色", ClusterLyricColors.DAY_MAIN, ClusterLyricColors.DAY_HALO, bg,
+            )
+            assertSeparated(
+                "日间副色", ClusterLyricColors.DAY_SUB, ClusterLyricColors.DAY_HALO, bg,
+            )
+        }
+    }
+
+    @Test
+    fun 夜间配色压在地图上也分得开() {
+        val backgrounds = listOf(
+            MapColors.NIGHT_LAND,
+            MapColors.NIGHT_ROAD,
+            MapColors.NIGHT_POI,
+            MapColors.CYAN,
+            MapColors.NIGHT_GOLD,
+        )
+        for (bg in backgrounds) {
+            assertSeparated(
+                "夜间主色", ClusterLyricColors.NIGHT_MAIN, ClusterLyricColors.NIGHT_HALO, bg,
+            )
+            assertSeparated(
+                "夜间副色", ClusterLyricColors.NIGHT_SUB, ClusterLyricColors.NIGHT_HALO, bg,
+            )
+        }
+    }
+
+    @Test
+    fun 描边色与文字明度相反() {
+        // 描边必须和字**反着来**：白天字暗 → 描边亮；夜里字亮 → 描边暗。
+        // 反了的话描边不但不帮忙，还会让字的轮廓糊掉。
+        assertTrue(
+            "日间描边应当比日间字亮",
+            luminance(ClusterLyricColors.DAY_HALO) > luminance(ClusterLyricColors.DAY_MAIN),
+        )
+        assertTrue(
+            "夜间描边应当比夜间字暗",
+            luminance(ClusterLyricColors.NIGHT_HALO) < luminance(ClusterLyricColors.NIGHT_MAIN),
+        )
+    }
+
+    @Test
+    fun 夜间主色不再和地图的饱和青蓝一个明度() {
+        // 这是「还是不太明显」最硬的一条证据：
+        //
+        // 旧的夜间主色 `0xFF7FE3D4` 与高德路线青蓝 `#00C8FF` 的对比度只有
+        // **1.29 : 1**（亮度 0.642 vs 0.485）—— 也就是说旧配色下，
+        // 歌词和地图上的路线**在亮度上几乎等价**，
+        // 屏幕上根本分不出谁是谁。
+        //
+        // 现在主色提到 `0xFFA8F7EA`，亮度 0.808，和地图青蓝拉开了明度差。
+        assertTrue(
+            "夜间主色和地图青蓝的对比度只有 %.2f:1（应该 > 1.3）".format(
+                contrast(ClusterLyricColors.NIGHT_MAIN, MapColors.CYAN),
+            ),
+            contrast(ClusterLyricColors.NIGHT_MAIN, MapColors.CYAN) > 1.3,
+        )
+    }
+
+    /**
+     * 「字 + 描边」这对组合，必须和底色分得开。
+     *
+     * 判据不是「字自己的对比度」—— 那是纯色底的思路。
+     * 地图底色是**逐块不同**的：同一个字压在一张图上，
+     * 这一块底浅、下一块底深，**不可能有一个字色同时压住所有块**。
+     *
+     * 真正管用的是「贴纸式」的两层结构：
+     * **字或者描边，至少有一层和这块底色拉开 4.5 : 1**。
+     *
+     * - 浅底块 → 靠字（深字压浅底）；
+     * - 深底块 → 靠描边（亮字套黑边 / 暗字套白边）。
+     *
+     * @param text 文字色
+     * @param halo 描边色（带 alpha，要先和底色合成再算）
+     * @param bg 这一块地图底色
+     */
+    private fun assertSeparated(name: String, text: Int, halo: Int, bg: Int) {
+        val haloAlpha = (halo ushr 24) and 0xFF
+        val composited = if (haloAlpha >= 255) {
+            halo
+        } else {
+            // 描边是半透明的：先叠到底色上，再拿合成结果去比。
+            val r = blend((halo ushr 16) and 0xFF, (bg ushr 16) and 0xFF, haloAlpha)
+            val g = blend((halo ushr 8) and 0xFF, (bg ushr 8) and 0xFF, haloAlpha)
+            val b = blend(halo and 0xFF, bg and 0xFF, haloAlpha)
+            (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+        }
+        val byText = contrast(text, bg)
+        val byHalo = contrast(composited, bg)
+        val best = maxOf(byText, byHalo)
+        assertTrue(
+            "$name 在 #%06X 上分不开：字 %.2f:1、描边 %.2f:1".format(bg and 0xFFFFFF, byText, byHalo),
+            best >= 4.5,
+        )
+    }
+
+    /** 半透明前景叠到底色上（sRGB 直叠，和 Android 的绘制口径一致）。 */
+    private fun blend(fg: Int, bg: Int, alpha: Int): Int =
+        ((fg * alpha + bg * (255 - alpha)) / 255.0).toInt().coerceIn(0, 255)
+
     // ------------------------------------------------------------ 对比度算法
 
     /**

@@ -2392,12 +2392,23 @@ class SettingsOverlay(
             logSettingDebug("desk_cluster_rows", "显示行数", from, it)
             liveClusterRefresh()
         }
-        chipRow("面板样式", listOf("胶囊", "纯文字", "发光"), prefs.clusterStyle) { next ->
+        chipRow(
+            "面板样式",
+            com.cardesk.launcher.cluster.ClusterLyricStyles.OPTIONS.map { it.first },
+            com.cardesk.launcher.cluster.ClusterLyricStyles.indexOf(prefs.clusterStyle),
+        ) { index ->
+            // 第一百四十三轮：这里原来直接存了 chip 的**中文标签**，
+            // 而服务只认英文键（pill/plain/glow）⇒ 点哪个都落到「胶囊」。
+            // 现在统一走 [ClusterLyricStyles] 的标签 ↔ 键映射。
             val from = prefs.clusterStyle
-            prefs.clusterStyle = next
-            logSetting("desk_cluster_style", "面板样式", from, next)
+            val to = com.cardesk.launcher.cluster.ClusterLyricStyles.OPTIONS[index].second
+            prefs.clusterStyle = to
+            logSetting("desk_cluster_style", "面板样式", from, to)
             liveClusterRefresh()
         }
+        note(
+            "胶囊 = 圆角底板 + 普通字；纯文字 = 只有字，永远不画底板；发光 = 字带一层光晕。",
+        )
         sliderRow("模块宽度", prefs.overlayWidthPct, 30, 100, "%") {
             val from = prefs.overlayWidthPct
             prefs.overlayWidthPct = it
@@ -2412,8 +2423,21 @@ class SettingsOverlay(
         }
         note(
             "0% = 不画底板，歌词直接落在仪表画面上（默认）。\n" +
-                "仪表底色太亮、字看不清时，把这里拉上去加一层底。",
+                "仪表底色太亮、字看不清时，把这里拉上去加一层底。\n" +
+                "「胶囊」样式自带 40% 的淡底板 —— 不然它和「纯文字」会长得一模一样。",
         )
+        // —— 对比描边（第一百四十二轮）——
+        switchRow(
+            "文字描边",
+            prefs.clusterHalo,
+            "在字外面套一圈对比色（日间白边 / 夜间黑边）。" +
+                "压在地图上时靠它把字从地图细节里拔出来。",
+        ) { next ->
+            val from = prefs.clusterHalo
+            prefs.clusterHalo = next
+            logSetting("desk_cluster_halo", "文字描边", from, next)
+            liveClusterRefresh()
+        }
         sliderRow("主歌词字号", prefs.overlayMainSp, 12, 72, " px") {
             val from = prefs.overlayMainSp
             prefs.overlayMainSp = it
@@ -2430,7 +2454,7 @@ class SettingsOverlay(
         // —— 歌词颜色（第一百三十七轮：默认跟随日夜）——
         section("歌词颜色")
         note(
-            "默认跟随日夜：夜间用浅青配深色仪表，日间用深青配白色仪表，两套都够清楚。\n" +
+            "默认跟随日夜：夜间用薄荷白配深色地图，日间用深青配浅色地图，两套都够清楚。\n" +
                 "自己挑过颜色就以你挑的为准（不再跟随日夜）。",
         )
         pickerRow("主歌词颜色", clusterLyricColorLabel(0)) { onShowClusterLyricColor?.invoke(0) }

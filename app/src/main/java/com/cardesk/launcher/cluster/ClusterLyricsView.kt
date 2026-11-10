@@ -49,6 +49,33 @@ class ClusterLyricsView(context: Context) : View(context) {
 
         /** 发光样式的光晕半径（px）。 */
         private const val GLOW_RADIUS = 12f
+
+        /**
+         * 主歌词的描边宽度系数（相对字号）。
+         *
+         * 描边画在字形轮廓上，露在外面的宽度约为它的一半，
+         * 所以 0.10 听起来小，实际在 42px 的主行上是**约 2px** 的一圈白边/黑边。
+         */
+        private const val HALO_RATIO_MAIN = 0.10f
+
+        /**
+         * 副歌词的描边宽度系数（相对字号）。
+         *
+         * 小字**不能**按比例放大描边：18sp 在 240dpi 屏上只有 27px，
+         * 笔画本身才 2~3px，描边一厚就把笔画挤没了（字看着像个白壳子）。
+         * 分离度靠的是**明暗差**（描边和底色差 5 : 1 以上），不是靠宽度堆 ——
+         * 所以这里给小字的比例反而比大字还小一点。
+         */
+        private const val HALO_RATIO_SUB = 0.09f
+
+        /** 胶囊底板的描边宽度（px）。 */
+        private const val PLATE_STROKE_WIDTH = 2f
+
+        /** 深色底板上的描边色（半透明白）。 */
+        private const val PLATE_STROKE_ON_DARK = 0x66FFFFFF
+
+        /** 浅色底板上的描边色（半透明黑）。 */
+        private const val PLATE_STROKE_ON_LIGHT = 0x66000000
     }
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -100,6 +127,24 @@ class ClusterLyricsView(context: Context) : View(context) {
         }
 
     /**
+     * 文字**描边色**（`0` = 不描边）。
+     *
+     * ## 这是「压在地图上还看得清」的关键（第一百四十二轮）
+     *
+     * 承载面是高德地图，底色**不是纯色**：日间是米白 + 绿地 + 深色 POI 标签，
+     * 夜间是深蓝黑 + 青蓝路网 + 亮色路名。只靠一个字色压不住 ——
+     * 深字会陷进地图的深色细节里，浅字会混进地图的青色元素里。
+     *
+     * 描边是地图类 UI 的标准做法：字形外圈套一圈与底色**相反**的颜色
+     * （白天套白边、夜里套黑边），**不管底下是地图还是照片，字都立得住**。
+     */
+    var haloColor: Int = 0
+        set(value) {
+            field = value
+            invalidate()
+        }
+
+    /**
      * 底板颜色（alpha = 0 时不画底）。
      *
      * 名字**不能叫 `backgroundColor`**：`View` 已经有 `setBackgroundColor(Int)`，
@@ -135,6 +180,7 @@ class ClusterLyricsView(context: Context) : View(context) {
         muted: Int,
         background: Int,
         style: Int,
+        halo: Int = 0,
     ) {
         this.mainSizePx = mainSizePx
         this.subSizePx = subSizePx
@@ -143,6 +189,7 @@ class ClusterLyricsView(context: Context) : View(context) {
         this.mutedColor = muted
         this.plateColor = background
         this.style = style
+        this.haloColor = halo
     }
 
     // ---------------------------------------------------------------- 测量
@@ -233,6 +280,20 @@ class ClusterLyricsView(context: Context) : View(context) {
      *
      * 宽条上用「胶囊」圆角读起来像一块贴在仪表上的药丸；
      * 30% 的圆角则更像一块属于这块屏的板子。
+     *
+     * ## 为什么底板要带一圈描边（第一百四十三轮）
+     *
+     * 底板**本身**的颜色是跟着日夜翻的：夜里是接近黑的深色，白天是接近白的浅色。
+     * 这在「纯色仪表盘面」上没问题，但在**地图**上有个硬伤 ——
+     *
+     * - 夜间的深色底板压在夜间地图（深蓝黑）上，几乎**同色**；
+     * - 日间的浅色底板压在日间地图（米白）上，也几乎同色。
+     *
+     * 结果就是「胶囊」样式画出来了、却看不出是一块胶囊 —— 和「纯文字」没区别。
+     *
+     * 所以底板加一圈描边，颜色取**与底板明度相反**的那一边
+     * （深底板配浅描边、浅底板配深描边，见 [plateStrokeColor]）。
+     * 这和文字描边是同一个思路：**形状要靠描边才立得住**。
      */
     private fun drawPlate(canvas: Canvas, w: Int, h: Int) {
         val radius = minOf(h * 0.30f, w * 0.02f)
@@ -249,6 +310,29 @@ class ClusterLyricsView(context: Context) : View(context) {
         )
         canvas.drawRoundRect(plateRect, radius, radius, backgroundPaint)
         backgroundPaint.shader = null
+        // 描边：与底板明度相反，保证胶囊的**形状**在任何底色上都看得出来。
+        backgroundPaint.style = Paint.Style.STROKE
+        backgroundPaint.strokeWidth = PLATE_STROKE_WIDTH
+        backgroundPaint.color = plateStrokeColor()
+        canvas.drawRoundRect(plateRect, radius, radius, backgroundPaint)
+        backgroundPaint.style = Paint.Style.FILL
+    }
+
+    /**
+     * 胶囊描边色：**与底板明度相反**。
+     *
+     * 深底板 → 浅描边；浅底板 → 深描边。
+     *
+     * 明度用经典的 299/587/114 加权（够判断「深还是浅」，不必上完整的 sRGB 线性化）。
+     */
+    private fun plateStrokeColor(): Int {
+        val rgb = plateColor and 0x00FFFFFF
+        val luma = (
+            (rgb ushr 16 and 0xFF) * 299 +
+                (rgb ushr 8 and 0xFF) * 587 +
+                (rgb and 0xFF) * 114
+            ) / 1000
+        return if (luma < 128) PLATE_STROKE_ON_DARK else PLATE_STROKE_ON_LIGHT
     }
 
     /**
@@ -263,7 +347,6 @@ class ClusterLyricsView(context: Context) : View(context) {
         paint.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         val baseline = top + size * ClusterPanelGeometry.ROW_SPACING * 0.72f
         val edge = LyricWipe.edgeWidth(resources.displayMetrics.density)
-        applyGlow()
         LyricWipeText.draw(
             canvas = canvas,
             text = text,
@@ -275,26 +358,79 @@ class ClusterLyricsView(context: Context) : View(context) {
             fraction = fraction.coerceIn(0f, 1f),
             edgePx = edge,
             maxWidth = width * (1f - SIDE_MARGIN * 2f),
+            // 描边垫在字底下；光晕套在描边外面 —— 两者都由画笔自己排好顺序。
+            haloColor = haloColor,
+            haloWidth = haloWidth(size, HALO_RATIO_MAIN),
+            glowRadius = glowRadius(),
+            glowColor = accentColor,
         )
-        clearGlow()
     }
 
     /** 上一句 / 下一句：纯色。 */
     private fun drawPlainRow(canvas: Canvas, text: String, top: Float, size: Float, color: Int, alpha: Float) {
         if (text.isEmpty()) return
         paint.textSize = size
-        paint.color = color
-        paint.alpha = clampAlpha(alpha)
         paint.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         val shown = ellipsize(text, width * (1f - SIDE_MARGIN * 2f))
         val tw = paint.measureText(shown)
         val left = maxOf(width * SIDE_MARGIN, (width - tw) / 2f)
         val baseline = top + size * ClusterPanelGeometry.ROW_SPACING * 0.72f
+        // 描边先画（垫底），再画正文。
+        //
+        // **正文必须不透明**：半透明的正文叠在描边上会被冲淡 ——
+        // 深色字压在白色描边上本来就浅，再乘一层 0.7 的透明度就等于没画
+        // （在深色 POI 标签上实测只剩 1.05 : 1）。
+        // 层次改由「描边更淡 + 字号更小」表达：字本身始终是实的。
+        drawHalo(canvas, shown, left, baseline, size, HALO_RATIO_SUB, alpha)
+        paint.color = color
+        paint.alpha = 255
         applyGlow()
         canvas.drawText(shown, left, baseline, paint)
         clearGlow()
         paint.alpha = 255
     }
+
+    /**
+     * 描边：字形外圈套一圈 [haloColor]。
+     *
+     * 用 `Paint.Style.STROKE` 画一遍字 —— 描边画在字形轮廓上，
+     * 里外各占一半，内侧那一半被随后的正文盖住，
+     * **露在外面的宽度约为 [width] 的一半**。
+     *
+     * 与正文一致：这一行压暗多少（[alpha]），描边也跟着压暗多少，
+     * 否则小字那两行会出现「亮边包着暗字」的怪相。
+     */
+    private fun drawHalo(
+        canvas: Canvas,
+        text: String,
+        x: Float,
+        baseline: Float,
+        size: Float,
+        ratio: Float,
+        alpha: Float = 1f,
+    ) {
+        if (haloColor == 0) return
+        // 这一遍是「借」画笔用的：**颜色、样式、描边宽度都要原样还回去**。
+        // 漏还原颜色的话，后面那次 `drawText` 会拿描边色去画正文 ——
+        // 结果就是「字是描边色、描边反而看不见」的白字幽灵。
+        val oldStyle = paint.style
+        val oldStroke = paint.strokeWidth
+        val oldColor = paint.color
+        val oldAlpha = paint.alpha
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = haloWidth(size, ratio)
+        paint.color = (clampAlpha(alpha) shl 24) or (haloColor and 0x00FFFFFF)
+        paint.clearShadowLayer()
+        canvas.drawText(text, x, baseline, paint)
+        paint.style = oldStyle
+        paint.strokeWidth = oldStroke
+        paint.color = oldColor
+        paint.alpha = oldAlpha
+    }
+
+    /** 描边宽度（px）：`0` = 不描边。 */
+    private fun haloWidth(size: Float, ratio: Float): Float =
+        if (haloColor == 0) 0f else size * ratio
 
     /**
      * 发光样式：给字加一层同色光晕。
@@ -317,6 +453,9 @@ class ClusterLyricsView(context: Context) : View(context) {
         paint.clearShadowLayer()
     }
 
+    /** 发光半径（`0` = 不发光）。 */
+    private fun glowRadius(): Float = if (style == STYLE_GLOW) GLOW_RADIUS else 0f
+
     /**
      * 空态：整块面板就一句话，**垂直居中**。
      *
@@ -328,14 +467,18 @@ class ClusterLyricsView(context: Context) : View(context) {
         if (text.isEmpty()) return
         val size = subSizePx
         paint.textSize = size
-        paint.color = color
-        paint.alpha = clampAlpha(alpha)
         paint.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         val shown = ellipsize(text, width * (1f - SIDE_MARGIN * 2f))
         val tw = paint.measureText(shown)
         val left = maxOf(width * SIDE_MARGIN, (width - tw) / 2f)
         val baseline = height / 2f + size * 0.35f
+        // 空态那句也是压在地图上的，一样要描边；正文同样保持不透明（同 [drawPlainRow]）。
+        drawHalo(canvas, shown, left, baseline, size, HALO_RATIO_SUB, alpha)
+        paint.color = color
+        paint.alpha = 255
+        applyGlow()
         canvas.drawText(shown, left, baseline, paint)
+        clearGlow()
         paint.alpha = 255
     }
 

@@ -445,7 +445,23 @@ class GlobalDockService : Service() {
 
         bar.onPower = { VehicleController.togglePower() }
         bar.onTemp = { zone, delta -> VehicleController.stepTemp(zone, delta.toFloat()) }
-        bar.onFan = { VehicleController.stepFan(1) }
+        // 第142轮：风量键**按桌面是否在前台分流**。
+        //
+        // 第101轮起全局 Dock 用 RRO 预留区占住系统导航栏，桌面上画的那条 Dock
+        // 其实就是**这个窗口**（桌面自己的 Dock 在 `globalReserved` 时被 GONE 掉了），
+        // 于是风量键的语义被这条窗口接管了：
+        // - 桌面在前台 → 和桌面里的 Dock 一致：弹**空调浮层**（回桌面执行，见 `toLauncher`）
+        // - 别的应用在前台 → 维持原状：直接调车控把风量 +1，不打断当前应用
+        //
+        // 预留区没生效时桌面自己的 Dock 在显示，它的 `onFan` 本来就是 `showClimate()`，
+        // 不走这里 —— 所以两条路径的语义最终一致。
+        bar.onFan = {
+            if (homeForeground) {
+                toLauncher(MainActivity.ACTION_CLIMATE)
+            } else {
+                VehicleController.stepFan(1)
+            }
+        }
         bar.onAc = { VehicleController.toggleAc() }
         bar.onAuto = { VehicleController.toggleAuto() }
         bar.onCirc = { VehicleController.toggleCirculation() }

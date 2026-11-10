@@ -775,7 +775,12 @@ class MainActivity : Activity() {
         /** 回桌面并打开应用抽屉（契约里的 `apps` 别名，语义与 [ACTION_DRAWER] 相同）。 */
         const val ACTION_APPS = "apps"
 
-        /** 回桌面并打开空调浮层（契约 `climate`；全局 Dock 目前的风量键直调车控，不跳页）。 */
+        /**
+         * 回桌面并打开空调浮层（契约 `climate`）。
+         *
+         * 第142轮起全局 Dock 的风量键在**桌面在前台**时也走这条链路（与桌面自己的
+         * Dock 语义一致）；在别的应用前台时仍然直调车控加风量，不打断当前应用。
+         */
         const val ACTION_CLIMATE = "climate"
 
         /** 回桌面并切到下一页（`onSplit`）。 */

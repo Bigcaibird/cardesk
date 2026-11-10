@@ -805,6 +805,24 @@ class Prefs(context: Context) {
         set(value) = setIntValue("desk_cluster_lyric_sub_color", value)
 
     /**
+     * 仪表歌词是否加**对比描边**（`desk_cluster_halo`，默认开）。
+     *
+     * ## 为什么默认开（第一百四十二轮）
+     *
+     * 承载面是高德地图 —— 底色不是纯色，浅的（米白底 + 绿地 + 深色 POI 标签）
+     * 深的（深蓝黑底 + 青蓝路网 + 亮色路名）都有，而且**每一块都不一样**。
+     * 只靠一个字色压不住：深字会陷进地图的深色细节里，浅字会混进地图的青色元素里。
+     *
+     * 描边（白天套白边、夜里套黑边）是地图类 UI 的标准做法：
+     * 不管底下是地图还是照片，字都能立得住。
+     *
+     * 留这个开关是给「觉得描边太重」的用户 —— 关掉就是原来那套纯色字。
+     */
+    var clusterHalo: Boolean
+        get() = flag("desk_cluster_halo", true)
+        set(value) = setFlag("desk_cluster_halo", value)
+
+    /**
      * 歌词投射的目标屏 id（`desk_cluster_display_id`，默认 -1 = 没选过）。
      *
      * 存 id 是为了「同一块屏重启后还在」；但 id 会变（车机重连、副屏热插后
@@ -838,12 +856,23 @@ class Prefs(context: Context) {
         set(value) = setIntValue("desk_cluster_rows", value.coerceIn(1, 3))
 
     /**
-     * 歌词面板样式（`desk_cluster_style`，默认 `pill`）。
+     * 歌词面板样式（`desk_cluster_style`，默认 `plain`）。
      *
      * 取值：`pill`（胶囊底板）/ `plain`（纯文字）/ `glow`（发光）。
+     * 标签 ↔ 键的映射见 `com.cardesk.launcher.cluster.ClusterLyricStyles`
+     * （老机器上可能存着中文标签，读取方要能认 —— 见那里的说明）。
+     *
+     * ## 为什么默认是「纯文字」而不是「胶囊」（第一百四十三轮）
+     *
+     * 「胶囊」样式自带一档淡底板（滑杆在 0% 时也有 40%），
+     * 否则默认配置下它和「纯文字」画出来一模一样、切样式等于没切。
+     *
+     * 而**升级前的默认观感是「没有底板」**（滑杆默认 0%，底板根本不画）。
+     * 把默认样式设成 `pill` 等于给所有老用户凭空加一块底板 —— 那是没人要求的改变。
+     * 所以默认走 `plain`：观感与升级前完全一致，想要胶囊自己点一下。
      */
     var clusterStyle: String
-        get() = stringValue("desk_cluster_style", "pill")
+        get() = stringValue("desk_cluster_style", "plain")
         set(value) = setStringValue("desk_cluster_style", value)
 
     // ------------------------------------------------------------------ 按键增强
