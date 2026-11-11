@@ -548,6 +548,36 @@ class MainActivity : Activity() {
         }
     }
 
+    /**
+     * 第144轮：桌面窗口**回到屏幕上**（`onStart`）。
+     *
+     * 为什么不能只用 `onResume`/`onPause`：桌面把画中画承载面（`ActivityView`
+     * + `VirtualDisplay`）里的高德启动起来时，系统会把焦点抢走 → 桌面走
+     * `onPause`，**但桌面窗口还亮在屏幕上**，用户眼前就是桌面。
+     * 用焦点口径判「用户眼前是不是桌面」会误判，
+     * 于是全局 Dock 的风量键又变回「风量 +1」（第142~143轮真机没生效的原因）。
+     *
+     * `onStart`/`onStop` 才是「窗口还在不在屏幕上」的口径。
+     */
+    override fun onStart() {
+        super.onStart()
+        Logx.i(LogTags.APP, "onStart")
+        HomeForeground.isOnScreen = true
+        GlobalDockService.onHomeOnScreen(true)
+    }
+
+    /**
+     * 第144轮：桌面窗口**离开屏幕**（`onStop`）——别的应用全屏盖上来了。
+     *
+     * 这时全局 Dock 的风量键应当直调车控（风量 +1），不打断当前应用。
+     */
+    override fun onStop() {
+        Logx.i(LogTags.APP, "onStop")
+        HomeForeground.isOnScreen = false
+        GlobalDockService.onHomeOnScreen(false)
+        super.onStop()
+    }
+
     override fun onResume() {
         super.onResume()
         Logx.i(LogTags.APP, "onResume")

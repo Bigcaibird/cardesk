@@ -25,6 +25,7 @@ import android.widget.Toast
 import com.cardesk.launcher.MainActivity
 import com.cardesk.launcher.R
 import com.cardesk.launcher.core.DockQuickApps
+import com.cardesk.launcher.core.HomeForeground
 import com.cardesk.launcher.core.Prefs
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
@@ -91,12 +92,22 @@ class GlobalDockService : Service() {
     private var params: WindowManager.LayoutParams? = null
 
     /**
-     * 桌面是否在前台。
+     * 桌面是否在前台（**焦点**口径：`onResume`/`onPause`）。
      *
      * 默认 `true`：服务多数是从桌面的设置页拉起来的，此刻 HOME 就在前台，
      * 先当「桌面在前台」处理能避免窗口在桌面上一闪。
      */
     private var homeForeground = true
+
+    /**
+     * 桌面窗口是否**还在屏幕上**（第144轮：`onStart`/`onStop` 口径）。
+     *
+     * 为什么要跟 [homeForeground] 分开：桌面把画中画承载面里的高德拉起来时，
+     * 焦点会被抢走 → 桌面走 `onPause`，**但桌面窗口还亮着**（用户眼前就是桌面）。
+     * 风量键的语义要按「用户眼前是不是桌面」判，不能按「谁有焦点」判，
+     * 否则桌面上点风量键会退化成「风量 +1」（真机实测，2026-11-07）。
+     */
+    private var homeOnScreen = false
 
     /** 当前是不是可见（`root.visibility` 的缓存，避免重复 setVisibility）。 */
     private var showing = false
@@ -149,6 +160,10 @@ class GlobalDockService : Service() {
         // 5 秒内不调 startForeground，系统会抛 RemoteServiceException（Android 8+），
         // 那是**启动即崩**，比「静默退出」难排查得多。
         startForeground(NOTIFICATION_ID, buildNotification())
+
+        // 第144轮：服务起来时先对齐桌面的「窗口是否还在屏幕上」状态 ——
+        // 服务可能在桌面 `onStart` 之前就起来了（开机广播），也可能之后才起来。
+        homeOnScreen = HomeForeground.isOnScreen
 
         val overlay = runCatching { Settings.canDrawOverlays(this) }.getOrDefault(false)
         val navInsetsSupported = runCatching { NavInsets.supported(this) }.getOrDefault(false)
@@ -403,6 +418,25 @@ class GlobalDockService : Service() {
         updateVisibility()
     }
 
+    /**
+     * 第144轮：桌面窗口在不在屏幕上（`onStart`/`onStop` 口径）。
+     *
+     * 只影响**风量键的语义**，不影响全局 Dock 窗口自己的显隐：
+     * 显隐必须留在焦点口径 [homeForeground] 上 —— 用户可能自己把桌面那条 Dock
+     * 隐藏了（`hideHomeDock`，这台车就是），这时若按窗口口径把全局 Dock 藏掉，
+     * 桌面上会**一条 Dock 都不剩**。
+     */
+    private fun setHomeOnScreen(value: Boolean) {
+        if (homeOnScreen == value) return
+        homeOnScreen = value
+        Logx.i(
+            LogTags.DOCK,
+            "桌面窗口可见性",
+            "onScreen" to value,
+            "focused" to homeForeground,
+        )
+    }
+
     // ---------------------------------------------------------------- Dock 回调
 
     /**
@@ -445,21 +479,33 @@ class GlobalDockService : Service() {
 
         bar.onPower = { VehicleController.togglePower() }
         bar.onTemp = { zone, delta -> VehicleController.stepTemp(zone, delta.toFloat()) }
-        // 第142轮：风量键**按桌面是否在前台分流**。
+        // 第144轮：风量键**按「桌面窗口还在不在屏幕上」分流**。
         //
         // 第101轮起全局 Dock 用 RRO 预留区占住系统导航栏，桌面上画的那条 Dock
         // 其实就是**这个窗口**（桌面自己的 Dock 在 `globalReserved` 时被 GONE 掉了），
         // 于是风量键的语义被这条窗口接管了：
-        // - 桌面在前台 → 和桌面里的 Dock 一致：弹**空调浮层**（回桌面执行，见 `toLauncher`）
-        // - 别的应用在前台 → 维持原状：直接调车控把风量 +1，不打断当前应用
+        // - 桌面窗口还在屏幕上 → 和桌面里的 Dock 一致：弹**空调浮层**（回桌面执行，见 `toLauncher`）
+        // - 别的应用盖上来了（桌面 `onStop`）→ 维持原状：直接调车控把风量 +1，不打断当前应用
+        //
+        // **判据不能用焦点**（第142~143轮真机没生效的原因）：
+        // 桌面把画中画承载面里的高德拉起来时，系统把焦点抢走 → 桌面走 `onPause`，
+        // 可桌面窗口还亮在屏幕上，用户眼前就是桌面。焦点口径会误判成「不在桌面上」，
+        // 于是桌面上点风量键还是「风量 +1」。窗口口径（`onStart`/`onStop`）才对。
         //
         // 预留区没生效时桌面自己的 Dock 在显示，它的 `onFan` 本来就是 `showClimate()`，
         // 不走这里 —— 所以两条路径的语义最终一致。
         bar.onFan = {
-            if (homeForeground) {
-                toLauncher(MainActivity.ACTION_CLIMATE)
-            } else {
-                VehicleController.stepFan(1)
+            val action = DockFanPolicy.decide(homeOnScreen)
+            Logx.event(
+                LogTags.DOCK,
+                "Dock 风量键",
+                "action" to action,
+                "desktopOnScreen" to homeOnScreen,
+                "desktopFocused" to homeForeground,
+            )
+            when (action) {
+                DockFanPolicy.ACTION_OPEN_CLIMATE -> toLauncher(MainActivity.ACTION_CLIMATE)
+                else -> VehicleController.stepFan(1)
             }
         }
         bar.onAc = { VehicleController.toggleAc() }
@@ -810,6 +856,16 @@ class GlobalDockService : Service() {
         /** 桌面 onResume / onPause 通知：HOME 前台时全局窗口要隐身。 */
         fun onHomeForeground(homeForeground: Boolean) {
             active?.setHomeForeground(homeForeground)
+        }
+
+        /**
+         * 第144轮：桌面 `onStart` / `onStop` 通知 —— 桌面窗口还在不在屏幕上。
+         *
+         * 只用来决定**风量键的语义**（弹空调浮层 / 风量 +1），
+         * 不影响全局 Dock 窗口自己的显隐。
+         */
+        fun onHomeOnScreen(onScreen: Boolean) {
+            active?.setHomeOnScreen(onScreen)
         }
 
         /** 服务是否已经挂上窗口（给设置页 / 排障用）。 */

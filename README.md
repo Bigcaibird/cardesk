@@ -5382,3 +5382,110 @@ chipRow("面板样式", listOf("胶囊", "纯文字", "发光"), prefs.clusterSt
 | 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
 | 单测 | 1981 项全绿（本轮新增 8 项） |
 | 更新说明 | `dist/cardesk-latest.json` 的 `notes` 写了这三条修复 |
+
+---
+
+## 第144轮：桌面 Dock 风量键修完还是「风量 +1」——判据用错了口径
+
+> 起因：第142轮修的正是「桌面上点 Dock 风量键没弹空调页面」，
+> 4242 装车后用户反馈**还是老样子**：桌面状态点风量键仍然是风量 +1。
+
+### 一、这次不是玄学：真机日志里写得清清楚楚
+
+`cardesk-logs-20261107`（真机，1.0.1135-system）第 6、7 个日志文件里，
+桌面在前台的最后一段是这样的（19:55:56.832 ~ 19:56:06，日志结束）：
+
+```
+19:55:56.832 I CarDesk/App : onResume
+19:55:56.922 I CarDesk/NavUI : 承载面重建，重新拉起承载应用 pkg=com.autonavi.amapautp.yh
+19:55:57.109 I CarDesk/NavUI : ActivityView 启动承载应用 pkg=com.autonavi.amapautp.yh
+19:55:57.146 I CarDesk/App : onPause        ← 焦点没了
+（之后 9 秒里再没有 onResume）
+```
+
+再往前一段能反证「桌面确实在前台、且全局 Dock 的键是通的」：
+
+```
+19:54:30.098 I CarDesk/App : onResume
+19:54:33.442 I CarDesk/Dock : [EVT] Dock 按键点击 key=apps label=应用
+19:54:33.443 I CarDesk/Dock : [EVT] 全局 Dock：回桌面执行动作 action=drawer
+19:54:33.473 I CarDesk/App : onPause
+19:54:33.474 I CarDesk/Dock : [EVT] 全局 Dock 带回桌面动作 action=drawer
+19:54:33.476 I CarDesk/App : onResume
+```
+
+⇒ 全局 Dock 的按键链路是通的（`应用` 键正常带回桌面开抽屉），
+所以风量键走的**也是** `bar.onFan`，只是**分支选错了**。
+
+### 二、根因：`onPause` ≠ 桌面不在屏幕上
+
+第142轮拿 `MainActivity` 的 `onResume`/`onPause`（**焦点**口径）当
+「用户眼前是不是桌面」的判据（`homeForeground`）。
+
+可桌面是 HOME，**自己的窗口里嵌着别家的应用** —— 画中画承载面
+（`ActivityView` + `VirtualDisplay`，见 `ui/embed/ActivityEmbed.kt`）。
+承载应用启动的那一刻，系统把焦点交给承载面 → 我们的 Activity 走 `onPause`，
+**但桌面窗口还好好地亮在屏幕上**（地图就在桌面里的画中画窗口中）。
+
+于是焦点口径的 `homeForeground` 变成 false →
+风量键被判成「不在桌面上」→ 直调 `VehicleController.stepFan(1)` →
+**用户看到的还是「风量 +1」**，跟第142轮之前一模一样。
+
+两个口径必须分开：
+
+| 信号 | 生命周期 | 含义 | 谁在用 |
+|---|---|---|---|
+| 焦点 | `onResume`/`onPause` | 有没有焦点 | 全局 Dock 窗口自己的显隐；画中画黑屏自愈的闸门 |
+| **窗口可见** | **`onStart`/`onStop`** | **窗口还在不在屏幕上** | **第144轮：风量键的语义** |
+
+`onStop` 才是「被别的应用全屏盖住」的时刻（`onPause` 之后）；
+画中画承载面启动**不会**让桌面 `onStop`（窗口还亮着）——
+这正好把「桌面」和「其它应用」区分开。
+
+### 三、修法
+
+1. `core/HomeForeground` 拆出第二个信号 `isOnScreen`（`onStart`/`onStop` 口径）。
+2. `MainActivity` 加 `onStart`/`onStop`：置 `HomeForeground.isOnScreen`，
+   并通知全局 Dock 服务（`GlobalDockService.onHomeOnScreen`）。
+   服务启动时先从 `HomeForeground.isOnScreen` 对齐一次
+   （服务可能比桌面先起来，也可能后起来）。
+3. 风量键的决策抽成纯函数 `core/dock/DockFanPolicy.decide(desktopOnScreen)`：
+   - 桌面窗口还在屏幕上 → `toLauncher(ACTION_CLIMATE)` → 回桌面弹**空调浮层**
+     （和桌面自己那条 Dock 的 `showClimate()` 语义一致）；
+   - 别的应用盖上来了 → 维持原状，直调车控**风量 +1**，不打断当前应用。
+
+**没有动全局 Dock 窗口自己的显隐**：它必须留在焦点口径上 ——
+这台车用户自己把桌面那条 Dock 隐藏了（`hideHomeDock=true`），
+若按窗口口径把全局 Dock 藏掉，桌面上会**一条 Dock 都不剩**。
+
+**也没有动画中画黑屏自愈的闸门**（`PipSurface` 里的 `HomeForeground.isForeground`）：
+它停在焦点口径上是**保守方向**（焦点没了就不自愈），宁可少自愈也不要把用户
+正在用的全屏应用抢回画中画（第130轮踩过这个坑），这轮不动它。
+
+### 四、判据
+
+- **纯策略单测**（`DockFanPolicyTest`，3 项）：窗口在屏幕上 → 弹浮层；
+  不在 → 风量 +1；两个动作互斥。
+- **生命周期回归单测**（`DesktopOnScreenTest`，4 项，Robolectric 真跑 Activity）：
+  - `onStart` 后 → 判为在屏幕上 → 弹浮层；
+  - **只 `onPause`（焦点被画中画承载面抢走）→ 仍判为在屏幕上 → 还是弹浮层**
+    —— 这条就是第142~143轮真机没生效的那个坑；
+  - `onStop`（别的应用全屏盖上来）→ 不在屏幕上 → 风量 +1；
+  - 焦点回来时窗口口径不受影响。
+- **诊断日志**：风量键每次点击都落一行
+  `Dock 风量键 action=… desktopOnScreen=… desktopFocused=…`，
+  桌面窗口可见性变化也落一行 `桌面窗口可见性 onScreen=… focused=…`，
+  下次抓日志能一眼看出走的哪条分支。
+
+### 五、产物
+
+| 项 | 值 |
+|---|---|
+| 文件 | `dist/CarDesk-platform-ecarx-cardesk-4243.apk` |
+| versionCode / versionName | 4243 / 1.0.1147-system |
+| 大小 | 2 364 041 字节 |
+| SHA-256 | `462bb72ba37d6c1be424f7dbdae416ffbaa6a3475a15c7d3bb6c1dcde59a2e27` |
+| 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
+| 单测 | 1988 项全绿（本轮新增 7 项） |
+| 更新说明 | `dist/cardesk-latest.json` 的 `notes` 写了这一条修复 |
+
