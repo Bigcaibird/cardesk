@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1146",
-  "versionCode": 4242,
-  "tag": "v1.0.1146",
-  "name": "CarDesk 4242 / 1.0.1146-system",
-  "notes": "修复：①桌面 Dock 的风量键点击恢复为弹出空调页面（此前被全局 Dock 窗口接管成「风量+1」，在导航等其它应用里仍直调风量）；②仪表歌词加对比描边并调整日夜配色，压在高德地图底色上也分得开（深字不再陷进 POI 标签、浅字不再混进青色路网）；③修复仪表歌词「面板样式」切换无效果（胶囊/纯文字/发光点哪个都变成胶囊，胶囊样式现在自带描边底板）。",
-  "publishedAt": "2026-11-10T09:48:58Z",
+  "version": "1.0.1147",
+  "versionCode": 4243,
+  "tag": "v1.0.1147",
+  "name": "CarDesk 4243 / 1.0.1147-system",
+  "notes": "修复：桌面 Dock 的风量键点了仍是「风量+1」。上一版判据用错了口径——拿「有没有焦点」当「用户眼前是不是桌面」，而桌面把画中画里的高德拉起来时系统会抢走焦点（桌面走 onPause），可桌面窗口还亮在屏幕上，于是被误判成「不在桌面上」。本版改按「窗口是否还在屏幕上」判断：桌面上点风量键弹空调页面，其它应用前台时仍直调风量 +1。",
+  "publishedAt": "2026-11-11T01:03:16Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4242.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4242.apk",
-    "size": 2363113,
-    "sha256": "94e97bc6fcd705b4333bb6386533d3ea37a2c115bd58db644a5504f53c307649"
+    "name": "CarDesk-platform-ecarx-cardesk-4243.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4243.apk",
+    "size": 2364041,
+    "sha256": "462bb72ba37d6c1be424f7dbdae416ffbaa6a3475a15c7d3bb6c1dcde59a2e27"
   }
 }
