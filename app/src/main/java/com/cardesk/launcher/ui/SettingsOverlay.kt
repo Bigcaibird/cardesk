@@ -93,6 +93,22 @@ class SettingsOverlay(
     var onCardLayoutChanged: (() -> Unit)? = null
 
     /**
+     * 导航栏槽位配置变了：让宿主把槽位重新读回来并刷到槽位条上。
+     *
+     * ## 为什么需要单独一个回调（第154轮）
+     *
+     * 「恢复默认 15 槽位」只调 [onApply] 是不够的 ——
+     * `onApply` → `LauncherView.onSettingsApplied()` 只在「增强导航栏开关」或
+     * 「导航栏样式」变了时才 `build()` 重建，而重置槽位两个都不改 ⇒ 不重建，
+     * 导航栏看上去纹丝不动（值存进盘里了，但要等重启才生效）。
+     *
+     * 「编辑槽位…」面板走的是 `LauncherView.showNavSlots()` 里的
+     * `slotsBar?.slots = list`，那才是「当场生效」的关键动作。
+     * 这个回调就是把同一件事交给宿主做。
+     */
+    var onNavSlotsChanged: (() -> Unit)? = null
+
+    /**
      * 首页中央大字歌词的**缩放**变了：让场景页立刻重画。
      *
      * 第 114 轮：拖滑杆时桌面在背后就能看到字变大 —— 等每秒 tick 刷新太慢，
@@ -629,7 +645,12 @@ class SettingsOverlay(
      * 第五十九轮：标题组**垂直居中**在行块里（原来贴在行顶，行块一高就头重脚轻），
      * 右侧控件也从「顶 + 14」改成**垂直居中**，跟标题对齐。
      */
-    private fun row(control: View, label: String, subtitle: String? = null) {
+    /**
+     * 一行：左侧标题（+ 可选副标题）+ 右侧控件。
+     *
+     * @return 这一行的容器 —— [unavailableRow] 要给整行挂点击提示。
+     */
+    private fun row(control: View, label: String, subtitle: String? = null): ViewGroup {
         val holder = FrameLayout(context)
         val textBox = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -651,6 +672,7 @@ class SettingsOverlay(
         body.addView(holder, LinearLayout.LayoutParams(-1, ROW_H))
         val line = View(context).apply { setBackgroundColor(Skin.NAV_STROKE) }
         body.addView(line, LinearLayout.LayoutParams(-1, 1).also { it.bottomMargin = ROW_GAP })
+        return holder
     }
 
     /**
@@ -690,6 +712,39 @@ class SettingsOverlay(
             }
         }
         row(toggle, label, subtitle)
+    }
+
+    /**
+     * 一行「**暂不可用**」的设置。
+     *
+     * ## 为什么要有这个
+     *
+     * 第154轮审计（`emu-verify/y154/SETTINGS-AUDIT.md`）发现：有些开关把值写进了
+     * SharedPreferences，但**全仓没有任何代码读它** —— 开关能切、能持久化，
+     * 实际功能一点没变。
+     *
+     * 直接删掉，老用户会以为「这个功能被砍了」；留着又不标，会继续骗人。
+     * 所以这里**保留位置、明说不可用**：
+     * - 右侧用淡字写「暂不可用」，一眼看得出跟别的行不一样；
+     * - 点整行弹 Toast 说明情况，不装作「点了没反应」；
+     * - **不再写偏好** —— 盘上留一个没人读的值，只会在以后排障时误导人。
+     *
+     * ## 为什么用「右侧文字」而不是「副标题」
+     *
+     * 设置页的副标题是「功能描述」的主要载体，第150轮专门做过一轮精简
+     * （见 [SettingsCopyTest] 的白名单：只剩互斥 / 语义那几条）。
+     * 「暂不可用」是**状态**不是功能描述 —— 跟「预留区未启用」一个性质，
+     * 不该挤进副标题那个池子。所以走右侧读数位，跟胎压那行滑杆的读数一个位置。
+     */
+    private fun unavailableRow(label: String) {
+        val mark = Ui.text(context, "暂不可用", 20f, pal.textFaint).apply {
+            gravity = Gravity.CENTER
+            tag = UNAVAILABLE_MARK
+        }
+        val holder = row(mark, label)
+        holder.setOnClickListener {
+            Toast.makeText(context, "「$label」暂不可用，功能尚未接入", Toast.LENGTH_SHORT).show()
+        }
     }
 
     /** 一行选择：左侧标题 + 右侧横向滚动的选项条（选项多时也能滚）。 */
@@ -1117,6 +1172,44 @@ class SettingsOverlay(
         body.addView(line, LinearLayout.LayoutParams(-1, 1))
     }
 
+    /**
+     * 一行「**暂不可用**」的滑杆。
+     *
+     * 和 [unavailableRow] 同理（第154轮审计）：这个滑杆写进偏好的值
+     * **没有任何代码读**，拖了也不生效。与其骗人，不如明说。
+     *
+     * 做法上跟开关行有个区别：滑杆**用不着真值**，读数直接写「暂不可用」——
+     * 显示一个用户拖不动的数字，比显示「暂不可用」更像功能正常。
+     */
+    private fun unavailableSliderRow(label: String) {
+        val holder = FrameLayout(context)
+        val caption = Ui.text(context, label, 22f, pal.textDim).apply { gravity = Gravity.CENTER_VERTICAL }
+        val readout = Ui.text(context, "暂不可用", 20f, pal.textFaint).apply {
+            gravity = Gravity.CENTER_VERTICAL or Gravity.END
+            tag = UNAVAILABLE_MARK
+        }
+        holder.addView(caption, FrameLayout.LayoutParams(260, -1).also { it.leftMargin = 18 })
+        val bar = SeekBar(context).apply {
+            // 置灰 + 禁用：拖不动，也就不会误改那个没人读的偏好值。
+            isEnabled = false
+            alpha = 0.4f
+            progressTintList = android.content.res.ColorStateList.valueOf(pal.textFaint)
+            thumbTintList = android.content.res.ColorStateList.valueOf(0xFFF2FFFFFF.toInt())
+        }
+        holder.addView(bar, FrameLayout.LayoutParams(420, 64, Gravity.CENTER_VERTICAL or Gravity.END).also {
+            it.rightMargin = 150
+        })
+        holder.addView(readout, FrameLayout.LayoutParams(130, -1, Gravity.CENTER_VERTICAL or Gravity.END).also {
+            it.rightMargin = 18
+        })
+        // 滑杆被禁用后不消费触摸，点整行仍然能拿到 —— 用它弹提示。
+        holder.setOnClickListener {
+            Toast.makeText(context, "「$label」暂不可用，功能尚未接入", Toast.LENGTH_SHORT).show()
+        }
+        body.addView(holder, LinearLayout.LayoutParams(-1, 96))
+        body.addView(View(context).apply { setBackgroundColor(Skin.NAV_STROKE) }, LinearLayout.LayoutParams(-1, 1))
+    }
+
     private fun bodyField(view: android.view.View, height: Int = 60) {
         body.addView(view, LinearLayout.LayoutParams(-1, height).also { it.topMargin = 10 })
     }
@@ -1239,11 +1332,9 @@ class SettingsOverlay(
 
     /** 启动切换。 */
     private fun bootBody() {
-        switchRow("自动导航投屏", prefs.startNaviCastEnabled) {
-            val from = prefs.startNaviCastEnabled
-            prefs.startNaviCastEnabled = it
-            logSetting("start_navi_cast_enabled", "自动导航投屏", from, it)
-        }
+        // 第154轮审计：`start_navi_cast_enabled` 同样**没有任何代码读**
+        // —— BootReceiver / MainActivity 都不引用它，启动时没有任何导航投屏动作。
+        unavailableRow("自动导航投屏")
         switchRow("自动切换驾驶模式", prefs.startSwitchEnabled) {
             val from = prefs.startSwitchEnabled
             prefs.startSwitchEnabled = it
@@ -1467,11 +1558,12 @@ class SettingsOverlay(
 
     /** 桌面自启（case "autostart"）。 */
     private fun autostartBody() {
-        switchRow("桌面开机启动", prefs.bootAutostart) {
-            val from = prefs.bootAutostart
-            prefs.bootAutostart = it
-            logSetting("desktop_boot_autostart", "桌面开机启动", from, it)
-        }
+        // 第154轮审计：这一行写的 `desktop_boot_autostart` **全仓没有任何代码读**
+        // —— 开机流程（BootReceiver）只读 `adbAuto` / `adbWirelessAuto`，
+        // 桌面是 HOME 车机本来就随系统起，这个开关从设下那天起就没生效过。
+        //
+        // 不删行（删了老用户会以为功能被砍），但明说不可用，并且不再写盘。
+        unavailableRow("桌面开机启动")
     }
 
     /**
@@ -2065,10 +2157,18 @@ class SettingsOverlay(
 
     /** 360 环影。 */
     private fun pageCamera360() {
+        // 第154轮：下面「视角延迟 / 按键视角」是**跟着总开关条件渲染**的
+        // （关着就 return，不画）。可总开关原来只写偏好、不重建本页，
+        // 于是用户拨开开关，眼前什么都没变 —— 得切走再切回才看得到子项，
+        // 很容易被当成「这一页坏了」。
+        // 这一页恰好是本轮刚收敛过的（5 个假选项被删了），剩下的两项如果还藏着，
+        // 等于把唯一能用的东西也藏起来了，所以这里跟着重建本页。
+        // 用法和文件里其它「开关影响本页内容」的地方一致（如「显示这张卡」）。
         switchRow("启用 360 环影增强", prefs.camera360Enabled) {
             val from = prefs.camera360Enabled
             prefs.camera360Enabled = it
             logSetting("camera360_enabled_v2", "启用 360 环影增强", from, it)
+            select(selectedKey)
         }
         if (!prefs.camera360Enabled) {
             return
@@ -2085,36 +2185,14 @@ class SettingsOverlay(
             prefs.camera360KeyView = to
             logSetting("camera360_key_view_v2", "按键视角", from, to)
         }
-        chipRow("倒车视角", CAMERA360_VIEW_LABELS, CAMERA360_VIEW_IDS.indexOf(prefs.camera360ReverseView)) { idx ->
-            val from = prefs.camera360ReverseView
-            val to = CAMERA360_VIEW_IDS[idx]
-            prefs.camera360ReverseView = to
-            logSetting("camera360_reverse_view_v2", "倒车视角", from, to)
-        }
-        chipRow("R→D 视角", CAMERA360_VIEW_LABELS, CAMERA360_VIEW_IDS.indexOf(prefs.camera360RdView)) { idx ->
-            val from = prefs.camera360RdView
-            val to = CAMERA360_VIEW_IDS[idx]
-            prefs.camera360RdView = to
-            logSetting("camera360_rd_view_v2", "R→D 视角", from, to)
-        }
-        chipRow("D 档视角", CAMERA360_VIEW_LABELS, CAMERA360_VIEW_IDS.indexOf(prefs.camera360DView)) { idx ->
-            val from = prefs.camera360DView
-            val to = CAMERA360_VIEW_IDS[idx]
-            prefs.camera360DView = to
-            logSetting("camera360_d_view_v2", "D 档视角", from, to)
-        }
-        chipRow("转向灯视角", CAMERA360_VIEW_LABELS, CAMERA360_VIEW_IDS.indexOf(prefs.camera360LampView)) { idx ->
-            val from = prefs.camera360LampView
-            val to = CAMERA360_VIEW_IDS[idx]
-            prefs.camera360LampView = to
-            logSetting("camera360_lamp_view_v2", "转向灯视角", from, to)
-        }
-        chipRow("N/P 关闭环影", listOf("无", "关"), if (prefs.camera360NpClose) 1 else 0) {
-            val from = prefs.camera360NpClose
-            val to = it == 1
-            prefs.camera360NpClose = to
-            logSetting("camera360_np_close_v2", "N/P 关闭环影", from, to)
-        }
+        // 第154轮：原来这一页下面还有「倒车视角 / R→D 视角 / D 档视角 / 转向灯视角 /
+        // N/P 关闭环影」五项，审计发现它们**写进偏好后没有任何代码读**：
+        // 实现侧只有一条通路 —— VehicleController.schedule360View(按键视角, 延迟)，
+        // 一次只切一个视角，其余五个存了没人用。
+        //
+        // 与其留五个假开关，不如把这一页收敛成「能用的两个」：
+        // 启用 + 视角延迟 + 按键视角。看板倒车时的视角切换留待实现侧真的支持了再加回来
+        // （落盘键 `camera360_reverse_view_v2` 等在 Prefs.kt 里保留着，随时可接）。
     }
 
     /**
@@ -2468,34 +2546,16 @@ class SettingsOverlay(
     }
 
     private fun desktopLyricBody() {
-        section("导航栏歌词槽字号")
-        sliderRow("收起·主歌词", prefs.deskCompactMainSp, 14, 64, " px") {
-            val from = prefs.deskCompactMainSp
-            prefs.deskCompactMainSp = it
-            logSettingDebug("desk_desk_compact_main_sp", "收起·主歌词", from, it)
-        }
-        sliderRow("收起·副歌词", prefs.deskCompactSubSp, 10, 48, " px") {
-            val from = prefs.deskCompactSubSp
-            prefs.deskCompactSubSp = it
-            logSettingDebug("desk_desk_compact_sub_sp", "收起·副歌词", from, it)
-        }
-        sliderRow("展开·主歌词", prefs.deskExpandedMainSp, 14, 64, " px") {
-            val from = prefs.deskExpandedMainSp
-            prefs.deskExpandedMainSp = it
-            logSettingDebug("desk_desk_expanded_main_sp", "展开·主歌词", from, it)
-        }
-        sliderRow("展开·副歌词", prefs.deskExpandedSubSp, 10, 48, " px") {
-            val from = prefs.deskExpandedSubSp
-            prefs.deskExpandedSubSp = it
-            logSettingDebug("desk_desk_expanded_sub_sp", "展开·副歌词", from, it)
-        }
-        // 第三十二轮起桌面只有两页，`desk_desk_page3_main_sp` / `desk_desk_page3_sub_sp`
-        // 这两个「第三页全屏歌词」字号已经没有对应的画面了，设置项随之移除；
-        // 落盘键 `desk_desk_page3_main_sp` / `desk_desk_page3_sub_sp` 保留，将来恢复独立播放器页可直接用。
-        // 第114轮：首页中央那坨**五行大字歌词**的字号做成了可调。
+        // 第154轮：原来这一节开头有四个滑杆 ——「收起·主歌词 / 收起·副歌词 /
+        // 展开·主歌词 / 展开·副歌词」，审计发现它们**写进偏好后没有任何代码读**：
+        // 导航栏歌词槽的实际绘制在 NavSlotBarView.drawLyric()，字号是写死的
+        // （当前行 12f * u、下一行 10f * u），跟偏好没有关系。
         //
-        // 为什么单独一节：上面四个滑杆管的是**导航栏歌词槽**（收起 / 展开两种形态），
-        // 跟桌面正中这块大字歌词是两套画面，混在一起会让人以为改一个动两个。
+        // 四个滑杆已删。落盘键 `desk_desk_compact_main_sp` 等在 Prefs.kt 里保留，
+        // 将来让歌词槽真的读偏好，可以直接接回去。
+        //
+        // 下面「首页中央歌词」是**另一套画面**（桌面正中那坨大字），
+        // 它的字号（第114轮起）接的是 `scene_lyric_scale_pct`，是活的，不受影响。
         section("首页中央歌词")
         // —— 布局选择（第117轮）——
         //
@@ -2844,11 +2904,9 @@ class SettingsOverlay(
      */
     private fun pageCarInfo() {
         section("胎压")
-        sliderRow("胎压数字字号", prefs.deskTpmsValueSp, 10, 48, " px") {
-            val from = prefs.deskTpmsValueSp
-            prefs.deskTpmsValueSp = it
-            logSettingDebug("desk_tpms_value_sp", "胎压数字字号", from, it)
-        }
+        // 第154轮审计：`desk_tpms_value_sp` **没有任何代码读** —— 胎压数字的渲染
+        // 里字号是写死的，这个滑杆拖了不生效。标成暂不可用，别再骗人。
+        unavailableSliderRow("胎压数字字号")
         // 车型编号（：键 `tpms_car_model`，默认 `03`）。
         // 01 / 02 / 02HB / 05 是 SUV 家族，03 / 03+ 是轿车家族。
         chipRow("车模编号", com.cardesk.launcher.core.CarModels.MODEL_IDS, prefs.carModel) { modelId ->
@@ -2987,7 +3045,19 @@ class SettingsOverlay(
             NavSlots.save(prefs, NavSlots.defaults())
             // 排障场景：槽位被一键重置 —— 记下重置动作（落盘明细见 NavSlots.save）
             Logx.event(LogTags.SETTING, "恢复默认 15 槽位")
+            // 第154轮审计：**光存盘不够**。
+            // `onApply` 走的是 LauncherView.onSettingsApplied()，它只在
+            // 「增强导航栏开关」或「导航栏样式」变了的时候才 build() 重建 ——
+            // 本按钮两个都不改 ⇒ 不重建，导航栏纹丝不动，
+            // 而且本页也不重画（按钮上方「编辑槽位（N 项）」的 N 都不变）。
+            // 落盘要到下次重启才生效，用户当下的预期完全落空。
+            //
+            // 修法：显式通知宿主把槽位重新读回来并刷到槽位条上，
+            // 和「编辑槽位…」面板 onChange 里的做法对齐（见 LauncherView.showNavSlots）。
+            onNavSlotsChanged?.invoke()
             onApply?.invoke()
+            // 本页自己也要重画 —— 「编辑槽位（N 项）」的 N 得跟着变。
+            select(selectedKey)
         }
         section("槽位规则")
     }
@@ -4248,6 +4318,16 @@ class SettingsOverlay(
          * 之前按钮底边直接贴住下一行的标题，看着像压在上面。
          */
         val ACTION_BUTTON_MARK = Any()
+
+        /**
+         * 「暂不可用」状态标记的标记 —— 测试用。
+         *
+         * 第154轮：设置项整改时给几个**没有实现**的开关 / 滑杆留了一行，
+         * 右侧用淡字写「暂不可用」。这里给它打标记，
+         * 测试就能从视图树里把「哪些行被标成了暂不可用」精确挑出来，
+         * 而不是靠扫文字（扫文字会跟别的页撞车）。
+         */
+        val UNAVAILABLE_MARK = Any()
 
         /** 局域网传输页的二维码边长（设计 px）。 */
         const val QR_SIZE_PX = 300

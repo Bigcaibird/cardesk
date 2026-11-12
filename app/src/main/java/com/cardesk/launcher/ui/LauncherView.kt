@@ -2724,6 +2724,18 @@ private fun showCam() {
             closeSettings()
             showNavSlots()
         }
+        // 第154轮：「恢复默认 15 槽位」一键重置后要**当场生效**。
+        // 光落盘不够 —— onApply → onSettingsApplied() 只在「增强导航栏开关」或
+        // 「导航栏样式」变了时才 build() 重建，重置槽位两个都不改 ⇒ 不重建，
+        // 导航栏纹丝不动，重启才生效。
+        //
+        // 这里补的正是「编辑槽位…」面板 onChange 里那三步
+        // （重新读盘 → 刷槽位条 → 重算歌词归属），两边行为就一致了。
+        overlay.onNavSlotsChanged = {
+            navSlots = NavSlots.load(prefs)
+            slotsBar?.slots = navSlots
+            refresh()
+        }
         overlay.onVehicleSource = {
             VehicleController.reconnect(context.applicationContext, prefs)
             refresh()
