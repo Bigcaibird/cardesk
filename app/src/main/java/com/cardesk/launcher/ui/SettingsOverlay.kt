@@ -645,12 +645,7 @@ class SettingsOverlay(
      * 第五十九轮：标题组**垂直居中**在行块里（原来贴在行顶，行块一高就头重脚轻），
      * 右侧控件也从「顶 + 14」改成**垂直居中**，跟标题对齐。
      */
-    /**
-     * 一行：左侧标题（+ 可选副标题）+ 右侧控件。
-     *
-     * @return 这一行的容器 —— [unavailableRow] 要给整行挂点击提示。
-     */
-    private fun row(control: View, label: String, subtitle: String? = null): ViewGroup {
+    private fun row(control: View, label: String, subtitle: String? = null) {
         val holder = FrameLayout(context)
         val textBox = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -672,7 +667,6 @@ class SettingsOverlay(
         body.addView(holder, LinearLayout.LayoutParams(-1, ROW_H))
         val line = View(context).apply { setBackgroundColor(Skin.NAV_STROKE) }
         body.addView(line, LinearLayout.LayoutParams(-1, 1).also { it.bottomMargin = ROW_GAP })
-        return holder
     }
 
     /**
@@ -712,39 +706,6 @@ class SettingsOverlay(
             }
         }
         row(toggle, label, subtitle)
-    }
-
-    /**
-     * 一行「**暂不可用**」的设置。
-     *
-     * ## 为什么要有这个
-     *
-     * 第154轮审计（`emu-verify/y154/SETTINGS-AUDIT.md`）发现：有些开关把值写进了
-     * SharedPreferences，但**全仓没有任何代码读它** —— 开关能切、能持久化，
-     * 实际功能一点没变。
-     *
-     * 直接删掉，老用户会以为「这个功能被砍了」；留着又不标，会继续骗人。
-     * 所以这里**保留位置、明说不可用**：
-     * - 右侧用淡字写「暂不可用」，一眼看得出跟别的行不一样；
-     * - 点整行弹 Toast 说明情况，不装作「点了没反应」；
-     * - **不再写偏好** —— 盘上留一个没人读的值，只会在以后排障时误导人。
-     *
-     * ## 为什么用「右侧文字」而不是「副标题」
-     *
-     * 设置页的副标题是「功能描述」的主要载体，第150轮专门做过一轮精简
-     * （见 [SettingsCopyTest] 的白名单：只剩互斥 / 语义那几条）。
-     * 「暂不可用」是**状态**不是功能描述 —— 跟「预留区未启用」一个性质，
-     * 不该挤进副标题那个池子。所以走右侧读数位，跟胎压那行滑杆的读数一个位置。
-     */
-    private fun unavailableRow(label: String) {
-        val mark = Ui.text(context, "暂不可用", 20f, pal.textFaint).apply {
-            gravity = Gravity.CENTER
-            tag = UNAVAILABLE_MARK
-        }
-        val holder = row(mark, label)
-        holder.setOnClickListener {
-            Toast.makeText(context, "「$label」暂不可用，功能尚未接入", Toast.LENGTH_SHORT).show()
-        }
     }
 
     /** 一行选择：左侧标题 + 右侧横向滚动的选项条（选项多时也能滚）。 */
@@ -1172,44 +1133,6 @@ class SettingsOverlay(
         body.addView(line, LinearLayout.LayoutParams(-1, 1))
     }
 
-    /**
-     * 一行「**暂不可用**」的滑杆。
-     *
-     * 和 [unavailableRow] 同理（第154轮审计）：这个滑杆写进偏好的值
-     * **没有任何代码读**，拖了也不生效。与其骗人，不如明说。
-     *
-     * 做法上跟开关行有个区别：滑杆**用不着真值**，读数直接写「暂不可用」——
-     * 显示一个用户拖不动的数字，比显示「暂不可用」更像功能正常。
-     */
-    private fun unavailableSliderRow(label: String) {
-        val holder = FrameLayout(context)
-        val caption = Ui.text(context, label, 22f, pal.textDim).apply { gravity = Gravity.CENTER_VERTICAL }
-        val readout = Ui.text(context, "暂不可用", 20f, pal.textFaint).apply {
-            gravity = Gravity.CENTER_VERTICAL or Gravity.END
-            tag = UNAVAILABLE_MARK
-        }
-        holder.addView(caption, FrameLayout.LayoutParams(260, -1).also { it.leftMargin = 18 })
-        val bar = SeekBar(context).apply {
-            // 置灰 + 禁用：拖不动，也就不会误改那个没人读的偏好值。
-            isEnabled = false
-            alpha = 0.4f
-            progressTintList = android.content.res.ColorStateList.valueOf(pal.textFaint)
-            thumbTintList = android.content.res.ColorStateList.valueOf(0xFFF2FFFFFF.toInt())
-        }
-        holder.addView(bar, FrameLayout.LayoutParams(420, 64, Gravity.CENTER_VERTICAL or Gravity.END).also {
-            it.rightMargin = 150
-        })
-        holder.addView(readout, FrameLayout.LayoutParams(130, -1, Gravity.CENTER_VERTICAL or Gravity.END).also {
-            it.rightMargin = 18
-        })
-        // 滑杆被禁用后不消费触摸，点整行仍然能拿到 —— 用它弹提示。
-        holder.setOnClickListener {
-            Toast.makeText(context, "「$label」暂不可用，功能尚未接入", Toast.LENGTH_SHORT).show()
-        }
-        body.addView(holder, LinearLayout.LayoutParams(-1, 96))
-        body.addView(View(context).apply { setBackgroundColor(Skin.NAV_STROKE) }, LinearLayout.LayoutParams(-1, 1))
-    }
-
     private fun bodyField(view: android.view.View, height: Int = 60) {
         body.addView(view, LinearLayout.LayoutParams(-1, height).also { it.topMargin = 10 })
     }
@@ -1332,9 +1255,14 @@ class SettingsOverlay(
 
     /** 启动切换。 */
     private fun bootBody() {
-        // 第154轮审计：`start_navi_cast_enabled` 同样**没有任何代码读**
-        // —— BootReceiver / MainActivity 都不引用它，启动时没有任何导航投屏动作。
-        unavailableRow("自动导航投屏")
+        // 第155轮：「自动导航投屏」这一项**删掉了**。
+        // 它写的 `start_navi_cast_enabled` 全仓没有任何代码读 —— 开机流程里
+        // 没有任何导航投屏动作，这个开关从设下那天起就是纯装饰。
+        // 跟「桌面开机启动」「胎压数字字号」不同，那两项现在有实现了（见下），
+        // 这一项没有 —— 留着只会继续骗人，所以整行拿掉。
+        //
+        // 落盘键 `start_navi_cast_enabled` 仍保留在 Prefs.kt，
+        // 将来真要做导航投屏时可以直接接回去。
         switchRow("自动切换驾驶模式", prefs.startSwitchEnabled) {
             val from = prefs.startSwitchEnabled
             prefs.startSwitchEnabled = it
@@ -1558,12 +1486,18 @@ class SettingsOverlay(
 
     /** 桌面自启（case "autostart"）。 */
     private fun autostartBody() {
-        // 第154轮审计：这一行写的 `desktop_boot_autostart` **全仓没有任何代码读**
-        // —— 开机流程（BootReceiver）只读 `adbAuto` / `adbWirelessAuto`，
-        // 桌面是 HOME 车机本来就随系统起，这个开关从设下那天起就没生效过。
+        // 第155轮：这个开关**接上实现**了。
         //
-        // 不删行（删了老用户会以为功能被砍），但明说不可用，并且不再写盘。
-        unavailableRow("桌面开机启动")
+        // 之前它写进 `desktop_boot_autostart` 就没人读 —— 但其实**功能一直存在**：
+        // BootReceiver 开机时会显式拉一次桌面（兜底那些不主动 re-launch HOME 的车机），
+        // 只是没有开关管它。现在由用户决定要不要开：
+        // - 开（默认）：开机照旧拉桌面（跟今天一模一样）；
+        // - 关：开机不显式拉桌面。
+        switchRow("桌面开机启动", prefs.bootAutostart) {
+            val from = prefs.bootAutostart
+            prefs.bootAutostart = it
+            logSetting("desktop_boot_autostart", "桌面开机启动", from, it)
+        }
     }
 
     /**
@@ -2904,9 +2838,16 @@ class SettingsOverlay(
      */
     private fun pageCarInfo() {
         section("胎压")
-        // 第154轮审计：`desk_tpms_value_sp` **没有任何代码读** —— 胎压数字的渲染
-        // 里字号是写死的，这个滑杆拖了不生效。标成暂不可用，别再骗人。
-        unavailableSliderRow("胎压数字字号")
+        // 第155轮：这个滑杆**接上实现**了 —— `prefs.deskTpmsValueSp` 现在真的
+        // 喂给第一页胎压卡的渲染（`ScenePage.drawTireCard` → `scenePage.tpmsValueSp`），
+        // 拖动时桌面上的胎压数字会实时变大变小。
+        //
+        // 之前它是写进偏好就没人读（第154轮审计标成「暂不可用」）。
+        sliderRow("胎压数字字号", prefs.deskTpmsValueSp, 10, 48, " px") {
+            val from = prefs.deskTpmsValueSp
+            prefs.deskTpmsValueSp = it
+            logSettingDebug("desk_tpms_value_sp", "胎压数字字号", from, it)
+        }
         // 车型编号（：键 `tpms_car_model`，默认 `03`）。
         // 01 / 02 / 02HB / 05 是 SUV 家族，03 / 03+ 是轿车家族。
         chipRow("车模编号", com.cardesk.launcher.core.CarModels.MODEL_IDS, prefs.carModel) { modelId ->
@@ -4318,16 +4259,6 @@ class SettingsOverlay(
          * 之前按钮底边直接贴住下一行的标题，看着像压在上面。
          */
         val ACTION_BUTTON_MARK = Any()
-
-        /**
-         * 「暂不可用」状态标记的标记 —— 测试用。
-         *
-         * 第154轮：设置项整改时给几个**没有实现**的开关 / 滑杆留了一行，
-         * 右侧用淡字写「暂不可用」。这里给它打标记，
-         * 测试就能从视图树里把「哪些行被标成了暂不可用」精确挑出来，
-         * 而不是靠扫文字（扫文字会跟别的页撞车）。
-         */
-        val UNAVAILABLE_MARK = Any()
 
         /** 局域网传输页的二维码边长（设计 px）。 */
         const val QR_SIZE_PX = 300

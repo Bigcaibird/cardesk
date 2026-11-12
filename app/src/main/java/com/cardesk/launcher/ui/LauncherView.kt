@@ -3264,6 +3264,11 @@ private fun showCam() {
         // 车模编号跟着设置走（第三十三轮：**接到第一页胎压卡的自绘图模**上）。
         scenePage.carModel = prefs.carModel
         navPage.carModel = prefs.carModel
+        // 第155轮：胎压**数值字号**跟着设置走
+        // （设置页滑杆 → `prefs.deskTpmsValueSp` → 场景页胎压卡）。
+        // 这个滑杆在 `onProgressChanged` 里就会触发 `onApply` → `refresh()`，
+        // 所以拖动过程中数字会实时变大变小。
+        scenePage.tpmsValueSp = prefs.deskTpmsValueSp
         // 第111轮：右侧固定「车况卡」的显隐跟着偏好走。
         // 设置页开关 → `prefs.carStatusCardVisible` → 这里 → 场景页。
         scenePage.showCarStatusCard = prefs.carStatusCardVisible

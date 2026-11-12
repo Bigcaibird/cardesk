@@ -154,6 +154,32 @@ class ScenePage(context: Context) : View(context) {
     // （导航页组合卡还是 5 句，那是 `NavPage` 自己的字段，没动。）
 
     /**
+     * 胎压**数值**字号（第155轮）。
+     *
+     * 设置页「车辆信息 → 胎压数字字号」滑杆 → `prefs.deskTpmsValueSp` → 这里
+     * → [drawTireCard] 里那四个胎压数字。
+     *
+     * ## 之前为什么写死
+     *
+     * 这个字号以前在渲染里是写死的 `28f`，设置页那个滑杆只写盘没人读 ——
+     * 拖了不生效（第154轮审计标成「暂不可用」）。
+     *
+     * ## 为什么单位标签不跟着缩
+     *
+     * 「kPa」单位是 14px 的弱文字，它是**标注**不是数据；
+     * 跟着数字一起放大，数字一大单位就糊成一团。
+     * 数字大了以后单位的位置仍然按「量出来的实际宽度 + 8px」算，
+     * 所以绝不会盖住数字（这是第三十七轮修过的问题，不能退回去）。
+     */
+    var tpmsValueSp: Int = DEFAULT_TPMS_VALUE_SP
+        set(value) {
+            val next = value.coerceIn(TPMS_VALUE_SP_MIN, TPMS_VALUE_SP_MAX)
+            if (field == next) return
+            field = next
+            invalidate()
+        }
+
+    /**
      * 车型编号。
      *
      * 第三十三轮起**接到第一页底部的胎压卡**上（`drawTireCard` → `drawCarTop`），
@@ -2267,7 +2293,10 @@ class ScenePage(context: Context) : View(context) {
         val lx = x + 18f
         val rx = x + w - 18f
         val rows = listOf(top + 46f, top + 104f)
-        text.textSize = 28f
+        // 第155轮：数值字号跟着设置走（`prefs.deskTpmsValue_sp` → `tpmsValueSp`）。
+        // 单位「kPa」还是 14px 的弱文字 —— 它是标注，跟着放大就糊了。
+        val valueSp = tpmsValueSp.toFloat()
+        text.textSize = valueSp
         for (i in 0..1) {
             text.color = Skin.TEXT
             text.textAlign = Paint.Align.LEFT
@@ -2278,13 +2307,13 @@ class ScenePage(context: Context) : View(context) {
             // 会把「kPa」盖掉（真机反馈：首页胎压卡左边的 kPa 被胎压数字覆盖）。
             // 现在数值与标签之间永远留 8px 间隙，位数再多也不会压住。
             //
-            // 注意：**必须在 28px 字号下量宽度** —— 先量再把字号切成 14px，
+            // 注意：**必须在数值字号下量宽度** —— 先量再把字号切成 14px，
             // 否则量到的是 14px 的宽度，标签又会压回数字上。
             val valueW = text.measureText(v)
             text.textSize = 14f
             text.color = Skin.TEXT_DIM
             canvas.drawText(TIRE_UNIT, lx + valueW + 8f, rows[i], text)
-            text.textSize = 28f
+            text.textSize = valueSp
         }
         for (i in 0..1) {
             text.color = Skin.TEXT
@@ -2292,12 +2321,12 @@ class ScenePage(context: Context) : View(context) {
             val v = fmtTire(values[TireOrder.rightIndex(i)])   // 右列：FR, RR
             text.textSize = 14f
             val unitW = text.measureText(TIRE_UNIT)
-            text.textSize = 28f
+            text.textSize = valueSp
             canvas.drawText(v, rx - unitW - 8f, rows[i], text)
             text.textSize = 14f
             text.color = Skin.TEXT_DIM
             canvas.drawText(TIRE_UNIT, rx, rows[i], text)
-            text.textSize = 28f
+            text.textSize = valueSp
         }
         // `SceneDesktop.disableShortClick(sceneTireCard)`（:702）：胎压卡不可点
     }
@@ -3518,6 +3547,17 @@ class ScenePage(context: Context) : View(context) {
          * 在 unit=0 时也返回 `kPa`。
          */
         const val TIRE_UNIT = "kPa"
+
+        /**
+         * 胎压数值字号：默认 28、范围 10..48（第155轮）。
+         *
+         * 默认值跟「实现之前渲染里写死的那个值」一致 ——
+         * 接上开关不能让没动过设置的用户看到画面变化。
+         * 范围跟 `Prefs.deskTpmsValueSp` 一致（那边是权威）。
+         */
+        const val DEFAULT_TPMS_VALUE_SP = 28
+        const val TPMS_VALUE_SP_MIN = 10
+        const val TPMS_VALUE_SP_MAX = 48
 
         /** 快捷入口卡左边距（设计板：图标底板从卡内 24 开始）。 */
         const val QUICK_PAD = 24f

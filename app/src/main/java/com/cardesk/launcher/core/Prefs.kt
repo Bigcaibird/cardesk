@@ -742,10 +742,18 @@ class Prefs(context: Context) {
         set(value) = setIntValue("desk_desk_compact_main_sp", value.coerceIn(14, 64))
 
     /**
-     * 胎压数值字号（`desk_tpms_value_sp`，默认 20，范围 10..48）。
+     * 胎压数值字号（`desk_tpms_value_sp`，默认 28，范围 10..48）。
+     *
+     * 第155轮：接到第一页胎压卡的渲染上了（[com.cardesk.launcher.ui.pages.ScenePage.drawTireCard]）。
+     *
+     * ## 为什么默认值从 20 改成 28
+     *
+     * 这个键之前只写不读，渲染里字号是**写死的 28**。接上以后如果默认值还留 20，
+     * 相当于给所有老用户「悄悄换了个胎压字号」—— 用户没动过任何设置，画面却变了。
+     * 所以默认值改成 28：**不动这个设置的人，画面跟今天一模一样**。
      */
     var deskTpmsValueSp: Int
-        get() = intValue("desk_tpms_value_sp", 20).coerceIn(10, 48)
+        get() = intValue("desk_tpms_value_sp", 28).coerceIn(10, 48)
         set(value) = setIntValue("desk_tpms_value_sp", value.coerceIn(10, 48))
 
     /**
@@ -1021,8 +1029,25 @@ class Prefs(context: Context) {
 
     // ------------------------------------------------------------------ 启动 / Dock / 导航栏
 
+    /**
+     * **开机自动拉起桌面**（第155轮：接上实现）。
+     *
+     * ## 之前为什么是「假的」
+     *
+     * 这个开关从设下那天起就只写盘、没人读 —— 第154轮审计把它标成了「暂不可用」。
+     * 可它其实**有一个现成的落点**：[com.cardesk.launcher.BootReceiver] 开机时
+     * 本来就会显式拉一次桌面 Activity（「部分车机不主动 re-launch HOME」的兜底）。
+     * 也就是说：**功能一直存在，只是没有开关管它**。
+     *
+     * ## 现在是什么语义
+     *
+     * - 开（默认）：开机广播照旧拉起桌面 —— 跟今天的行为**一字不差**；
+     * - 关：开机广播**不**显式拉桌面（车机自己会拉 HOME 的话，用户看到的还是桌面）。
+     *
+     * 默认值取 `true` 是刻意的：不能因为「接上一个开关」就让老用户的开机行为变样。
+     */
     var bootAutostart: Boolean
-        get() = flag("desktop_boot_autostart")
+        get() = flag("desktop_boot_autostart", def = true)
         set(v) = setFlag("desktop_boot_autostart", v)
 
     /**

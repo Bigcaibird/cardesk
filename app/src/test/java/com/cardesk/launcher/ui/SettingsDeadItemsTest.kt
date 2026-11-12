@@ -7,7 +7,6 @@ import android.widget.TextView
 import com.cardesk.launcher.core.NavSlots
 import com.cardesk.launcher.core.Prefs
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -17,10 +16,9 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
-import org.robolectric.shadows.ShadowToast
 
 /**
- * 设置页「没有功能的设置项」整改（第154轮）。
+ * 设置页「没有功能的设置项」整改（第154轮，第155轮收尾）。
  *
  * ## 背景
  *
@@ -32,7 +30,7 @@ import org.robolectric.shadows.ShadowToast
  * - 歌词页 4 个「导航栏歌词槽字号」滑杆，字号在 `NavSlotBarView` 里是写死的；
  * - 「桌面开机启动」「自动导航投屏」「胎压数字字号」三项各自有人读、无人用。
  *
- * ## 本轮定的口径
+ * ## 第154轮定的口径
  *
  * - 前 9 项（5 + 4）**直接删掉** —— 留着比没有更糟（用户会当成设置坏了）；
  * - 后 3 项**保留位置但标注「暂不可用」**，点击只提示、**不再写偏好**
@@ -40,10 +38,18 @@ import org.robolectric.shadows.ShadowToast
  *
  * 另外把「恢复默认 15 槽位」修成**当场生效**（原来要重启）。
  *
+ * ## 第155轮：后 3 项各归其位
+ *
+ * - 「自动导航投屏」—— 删掉（没有实现可以接）；
+ * - 「桌面开机启动」「胎压数字字号」—— **真实现**（用例见 [SettingsLiveItemsTest]）。
+ *
+ * 所以这一轮之后设置页里**不该再有「暂不可用」**这种占位，
+ * `unavailableRow` / `unavailableSliderRow` 那套机制也一并拆了。
+ *
  * ## 这条测试锁住什么
  *
  * ① 删掉的 9 项**不能再出现在界面上**（防止有人「顺手加回来」）；
- * ② 保留的三项必须**明说暂不可用**，而且**点了不写盘**；
+ * ② 界面里**不该再有「暂不可用」**；
  * ③ 360 环影总开关拨开后，子项必须**当场出现**（不用切走再切回）；
  * ④ 「恢复默认 15 槽位」必须**通知宿主刷新槽位**。
  */
@@ -138,83 +144,30 @@ class SettingsDeadItemsTest {
         assertTrue("首页中央歌词是另一套画面，字号可调，不能一起删", ts.any { it == "首页中央歌词" })
     }
 
-    // ---------------------------------------------------------------- ② 标注暂不可用的 3 项
+    // ---------------------------------------------------------------- ② 「暂不可用」清零
+    //
+    // 第155轮：「暂不可用」那三项已经各归其位 ——
+    // 「自动导航投屏」删掉、「桌面开机启动」「胎压数字字号」真实现。
+    // 它们的用例挪到了 [SettingsLiveItemsTest]，
+    // 这里只留一条：**界面里不该再有这种占位**。
 
-    /** 行里那个「暂不可用」的状态标记（靠标记找，不靠扫文字）。 */
-    private fun unavailableMark(row: ViewGroup): TextView? {
-        fun walk(v: View): TextView? {
-            if (v is TextView && v.tag === SettingsOverlay.UNAVAILABLE_MARK) return v
-            if (v is ViewGroup) {
-                for (i in 0 until v.childCount) walk(v.getChildAt(i))?.let { return it }
+    @Test
+    fun `设置页里不该再有暂不可用`() {
+        val overlay = overlay()
+        val f = SettingsOverlay::class.java.getDeclaredField("navRows").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        val rows = f.get(overlay) as Map<String, TextView>
+        val bad = ArrayList<String>()
+        for (key in rows.keys.toList() + "about") {
+            openPage(overlay, key)
+            for (t in texts(bodyOf(overlay))) {
+                if (t.contains("暂不可用")) bad.add("[$key] $t")
             }
-            return null
         }
-        return walk(row)
-    }
-
-    @Test
-    fun `桌面开机启动标注暂不可用且点击不写偏好`() {
-        val overlay = overlay()
-        val prefs = Prefs(RuntimeEnvironment.getApplication())
-        openPage(overlay, "boot")
-        val row = rowOf(overlay, "桌面开机启动")
-        assertNotNull("「桌面开机启动」这行要留着（只是标成暂不可用）", row)
-
-        val mark = unavailableMark(row!!)
-        assertNotNull("必须有「暂不可用」的状态标记", mark)
-        assertEquals("状态标记上就写「暂不可用」", "暂不可用", mark!!.text.toString())
-        assertEquals(
-            "「暂不可用」要用淡字，不能跟正常文字一样显眼",
-            com.cardesk.launcher.core.Palettes.night.textFaint,
-            mark.currentTextColor,
-        )
-
-        val before = prefs.bootAutostart
-        row.performClick()
-        shadowOf(android.os.Looper.getMainLooper()).idle()
-        assertEquals("点了不该写偏好：没人读的值留在盘上只会误导排障", before, prefs.bootAutostart)
         assertTrue(
-            "点了要有提示，不能让人以为界面卡住了",
-            ShadowToast.getTextOfLatestToast()?.contains("暂不可用") == true,
+            "第155轮把「暂不可用」全实现掉了，设置页里不该再有这种占位：\n" + bad.joinToString("\n"),
+            bad.isEmpty(),
         )
-    }
-
-    @Test
-    fun `自动导航投屏标注暂不可用且点击不写偏好`() {
-        val overlay = overlay()
-        val prefs = Prefs(RuntimeEnvironment.getApplication())
-        openPage(overlay, "boot")
-        val row = rowOf(overlay, "自动导航投屏")
-        assertNotNull("「自动导航投屏」这行要留着", row)
-
-        val mark = unavailableMark(row!!)
-        assertNotNull("必须有「暂不可用」的状态标记", mark)
-        assertEquals("状态标记上就写「暂不可用」", "暂不可用", mark!!.text.toString())
-
-        val before = prefs.startNaviCastEnabled
-        row.performClick()
-        shadowOf(android.os.Looper.getMainLooper()).idle()
-        assertEquals("点了不该写偏好", before, prefs.startNaviCastEnabled)
-    }
-
-    @Test
-    fun `胎压数字字号标注暂不可用且滑杆是禁用的`() {
-        val overlay = overlay()
-        openPage(overlay, "carinfo")
-        val row = rowOf(overlay, "胎压数字字号")
-        assertNotNull("「胎压数字字号」这行要留着", row)
-
-        val mark = unavailableMark(row!!)
-        assertNotNull("必须有「暂不可用」的状态标记", mark)
-        assertEquals("读数要写明暂不可用", "暂不可用", mark!!.text.toString())
-
-        // 滑杆必须是禁用的 —— 拖得动却不生效，比不显示更糟
-        val seek = (0 until row.childCount)
-            .map { row.getChildAt(it) }
-            .filterIsInstance<android.widget.SeekBar>()
-            .firstOrNull()
-        assertNotNull("这一行应该还是滑杆形态（只是禁用）", seek)
-        assertFalse("滑杆必须禁用", seek!!.isEnabled)
     }
 
     // ---------------------------------------------------------------- ③ 360 子项即时出现

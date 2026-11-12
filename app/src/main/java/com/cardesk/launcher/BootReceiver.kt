@@ -20,6 +20,16 @@ import com.cardesk.launcher.core.log.Logx
  * - `adbWirelessAuto` → 开机再把无线端口切到 5555。
  *
  * 两个开关都关时，开机不做任何系统设置写入。
+ *
+ * 第155轮：拉桌面这件事本身**由设置页的「桌面开机启动」管**了
+ * （以前是无条件拉，设置项只写盘没人读 —— 功能一直存在，只是没有开关管它）。
+ *
+ * ## 注意：全局 Dock 不受这个开关影响
+ *
+ * [com.cardesk.launcher.core.dock.GlobalDockService] 是**独立的前台服务**，
+ * 开机必须常驻（否则用户直接开导航时底栏缺位）。
+ * 它有自己的开关（`globalDockEnabled`），跟「桌面开机启动」是两件事，
+ * 所以这里照样无条件拉。
  */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -37,19 +47,36 @@ class BootReceiver : BroadcastReceiver() {
             "action" to intent.action,
             "bootMs" to android.os.SystemClock.elapsedRealtime(),
         )
-        val launch = Intent(context, MainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        }
-        try {
-            context.startActivity(launch)
+        val prefs = Prefs(context.applicationContext)
+        // 第155轮：「桌面开机启动」这个开关终于接上了实现。
+        //
+        // 之前这里**无条件**拉桌面（兜底那些不主动 re-launch HOME 的车机），
+        // 而设置页那个开关只写盘没人读 —— 功能一直存在，只是没有开关管它。
+        // 现在由用户决定：关掉就**不显式**拉桌面
+        // （车机自己会拉 HOME 的话，用户看到的还是桌面，不受影响）。
+        //
+        // 默认值是「开」，所以老用户升级后的开机行为跟今天一模一样。
+        if (prefs.bootAutostart) {
+            val launch = Intent(context, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            }
+            try {
+                context.startActivity(launch)
+                Logx.i(
+                    LogTags.APP,
+                    "开机广播已拉起桌面",
+                    "bootMs" to android.os.SystemClock.elapsedRealtime(),
+                )
+            } catch (e: Throwable) {
+                // Android 10+ 后台启动 Activity 受限，作为 HOME 应用通常已被系统拉起，失败可忽略
+                Logx.w(LogTags.APP, "开机广播拉起桌面失败（Android 10+ 后台启动受限）", e)
+            }
+        } else {
             Logx.i(
                 LogTags.APP,
-                "开机广播已拉起桌面",
+                "开机不拉起桌面（用户关掉了「桌面开机启动」）",
                 "bootMs" to android.os.SystemClock.elapsedRealtime(),
             )
-        } catch (e: Throwable) {
-            // Android 10+ 后台启动 Activity 受限，作为 HOME 应用通常已被系统拉起，失败可忽略
-            Logx.w(LogTags.APP, "开机广播拉起桌面失败（Android 10+ 后台启动受限）", e)
         }
         // 全局 Dock（第八十七轮）：开机就要常驻。
         // 不能只靠「桌面启动时顺手拉」—— 车机冷启动后用户可能直接开导航，
