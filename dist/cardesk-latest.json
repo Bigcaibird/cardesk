@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1147",
-  "versionCode": 4243,
-  "tag": "v1.0.1147",
-  "name": "CarDesk 4243 / 1.0.1147-system",
-  "notes": "修复：桌面 Dock 的风量键点了仍是「风量+1」。上一版判据用错了口径——拿「有没有焦点」当「用户眼前是不是桌面」，而桌面把画中画里的高德拉起来时系统会抢走焦点（桌面走 onPause），可桌面窗口还亮在屏幕上，于是被误判成「不在桌面上」。本版改按「窗口是否还在屏幕上」判断：桌面上点风量键弹空调页面，其它应用前台时仍直调风量 +1。",
-  "publishedAt": "2026-11-11T01:03:16Z",
+  "version": "1.0.1153",
+  "versionCode": 4249,
+  "tag": "v1.0.1153",
+  "name": "CarDesk 4249 / 1.0.1153-system",
+  "notes": "第153轮：修复「日间模式下点第二页音乐卡的封面图，有提示但画面没变化」\n\n- 根因：日间是白底深字。卡上最弱那档小字（18px 时间行）颜色太浅，\n  为了让它还有 3:1 对比度，封面得被罩到接近纯白 ——\n  开 / 关「歌曲图片当卡片背景」画出来几乎一模一样，所以提示弹了、画面没动。\n- 修法：日间把这张卡改成**两档文字**（弱的那档加深），白罩因此可以淡 4 倍：\n  封面留得住一层灰调影子，一眼能认出是那张封面，\n  卡片同时跟日间其它卡一样白 —— 风格统一。\n- 夜间一行没动：深底浅字、封面压暗，清晰可见，零退化。\n- 用户设置照旧生效：自选的卡片色够用就沿用（夜间够暗、日间够亮），\n  卡片不透明度照旧。",
+  "publishedAt": "2026-11-12T02:56:46Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4243.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4243.apk",
-    "size": 2364041,
-    "sha256": "462bb72ba37d6c1be424f7dbdae416ffbaa6a3475a15c7d3bb6c1dcde59a2e27"
+    "name": "CarDesk-platform-ecarx-cardesk-4249.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4249.apk",
+    "size": 2374581,
+    "sha256": "c644e79f86d26f677a8d755ece78361a2cd24cad2641508a792daf97f72e86c5"
   }
 }
