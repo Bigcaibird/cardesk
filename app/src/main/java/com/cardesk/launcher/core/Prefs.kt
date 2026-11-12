@@ -141,6 +141,26 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("scene_car_status_card_visible", true)
         set(v) = sp.edit().putBoolean("scene_car_status_card_visible", v).apply()
 
+    /**
+     * 第二页（导航页）音乐卡的「**歌曲图片当卡片背景**」开关。
+     *
+     * 持久化键 `nav_cover_backdrop_enabled`，默认 **true**（保持第146轮上线的现状：
+     * 音乐卡的整张卡面就是模糊后的封面）。
+     *
+     * ## 为什么要有这个开关
+     *
+     * 封面当底好看，但不是所有人都喜欢 —— 有些人更想要「干净的纯色卡面」，
+     * 有些人觉得背景纹理干扰歌词阅读。所以做成**随时可切**的：
+     *
+     * - 主入口：**直接点音乐卡上的封面图**（`NavPage` 里那张 96×96）就能切；
+     * - 辅助入口：设置页「桌面卡片 → 音乐卡封面背景」那个开关（同一份状态）。
+     *
+     * 两处操作的是**同一个键**，谁先改谁生效，不会有两份状态打架。
+     */
+    var navCoverBackdropEnabled: Boolean
+        get() = sp.getBoolean("nav_cover_backdrop_enabled", true)
+        set(v) = sp.edit().putBoolean("nav_cover_backdrop_enabled", v).apply()
+
     /** 主题强调色，0 = 跟随日/夜配色。 */
     var accentColor: Int
         get() = intValue("accent_color", 0)
@@ -612,6 +632,26 @@ class Prefs(context: Context) {
         get() = stringValue("default_music_source_v1", "generic")
         set(value) = setStringValue("default_music_source_v1", value)
 
+    /**
+     * 桌面启动完成后，**自动唤起默认媒体来源 App 并让它播放**（`auto_launch_media_app`）。
+     *
+     * ## 默认关闭
+     *
+     * 开机就弹出一个音乐 App 是个挺打扰的行为，而且「通用音乐」这个默认源
+     * 根本没有对应的 App —— 开着也没用。所以默认 **false**，
+     * 用户在设置页显式打开才开始。
+     *
+     * ## 和 `defaultMusicSource` 的关系
+     *
+     * - [defaultMusicSource] 决定「**是哪个** App」；
+     * - 本项决定「**要不要**在桌面起来时把它拉起来并播放」。
+     *
+     * 两者都满足才动作。
+     */
+    var autoLaunchMediaApp: Boolean
+        get() = sp.getBoolean("auto_launch_media_app", false)
+        set(v) = sp.edit().putBoolean("auto_launch_media_app", v).apply()
+
     var mock360Overlay: Boolean
         get() = sp.getBoolean("mock_360_overlay", true)
         set(v) = sp.edit().putBoolean("mock_360_overlay", v).apply()
@@ -750,10 +790,17 @@ class Prefs(context: Context) {
         get() = flag("desk_cluster_overlay", false)
         set(v) = setFlag("desk_cluster_overlay", v)
 
-    /** Overlay 模块宽度百分比（`desk_overlay_w`，默认 100，范围 30..100）。 */
+    /**
+     * Overlay 模块宽度百分比（`desk_overlay_w`，默认 100，范围 **10..100**）。
+     *
+     * 第149轮：下限从 30 放宽到 10（用户要求）。这里和
+     * `ClusterPanelGeometry.MIN_WIDTH_RATIO` 是**同一个下限的两个副本** ——
+     * 一处在存储层（一进 prefs 就夹），一处在几何层（算面板宽度时夹）。
+     * 两边都要改，否则会出现「设置里拖到 10%，实际还是 20%」的错位。
+     */
     var overlayWidthPct: Int
-        get() = intValue("desk_overlay_w", 100).coerceIn(30, 100)
-        set(value) = setIntValue("desk_overlay_w", value.coerceIn(30, 100))
+        get() = intValue("desk_overlay_w", 100).coerceIn(10, 100)
+        set(value) = setIntValue("desk_overlay_w", value.coerceIn(10, 100))
 
     /**
      * Overlay 底板透明度百分比（`desk_overlay_bg_alpha`，默认 **0**，范围 0..100）。

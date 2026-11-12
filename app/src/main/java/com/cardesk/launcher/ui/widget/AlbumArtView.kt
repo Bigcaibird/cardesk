@@ -43,14 +43,46 @@ class AlbumArtView(context: Context) : View(context) {
             invalidate()
         }
 
-    /** 没有封面时的占位底色（第四十九轮「浮屿」：不透明的弱一档面）。 */
+    /**
+     * 「没有封面时的占位底色」（第四十九轮「浮屿」：不透明的弱一档面）。
+     */
     var placeholderColor: Int = Skin.surfaceSoft
         set(value) {
             field = value
             invalidate()
         }
 
+    /**
+     * 封面位图的画笔（centerCrop 缩放绘制）。
+     *
+     * **必须与占位底的画笔分开** —— 见 [placeholderPaint] 的说明。
+     */
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
+    /**
+     * 「没有封面」时那块占位底的画笔。
+     *
+     * ## 为什么不能和 [paint] 共用一个
+     *
+     * `Paint.setColor()` **连 alpha 一起改** —— 而占位底色是半透明的
+     * （导航页是 `pal.withAlpha(Skin.TEXT, 0x14)`，alpha 只有 **20/255**）。
+     *
+     * 共用一个画笔时，真机上会踩到这条顺序：
+     *
+     * ① 桌面上电 → 还没有封面 → 走占位分支 → `paint` 的 alpha 被改成 **20**；
+     * ② 歌曲起来 → 封面到位 → 走封面分支 → `drawBitmap(bmp, src, dst, paint)`
+     *    **用的还是那个 alpha=20 的画笔** → 封面只画了 8% 的不透明度。
+     *
+     * 结果就是：第二页音乐卡的封面像蒙了一层**半透明灰纱**，
+     * 底下隐约透出卡片底色 —— 看着就像「图上盖了一层东西」。
+     *
+     * （首页音乐卡与 Dock 都不受影响：它们各自 `new Paint(...)` 现画现用，
+     * alpha 永远是 255。所以同一首歌，**Dock 里是亮的、第二页里是暗的**。）
+     *
+     * 拆成两个画笔后，占位底色怎么改都碰不到封面的不透明度。
+     */
+    private val placeholderPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
     private val path = Path()
     private val src = Rect()
     private val dst = Rect()
@@ -66,16 +98,22 @@ class AlbumArtView(context: Context) : View(context) {
         canvas.clipPath(path)
         val bmp = bitmap
         if (bmp == null) {
-            paint.color = placeholderColor
-            paint.shader = null
-            canvas.drawRect(r, paint)
+            placeholderPaint.color = placeholderColor
+            placeholderPaint.shader = null
+            canvas.drawRect(r, placeholderPaint)
         } else {
             // centerCrop：等比缩放到铺满，再居中裁掉多余部分
             val bw = bmp.width.toFloat()
             val bh = bmp.height.toFloat()
             if (bw <= 0f || bh <= 0f) {
-                canvas.drawRect(r, paint)
+                placeholderPaint.color = placeholderColor
+                placeholderPaint.shader = null
+                canvas.drawRect(r, placeholderPaint)
             } else {
+                // 封面必须**满不透明度**地画 —— 半透明画笔会露出卡片底色，
+                // 看起来像「图上蒙了一层灰纱」。这里显式钉死 alpha=255，
+                // 免得以后有人往这个画笔上设色时又把它带暗。
+                paint.alpha = 255
                 val scale = maxOf(w / bw, h / bh)
                 val sw = w / scale
                 val sh = h / scale

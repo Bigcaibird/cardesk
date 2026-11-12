@@ -306,6 +306,27 @@ class MainActivity : Activity() {
             }
         }.onFailure { Logx.w(LogTags.MEDIA, "默认媒体源应用失败", it) }
 
+        // 第149轮：**启动后唤起默认媒体源 App 并让它播放**（可选，默认关）。
+        //
+        // ## 和上面那段「只锁定、不拉起」的区别
+        //
+        // 上面那段是**无条件**的「锁定默认源」—— 桌面起来就知道该听谁的，
+        // 但**不打扰用户**（不弹 App）。
+        //
+        // 这一段是**用户显式打开开关**后才会发生的「拉起 App + 下播放指令」——
+        // 属于「开机就直接开始听歌」的需求。
+        //
+        // 开关默认关：开机弹出一个音乐 App 挺打扰，而且默认源是「通用音乐」时
+        // 根本没有对应的 App 可拉（`MediaAppLauncher.shouldLaunch` 会挡住）。
+        runCatching {
+            val prefs = com.cardesk.launcher.core.Prefs(applicationContext)
+            com.cardesk.launcher.core.media.MediaAppLauncher.launchAndPlay(
+                context = applicationContext,
+                autoLaunchEnabled = prefs.autoLaunchMediaApp,
+                sourceId = prefs.defaultMusicSource,
+            )
+        }.onFailure { Logx.w(LogTags.MEDIA, "启动后唤起媒体 App 失败", it) }
+
         // 氛围灯（第七十轮）：绑上下文；上次是开着的就把频谱采集拉起来。
         // 第七十一轮接上了真实通道：车机端 AdaptAPI 的
         // `SETTING_FUNC_AMBIENCE_LIGHT_*` 一组设置类功能号

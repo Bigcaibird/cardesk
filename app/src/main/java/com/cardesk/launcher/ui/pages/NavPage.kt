@@ -60,10 +60,114 @@ import com.cardesk.launcher.ui.pip.PipSurface
  */
 class NavPage(context: Context, private val pal: Palette) : FrameLayout(context) {
 
+    /**
+     * 偏好存储。
+     *
+     * 声明在**属性区最前面**：下面 [coverBackdropEnabled] 的初始值要读它，
+     * 而 Kotlin 的属性初始化按声明顺序走 —— 声明晚了 setter 里就还拿不到。
+     */
+    private val prefs = Prefs(context)
+
+    /**
+     * 组合卡（音乐卡）的配色 —— **日夜各一套**，但两套各自的规矩不一样。
+     *
+     * ## 夜间（深底浅字，三档文字）
+     *
+     * 最弱那档是 `#757E8E`（L=0.2065）→ 背景亮度**上限** `L ≤ 0.0341`
+     * → 封面被**压暗**，色彩和构图都清晰可见。
+     *
+     * ## 日间（白底深字，**只有两档**文字）
+     *
+     * 最弱那档是 `#565D6B`（L=0.1087）→ 背景亮度**下限** `L ≥ 0.4340`
+     * → 封面被罩成一层**很淡的灰调影子**：认得出是那张封面，但卡片整体还是亮的，
+     * 和日间其它卡**风格统一**。
+     *
+     * ## 为什么日间要砍到两档（第153轮）
+     *
+     * 原来的日间路线是三档（最弱 `#8B92A0`，L=0.2859）
+     * → 下限 **0.9743** → 整张封面被冲成一片均匀的白
+     * → 「开封面背景」和「关封面背景」画出来**像素级几乎一样**
+     * → 用户点封面图只看到一句提示、看不到任何变化（真机实测，见 REPORT-y153）。
+     *
+     * 砍掉最弱那档、把它并进 `textDim` 之后，下限从 0.9743 降到 0.4340，
+     * 白罩可以淡很多 —— 这就是「风格统一」和「封面看得见」能同时成立的分水岭。
+     *
+     * ## 夜间为什么一行不改
+     *
+     * 夜间本来就是深底浅字，上面那套（三档 + 上限 0.0341）**原样保留**
+     * → 夜间零退化（真机逐像素比对，见 REPORT-y153）。
+     */
+    private val cardPal: Palette = if (pal.night) Palettes.night else Palettes.day
+
+    /**
+     * 卡面上**最弱那档文字**的颜色 —— 背景亮度区间就是由它反推的。
+     *
+     * - 夜间：三档，最弱是 `textFaint`（`#757E8E`）；
+     * - 日间：两档，最弱是 `textDim`（`#565D6B`）——
+     *   日间**不用** `textFaint`（`#8B92A0`），那档会把下限顶回 0.9743。
+     */
+    private val cardWeakText: Int
+        get() = if (pal.night) cardPal.textFaint else cardPal.textDim
+
+    /**
+     * 卡面上的强调色（当前歌词高亮 / 进度条填充）。
+     *
+     * - 夜间：`#5AD8C8`（青，明亮底上很跳）；
+     * - 日间：**加深的青** `#0A6459` ——
+     *   白罩底最暗处 L=0.4340，普通强调色 `#0F9C8E`（L=0.2584）在上面只有 1.57:1，
+     *   读不出来；`#0A6459`（L=0.0990）有 3.25:1，两种状态下都够。
+     */
+    private val cardAccent: Int
+        get() = if (pal.night) CARD_ACCENT_NIGHT else CARD_ACCENT_DAY
+
+    /**
+     * 组合卡的卡面色。
+     *
+     * - **RGB**：用户自选的卡片色**够用就原样用**；
+     *   夜间要求它够暗（浅色字压得住），日间要求它够亮（深色字读得清）；
+     *   不满足就换成该模式的标准氛围底（夜间 `#1F232D` / 日间 `#FFFFFF`）。
+     * - **alpha**：仍然跟用户的「卡片不透明度」设置走（[Skin.surface] 的 alpha 段）。
+     */
+    private fun cardSurface(): Int {
+        val alpha = Skin.surface ushr 24
+        val rgb = Skin.surface and 0x00FFFFFF
+        val l = com.cardesk.launcher.core.media.CoverBackdrop.relativeLuminance(rgb)
+        val ok = if (pal.night) {
+            // 浅色字压在底上 → 底色亮度的**上限**，由最弱那档文字色反推。
+            l <= com.cardesk.launcher.core.media.CoverBackdrop
+                .maxBackgroundLuminance(cardWeakText)
+        } else {
+            // 深色字压在底上 → 底色亮度的**下限**，由最弱那档文字色反推。
+            l >= com.cardesk.launcher.core.media.CoverBackdrop
+                .minBackgroundLuminance(cardWeakText)
+        }
+        return (alpha shl 24) or (if (ok) rgb else cardPal.surface and 0x00FFFFFF)
+    }
+
     // ------------------------------------------------------------------ 对外状态
 
     /** 画中画承载面。 */
     val pip = PipSurface(context, pal)
+
+    /**
+     * 组合卡的**背景层**（专辑封面做底）。
+     *
+     * 它替代了原来的 `Skin.flat(Shape.CARD)`：
+     * - 有封面 → 模糊后的封面铺满整张卡 + 一层压暗遮罩（保证歌词 / 歌名读得清）；
+     * - 没封面 → 纯色卡面 + 1px 描边，和原来**一模一样**。
+     *
+     * 遮罩强度不是拍脑袋定的，是按「最弱那档文字与背景的对比度 ≥ 3:1」反推的
+     * （见 `CoverBackdrop`）。
+     *
+     * 声明在**属性区最前面**是为了让 [artwork] 的 setter 能直接喂它 ——
+     * Kotlin 的属性初始化按声明顺序走，声明晚了 setter 里就还拿不到。
+     */
+    private val coverBackdrop = com.cardesk.launcher.ui.widget.CoverBackdropDrawable(
+        surfaceColor = cardSurface(),
+        strokeColor = cardPal.stroke,
+        cornerRadius = com.cardesk.launcher.core.Shape.CARD,
+        textColor = cardWeakText,
+    )
 
     /**
      * 音乐来源名（`musicSource`）。
@@ -116,13 +220,131 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         set(v) { field = v; if (::artistText.isInitialized) artistText.text = v }
 
     /**
-     * 专辑图（80×80 / 圆角 26 / centerCrop）。
+     * 专辑图（96×96 / 圆角 26 / centerCrop）。
+     *
+     * 同一张封面同时喂给**两处**：
+     * - [albumArtView]：卡片左上角那块 96×96 的小封面；
+     * - [coverBackdrop]：整张卡的**背景**（模糊 + 遮罩）。
      */
     var artwork: android.graphics.Bitmap? = null
         set(v) {
             field = v
             if (::albumArtView.isInitialized) albumArtView.bitmap = v
+            // 背景层是封面做底的唯一入口 —— 换歌时它负责重算模糊图与遮罩强度。
+            coverBackdrop.bitmap = v
         }
+
+    /**
+     * 「歌曲图片当卡片背景」开关（**第148轮**）。
+     *
+     * - true：整张卡的卡面是模糊后的封面（第146轮上线的效果）；
+     * - false：卡面退回纯色卡面 + 描边（等于第146轮之前的 `Skin.flat`）。
+     *
+     * ## 切换入口
+     *
+     * 用户**直接点这张 96×96 的封面图**就能切（见 [toggleCoverBackdrop]），
+     * 设置页「桌面卡片 → 音乐卡封面背景」那个开关操作的是**同一份状态**。
+     *
+     * 关掉时封面图**本身不动**（还是原来那张封面）——
+     * 变的是**整张卡**：卡面从「模糊封面」退回「纯色卡面」。
+     *
+     * 状态落在 `Prefs.navCoverBackdropEnabled`，默认 **true**（保持第146轮现状）。
+     */
+    var coverBackdropEnabled: Boolean = prefs.navCoverBackdropEnabled
+        set(v) {
+            // 同一个值不重复刷 —— 桌面每轮刷新都会把偏好重新灌进来，
+            // 不做这个判断的话每帧都会走一遍 sync（白重建背景层）。
+            if (field == v) return
+            field = v
+            syncCoverBackdropState()
+        }
+
+    /**
+     * 把 [coverBackdropEnabled] 同步到背景层 + 封面图上的标记。
+     *
+     * ## 为什么需要这个方法（Kotlin 的一个坑）
+     *
+     * 属性初始化**不走 setter** —— `var x = 初值` 是编译器直接把初值写进 field，
+     * setter 一次都不调。所以：
+     *
+     * ```
+     * var coverBackdropEnabled = prefs.navCoverBackdropEnabled   // field 正确
+     * coverBackdrop.coverEnabled                                 // ← 还是构造时的 true！
+     * ```
+     *
+     * 用户上次把背景关掉了，这次冷启动 `prefs` 里是 false，
+     * 但背景层还停在 true —— **背景照样会显示**，开关等于没记住。
+     *
+     * 所以 build() 里必须显式同步一次（见 `build()` 末尾），
+     * 之后每次改状态都走 setter → 也统一走这个方法。
+     */
+    private fun syncCoverBackdropState() {
+        coverBackdrop.coverEnabled = coverBackdropEnabled
+    }
+
+    /**
+     * 背景层当前**实际上**是不是在用封面（供单测 / 排障读取）。
+     *
+     * ## 为什么不能直接读 [coverBackdropEnabled]
+     *
+     * `coverBackdropEnabled` 是**属性**（field），它的初值读自 `prefs`，永远是对的；
+     * 真正可能错的是**背景层**（`coverBackdrop.coverEnabled`）——
+     * 属性初始化不走 setter，所以少了 `build()` 末尾那次同步，
+     * 背景层会停在构造时的 `true`，而属性显示 `false`。
+     *
+     * **两边不一致 = bug**。这条只读属性把背景层的真实状态暴露出来，
+     * 让「冷启动记住了吗」这条断言查得到真东西。
+     */
+    val coverBackdropOn: Boolean get() = coverBackdrop.coverEnabled
+
+    /**
+     * 组合卡当前**实际用的卡面色**（含 alpha 段）。
+     *
+     * 第153轮：夜间是深色氛围底（日间默认的纯白压不住浅色字 → 换成 `#1F232D`），
+     * 所以这个值**不一定等于** `Skin.surface`（那是全局卡片色）。
+     * 供单测 / 排障读取。
+     */
+    val cardSurfaceColor: Int get() = coverBackdrop.surfaceColorNow
+
+    /**
+     * 组合卡当前**实际用的文字色**（歌名那一档）。
+     *
+     * 第153轮：夜间是浅色字，日间是深色字（白底深字）—— 跟着主题走。
+     * 供单测 / 排障读取。
+     */
+    val cardTextColor: Int
+        get() = if (::titleText.isInitialized) titleText.currentTextColor else 0
+
+    /**
+     * 组合卡当前**实际用的次要文字色**（歌手那一档）。
+     *
+     * 第153轮：夜间浅色、日间深色 —— 跟着主题走。
+     * 供单测 / 排障读取。
+     */
+    val cardArtistColor: Int
+        get() = if (::artistText.isInitialized) artistText.currentTextColor else 0
+
+    /**
+     * 组合卡当前**实际用的强调色**（当前歌词高亮 / 进度条填充）。
+     *
+     * 取的是**歌词控件真实在用的那个色**，不是常量 ——
+     * 常量本身对了、但接线接错的话，查常量是查不出来的
+     * （反向验证第 3 项踩过这个坑：第一版查的是常量，改坏接线没红）。
+     *
+     * 供单测 / 排障读取。
+     */
+    val cardAccentColor: Int
+        get() = currentWipeView()?.activeColor ?: 0
+
+    /**
+     * 背景层本体（供单测 / 排障读取：亮度允许区间、模糊图尺寸）。
+     *
+     * 第153轮日间模式的修复就是靠它验证的 ——
+     * 夜间区间是「上限」（封面被压暗），日间是「下限」且下限只有 0.4340
+     * （封面被罩成淡灰影子，而不是像旧路线那样冲成纯白）。
+     */
+    val coverBackdropLayer: com.cardesk.launcher.ui.widget.CoverBackdropDrawable
+        get() = coverBackdrop
 
     /**
      * 车型编号（= `tpms_car_model`）。
@@ -296,6 +518,16 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
     var onNext: (() -> Unit)? = null
     var onSource: (() -> Unit)? = null
 
+    /**
+     * 封面背景开关被切换（**第148轮**）。
+     *
+     * 参数 = 切换**之后**的状态（true = 现在用封面当背景）。
+     *
+     * 宿主（`LauncherView`）拿它弹 Toast —— 桌面不是普通 Activity，
+     * 用户点完得立刻知道当前是什么状态，不然会以为「点了没反应」。
+     */
+    var onCoverBackdropToggled: ((Boolean) -> Unit)? = null
+
     /** 画中画全屏 / 还原（`pipDivider` 单击 = 主画全屏）。 */
     var onPipFullscreen: (() -> Unit)? = null
 
@@ -327,8 +559,6 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
 
     /** 比例持久化（；我们用 SharedPreferences）。 */
     private val ratioStore = PipRatioStore(context)
-
-    private val prefs = Prefs(context)
 
     /**
      * 双画模式（键名 `desk_dual_pip`）。
@@ -653,6 +883,12 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         // 地图卡内容：画中画 + 顶部 3 个圆点
         mapCard.addView(pip, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         mapCard.addView(buildPipDots(), dotsParams())
+
+        // 第148轮：把「封面作背景」的开关状态同步进背景层 + 封面图。
+        //
+        // 必须在 build() 里显式做一次 —— 属性初始化不走 setter（见 [syncCoverBackdropState]
+        // 的说明），不补这一下，用户上次关掉的背景在冷启动时会自己回来。
+        syncCoverBackdropState()
     }
 
     /**
@@ -702,7 +938,7 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         }.also { group ->
             for (i in 0 until 3) {
                 group.addView(
-                    View(context).apply { background = Skin.oval(pal.withAlpha(Skin.TEXT, 0x4D)) },
+                    View(context).apply { background = Skin.oval(cardPal.withAlpha(cardPal.text, 0x4D)) },
                     LinearLayout.LayoutParams(6, 6).apply { if (i < 2) rightMargin = 8 },
                 )
             }
@@ -721,14 +957,59 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
      *
      * 组合卡的背景是**构建时**设上去的（不是每帧画），
      * 所以透明度 / 颜色 / 圆角改了之后要单独刷一次。
+     *
+     * 现在背景层是 `CoverBackdropDrawable` —— 它同时管「卡面色 / 描边 / 圆角」
+     * 和「封面模糊图 + 遮罩强度」，所以换风格时这几样要一起刷。
+     *
+     * 注意**遮罩强度会跟着重算**：卡面色变了（用户把卡片调亮 / 调暗），
+     * 「文字压在多少亮度的底上才读得清」的答案也变了。
      */
     fun applyCardStyle() {
-        combinedCard.background = Skin.flat(com.cardesk.launcher.core.Shape.CARD)
+        coverBackdrop.setStyle(
+            surface = cardSurface(),
+            stroke = cardPal.stroke,
+            radius = com.cardesk.launcher.core.Shape.CARD,
+            text = cardWeakText,
+        )
+    }
+
+    /**
+     * 切换「歌曲图片当卡片背景」（**第148轮**）。
+     *
+     * ## 落盘 + 刷新的顺序
+     *
+     * 先写 `prefs` 再改内存状态 —— 万一写到一半崩了，磁盘上还是上一个**完整**的状态，
+     * 下次启动读出来不会出现「内存说开、磁盘说关」的错位。
+     *
+     * 改内存状态走 [coverBackdropEnabled] 的 setter，它一次干三件事：
+     * 背景层开 / 关、封面图上画 / 擦掉「背景已关」标记。
+     *
+     * ## 为什么回调给宿主
+     *
+     * 光切状态用户是「看不到」的 —— 关掉背景后卡片变纯色了，但没有一句话告诉他
+     * 「你刚把背景关了」。所以把新状态抛给宿主弹个 Toast。
+     */
+    fun toggleCoverBackdrop() {
+        val next = !coverBackdropEnabled
+        prefs.navCoverBackdropEnabled = next
+        coverBackdropEnabled = next
+        // 排障场景：「点了封面图背景没变 / 状态没记住」——切换必须落盘。
+        Logx.event(
+            LogTags.NAV_UI,
+            "导航页音乐卡封面背景切换",
+            "enabled" to next,
+            "title" to trackTitle,
+        )
+        onCoverBackdropToggled?.invoke(next)
     }
 
     private fun buildCombinedCard() {
-        // —— 卡片本体：纯扁平面 + 1px 描边（第四十九轮「浮屿」，零投影零玻璃）——
-        combinedCard.background = Skin.flat(com.cardesk.launcher.core.Shape.CARD)
+        // —— 卡片本体：专辑封面做底（模糊 + 压暗遮罩），没封面时回退成纯扁平面 ——
+        //
+        // 第四十九轮「浮屿」这层是「纯扁平面 + 1px 描边」（零投影零玻璃）；
+        // 现在底层换成封面，所以这一行交给 `CoverBackdropDrawable`：
+        // 有封面 → 模糊封面 + 遮罩；没封面 → 卡面色 + 1px 描边（和原来完全一样）。
+        combinedCard.background = coverBackdrop
         combinedCard.setPadding(0, 0, 0, 0)
 
         // 第四十九轮按设计板 `s02-nav` 重排为**绝对定位**版式（坐标相对卡片左上角）：
@@ -767,12 +1048,12 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
             sourceIconView,
             LinearLayout.LayoutParams(SOURCE_ICON_SIZE, SOURCE_ICON_SIZE).apply { rightMargin = 8 },
         )
-        sourceText = Ui.text(context, sourceLabel, 20f, Skin.TEXT_SOFT)
+        sourceText = Ui.text(context, sourceLabel, 20f, cardPal.textDim)
         sourceRow.addView(sourceText, LinearLayout.LayoutParams(-2, -2))
-        val chev = Ui.text(context, "⌄", 20f, Skin.TEXT_SOFT)
+        val chev = Ui.text(context, "⌄", 20f, cardPal.textDim)
         sourceChevron = chev
         sourceRow.addView(chev, LinearLayout.LayoutParams(20, 20).apply { leftMargin = 4 })
-        musicStateText = Ui.text(context, musicState, 20f, Skin.TEXT_DIM)
+        musicStateText = Ui.text(context, musicState, 20f, cardWeakText)
         sourceRow.addView(
             musicStateText,
             LinearLayout.LayoutParams(0, -2, 1f).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL },
@@ -791,19 +1072,25 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         // 第四十九轮按设计板放大到 96。
         val art = com.cardesk.launcher.ui.widget.AlbumArtView(context).apply {
             cornerRadius = 26f
-            placeholderColor = pal.withAlpha(Skin.TEXT, 0x14)
+            placeholderColor = cardPal.withAlpha(cardPal.text, 0x14)
+            // 第148轮：**点封面图 = 切换「歌曲图片当卡片背景」**。
+            //
+            // 这是用户拿到这个功能的主入口 —— 音乐卡上就这一张图，
+            // 点它就能开关，比去设置页里找开关顺手得多。
+            contentDescription = "歌曲图片，点击切换封面背景"
+            setOnClickListener { toggleCoverBackdrop() }
         }
         albumArtView = art
         combinedCard.addView(art, abs(pad, COMBINED_ART_TOP, 96, 96))
 
         //
         // `maxLines="1"` + `ellipsize="end"` —— 长歌名 / 长歌手名截断成省略号。
-        titleText = Ui.text(context, trackTitle, 38f, Skin.TEXT, bold = true).apply {
+        titleText = Ui.text(context, trackTitle, 38f, cardPal.text, bold = true).apply {
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
         }
         combinedCard.addView(titleText, abs(COMBINED_META_X, COMBINED_TITLE_TOP, -1, 48))
-        artistText = Ui.text(context, trackArtist, 22f, Skin.TEXT_SOFT).apply {
+        artistText = Ui.text(context, trackArtist, 22f, cardPal.textDim).apply {
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
         }
@@ -825,9 +1112,9 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
             val isCurrent = slot == 0
             // 设计板 s02：当前句主文字 / 下1 次文字 / 下2 弱文字
             val color = when {
-                isCurrent -> Skin.TEXT
-                slot == 1 -> Skin.TEXT_SOFT
-                else -> Skin.TEXT_DIM
+                isCurrent -> cardPal.text
+                slot == 1 -> cardPal.textDim
+                else -> cardWeakText
             }
             // 自绘控件：当前句开擦除高亮，其余句纯色
             // 三种模式都支持**跑马灯**（超宽时整句水平滚动，不再被 `ellipsize` 截断）。
@@ -836,8 +1123,8 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
                 bold = isCurrent
                 wipeEnabled = isCurrent
                 plainColor = color
-                activeColor = Skin.ACCENT_LIGHT
-                inactiveColor = Skin.TEXT
+                activeColor = cardAccent
+                inactiveColor = cardPal.text
                 wipeTarget = lyricWipe
                 scrollable = true
             }
@@ -859,17 +1146,17 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         // —— 进度条：高 8 的胶囊轨道 + 强调色填充（第四十九轮去掉圆点，改成设计板的纯条）——
         progressHost = FrameLayout(context)
         progressHost.addView(
-            View(context).apply { background = Skin.solid(Skin.surfaceStrong, 4f) },
+            View(context).apply { background = Skin.solid(cardPal.surfaceStrong, 4f) },
             LayoutParams(LayoutParams.MATCH_PARENT, 8, Gravity.CENTER_VERTICAL),
         )
-        progressFill = View(context).apply { background = Skin.solid(Skin.ACCENT, 4f) }
+        progressFill = View(context).apply { background = Skin.solid(cardAccent, 4f) }
         progressHost.addView(progressFill, LayoutParams(0, 8, Gravity.CENTER_VERTICAL))
         combinedCard.addView(progressHost, abs(pad, COMBINED_PROGRESS_TOP, -1, 24))
 
         // —— 时间行 ——
         val timeRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
-        currentTimeText = Ui.text(context, positionText, 18f, Skin.TEXT_DIM)
-        totalTimeText = Ui.text(context, durationText, 18f, Skin.TEXT_DIM)
+        currentTimeText = Ui.text(context, positionText, 18f, cardWeakText)
+        totalTimeText = Ui.text(context, durationText, 18f, cardWeakText)
         timeRow.addView(currentTimeText, LinearLayout.LayoutParams(0, -2, 1f))
         timeRow.addView(totalTimeText, LinearLayout.LayoutParams(-2, -2))
         combinedCard.addView(timeRow, abs(pad, COMBINED_TIME_TOP, -1, 26))
@@ -886,7 +1173,7 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
             onPrev?.invoke()
         }
         controls.addView(prevBtn, LinearLayout.LayoutParams(40, 56).apply { rightMargin = 56 })
-        val playBtn = Ui.text(context, "▶", 48f, Skin.TEXT, bold = true).apply {
+        val playBtn = Ui.text(context, "▶", 48f, cardPal.text, bold = true).apply {
             gravity = Gravity.CENTER
             isClickable = true
             setOnClickListener {
@@ -916,7 +1203,7 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
             leftMargin = x
             topMargin = y
         }
-    private fun iconButton(glyph: String, size: Int): TextView = Ui.text(context, glyph, size * 0.7f, Skin.TEXT).apply {
+    private fun iconButton(glyph: String, size: Int): TextView = Ui.text(context, glyph, size * 0.7f, cardPal.text).apply {
         gravity = Gravity.CENTER
         isClickable = true
     }
@@ -1132,6 +1419,22 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
 
 
     companion object {
+        /**
+         * 组合卡里歌词高亮用的**夜间那档强调色**（`#5AD8C8`）。
+         *
+         * 夜间是深底浅字，这档青在压暗后的封面上很跳。
+         */
+        const val CARD_ACCENT_NIGHT = 0xFF5AD8C8.toInt()
+
+        /**
+         * 日间组合卡的强调色（当前歌词高亮 / 进度条填充）。
+         *
+         * 日间是**白底深字**，封面被罩成一层很淡的灰调影子（最暗处 L=0.4340）——
+         * 日间主题那个强调色 `#0F9C8E`（L=0.2584）压在上面只有 1.57:1，读不出来。
+         * 这档加深到 `#0A6459`（L=0.0990）→ 3.25:1。
+         */
+        const val CARD_ACCENT_DAY = 0xFF0A6459.toInt()
+
         // —— 第四十九轮「浮屿」：导航页版面对齐设计板 s02-nav ——
 
         /**

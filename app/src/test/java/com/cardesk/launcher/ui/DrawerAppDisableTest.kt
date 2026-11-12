@@ -27,7 +27,7 @@ import org.robolectric.annotation.Config
  *
  * 钉住三件事：
  * 1. 已禁用的应用仍出现在抽屉里，但图标压暗、名称用弱色，并标「已禁用」；
- * 2. 禁用应用的 ⋮ 菜单给的是「启用应用」，可用应用给的是「禁用应用」；
+ * 2. 禁用应用的应用菜单给的是「启用应用」，可用应用给的是「禁用应用」；
  * 3. 点已禁用应用不会去启动它，而是打开菜单（唯一的恢复入口）。
  */
 @RunWith(RobolectricTestRunner::class)
@@ -37,7 +37,6 @@ class DrawerAppDisableTest {
     private val pkg = "com.example.demo"
     private val cls = "com.example.demo.MainActivity"
     private val demoLabel = "示例应用"
-    private val moreGlyph = "\u22EE"
 
     private fun activity(): MainActivity {
         val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
@@ -87,14 +86,19 @@ class DrawerAppDisableTest {
         return page
     }
 
-    private fun menuButtonOf(page: View, label: String): TextView {
+    /**
+     * 找到指定显示名那个**应用格子**（长按弹菜单的宿主）。
+     *
+     * 第152轮：菜单入口从「右上角 ⋮ 按钮」改成了「**长按图标**」，
+     * 所以这里改成往上找带 [DrawerPage.APP_CELL_MARK] 标记的祖先。
+     */
+    private fun menuButtonOf(page: View, label: String): View {
         var node: View? = text(page, label)
         while (node != null) {
-            val button = findAll(node, TextView::class.java).firstOrNull { it.text.toString() == moreGlyph }
-            if (button != null) return button
+            if (node.tag === DrawerPage.APP_CELL_MARK) return node
             node = node.parent as? View
         }
-        error("找不到「$label」格子的 ⋮ 按钮")
+        error("找不到「$label」格子的图标列")
     }
 
     @Test
@@ -128,7 +132,7 @@ class DrawerAppDisableTest {
         Prefs(a.applicationContext).setAppAlias(pkg, "")
         val page = drawer(a)
 
-        menuButtonOf(page, demoLabel).performClick()
+        menuButtonOf(page, demoLabel).performLongClick()
         shadowOf(Looper.getMainLooper()).idle()
 
         assertNotNull("禁用应用菜单应含「启用应用」", findAll(page, TextView::class.java).firstOrNull { it.text == "启用应用" })
@@ -142,7 +146,7 @@ class DrawerAppDisableTest {
         Prefs(a.applicationContext).setAppAlias(pkg, "")
         val page = drawer(a)
 
-        menuButtonOf(page, demoLabel).performClick()
+        menuButtonOf(page, demoLabel).performLongClick()
         shadowOf(Looper.getMainLooper()).idle()
 
         assertNotNull("可用应用菜单应含「禁用应用」", findAll(page, TextView::class.java).firstOrNull { it.text == "禁用应用" })

@@ -24,8 +24,13 @@ package com.cardesk.launcher.cluster
  */
 object ClusterPanelGeometry {
 
-    /** 窄于屏幕的 1/5 就不再是歌词面板了。 */
-    const val MIN_WIDTH_RATIO = 0.2f
+    /**
+     * 窄于屏幕的 1/10 就不再是歌词面板了。
+     *
+     * 第149轮：下限从 **1/5 放宽到 1/10** —— 用户要求「仪表歌词的最小宽度限制
+     * 从 30% 调整到 10%」。10% 在仪表（1920 宽）上是 192px，够放一行短歌词。
+     */
+    const val MIN_WIDTH_RATIO = 0.1f
 
     /** 最宽就是整屏。 */
     const val MAX_WIDTH_RATIO = 1f

@@ -155,13 +155,16 @@ class MediaSourceIconRenderTest {
         prefs.defaultMusicSource = "generic"
         val overlay = com.cardesk.launcher.ui.SettingsOverlay(activity, prefs, com.cardesk.launcher.core.Palettes.night)
 
-        // 切到「系统诊断」页（媒体来源那一节在那页）。
+        // 切到「媒体源」页。
+        //
+        // 第149轮：这一页原本**藏在「系统诊断」页里** —— 「默认用哪个音乐 App」
+        // 是天天要碰的设置，藏在排障页里太深，已独立成页。
         val navRowsField = com.cardesk.launcher.ui.SettingsOverlay::class.java
             .getDeclaredField("navRows").apply { isAccessible = true }
         @Suppress("UNCHECKED_CAST")
         val navRows = navRowsField.get(overlay) as Map<String, TextView>
-        val row = navRows["diagnostics"]
-        assertNotNull("左栏应该有「系统诊断」", row)
+        val row = navRows["media"]
+        assertNotNull("左栏应该有「媒体源」", row)
         row!!.performClick()
 
         // 找到「QQ音乐」那个可点的 chip（下面的只读列表里的同名行不可点）。

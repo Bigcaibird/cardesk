@@ -1,13 +1,11 @@
 package com.cardesk.launcher.ui
 
-import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
-import android.view.DragEvent
 import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
@@ -33,8 +31,21 @@ import com.cardesk.launcher.ui.widget.OverlayBackdrop
  *   内边距 5、间距 6；选项 20px / 内边距 9×22；**选中** = 强调色实底 + 强调色上的字 + 加粗；
  * - 标题下一条 1px 分隔线 (40, 100) 宽 1796；
  * - 6 列应用网格：单元格 `left 40 + c×300`、`top 150 + r×150`、宽 300；
- *   图标 **76×76 圆角 20** 软底居中，名称 18px 次级文字、距图标 12；
+ *   图标 **76×76 圆角 20** 软底**居中**，名称 18px 次级文字、距图标 12、宽 160；
  * - 遮罩改用 [Skin.SCRIM]，状态栏和 Dock 仍在抽屉之上可见（抽屉插在状态栏之前）。
+ *
+ * ## 第152轮：去掉「⋮」，菜单改成长按图标
+ *
+ * 原来每个格子右上角有一个独立的「⋮」按钮，它贴在 300 宽格子的**右沿**，
+ * 离自己的图标 242px —— 远得像**下一个应用**的按钮，
+ * 一眼看过去满屏「图标 ⋮ 图标 ⋮」，这就是「太混乱」的根源。
+ *
+ * 这一轮：
+ * - **删掉「⋮」**；
+ * - **长按图标**弹出应用菜单（重命名 / 应用信息 / 禁用·启用 / 卸载）；
+ * - **去掉长按拖动排序**（长按只剩一个手势，不用跟拖放抢）；
+ * - 图标列**在格子里居中**（之前贴左沿是给 ⋮ 让位的）；
+ * - 名称列 76 → **160**，别再把应用名截成一串省略号。
  */
 class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(context) {
 
@@ -47,7 +58,12 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
     private lateinit var grid: GridLayout
     private lateinit var hint: TextView
 
-    /** 当前显示顺序（包名），拖动排序后写回 [prefs.appOrder]。 */
+    /**
+     * 当前显示顺序（包名）。
+     *
+     * 第152轮**去掉拖放排序**后，它不再被任何地方改写 ——
+     * 只用来记一下本次加载了多少个应用（排障日志）。
+     */
     private var currentPackages: List<String> = emptyList()
     private val prefs = com.cardesk.launcher.core.Prefs(context.applicationContext)
 
@@ -150,22 +166,17 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
             isVerticalScrollBarEnabled = false
         }
         grid = GridLayout(context).apply { columnCount = 6 }
-        grid.setOnDragListener { _, event ->
-            when (event.action) {
-                DragEvent.ACTION_DRAG_STARTED ->
-                    event.clipDescription?.hasMimeType("text/plain") == true
-                DragEvent.ACTION_DROP -> {
-                    val pkg = event.clipData?.getItemAt(0)?.text?.toString()
-                    pkg != null && handleDrop(event.x, event.y, pkg)
-                }
-                else -> true
-            }
-        }
+        // 第152轮：**去掉拖放排序**。
+        //
+        // 以前 grid 上挂了 `setOnDragListener` + 格子长按 `startDragAndDrop`，
+        // 长按一个应用能拖着换位置（顺序写进 `launcher_app_order`）。
+        // 现在长按改成**弹出应用菜单**，拖放整套（监听 / 拖影 / 落点换算）一并删掉 ——
+        // 两个手势抢同一个入口，留着只会打架。
         scroll.addView(grid, FrameLayout.LayoutParams(GRID_W, LayoutParams.WRAP_CONTENT))
         panel.addView(scroll, abs(PANEL_PAD, GRID_TOP, GRID_W, GRID_H))
 
-        // —— 底部提示（长按拖动排序是 App 侧能力，也有）——
-        val foot = Ui.text(context, "点按图标启动，长按拖动排序；格子右上角 ⋮ 可重命名 / 应用信息 / 禁用·启用 / 卸载", 16f, Skin.TEXT_DIM).apply {
+        // —— 底部提示 ——
+        val foot = Ui.text(context, "点按图标启动，长按图标打开菜单", 16f, Skin.TEXT_DIM).apply {
             gravity = Gravity.CENTER
         }
         panel.addView(foot, abs(PANEL_PAD, FOOT_TOP, PANEL_W - PANEL_PAD * 2, 26))
@@ -216,7 +227,10 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
             Logx.w(LogTags.DRAWER, "抽屉应用列表查询失败", e, "reason" to e.message)
             emptyList()
         }
-        // 用户排序优先：排过序的按保存顺序在前，其余按名称排在后面
+        // 用户排序优先：排过序的按保存顺序在前，其余按名称排在后面。
+        //
+        // 第152轮去掉了拖放排序，**这里只读不写** ——
+        // 老用户之前排过的顺序不该因为功能下线就丢（写了就还在）。
         val order = prefs.appOrder
         val rank = order.withIndex().associate { (i, pkg) -> pkg to i }
         val sorted = apps.sortedWith(
@@ -236,18 +250,27 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
             "ordered" to prefs.appOrder.size,
         )
         for (info in sorted) {
-            val pkg = info.activityInfo.packageName
             val display = displayLabel(info, pm)
             val enabled = isEnabled(info)
-            // 第九十五轮 C5：格子 = 图标列（点按启动 / 长按拖动排序）+ 右上角「⋮」菜单。
+            // 第152轮：格子 = 图标列（点按启动 / **长按弹菜单**）。
+            //
+            // 第九十五轮 C5 的样子是「图标列 + 右上角 ⋮ 菜单按钮」，这一轮整个换掉：
+            // ① **去掉 ⋮** —— 它贴在 300 宽格子的右沿，离自己的图标 242px，
+            //    远得像**下一个应用**的按钮，一眼看过去就是「图标 ⋮ 图标 ⋮」的乱麻；
+            // ② **长按图标弹菜单** —— 菜单入口挪到图标上，符合直觉（长按哪张图管哪张图）；
+            // ③ **去掉长按拖动排序** —— 长按只剩一个手势，不用再跟拖放抢。
             val cell = FrameLayout(context)
             val body = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                // 第五十一轮：设计板 s03 的格子是 的**定宽块**，
-                // 图标（`.appicon` 76×96）用 **贴格子左沿**，
-                // 名称在 76 宽的框里居中。之前这里把图标在 300 宽的格子里居中，
-                // 整排图标右移了 112px，跟设计板对不上。
-                gravity = Gravity.TOP or Gravity.START
+                // 第152轮：打标记，测试才能从视图树里找到「长按弹菜单」的宿主。
+                // （菜单入口从「⋮ 按钮」挪到了这里，测试也得跟着换。）
+                tag = APP_CELL_MARK
+                // 第152轮：图标列改成**在格子里居中**。
+                //
+                // 之前贴左沿是**给右上角的 ⋮ 让位**（第五十一轮的设计板 s03 是那个样子）；
+                // ⋮ 没了之后贴左沿就变成「一整排图标全挤在左边、右边空 224px」，
+                // 反而更不平衡。居中之后每列的图标中心间距正好等于格宽 300。
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
                 isClickable = true
                 setOnClickListener {
                     if (enabled) {
@@ -257,18 +280,9 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
                         toast("应用已禁用，可在菜单里启用")
                     }
                 }
-                // 长按 = 拖动排序（Drawer 的 startDragAndDrop +）
+                // 第152轮：长按 = 弹出应用菜单（原来是拖动排序）。
                 setOnLongClickListener {
-                    val clip = ClipData.newPlainText("package", pkg)
-                    val shadow = View.DragShadowBuilder(this).apply {
-                        // 拖起时放大 1.03 并抬升 translationZ 8dp
-                        scaleX = 1.03f
-                        scaleY = 1.03f
-                        elevation = 8f * resources.displayMetrics.density
-                    }
-                    // 排障场景：「抽屉里长按拖不动」——拖拽开始落盘。
-                    Logx.event(LogTags.DRAWER, "抽屉应用长按开始拖拽", "pkg" to pkg)
-                    startDragAndDrop(clip, shadow, pkg, 0)
+                    showItemMenu(info, display)
                     true
                 }
             }
@@ -282,8 +296,11 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
             // 已禁用：图标压暗，和可用应用区分开。
             if (!enabled) iv.alpha = 0.35f
             iv.background = Skin.solid(Skin.surfaceSoft, 20f)
-            // 图标 + 名称放进一个 76 宽的竖列（设计板 `.appicon` 宽 76），
-            // 名称在这一列里居中 —— 整列再贴到 300 宽格子的左沿。
+            // 第152轮：图标 + 名称放进一个 **160 宽**的竖列（原来只有 76 宽）。
+            //
+            // 原来名称只有 76 宽，一半应用名都被截成「Amap A...」「CarDes...」——
+            // 那才是「太混乱」的另一半：满屏省略号，谁也认不出是哪个 App。
+            // 160 宽能放下「Android 设置」「Calculator」「高德地图」这些常见名字。
             val column = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_HORIZONTAL
@@ -294,31 +311,20 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
             }
-            column.addView(label, LinearLayout.LayoutParams(-1, 26).apply { topMargin = 12 })
+            column.addView(label, LinearLayout.LayoutParams(LABEL_W, 26).apply { topMargin = 12 })
             if (!enabled) {
                 column.addView(
                     Ui.text(context, "已禁用", 14f, pal.textFaint),
-                    LinearLayout.LayoutParams(-1, 18).also { it.topMargin = 2 },
+                    LinearLayout.LayoutParams(LABEL_W, 18).also { it.topMargin = 2 },
                 )
             }
-            body.addView(column, LinearLayout.LayoutParams(ICON, LayoutParams.WRAP_CONTENT))
+            body.addView(column, LinearLayout.LayoutParams(LABEL_W, LayoutParams.WRAP_CONTENT))
             cell.addView(body, FrameLayout.LayoutParams(-1, -1))
 
-            // 右上角「⋮」：重命名 / 应用信息 / 卸载（第九十五轮 C5）。
-            val more = Ui.text(context, "\u22EE", 24f, pal.textDim, bold = true).apply {
-                gravity = Gravity.CENTER
-                background = Ui.round(Skin.CHIP_FILL, Shape.PILL, 1f, Skin.CHIP_STROKE)
-                isClickable = true
-                pressFeedback()
-                setOnClickListener { showItemMenu(info, display) }
-            }
-            cell.addView(
-                more,
-                FrameLayout.LayoutParams(52, 52, Gravity.TOP or Gravity.END).apply {
-                    topMargin = 6
-                    rightMargin = 6
-                },
-            )
+            // 第152轮：**右上角的「⋮」按钮删掉了**（菜单入口改成「长按图标」）。
+            //
+            // 它贴在 300 宽格子的右沿，离自己的图标 242px ——
+            // 远得像**下一个应用**的按钮，整屏看上去是「图标 ⋮ 图标 ⋮」的乱麻。
             grid.addView(cell, GridLayout.LayoutParams().apply {
                 width = CELL_W
                 height = CELL_H
@@ -366,7 +372,11 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
     private var renameDialog: View? = null
     private var confirmDialog: View? = null
 
-    /** 格子右上角「⋮」菜单：重命名 / 应用信息 / 卸载。 */
+    /**
+     * 应用菜单：重命名 / 应用信息 / 禁用·启用 / 卸载。
+     *
+     * 第152轮起，入口是**长按图标**（原来是一个独立的「⋮」按钮）。
+     */
     private fun showItemMenu(info: ResolveInfo, display: String) {
         if (itemMenu != null) return
         val pkg = info.activityInfo.packageName
@@ -445,6 +455,48 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
         val menu = itemMenu ?: return
         itemMenu = null
         removeView(menu)
+    }
+
+    /**
+     * 关掉抽屉里**最上面**那层浮层。
+     *
+     * 第152轮真机发现的 bug：应用菜单（长按弹出的那层）打开时按返回键，
+     * 整个抽屉会被关掉，而**菜单本身留在了抽屉页里**——
+     * 抽屉页是 LauncherView 长期持有的**同一个实例**，
+     * 关闭抽屉只是把它从窗口摘掉，实例里的浮层原封不动。
+     * 下次打开抽屉，菜单又盖在上面，它的遮罩会把所有点击吃掉，
+     * **点图标一点都没反应**（第一次点只是把菜单关掉）。
+     *
+     * 返回键的优先级也靠它：**先关浮层，再关抽屉**。
+     *
+     * @return 真的关掉了一层返回 true；本来就没有浮层返回 false。
+     */
+    fun closeTopOverlay(): Boolean = when {
+        // 顺序按「谁在上面谁先关」：重命名 / 禁用确认都是在菜单之上弹出来的。
+        renameDialog != null -> {
+            dismissRenameDialog()
+            true
+        }
+        confirmDialog != null -> {
+            dismissConfirmDialog()
+            true
+        }
+        itemMenu != null -> {
+            dismissItemMenu()
+            true
+        }
+        else -> false
+    }
+
+    /**
+     * 清掉抽屉里的**所有**浮层。
+     *
+     * 抽屉关闭时必须调用 —— 否则这些浮层会跟着抽屉页的实例留到下一次打开。
+     */
+    fun clearOverlays() {
+        dismissItemMenu()
+        dismissRenameDialog()
+        dismissConfirmDialog()
     }
 
     private fun componentOf(info: ResolveInfo) =
@@ -534,7 +586,8 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
         card.addView(
             Ui.text(
                 context,
-                "禁用后「$display」会停止运行、图标变灰；随时可以在它的 ⋮ 菜单里重新启用。",
+                // 第152轮：菜单入口从「⋮ 按钮」改成了「长按图标」，这句提示也跟着改。
+                "禁用后「$display」会停止运行、图标变灰；随时可以长按它的图标重新启用。",
                 18f,
                 pal.textDim,
             ),
@@ -684,49 +737,15 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
         android.widget.Toast.makeText(context, "本机没有卸载界面，无法卸载", android.widget.Toast.LENGTH_SHORT).show()
     }
 
-    /**
-     * 拖放落点处理：把被拖的应用挪到目标位置并持久化（`launcher_app_order`）。
-     */
-    private fun handleDrop(dragX: Float, dragY: Float, draggedPkg: String): Boolean {
-        val target = cellIndexAt(dragX, dragY)
-        if (target < 0) return false
-        val list = currentPackages.toMutableList()
-        val from = list.indexOf(draggedPkg)
-        if (from < 0) return false
-        list.removeAt(from)
-        val to = if (target > from) target - 1 else target
-        list.add(to.coerceIn(0, list.size), draggedPkg)
-        currentPackages = list
-        prefs.appOrder = list
-        // 排障场景：「抽屉排序没保存 / 拖到了错误位置」——落点与最终顺序落盘。
-        Logx.event(
-            LogTags.DRAWER,
-            "抽屉应用拖放排序",
-            "pkg" to draggedPkg,
-            "from" to from,
-            "to" to to,
-            "order" to list.joinToString(","),
-        )
-        reload()
-        return true
-    }
-
-    /** 找到坐标落在哪个格子上（-1 表示没落在任何格子）。 */
-    private fun cellIndexAt(x: Float, y: Float): Int {
-        for (i in 0 until grid.childCount) {
-            val child = grid.getChildAt(i)
-            val loc = IntArray(2)
-            child.getLocationInWindow(loc)
-            val gridLoc = IntArray(2)
-            grid.getLocationInWindow(gridLoc)
-            val left = loc[0] - gridLoc[0]
-            val top = loc[1] - gridLoc[1]
-            if (x >= left && x <= left + child.width && y >= top && y <= top + child.height) return i
-        }
-        return -1
-    }
-
     companion object {
+        /**
+         * 应用格子（图标列）的标记。
+         *
+         * 第152轮起，菜单入口是**长按这个格子**弹出来的（原来是一个独立的「⋮」按钮），
+         * 所以测试需要能从视图树里精确找到某个应用的那个格子。
+         */
+        val APP_CELL_MARK = Any()
+
         /** 抽屉面板宽（设计 px）。 */
         const val PANEL_W = 1876
 
@@ -771,5 +790,19 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
 
         /** 应用图标边长（设计 px）。 */
         const val ICON = 76
+
+        /**
+         * 图标 + 名称那一列的宽（设计 px）。
+         *
+         * 第152轮：76 → **160**。
+         *
+         * 原来这列只有 76（跟图标一样宽），名称只能塞 4 个字，
+         * 一半应用名都被截成「Amap A...」「CarDes...」—— 满屏省略号，
+         * 谁也认不出是哪个 App，这才是「太混乱」的另一半。
+         *
+         * 160 能放下「Android 设置」「Calculator」「高德地图」这些常见名字；
+         * 格子本身是 300，所以列居中后左右各留 70，图标列不会挤在一起。
+         */
+        const val LABEL_W = 160
     }
 }

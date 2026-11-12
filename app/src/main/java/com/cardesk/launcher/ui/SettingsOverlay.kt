@@ -11,6 +11,7 @@ import android.graphics.Typeface
 import android.net.Uri
 import android.provider.Settings
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -169,126 +170,56 @@ class SettingsOverlay(
 
     private data class NavItem(val key: String, val label: String)
     private data class NavGroup(val title: String, val items: List<NavItem>)
-    private data class TabView(val root: LinearLayout, val label: TextView, val count: TextView)
 
     /**
      * 左侧导航分组与条目，按 重建
      *
      */
-    private val globalGroups = listOf(
-        NavGroup(
-            "智能功能",
-            listOf(
-                NavItem("boot", "启动切换"),
-                NavItem("keys", "按键增强"),
-                NavItem("cluster", "方控仪表"),
-                NavItem("tasks", "计划任务"),
-                NavItem("autostart", "桌面自启"),
-            ),
-        ),
-        NavGroup(
-            "布局与显示",
-            listOf(
-                NavItem("daynight", "日夜模式"),
-                NavItem("dualpip", "双画中画"),
-            ),
-        ),
-        NavGroup(
-            "网络与升级",
-            listOf(
-                NavItem("lan", "局域网传输"),
-                NavItem("apkstore", "云端应用"),
-                NavItem("update", "在线更新"),
-            ),
-        ),
-    )
-
-    private val systemGroups = listOf(
-        NavGroup(
-            "车辆功能",
-            listOf(
-                NavItem("ambient", "氛围灯"),
-                NavItem("p360", "360 环影"),
-                NavItem("autostop", "启停控制"),
-                NavItem("hotspot", "自动热点"),
-                NavItem("adb", "ADB 调试"),
-            ),
-        ),
-        NavGroup(
-            "界面显示",
-            listOf(
-                NavItem("desktoplyric", "桌面歌词"),
-                NavItem("clusterlyric", "仪表歌词"),
-                NavItem("dock", "Dock 状态栏"),
-                NavItem("quickapps", "Dock 快捷应用"),
-            ),
-        ),
-        NavGroup(
-            "系统控制",
-            listOf(
-                NavItem("oemsettings", "原厂设置"),
-                NavItem("native", "默认设置"),
-                NavItem("diagnostics", "系统诊断"),
-                NavItem("restart", "重启车机"),
-                // 调试工具（没有这一页，是为真机排障加的）
-                NavItem("logs", "诊断日志"),
-            ),
-        ),
-    )
-
-    private var tab = 0
+    /**
+     * 左侧导航树（第149轮重排）。
+     *
+     * ## 第149轮改了什么
+     *
+     * ① **合并同模块的页面** —— 原来 28 项，现在 21 项：
+     *
+     * | 原来 | 现在 |
+     * |---|---|
+     * | 启动切换 + 桌面自启 | **启动与开机** |
+     * | 桌面卡片 + 卡片风格 | **桌面卡片** |
+     * | 桌面歌词 + 仪表歌词 | **歌词** |
+     * | Dock 状态栏 + Dock 快捷应用 | **Dock 与导航栏** |
+     * | （藏在系统诊断里）默认媒体源 | **媒体源** |
+     *
+     * ② **媒体源单独成组** —— 「默认用哪个音乐 App」是天天要碰的设置，
+     * 之前塞在「系统诊断」里（那页是给排障用的），用户得先知道那个地名才找得到。
+     *
+     * ③ **删除死代码** —— 旧的 `globalGroups` / `systemGroups` 两份 list
+     * 只喂两个从没被 `addView` 进视图树的计数徽标，纯属白构造。
+     */
+    /** 当前选中的页（导航树和页面内容都跟着它走）。 */
     private var selectedKey = "boot"
 
-    /**
-     * 离开当前页时要做的清理（第七十轮：氛围灯页要退订实时频谱）。
-     */
+    /** 离开当前页时要做的清理（氛围灯页要退订实时频谱）。 */
     private var pageTeardown: (() -> Unit)? = null
 
-    /**
-     * 「投射目标」的屏幕列表容器（第一百三十七轮）。
-     *
-     * 点选了某块屏要把「●」挪过去，所以要能**就地重建**这一段，
-     * 而不是每次都重建整页（那样会丢掉滚动位置）。
-     */
+    /** 仪表歌词页的「投射目标」列表（切页时要从视图上摘掉）。 */
     private var clusterDisplayList: LinearLayout? = null
 
-    /** 「投射状态」那段文字（第一百三十七轮）。 */
+    /** 仪表歌词页的「投射状态」文本。 */
     private var clusterStatusText: TextView? = null
 
-    /**
-     * 打开歌词颜色选择器（第一百三十七轮）。
-     *
-     * 复用现成的 [com.cardesk.launcher.ui.dialogs.ColorPickerDialog]
-     * —— 设置页自己是个 View，不是弹层，起不了 `DialogSheet`，
-     * 所以取色器还是由桌面那边开（和「卡片颜色」同一套路）。
-     *
-     * @param slot 0 = 主歌词，1 = 副歌词。
-     */
+    /** 仪表歌词「主 / 副歌词颜色」的取色器回调。 */
     var onShowClusterLyricColor: ((Int) -> Unit)? = null
 
-    override fun onDetachedFromWindow() {
-        // 面板被关掉时同样要摘监听 —— 否则会一直持有这一页的视图
-        pageTeardown?.invoke()
-        pageTeardown = null
-        super.onDetachedFromWindow()
-    }
-
-    /**
-     * 第四十九轮：左侧导航改成**一棵完整的树**（设计板 `s05-settings`）。
-     *
-     * 第四十三～四十八轮是「全局 / 系统」两棵子树 + 顶部 tab 条来回切；
-     * 设计板把两棵树合成一棵，分组按归并为
-     * 智能功能 / 布局与显示 / 网络与升级 / 车控 / 系统。
-     */
     private val mergedGroups = listOf(
         NavGroup(
             "智能功能",
             listOf(
-                NavItem("boot", "启动切换"),
+                NavItem("boot", "启动与开机"),
                 NavItem("keys", "按键增强"),
                 NavItem("cluster", "方控仪表"),
                 NavItem("tasks", "计划任务"),
-                NavItem("autostart", "桌面自启"),
+                NavItem("media", "媒体源"),
             ),
         ),
         NavGroup(
@@ -296,13 +227,10 @@ class SettingsOverlay(
             listOf(
                 NavItem("daynight", "日夜模式"),
                 NavItem("wallpaper", "壁纸"),
-                NavItem("cardstyle", "卡片风格"),
                 NavItem("cards", "桌面卡片"),
-                NavItem("desktoplyric", "桌面歌词"),
-                NavItem("clusterlyric", "仪表歌词"),
+                NavItem("lyric", "歌词"),
                 NavItem("dualpip", "双画中画"),
-                NavItem("dock", "Dock 状态栏"),
-                NavItem("quickapps", "Dock 快捷应用"),
+                NavItem("dock", "Dock 与导航栏"),
             ),
         ),
         NavGroup(
@@ -340,8 +268,6 @@ class SettingsOverlay(
     private lateinit var navList: FrameLayout
     private lateinit var pageTitle: TextView
     private lateinit var body: LinearLayout
-    private lateinit var tabGlobal: TabView
-    private lateinit var tabSystem: TabView
     private lateinit var navScroll: ScrollView
     private lateinit var bodyScroll: ScrollView
 
@@ -445,11 +371,6 @@ class SettingsOverlay(
         // （第四十九轮起去掉了第四十三～四十八轮的「全局 / 系统」tab 条）。
         val brand = Ui.text(context, "桌面设置", 34f, pal.text, bold = true)
         left.addView(brand, abs(36, 26, -1, 46))
-        // tab 计数徽标仍然维护
-        // 只是第四十九轮起不再把切换条画出来（左栏改成单棵树）。
-        tabGlobal = tabView("全局")
-        tabSystem = tabView("系统")
-
         navScroll = ScrollView(context).apply { isVerticalScrollBarEnabled = false }
         navList = FrameLayout(context)
         navScroll.addView(navList, ViewGroup.LayoutParams(-1, -2))
@@ -491,7 +412,7 @@ class SettingsOverlay(
         val right = FrameLayout(context)
         sheet.addView(right, FrameLayout.LayoutParams(rightWidth, LayoutParams.MATCH_PARENT).also { it.leftMargin = leftWidth })
 
-        pageTitle = Ui.text(context, "启动切换", 40f, pal.text, bold = true)
+        pageTitle = Ui.text(context, "桌面设置", 40f, pal.text, bold = true)
         right.addView(pageTitle, abs(CONTENT_PAD, 34, -1, 48))
 
         val close = Ui.text(context, "关闭", 24f, pal.textDim).apply {
@@ -520,7 +441,7 @@ class SettingsOverlay(
         bodyScroll.addView(body, ViewGroup.LayoutParams(-1, -2))
         right.addView(bodyScroll, FrameLayout.LayoutParams(rightWidth, panelHeight - 140).also { it.topMargin = 120 })
 
-        switchTab(0)
+        buildNavTree()
     }
 
     /** FrameLayout 绝对定位（相对父容器左上角）。 */
@@ -530,27 +451,19 @@ class SettingsOverlay(
             topMargin = y
         }
 
-    private fun tabView(label: String): TabView {
-        val root = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-        }
-        val text = Ui.text(context, label, 19f, pal.textDim)
-        val count = Ui.text(context, "0", 15f, pal.textDim)
-        root.addView(text, LinearLayout.LayoutParams(-2, -2))
-        root.addView(count, LinearLayout.LayoutParams(-2, -2).also { it.leftMargin = 8 })
-        return TabView(root, text, count)
-    }
-
-    private fun switchTab(index: Int) {
-        tab = index
-        paintTab(tabGlobal, index == 0)
-        paintTab(tabSystem, index == 1)
-        // 排障场景：用户在全局/系统两组之间来回切 —— 记下切到了哪一组
-        Logx.event(LogTags.SETTING, "切换设置分组", "tab" to if (index == 0) "全局" else "系统")
-        // 计数徽标（/ recountTabs:2708-2711）
-        tabGlobal.count.text = globalGroups.sumOf { it.items.size }.toString()
-        tabSystem.count.text = systemGroups.sumOf { it.items.size }.toString()
+    /**
+     * 重建左侧导航树，并选中当前页。
+     *
+     * ## 为什么叫 `buildNavTree` 而不是 `switchTab`
+     *
+     * 以前这里还有个「全局 / 系统」两个 tab 的概念（`globalGroups` / `systemGroups` +
+     * 一条计数徽标）。第四十九轮起那条切换条就**不画了**，左栏改成单棵树，
+     * 但那两份 list 和两个计数 View 一直留着 —— 它们从来没被 `addView` 进视图树，
+     * 是**纯死代码**：每次打开设置页都会白白构造一遍。
+     *
+     * 第149轮把它们连同 `tabView()` / `paintTab()` 一起删掉。
+     */
+    private fun buildNavTree() {
         val groups = mergedGroups
         navList.removeAllViews()
         navRows.clear()
@@ -562,7 +475,9 @@ class SettingsOverlay(
         //   - 组尾 → 下一组组标题 10 → [TREE_GROUP_END]。
         var y = TREE_TOP
         for (group in groups) {
-            val title = Ui.text(context, group.title, 16f, pal.textFaint)
+            // 第149轮：组标题 16f → 17f，颜色 textFaint → textDim。
+            // 以前太弱，分组之间的层级看不出来（合并后分组也变了名字，更要说清楚）。
+            val title = Ui.text(context, group.title, 17f, pal.textDim)
             navList.addView(title, abs(TREE_GROUP_X, y - TREE_TOP, -1, 24))
             y += TREE_GROUP_STEP
             for (item in group.items) {
@@ -578,12 +493,6 @@ class SettingsOverlay(
             y += TREE_GROUP_END
         }
         select(selectedKey.takeIf { key -> groups.any { g -> g.items.any { it.key == key } } } ?: groups.first().items.first().key)
-    }
-
-    private fun paintTab(view: TabView, active: Boolean) {
-        view.label.setTextColor(if (active) pal.accent else pal.textDim)
-        view.count.setTextColor(if (active) pal.accent else pal.textDim)
-        view.root.background = Ui.round(if (active) pal.accentSoft else 0x00000000, 12f)
     }
 
     /** 供外部（深链/预览测试）直接切到某一页。 */
@@ -608,10 +517,16 @@ class SettingsOverlay(
         // 「启动后」只属于「启动切换」页
         bootCaption.visibility = if (key == "boot") View.VISIBLE else View.GONE
         // 「开源与声明」不在导航组里，标题固定
-        val label = if (key == "about") {
-            "开源与声明"
-        } else {
-            mergedGroups.flatMap { it.items }.firstOrNull { it.key == key }?.label ?: ""
+        // 第149轮：合并掉的那几个 key 仍然**保留路由**（外部深链 / 旧快捷入口
+        // 可能还在用它们），但它们已经不在导航树里了 —— 所以标题要单独给，
+        // 否则深链进来会看到一片空白标题。
+        val label = when (key) {
+            "about" -> "开源与声明"
+            "autostart" -> "启动与开机"
+            "cardstyle" -> "桌面卡片"
+            "desktoplyric", "clusterlyric" -> "歌词"
+            "quickapps" -> "Dock 与导航栏"
+            else -> mergedGroups.flatMap { it.items }.firstOrNull { it.key == key }?.label ?: ""
         }
         pageTitle.text = label
         // 离开上一页：把这一页挂的监听 / 定时器摘掉
@@ -629,10 +544,10 @@ class SettingsOverlay(
             "keys" -> pageKeys()
             "cluster" -> pageCluster()
             "tasks" -> pageTasks()
-            "autostart" -> pageAutostart()
+            "autostart" -> pageBoot()
             "daynight" -> pageDayNight()
             "wallpaper" -> pageWallpaper()
-            "cardstyle" -> pageCardStyle()
+            "cardstyle" -> pageCards()
             "cards" -> pageCards()
             "dualpip" -> pageDualPip()
             "lan" -> pageLan()
@@ -642,13 +557,15 @@ class SettingsOverlay(
             "autostop" -> pageAutostop()
             "hotspot" -> pageHotspot()
             "adb" -> pageAdb()
-            "desktoplyric" -> pageDesktopLyric()
-            "clusterlyric" -> pageClusterLyric()
+            "desktoplyric" -> pageLyric()
+            "clusterlyric" -> pageLyric()
             "carinfo" -> pageCarInfo()
             "dock" -> pageDock()
-            "quickapps" -> pageDockQuickApps()
+            "quickapps" -> pageDock()
             "oemsettings" -> pageOemSettings()
             "native" -> pageNativeSettings()
+            "lyric" -> pageLyric()
+            "media" -> pageMedia()
             "diagnostics" -> pageDiagnostics()
             "restart" -> pageRestart()
             "logs" -> pageLogs()
@@ -659,8 +576,29 @@ class SettingsOverlay(
 
     // ------------------------------------------------------------- 控件库
 
+    /**
+     * 一个分区的标题。
+     *
+     * ## 第149轮的 UI 优化
+     *
+     * 以前是 `22f textFaint` + `topMargin 8` —— 在 1920 宽的车机屏上，
+     * 这个字号配上最弱的那档颜色，**几乎看不见**。
+     *
+     * 合并页面之后一个页面里会有七八个分区（歌词页就有九个），
+     * 分区标题必须一眼能读出来，否则用户根本不知道「下面这一堆是什么」。
+     *
+     * 所以改成：
+     * - 字号 22 → **24**，颜色 `textFaint` → **`textDim`**，并且**加粗**；
+     * - 上方留白 8 → **20**（分区之间要能分开）；
+     * - 下面加一条 **1px 细线** —— 标题和它管的那一堆设置项之间要有视觉边界。
+     */
     private fun section(title: String) {
-        body.addView(Ui.text(context, title, 22f, pal.textFaint), LinearLayout.LayoutParams(-1, 40).also { it.topMargin = 8 })
+        body.addView(
+            Ui.text(context, title, 24f, pal.textDim, bold = true),
+            LinearLayout.LayoutParams(-1, 44).also { it.topMargin = 20 },
+        )
+        val line = View(context).apply { setBackgroundColor(Skin.NAV_STROKE) }
+        body.addView(line, LinearLayout.LayoutParams(-1, 1).also { it.topMargin = 6 })
     }
 
     /**
@@ -672,7 +610,12 @@ class SettingsOverlay(
      * 那种地方要能**就地改文案**，不能只在建页时写一次。
      */
     private fun note(text: String): TextView {
-        val tv = Ui.text(context, text, 22f, pal.textDim).apply { setLineSpacing(10f, 1f) }
+        // 第150轮：说明行打上标记，测试才能从视图树里把它挑出来
+        // （见 [SettingsCopyTest]）—— 精简文案后要能盯住「别又加回来」。
+        val tv = Ui.text(context, text, 22f, pal.textDim).apply {
+            setLineSpacing(10f, 1f)
+            tag = NOTE_MARK
+        }
         body.addView(tv, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
         return tv
     }
@@ -695,7 +638,9 @@ class SettingsOverlay(
         textBox.addView(Ui.text(context, label, 28f, pal.text, bold = true), LinearLayout.LayoutParams(-1, -2))
         if (!subtitle.isNullOrEmpty()) {
             textBox.addView(
-                Ui.text(context, subtitle, 19f, pal.textDim),
+                // 第150轮：副标题打上标记，测试才能把它从视图树里挑出来
+                // （见 [SettingsCopyTest]）—— 精简文案后要能盯住「别又加回来」。
+                Ui.text(context, subtitle, 19f, pal.textDim).apply { tag = SUBTITLE_MARK },
                 LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 8 },
             )
         }
@@ -836,6 +781,8 @@ class SettingsOverlay(
             orientation = LinearLayout.HORIZONTAL
             background = Ui.round(Skin.surfaceSoft, com.cardesk.launcher.core.Shape.PILL, 1f, Skin.NAV_STROKE)
             setPadding(5, 5, 5, 5)
+            // 第151轮：打标记，测试要能断言「哪一页还在用 chip 行」。
+            tag = CHIP_SEG_MARK
         }
         val views = ArrayList<TextView>()
         options.forEachIndexed { index, text ->
@@ -885,6 +832,218 @@ class SettingsOverlay(
     }
 
     /**
+     * 一行「标签 + 当前值 + 下拉箭头」，点开后在**下方原地展开**一列选项。
+     *
+     * ## 为什么「默认媒体源」要改成下拉
+     *
+     * 那一行原来是一排 chip（分段控件）。三个问题：
+     * 1. 9 个选项在 1920 宽下挤成两行还要横向滚动；
+     * 2. 选中项（默认是「通用音乐」）在**中间**，得靠 `post` 把它滚到可视区才看得见；
+     * 3. 打开设置页一眼看不出当前选的是谁 —— chip 行太宽，当前值淹没在中间。
+     *
+     * 改成一个下拉行：**收起时只占一行，当前值就写在行上**；展开时 9 个选项一次列全。
+     *
+     * ## 为什么是「原地展开」而不是 PopupWindow
+     *
+     * 设置页自己就是盖在桌面上的一层浮层，再往上盖一层浮层，层级和裁剪都要重新踩坑
+     * （这个项目至今没用过 PopupWindow）。原地展开最稳 ——
+     * 展开时下面的内容被推下去，设置页本来就能滚。
+     *
+     * ## 交互
+     *
+     * - 点行（标题或值）→ 展开 / 收起；箭头跟着转 180°；
+     * - 点某个选项 → 选中、收起、回调 [onPick]；
+     * - 选中项在列表里高亮（强调色底 + 强调色字 + 加粗）。
+     *
+     * @param selectedIndex 当前选中的下标；越界 = 没选中（显示「未选择」）。
+     */
+    private fun dropdownRow(
+        label: String,
+        options: List<String>,
+        selectedIndex: Int,
+        onPick: (Int) -> Unit,
+    ) {
+        // —— 行：标题 + 右侧「当前值 ⌄」 ——
+        val holder = FrameLayout(context)
+        holder.addView(
+            Ui.text(context, label, 22f, pal.textDim).apply { gravity = Gravity.CENTER_VERTICAL },
+            FrameLayout.LayoutParams(300, -1).also { it.leftMargin = 18 },
+        )
+
+        val valueText = Ui.text(context, options.getOrNull(selectedIndex) ?: "未选择", 24f, pal.text).apply {
+            gravity = Gravity.CENTER_VERTICAL or Gravity.END
+            // 第151轮：打标记，测试才能从视图树里把「当前值」挑出来
+            // （见 [SettingsCopyTest]）。
+            tag = DROPDOWN_VALUE_MARK
+        }
+        val chevron = Ui.text(context, "⌄", 26f, pal.textDim).apply { gravity = Gravity.CENTER }
+        val valueBox = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = Ui.round(Skin.surfaceSoft, com.cardesk.launcher.core.Shape.PILL, 1f, Skin.NAV_STROKE)
+            setPadding(26, 12, 20, 12)
+            isClickable = true
+        }
+        valueBox.addView(valueText, LinearLayout.LayoutParams(-2, -2))
+        valueBox.addView(chevron, LinearLayout.LayoutParams(-2, -2).also { it.leftMargin = 14 })
+        holder.addView(
+            valueBox,
+            FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_VERTICAL or Gravity.END).also { it.rightMargin = 18 },
+        )
+
+        body.addView(holder, LinearLayout.LayoutParams(-1, 96))
+        val line = View(context).apply { setBackgroundColor(Skin.NAV_STROKE) }
+        body.addView(line, LinearLayout.LayoutParams(-1, 1))
+
+        // —— 展开面板：直接挂在 body 里、紧跟这一行 ——
+        //
+        // 收起时 GONE（不占空间），展开时 VISIBLE —— 下方的内容自然被推下去。
+        // 这样不用在展开时挪 view 的位置，也就不会出现「展开后插错行」的坑。
+        val panel = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+            background = Ui.round(Skin.surfaceSoft, 18f, 1f, Skin.NAV_STROKE)
+            setPadding(0, 6, 0, 6)
+        }
+        body.addView(panel, LinearLayout.LayoutParams(-1, -2).also {
+            // 第151轮：面板**底部**也要留间距 ——
+            // 不留的话展开的列表会直接贴住下面那一行（跟 actionButton 那个毛病一样）。
+            // GONE 时这个 margin 不生效，收起状态不占任何空间。
+            it.bottomMargin = 20
+        })
+
+        // 当前选中项的画法（选中 = 强调色底 + 强调色字 + 加粗）。
+        fun paintOption(item: TextView, active: Boolean) {
+            item.setTextColor(if (active) pal.accent else pal.textDim)
+            item.typeface = Typeface.create(Typeface.DEFAULT, if (active) Typeface.BOLD else Typeface.NORMAL)
+            item.background = if (active) {
+                Ui.round(pal.withAlpha(pal.accent, 0x1A), com.cardesk.launcher.core.Shape.PILL)
+            } else {
+                null
+            }
+        }
+
+        val optionViews = ArrayList<TextView>()
+        options.forEach { text ->
+            val item = Ui.text(context, text, 24f, pal.textDim).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(26, 0, 26, 0)
+                // 第151轮：打标记，测试才能从视图树里把「展开后的选项」挑出来。
+                tag = DROPDOWN_OPTION_MARK
+                isClickable = true
+            }
+            optionViews.add(item)
+            panel.addView(item, LinearLayout.LayoutParams(-1, 56))
+        }
+
+        var current = selectedIndex
+        optionViews.forEachIndexed { i, v -> paintOption(v, i == current) }
+
+        var expanded = false
+        fun toggle() {
+            expanded = !expanded
+            panel.visibility = if (expanded) View.VISIBLE else View.GONE
+            chevron.rotation = if (expanded) 180f else 0f
+            if (expanded) {
+                // 展开后把选项带进可视区 ——
+                // 这一行可能在正文底部，展开的列表整个落在屏幕外的话，
+                // 用户会看到「点了没反应」。
+                panel.post {
+                    val y = panel.top
+                    if (y + panel.height > bodyScroll.height) {
+                        bodyScroll.scrollTo(0, (y - bodyScroll.height / 3).coerceAtLeast(0))
+                    }
+                }
+            }
+        }
+
+        holder.isClickable = true
+        holder.setOnClickListener { toggle() }
+        valueBox.setOnClickListener { toggle() }
+
+        optionViews.forEachIndexed { index, item ->
+            item.setOnClickListener {
+                current = index
+                optionViews.forEachIndexed { i, v -> paintOption(v, i == index) }
+                valueText.text = options.getOrNull(index) ?: "未选择"
+                if (expanded) toggle()
+                onPick(index)
+                onApply?.invoke()
+            }
+        }
+    }
+
+    /**
+     * 设置页是桌面的**子 View**（`LauncherView.content` 里 `addView` 进去的），
+     * 所以桌面的 `onInterceptTouchEvent` 对设置页里的控件**同样生效**：
+     * 桌面把「单指横滑超过阈值」当成翻页手势，会把 MOVE 事件抢走。
+     *
+     * ## 这个 bug 最常见的表现
+     *
+     * 拖设置页里的滑杆时，滑杆卡住不动，**桌面反而翻页了** ——
+     * 因为拖滑杆时手指必然横向移动，一越过阈值就被桌面抢走。
+     *
+     * ## 修法
+     *
+     * `requestDisallowInterceptTouchEvent(true)` 会把 `FLAG_DISALLOW_INTERCEPT`
+     * 一路传到祖先；祖先的 `ViewGroup.dispatchTouchEvent` 看到这个标志位时，
+     * **不会**再去调 `onInterceptTouchEvent` —— 设置页独占这次触摸。
+     *
+     * ## 踩过的坑：置位时机比「置不置位」重要得多
+     *
+     * 把 `android-all`（android-14）的 `ViewGroup` 反编译出来看，真相是这样的：
+     *
+     * ① `dispatchTouchEvent` 在 **ACTION_DOWN** 时会调 `resetTouchState()`，
+     *    而 `resetTouchState()` 干的第一件事就是
+     *    `mGroupFlags &= ~FLAG_DISALLOW_INTERCEPT` ——
+     *    **每次新手势开始，祖先身上的「禁止拦截」标志都会被清掉**。
+     *
+     * ② 同一段字节码里，`disallowIntercept` 为真时 **不会**去调
+     *    `onInterceptTouchEvent`（这正是我们要的效果）。
+     *
+     * ③ `resetTouchState()` 还会在手势**结束**（UP / CANCEL）时再调一次。
+     *
+     * 由此推出两条结论：
+     *
+     * - **「挂上去时置一次」是没用的**：标志会在下一次按下时被清掉，
+     *   等于每次手势都没保护。（这一版就是这么写的，结果 bug 还在。）
+     * - **「等滑杆回调了再置」也太晚**：`AbsSeekBar.onTouchEvent` 里，
+     *   如果自己在一个 `ScrollView` 中（设置页的正文就在 `ScrollView` 里），
+     *   按下时走的是 `isInScrollingContainer()` 分支，**不会**调 `startDrag`，
+     *   要等**位移超过 touch slop 的第一个 MOVE** 才调 ——
+     *   而那个 MOVE 恰恰就是桌面判定「横滑超阈值 → 抢事件」的那个 MOVE。
+     *   桌面先抢，滑杆连 `onStartTrackingTouch` 都等不到。
+     *   （手指划得快，一个 MOVE 位移就超过阈值，正是最容易复现的场景。）
+     *
+     * ## 正确做法：在 DOWN 派发**之后**立刻置位
+     *
+     * `super.dispatchTouchEvent(ev)` 返回时，这次事件已经派发完毕，
+     * 而祖先的**下一个 MOVE 还没开始** —— 此时置位，第一个 MOVE 就已经被保护。
+     *
+     * 顺序也关键：必须在 `super` **之后**调。
+     * `super` 内部在 ACTION_DOWN 时会先 `resetTouchState()` 清掉自己身上的标志；
+     * 如果在 `super` **之前**调，`requestDisallowInterceptTouchEvent` 里
+     * 「已经是这个状态就直接返回」的短路会让标志**传不上去**
+     * （子节点还留着 → 认为重复调用 → 直接返回 → 祖先没被置位）。
+     */
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        val handled = super.dispatchTouchEvent(ev)
+        requestDisallowInterceptTouchEvent(true)
+        return handled
+    }
+
+    /**
+     * 摘掉设置页时把标志撤掉 —— 否则关掉设置页后桌面就再也翻不了页。
+     *
+     * 正常情况下手势结束（UP）时 `ViewGroup.resetTouchState()` 也会清掉它，
+     * 这里显式清一次是为了兜住「摘掉时还有手指按着」的情况。
+     */
+    override fun onDetachedFromWindow() {
+        requestDisallowInterceptTouchEvent(false)
+        super.onDetachedFromWindow()
+    }
+
+    /**
      * 一行滑块。
      *
      * @param step 步长（例如 30 表示 30 分钟一档）
@@ -921,7 +1080,29 @@ class SettingsOverlay(
                     }
                 }
 
-                override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+                /**
+                 * 按下开始拖动 → **禁止祖先抢走 MOVE 事件**。
+                 *
+                 * ## 这是「第二道保险」
+                 *
+                 * 主防线是设置页整体的 [dispatchTouchEvent]（在 DOWN 派发之后
+                 * 就把标志置上，第一个 MOVE 就已经被保护）。
+                 * 这里再置一次是冗余的，但**无害且更保险**：
+                 * 万一将来有人改了主防线的置位时机，
+                 * 滑杆这一层还能自己把标志抢回来。
+                 *
+                 * ## 注意：这里只置位，**不复位**
+                 *
+                 * 复位交给设置页整体（[onDetachedFromWindow]）——
+                 * 在这里调 `false` 会把「设置页整体禁止拦截」的标志一起撤掉，
+                 * 反而让桌面又开始抢事件。
+                 */
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {
+                    // 用外层的 holder 调（它和 SeekBar 同在这行里，效果一样：
+                    // `requestDisallowInterceptTouchEvent` 会从自己这层一路往上传递）。
+                    holder.requestDisallowInterceptTouchEvent(true)
+                }
+
                 override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
             })
         }
@@ -951,6 +1132,10 @@ class SettingsOverlay(
         val tv = Ui.text(context, text, 19f, if (primary || danger) pal.accentInk else color, bold = true).apply {
             gravity = Gravity.CENTER
             setPadding(30, 14, 30, 14)
+            // 第151轮：打标记，测试要能盯住「按钮底边有没有留间距」
+            //（见 [SettingsButtonGapTest]）—— 不打标记就只能靠源码断言，
+            // 那是查不出「间距够不够」的。
+            tag = ACTION_BUTTON_MARK
             background = Ui.round(
                 when {
                     danger -> pal.danger
@@ -965,6 +1150,16 @@ class SettingsOverlay(
         }
         body.addView(tv, LinearLayout.LayoutParams(-2, 64).also {
             it.topMargin = 18
+            // 第151轮：**底部也要留间距**。
+            //
+            // 之前只给了 topMargin，按钮底边直接贴住下一行的标题 ——
+            // 「Dock 快捷应用」那个「配置 Dock 快捷应用…」按钮
+            // 看上去就**压在了「沉浸系统导航栏」上面**。
+            //
+            // 留 24（不是 18）：下一行是 [row]，它的文字是**顶对齐**的
+            // （见 [row] 里 textBox 的 `Gravity.TOP`），
+            // 间距小于 [ROW_GAP]（37）的话仍然会显得挤。
+            it.bottomMargin = 24
         })
         return tv
     }
@@ -1043,8 +1238,8 @@ class SettingsOverlay(
     // ------------------------------------------------------------- 各页
 
     /** 启动切换。 */
-    private fun pageBoot() {
-        switchRow("自动导航投屏", prefs.startNaviCastEnabled, "开机后将导航投送到仪表屏") {
+    private fun bootBody() {
+        switchRow("自动导航投屏", prefs.startNaviCastEnabled) {
             val from = prefs.startNaviCastEnabled
             prefs.startNaviCastEnabled = it
             logSetting("start_navi_cast_enabled", "自动导航投屏", from, it)
@@ -1076,7 +1271,7 @@ class SettingsOverlay(
 
     /** 方控仪表（case "cluster"）。 */
     private fun pageCluster() {
-        switchRow("桥接开关", prefs.flag(KEY_BRIDGE_ENABLED), "连接车机仪表与方控通道") {
+        switchRow("桥接开关", prefs.flag(KEY_BRIDGE_ENABLED)) {
             val from = prefs.flag(KEY_BRIDGE_ENABLED)
             prefs.setFlag(KEY_BRIDGE_ENABLED, it)
             logSetting(KEY_BRIDGE_ENABLED, "方控桥接开关", from, it)
@@ -1087,7 +1282,7 @@ class SettingsOverlay(
 
     /** 按键增强。 */
     private fun pageKeys() {
-        switchRow("启用按键增强", prefs.keysEnhanced, "为方向盘按键绑定额外动作") {
+        switchRow("启用按键增强", prefs.keysEnhanced) {
             val from = prefs.keysEnhanced
             prefs.keysEnhanced = it
             logSetting("custom_keys_enabled", "启用按键增强", from, it, LogTags.KEYS)
@@ -1271,17 +1466,33 @@ class SettingsOverlay(
     }
 
     /** 桌面自启（case "autostart"）。 */
-    private fun pageAutostart() {
-        switchRow("桌面开机启动", prefs.bootAutostart, "开机后进入本桌面") {
+    private fun autostartBody() {
+        switchRow("桌面开机启动", prefs.bootAutostart) {
             val from = prefs.bootAutostart
             prefs.bootAutostart = it
             logSetting("desktop_boot_autostart", "桌面开机启动", from, it)
         }
     }
 
+    /**
+     * 启动与开机（第149轮：把「桌面自启」并进来）。
+     *
+     * ## 为什么合并
+     *
+     * 「桌面开机启动」和「启动后投屏 / 切驾驶模式」讲的是**同一件事**：
+     * 开机时桌面要干什么。原先分两页，用户为了改一个开关要来回点。
+     *
+     * 「桌面开机启动」只有 1 个开关，单开一页太浪费。
+     */
+    private fun pageBoot() {
+        section("开机自启")
+        autostartBody()
+        bootBody()
+    }
+
     /** 日夜模式。 */
     private fun pageDayNight() {
-        switchRow("启用日夜模式同步", prefs.dayNightEnabled, "系统、地图与桌面主题保持一致") {
+        switchRow("启用日夜模式同步", prefs.dayNightEnabled) {
             val from = prefs.dayNightEnabled
             prefs.dayNightEnabled = it
             logSetting("daynight_enabled", "启用日夜模式同步", from, it)
@@ -1386,10 +1597,8 @@ class SettingsOverlay(
         }
         overlay.addView(sheet, LayoutParams(520, -2, Gravity.CENTER))
         sheet.addView(Ui.text(context, title, 26f, pal.text, bold = true), LinearLayout.LayoutParams(-1, 44))
-        sheet.addView(
-            Ui.text(context, "24 小时制 · 点按箭头调整", 16f, pal.textFaint),
-            LinearLayout.LayoutParams(-1, 34),
-        )
+        // 第150轮：去掉了原来那句「24 小时制 · 点按箭头调整」的说明文字 ——
+        // 滚轮本身的样式已经说明了一切。腾出来的间距补在滚轮上面，别让标题和滚轮贴死。
         val wheels = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -1412,7 +1621,7 @@ class SettingsOverlay(
             LinearLayout.LayoutParams(72, 180),
         )
         wheels.addView(minutePicker, LinearLayout.LayoutParams(0, 180, 1f))
-        sheet.addView(wheels, LinearLayout.LayoutParams(-1, 200).also { it.topMargin = 8 })
+        sheet.addView(wheels, LinearLayout.LayoutParams(-1, 200).also { it.topMargin = 20 })
         val buttons = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1630,13 +1839,27 @@ class SettingsOverlay(
      *
      * 顺序拖拽仍在桌面上长按拖动；这里只调整宽度和显隐，改完立即落盘并重排。
      */
+    /**
+     * 桌面卡片（第149轮：把「卡片风格」并进来）。
+     *
+     * ## 为什么合并
+     *
+     * 「卡片风格」（透明度 / 颜色 / 圆角）和「桌面卡片」（摆哪些卡、宽度、显隐）
+     * 改的都是**同一批卡片的外观** —— 先定样式、再摆布局，本就是一件事的两步。
+     *
+     * 顺序：样式在前（上面），布局在后（下面）。
+     */
     private fun pageCards() {
+        cardStyleBody()
+        cardsBody()
+    }
+
+    private fun cardsBody() {
         val store = com.cardesk.launcher.core.CardLayout.PrefsStore(prefs)
         val layout = com.cardesk.launcher.core.CardLayout.normalize(
             store.load() ?: com.cardesk.launcher.core.CardLayout.DEFAULT,
         )
         section("桌面卡片")
-        note("长按底部卡片可拖动排序。")
 
         // 第111轮：右侧固定「车况」卡（车门 / 车窗 / 引擎盖 / 后备箱俯视车模）
         // 单独一节 —— 它**不在底部卡片行里**，不参与拖拽排序，也没有宽度档位。
@@ -1647,11 +1870,24 @@ class SettingsOverlay(
         // 本轮把车况卡补上开关，底部行那张在 [com.cardesk.launcher.core.CardLayout.title]
         // 里改叫「续航」，两者各管各的。
         section("车况")
-        note("右侧固定卡片（车门 / 车窗 / 引擎盖 / 后备箱），不在底部卡片行里。")
-        switchRow("显示这张卡", prefs.carStatusCardVisible, "关闭后桌面右侧不再显示这张卡") { on ->
+        switchRow("显示这张卡", prefs.carStatusCardVisible) { on ->
             val from = prefs.carStatusCardVisible
             prefs.carStatusCardVisible = on
             logSetting("scene_car_status_card_visible", "车况卡", from, on)
+        }
+
+        // 第148轮：「歌曲图片当音乐卡背景」的开关。
+        //
+        // 这个功能和「点封面图」是**同一个键**（`prefs.navCoverBackdropEnabled`）——
+        // 设置页是「发现入口」，点封面图是「快捷入口」，状态只有一份。
+        //
+        // 为什么两个入口都要有：设置页能让人**知道**这个功能存在，
+        // 而真正想快速开关的人（比如觉得背景太花）会直接点封面图。
+        section("音乐卡")
+        switchRow("封面作背景", prefs.navCoverBackdropEnabled) { on ->
+            val from = prefs.navCoverBackdropEnabled
+            prefs.navCoverBackdropEnabled = on
+            logSetting("nav_cover_backdrop_enabled", "音乐卡封面背景", from, on)
         }
 
         val hidden = layout.filter { !it.visible }
@@ -1699,7 +1935,7 @@ class SettingsOverlay(
         }
     }
 
-    private fun pageCardStyle() {
+    private fun cardStyleBody() {
         section("预览")
         val preview = CardStylePreviewView(context)
         body.addView(preview, LinearLayout.LayoutParams(-1, 260).also { it.topMargin = 10 })
@@ -1756,8 +1992,6 @@ class SettingsOverlay(
             logSetting("card_radius", "卡片圆角", from, v)
             push()
         }
-
-        section("说明")
     }
 
     /** 卡片颜色的当前取值文案。 */
@@ -1768,7 +2002,7 @@ class SettingsOverlay(
 
     /** 双画中画。 */
     private fun pageDualPip() {
-        switchRow("双画中画", prefs.dualPip, "第二页右侧胎压和音乐卡片替换为第二画中画") {
+        switchRow("双画中画", prefs.dualPip) {
             val from = prefs.dualPip
             //
             // 开双画时主副画不能是同一个应用，否则拒绝并提示。
@@ -1811,7 +2045,7 @@ class SettingsOverlay(
      * Dock 最右边是一段快捷应用槽位（默认 3 个），这里进配置面板挑应用；
      * 也可以直接**长按 Dock 上的某个槽位**进同一个面板。
      */
-    private fun pageDockQuickApps() {
+    private fun quickAppsBody() {
         section("Dock 快捷应用")
         val assigned = prefs.dockQuickApps.filter { it.isNotEmpty() }
         kvRow(
@@ -1819,7 +2053,6 @@ class SettingsOverlay(
             if (assigned.isEmpty()) "未配置" else "${assigned.size} / ${com.cardesk.launcher.core.DockQuickApps.SLOTS} 个",
             assigned.isNotEmpty(),
         )
-        note("点「+」挑应用，最多两个槽位。")
         actionButton("配置 Dock 快捷应用…", primary = true) {
             Logx.event(
                 LogTags.SETTING,
@@ -1832,7 +2065,7 @@ class SettingsOverlay(
 
     /** 360 环影。 */
     private fun pageCamera360() {
-        switchRow("启用 360 环影增强", prefs.camera360Enabled, "按键与档位联动环影视角") {
+        switchRow("启用 360 环影增强", prefs.camera360Enabled) {
             val from = prefs.camera360Enabled
             prefs.camera360Enabled = it
             logSetting("camera360_enabled_v2", "启用 360 环影增强", from, it)
@@ -2006,7 +2239,7 @@ class SettingsOverlay(
 
     /** 自动热点（case "hotspot"）。 */
     private fun pageHotspot() {
-        switchRow("自动热点", ScheduledTasks.isHotspotAutoEnabled(prefs), "开机后自动打开车机热点") {
+        switchRow("自动热点", ScheduledTasks.isHotspotAutoEnabled(prefs)) {
             val from = ScheduledTasks.isHotspotAutoEnabled(prefs)
             ScheduledTasks.setHotspotAutoEnabled(prefs, it)
             logSetting(ScheduledTasks.KEY_HOTSPOT_AUTO, "自动热点", from, it)
@@ -2078,7 +2311,7 @@ class SettingsOverlay(
         live("前置检查") { support.reason to support.ok }
 
         section("自动开关")
-        switchRow("自动 ADB", prefs.adbAuto, "开机后自动打开调试开关") {
+        switchRow("自动 ADB", prefs.adbAuto) {
             val from = prefs.adbAuto
             prefs.adbAuto = it
             logSetting("adb_boot_auto", "自动 ADB", from, it)
@@ -2087,7 +2320,7 @@ class SettingsOverlay(
                 runAdbAction("自动 ADB") { controller.enableDebug() }
             }
         }
-        switchRow("无线 ADB 自启", prefs.adbWirelessAuto, "开机后自动开启 5555 端口") {
+        switchRow("无线 ADB 自启", prefs.adbWirelessAuto) {
             val from = prefs.adbWirelessAuto
             prefs.adbWirelessAuto = it
             logSetting("adb_wireless_boot_auto", "无线 ADB 自启", from, it)
@@ -2123,7 +2356,6 @@ class SettingsOverlay(
                 Toast.makeText(context, "打不开原生开发者选项页", Toast.LENGTH_SHORT).show()
             }
         }
-        note("调试完请点「恢复全部设置」。")
 
         section("诊断")
         val resultView = Ui.text(context, adbLastAction, 21f, pal.text).apply {
@@ -2215,27 +2447,46 @@ class SettingsOverlay(
      * - 「仪表歌词」= [pageClusterLyric]（**投到副屏**的歌词）；
      * - 「车辆信息」= [pageCarInfo]（胎压 / 车模 / 数据源）。
      */
-    private fun pageDesktopLyric() {
+    /**
+     * 歌词（第149轮：把「桌面歌词」和「仪表歌词」并成一页）。
+     *
+     * ## 为什么合并
+     *
+     * 两个页面都是**歌词**，用户心智里就是一件事：
+     * 「歌词长什么样、放在哪」。
+     *
+     * - 桌面歌词 = 桌面正中那坨大字 + Dock 导航栏里的歌词槽；
+     * - 仪表歌词 = 投到副屏（仪表 / 副驾屏）的那块面板。
+     *
+     * 两边都是「字号 / 位置 / 布局 / 颜色」这一套，拆成两页反而要来回对照。
+     *
+     * 合并后靠 `section()` 分区：桌面那半在上，仪表那半在下。
+     */
+    private fun pageLyric() {
+        desktopLyricBody()
+        clusterLyricBody()
+    }
+
+    private fun desktopLyricBody() {
         section("导航栏歌词槽字号")
-        note("Dock 状态栏里那条歌词（收起 / 展开两种形态）。")
         sliderRow("收起·主歌词", prefs.deskCompactMainSp, 14, 64, " px") {
             val from = prefs.deskCompactMainSp
             prefs.deskCompactMainSp = it
             logSettingDebug("desk_desk_compact_main_sp", "收起·主歌词", from, it)
         }
-        sliderRow("收起·副歌词", readInt("desk_desk_compact_sub_sp", 20), 10, 48, " px") {
-            val from = readInt("desk_desk_compact_sub_sp", 20)
-            writeInt("desk_desk_compact_sub_sp", it)
+        sliderRow("收起·副歌词", prefs.deskCompactSubSp, 10, 48, " px") {
+            val from = prefs.deskCompactSubSp
+            prefs.deskCompactSubSp = it
             logSettingDebug("desk_desk_compact_sub_sp", "收起·副歌词", from, it)
         }
-        sliderRow("展开·主歌词", readInt("desk_desk_expanded_main_sp", 28), 14, 64, " px") {
-            val from = readInt("desk_desk_expanded_main_sp", 28)
-            writeInt("desk_desk_expanded_main_sp", it)
+        sliderRow("展开·主歌词", prefs.deskExpandedMainSp, 14, 64, " px") {
+            val from = prefs.deskExpandedMainSp
+            prefs.deskExpandedMainSp = it
             logSettingDebug("desk_desk_expanded_main_sp", "展开·主歌词", from, it)
         }
-        sliderRow("展开·副歌词", readInt("desk_desk_expanded_sub_sp", 20), 10, 48, " px") {
-            val from = readInt("desk_desk_expanded_sub_sp", 20)
-            writeInt("desk_desk_expanded_sub_sp", it)
+        sliderRow("展开·副歌词", prefs.deskExpandedSubSp, 10, 48, " px") {
+            val from = prefs.deskExpandedSubSp
+            prefs.deskExpandedSubSp = it
             logSettingDebug("desk_desk_expanded_sub_sp", "展开·副歌词", from, it)
         }
         // 第三十二轮起桌面只有两页，`desk_desk_page3_main_sp` / `desk_desk_page3_sub_sp`
@@ -2246,7 +2497,6 @@ class SettingsOverlay(
         // 为什么单独一节：上面四个滑杆管的是**导航栏歌词槽**（收起 / 展开两种形态），
         // 跟桌面正中这块大字歌词是两套画面，混在一起会让人以为改一个动两个。
         section("首页中央歌词")
-        note("桌面正中那坨大字歌词。")
         // —— 布局选择（第117轮）——
         //
         // 摆在预览条**上面**：换布局时预览立刻跟着变，用户当场看到差别，
@@ -2309,7 +2559,6 @@ class SettingsOverlay(
         positionNoteView = note(
             layoutOptions.firstOrNull { it.key == prefs.sceneLyricLayout }?.positionHint ?: "",
         )
-        note("放大后一句能显示的字会变少（屏幕就那么宽）。")
     }
 
     /**
@@ -2332,10 +2581,10 @@ class SettingsOverlay(
      * 还和桌面歌词字号混在一处。第一百三十七轮起全部搬到这里，
      * 和桌面歌词**彻底分开**。
      */
-    private fun pageClusterLyric() {
+    private fun clusterLyricBody() {
         // —— 总开关 ——
         section("投射")
-        switchRow("仪表 Overlay 歌词", prefs.clusterOverlayEnabled, "把歌词贴到副屏（仪表 / 副驾屏）") {
+        switchRow("仪表 Overlay 歌词", prefs.clusterOverlayEnabled) {
             val from = prefs.clusterOverlayEnabled
             prefs.clusterOverlayEnabled = it
             logSetting("desk_cluster_overlay", "仪表 Overlay 歌词", from, it)
@@ -2355,7 +2604,10 @@ class SettingsOverlay(
         }
 
         // —— 投射目标 ——
-        section("投射目标")
+        // 第149轮：原来这里是一个独立分区「投射目标」，和上面的「投射」、
+        // 下面的「投射状态」是**同一件事**的三个面（开不开 / 投到哪 / 现在什么状态）。
+        // 合并后只剩一个分区「投射」，三段用小标题（note）区分。
+        note("投射到哪块屏：")
         val list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         body.addView(list, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
         clusterDisplayList = list
@@ -2366,14 +2618,17 @@ class SettingsOverlay(
         }
 
         // —— 投射状态 ——
-        section("投射状态")
+        note("当前投射状态：")
         val statusText = Ui.text(context, "", 22f, pal.textDim)
         body.addView(statusText, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
         clusterStatusText = statusText
         actionButton("刷新状态") { refreshClusterStatus() }
 
-        // —— 面板位置与样式 ——
-        section("面板位置与样式")
+        // —— 面板位置、样式与颜色 ——
+        // 第149轮：原来「面板位置与样式」和「歌词颜色」是两个分区，
+        // 但它们改的是**同一块面板** —— 位置 / 行数 / 样式 / 颜色，
+        // 调的时候是连着调的，拆成两段只会让人来回滚。
+        section("面板位置、样式与颜色")
         sliderRow("水平位置", prefs.overlayXPct, 0, 100, "%") {
             val from = prefs.overlayXPct
             prefs.overlayXPct = it
@@ -2406,10 +2661,7 @@ class SettingsOverlay(
             logSetting("desk_cluster_style", "面板样式", from, to)
             liveClusterRefresh()
         }
-        note(
-            "胶囊 = 圆角底板 + 普通字；纯文字 = 只有字，永远不画底板；发光 = 字带一层光晕。",
-        )
-        sliderRow("模块宽度", prefs.overlayWidthPct, 30, 100, "%") {
+        sliderRow("模块宽度", prefs.overlayWidthPct, 10, 100, "%") {
             val from = prefs.overlayWidthPct
             prefs.overlayWidthPct = it
             logSettingDebug("desk_overlay_w", "模块宽度", from, it)
@@ -2421,18 +2673,8 @@ class SettingsOverlay(
             logSettingDebug("desk_overlay_bg_alpha", "仪表背景透明度", from, it)
             liveClusterRefresh()
         }
-        note(
-            "0% = 不画底板，歌词直接落在仪表画面上（默认）。\n" +
-                "仪表底色太亮、字看不清时，把这里拉上去加一层底。\n" +
-                "「胶囊」样式自带 40% 的淡底板 —— 不然它和「纯文字」会长得一模一样。",
-        )
         // —— 对比描边（第一百四十二轮）——
-        switchRow(
-            "文字描边",
-            prefs.clusterHalo,
-            "在字外面套一圈对比色（日间白边 / 夜间黑边）。" +
-                "压在地图上时靠它把字从地图细节里拔出来。",
-        ) { next ->
+        switchRow("文字描边", prefs.clusterHalo) { next ->
             val from = prefs.clusterHalo
             prefs.clusterHalo = next
             logSetting("desk_cluster_halo", "文字描边", from, next)
@@ -2452,11 +2694,6 @@ class SettingsOverlay(
         }
 
         // —— 歌词颜色（第一百三十七轮：默认跟随日夜）——
-        section("歌词颜色")
-        note(
-            "默认跟随日夜：夜间用薄荷白配深色地图，日间用深青配浅色地图，两套都够清楚。\n" +
-                "自己挑过颜色就以你挑的为准（不再跟随日夜）。",
-        )
         pickerRow("主歌词颜色", clusterLyricColorLabel(0)) { onShowClusterLyricColor?.invoke(0) }
         pickerRow("副歌词颜色", clusterLyricColorLabel(1)) { onShowClusterLyricColor?.invoke(1) }
         actionButton("恢复跟随日夜") {
@@ -2625,26 +2862,40 @@ class SettingsOverlay(
             logSetting("vehicle_source", "车辆数据源", from, idx)
             onVehicleSource?.invoke()
         }
-        note("切换后立即生效。")
     }
 
     /** Dock 状态栏（case "dock"）+ 增强导航栏 / 槽位。 */
+    /**
+     * Dock 与导航栏（第149轮：把「Dock 快捷应用」并进来）。
+     *
+     * ## 为什么合并
+     *
+     * 「Dock 快捷应用」讲的是 Dock 上的**槽位里放什么**，
+     * 「Dock 状态栏」讲的是 Dock **本身怎么显示** —— 同一块区域的两种设置。
+     *
+     * 快捷应用只有 4 项（已配置 / 说明 / 一个按钮），单开一页太浪费。
+     */
     private fun pageDock() {
+        quickAppsBody()
+        dockBody()
+    }
+
+    private fun dockBody() {
         // 第五十六轮：这里原来只有一个「隐藏原车 Dock」开关，
         // 而我们把它**同时**用在了「隐藏原车 Dock」和「隐藏桌面自己的 Dock」上 ——
         // 于是勾上它，消失的是**桌面自己的** Dock（用户反馈「隐藏系统 Dock 栏功能实现错误」）。
         // 现在拆成三个互不相干的开关。
-        switchRow("沉浸系统导航栏", prefs.oemNavImmersive, "桌面自带 Dock 平时隐藏，从底部上滑可临时唤出") {
+        switchRow("沉浸系统导航栏", prefs.oemNavImmersive) {
             val from = prefs.oemNavImmersive
             prefs.oemNavImmersive = it
             logSetting("oem_nav_immersive", "沉浸系统导航栏", from, it)
         }
-        switchRow("隐藏桌面 Dock", prefs.hideHomeDock, "只隐藏桌面自己画的底部控制栏") {
+        switchRow("隐藏桌面 Dock", prefs.hideHomeDock) {
             val from = prefs.hideHomeDock
             prefs.hideHomeDock = it
             logSetting("home_dock_hidden", "隐藏桌面 Dock", from, it)
         }
-        switchRow("隐藏原车 Dock", prefs.hideDock, "对指定应用隐藏原车 Dock（不影响桌面 Dock）") {
+        switchRow("隐藏原车 Dock", prefs.hideDock) {
             val from = prefs.hideDock
             prefs.hideDock = it
             logSetting("dockbar_hide_dock", "隐藏原车 Dock", from, it)
@@ -2658,15 +2909,11 @@ class SettingsOverlay(
             )
             onShowDockApps?.invoke()
         }
-        actionButton("指定隐藏原车 Dock 的应用（已选 ${selectedAppCount(prefs.hideDockApps)} 个）…") {
-            Logx.event(
-                LogTags.SETTING,
-                "打开 Dock 生效应用选择器",
-                "current" to prefs.hideDockApps.joinToString(","),
-            )
-            onShowDockApps?.invoke()
-        }
-        switchRow("隐藏原车状态栏", prefs.hideStatus, "仅隐藏原车顶栏") {
+        // 第149轮：这里原来还有一行 actionButton「指定隐藏原车 Dock 的应用（已选 N 个）…」，
+        // 和上面那行 `pickerRow("Dock 生效应用")` **打开的是同一个选择器、写的是同一个键**
+        // —— 纯重复。第149轮删掉，只留 pickerRow：
+        // 它的值显示的是**具体 App 名**（"QQ音乐、设置 等3个"），比「已选 N 个」信息多。
+        switchRow("隐藏原车状态栏", prefs.hideStatus) {
             val from = prefs.hideStatus
             prefs.hideStatus = it
             logSetting("dockbar_hide_status", "隐藏原车状态栏", from, it)
@@ -2679,25 +2926,14 @@ class SettingsOverlay(
             )
             onShowStatusApps?.invoke()
         }
-        actionButton("指定隐藏状态栏的应用（已选 ${selectedAppCount(prefs.hideStatusApps)} 个）…") {
-            Logx.event(
-                LogTags.SETTING,
-                "打开状态栏生效应用选择器",
-                "current" to prefs.hideStatusApps.joinToString(","),
-            )
-            onShowStatusApps?.invoke()
-        }
+        // 第149轮：同上，删掉与 `pickerRow("状态栏生效应用")` 重复的那一行。
         // ---------------- 全局 Dock（第八十七轮） ----------------
         // 模型：Dock 不再只活在桌面窗口里，而是起一个前台服务，
         // 在**其它应用**底部常驻一个 Dock 窗口，把原车导航栏 / 原车 Dock 遮住。
         // 桌面自己（HOME 前台）不用全局窗口 —— 桌面里本来就有同一套 Dock，
         // 重复画既没价值还会闪（详见 work/r87-design.md「二、全局 Dock 工作流」）。
         section("全局 Dock")
-        switchRow(
-            "全局 Dock 栏（其他应用也显示）",
-            prefs.globalDockEnabled,
-            "在其它应用底部常驻 Dock，遮住原车导航栏；长按主页键 = 返回",
-        ) {
+        switchRow("全局 Dock 栏（其他应用也显示）", prefs.globalDockEnabled) {
             val from = prefs.globalDockEnabled
             prefs.globalDockEnabled = it
             logSetting(com.cardesk.launcher.core.Prefs.KEY_GLOBAL_DOCK, "全局 Dock 栏", from, it)
@@ -2800,7 +3036,6 @@ class SettingsOverlay(
     }
 
     /** 已选应用数（不含「一个都不隐藏」的哨兵）。 */
-    private fun selectedAppCount(apps: Set<String>): Int = apps.count { it != OemDockPolicy.NO_APPS }
 
     /**
      * 「生效应用」摘要
@@ -2843,7 +3078,6 @@ class SettingsOverlay(
      * 所以用 [com.cardesk.launcher.core.SystemSettingsCatalog] 按 action/组件名实时解析。
      */
     private fun pageOemSettings() {
-        note("列表由系统实时解析。")
         com.cardesk.launcher.core.SystemSettingsCatalog.warmAsync(context)
         val catalog = com.cardesk.launcher.core.SystemSettingsCatalog.entries()
         if (catalog.isEmpty()) {
@@ -2998,23 +3232,77 @@ class SettingsOverlay(
             "系统能力报告",
             "caps" to caps.joinToString(",") { "${it.first.label}=${if (it.second) "可用" else "不可用"}" },
         )
-        // 第125轮：默认媒体源（可设）。
-        // 放在「媒体来源」这一节的**最上面** —— 用户看一眼就知道
-        // 「默认用哪个」和「这 9 个分别装没装」是同一件事的两面。
-        section("默认媒体源")
-        note("桌面启动时自动锁定这个来源；音乐卡片上的来源行仍可临时切换成别的。")
-        chipRow(
-            "默认来源",
-            com.cardesk.launcher.core.media.MediaSources.LIST.map { it.label },
-            com.cardesk.launcher.core.media.MediaSources.byId(prefs.defaultMusicSource)?.label
-                ?: com.cardesk.launcher.core.media.MediaSources.GENERIC_LABEL,
-            compact = true,
-        ) { label ->
-            val src = com.cardesk.launcher.core.media.MediaSources.byLabel(label) ?: return@chipRow
-            prefs.defaultMusicSource = src.id
-            onDefaultMediaSource?.invoke(src.id)
-            onApply?.invoke()
+        actionButton("重新探测平台与通道", primary = true) {
+            com.cardesk.launcher.vehicle.VehicleController.reconnect(context, prefs)
+            select(selectedKey)
         }
+    }
+
+    /**
+     * 媒体源（第149轮：从「系统诊断」页里**独立出来**）。
+     *
+     * ## 为什么从系统诊断页搬出来
+     *
+     * 「默认用哪个音乐 App」是**天天要碰**的设置，
+     * 之前塞在「系统诊断」页里 —— 那一页是给排障用的
+     * （平台判定、车控通道状态、系统能力签名…），
+     * 想找「默认音乐 App」得先知道「系统诊断」这个地名。
+     *
+     * 独立成一页之后，它和「开机自启」「桌面卡片」这些常用项是平级的。
+     *
+     * ## 内容
+     *
+     * - 「默认来源」：桌面启动时锁定哪个 App（第125轮就有；**第151轮改成下拉**）；
+     * - 「启动后自动播放」：**第149轮新增** —— 桌面起来后把它拉起来并播放；
+     * - 「媒体来源（固定 9 个）」：这 9 个分别装没装（纯状态展示）。
+     */
+    private fun pageMedia() {
+        section("默认媒体源")
+
+        // 第151轮：「默认来源」从 **chip 行**改成**下拉**。
+        //
+        // 为什么：9 个选项挤在一排 chip 里，选中项（默认是「通用音乐」）在**中间**，
+        // 打开设置页根本看不出当前选的是谁 —— 得横向滚动去找那个高亮的。
+        // 改成一个下拉行：收起时当前值就写在行上，展开时 9 个选项一次列全。
+        val sources = com.cardesk.launcher.core.media.MediaSources.LIST
+        // 条件提示的引用要在下拉**之前**声明：下拉的回调里要能把它收起来
+        // （选了具体的 App，这条提示就没意义了）。
+        var genericNote: TextView? = null
+        dropdownRow(
+            "默认来源",
+            sources.map { it.label },
+            // 兜底：prefs 里存了不认识的 id 时退回「通用音乐」，
+            // 与旧 chip 行的行为一致（找不到就显示 GENERIC_LABEL）。
+            sources.indexOfFirst { it.id == prefs.defaultMusicSource }
+                .let { if (it >= 0) it else sources.indexOfFirst { s -> s.id == com.cardesk.launcher.core.media.MediaSources.GENERIC_ID } },
+        ) { index ->
+            val src = sources[index]
+            prefs.defaultMusicSource = src.id
+            genericNote?.visibility =
+                if (src.id == com.cardesk.launcher.core.media.MediaSources.GENERIC_ID) View.VISIBLE else View.GONE
+            onDefaultMediaSource?.invoke(src.id)
+        }
+
+        // 第149轮：桌面启动完成后唤起默认媒体源 App 并让它播放。
+        //
+        // 默认**关** —— 开机弹出一个音乐 App 挺打扰，而且默认源是「通用音乐」时
+        // 根本没有对应的 App 可拉（`MediaAppLauncher.shouldLaunch` 会挡住）。
+        switchRow("启动后自动播放", prefs.autoLaunchMediaApp) { on ->
+            val from = prefs.autoLaunchMediaApp
+            prefs.autoLaunchMediaApp = on
+            logSetting("auto_launch_media_app", "启动后自动播放", from, on)
+        }
+        genericNote = note(
+            "要先在上面把默认来源选成具体的 App ——「通用音乐」是跟随系统当前会话，没有对应的 App 可拉。",
+        ).apply {
+            visibility =
+                if (prefs.defaultMusicSource == com.cardesk.launcher.core.media.MediaSources.GENERIC_ID) {
+                    View.VISIBLE
+                } else {
+                    View.GONE
+                }
+        }
+
         section("媒体来源（固定 9 个）")
         for (source in com.cardesk.launcher.core.media.MediaSources.LIST) {
             val candidates = com.cardesk.launcher.core.media.MediaSources.packageCandidates(source.label)
@@ -3030,10 +3318,6 @@ class SettingsOverlay(
                 if (installed != null) "$installed · 已安装" else "${candidates.first()} 等 ${candidates.size} 个候选 · 未安装",
                 installed != null,
             )
-        }
-        actionButton("重新探测平台与通道", primary = true) {
-            com.cardesk.launcher.vehicle.VehicleController.reconnect(context, prefs)
-            select(selectedKey)
         }
     }
 
@@ -3061,7 +3345,6 @@ class SettingsOverlay(
         note(com.cardesk.launcher.core.media.NotificationAccess.describeEnumeration(context))
 
         section("日志级别")
-        note("排查问题时调到「调试」，结束后调回「信息」。")
         val levels = listOf(
             LogLevel.ERROR to "仅错误",
             LogLevel.WARN to "错误+警告",
@@ -3133,7 +3416,6 @@ class SettingsOverlay(
             // 传输目录搬到了公共 Download 目录，用户得一眼看到文件存哪儿
             note("保存路径：${LanTransferServer.rootDir(context).absolutePath}")
             if (files.isEmpty()) {
-                note("目录为空。启动服务后把地址贴到电脑浏览器，即可上传/下载。")
                 return
             }
             for (f in files.take(10)) {
@@ -3193,7 +3475,6 @@ class SettingsOverlay(
         body.addView(listBox, LinearLayout.LayoutParams(-1, -2))
         paint()
         paintFiles()
-        note("端口 18765..18775、`?t=<token>`；启动后把地址贴到电脑浏览器即可上传/下载。")
     }
 
     /**
@@ -3358,7 +3639,6 @@ class SettingsOverlay(
         section("更新通道")
         kvRow("更新源", "Cloudflare R2 · file.chuxi.bid", true)
         kvRow("当前版本", com.cardesk.launcher.core.update.AppUpdate.versionLabel(context), true)
-        note("桌面启动 3 秒后自动检测一次；也可以在这里手动检查。")
         actionButton("检查更新", primary = true) {
             // 排障场景：点了检查更新没反应 —— 记下打开更新对话框
             Logx.event(LogTags.SETTING, "打开在线更新对话框")
@@ -3401,11 +3681,7 @@ class SettingsOverlay(
  */
     private fun pageAmbient() {
         section("音乐律动氛围灯")
-        switchRow(
-            "启用氛围灯",
-            prefs.ambientEnabled,
-            "跟随正在播放的音乐改变灯光颜色与亮度",
-        ) { enabled ->
+        switchRow("启用氛围灯", prefs.ambientEnabled) { enabled ->
             com.cardesk.launcher.core.ambient.AmbientLightController.setEnabled(context, enabled)
             onApply?.invoke()
             // 开灯是要采频谱的 → 没权限就在这里要（用户正要开这个功能）
@@ -3757,11 +4033,7 @@ class SettingsOverlay(
 
         if (prefs.ambientEngine != Prefs.ENGINE_V2 || prefs.ambientCustomMode) {
         section("分区编排")
-        switchRow(
-            "区域巡游",
-            prefs.ambientZoneChoreo,
-            "三个分区轮流点亮（仅建议驻车 / 展示时开启）",
-        ) { enabled ->
+        switchRow("区域巡游", prefs.ambientZoneChoreo) { enabled ->
             val from = prefs.ambientZoneChoreo
             prefs.ambientZoneChoreo = enabled
             logSetting("ambient_zone_choreo", "氛围灯分区编排", from, enabled)
@@ -3925,6 +4197,57 @@ class SettingsOverlay(
     companion object {
         /** 面板宽（设计 px）—— 设计板 `s05-settings`。 */
         const val PANEL_W = 1440
+
+        /**
+         * **说明行**（[note] 生成的 TextView）的标记 —— 测试用。
+         *
+         * ## 为什么要有这个
+         *
+         * 第150轮把设置页里啰嗦的功能描述、需求解释全删了，
+         * 只留状态、风险警告、法律声明这几类。
+         * 但「删掉」很容易，「别又加回来」很难 ——
+         * 光看源码里的 [note] 调用没法一眼数清还剩哪些说明文字。
+         *
+         * 所以给说明行打个标记，测试顺着视图树就能把它们**挑出来**，
+         * 一条一条对着白名单核。
+         */
+        val NOTE_MARK = Any()
+
+        /**
+         * **开关行副标题**的标记 —— 测试用，理由同 [NOTE_MARK]。
+         *
+         * 副标题也是「功能描述」的主要载体（`switchRow` 的第三个实参）。
+         */
+        val SUBTITLE_MARK = Any()
+
+        // ------------------------------------------------ 下拉选择（第151轮）
+
+        /**
+         * 下拉行的「当前值」标记。
+         *
+         * 测试要能断言「媒体源那一行显示的确实是当前选中的来源」，
+         * 所以这个 TextView 得能**从视图树里被认出来**。
+         */
+        val DROPDOWN_VALUE_MARK = Any()
+
+        /** 下拉展开后的**每个选项**的标记。 */
+        val DROPDOWN_OPTION_MARK = Any()
+
+        /**
+         * chip 分段控件的标记。
+         *
+         * 有了它，测试才能断言「媒体源页**已经没有** chip 行了」——
+         * 否则「改回 chip 行」这种回退没人拦。
+         */
+        val CHIP_SEG_MARK = Any()
+
+        /**
+         * 操作按钮（[actionButton]）的标记。
+         *
+         * 第151轮用它守住「按钮底边要留间距」——
+         * 之前按钮底边直接贴住下一行的标题，看着像压在上面。
+         */
+        val ACTION_BUTTON_MARK = Any()
 
         /** 局域网传输页的二维码边长（设计 px）。 */
         const val QR_SIZE_PX = 300

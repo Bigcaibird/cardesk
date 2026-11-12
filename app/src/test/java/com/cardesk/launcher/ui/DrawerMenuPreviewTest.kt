@@ -26,10 +26,10 @@ import java.io.File
 import java.io.FileOutputStream
 
 /**
- * 应用抽屉「⋮」菜单与重命名弹窗（第九十五轮 C5）的效果图。
+ * 应用抽屉「长按图标弹出的应用菜单」与重命名弹窗（第九十五轮 C5）的效果图。
  *
  * 渲染两张图供目视检查：
- * 1. `preview/y02-drawer-menu.png`：格子右上角的菜单；
+ * 1. `preview/y02-drawer-menu.png`：长按图标弹出的应用菜单；
  * 2. `preview/y03-drawer-rename.png`：重命名弹窗（预填别名 + 软键盘隐藏）。
  */
 @RunWith(RobolectricTestRunner::class)
@@ -38,7 +38,6 @@ import java.io.FileOutputStream
 class DrawerMenuPreviewTest {
 
     private val dir = File("../preview").apply { mkdirs() }
-    private val moreGlyph = "\u22EE"
 
     private fun <T> findAll(root: View, type: Class<T>): List<T> {
         val out = ArrayList<T>()
@@ -69,14 +68,19 @@ class DrawerMenuPreviewTest {
         )
     }
 
-    private fun menuButton(page: View, label: String): TextView {
+    /**
+     * 找到指定显示名那个**应用格子**（长按弹菜单的宿主）。
+     *
+     * 第152轮：菜单入口从「右上角 ⋮ 按钮」改成了「**长按图标**」，
+     * 所以这里改成往上找带 [DrawerPage.APP_CELL_MARK] 标记的祖先。
+     */
+    private fun menuButton(page: View, label: String): View {
         var node: View? = text(page, label)
         while (node != null) {
-            val button = findAll(node, TextView::class.java).firstOrNull { it.text.toString() == moreGlyph }
-            if (button != null) return button
+            if (node.tag === DrawerPage.APP_CELL_MARK) return node
             node = node.parent as? View
         }
-        error("找不到 $label 格子的 ⋮ 按钮")
+        error("找不到「$label」格子的图标列")
     }
 
     @Test
@@ -98,7 +102,7 @@ class DrawerMenuPreviewTest {
         page.layout(0, 0, 1920, 1080)
         shadowOf(Looper.getMainLooper()).idle()
 
-        menuButton(page, "工作台").performClick()
+        menuButton(page, "工作台").performLongClick()
         shadowOf(Looper.getMainLooper()).idle()
         assertNotNull("菜单应打开", findAll(page, TextView::class.java).firstOrNull { it.text == "重命名" })
         shot(page, "y02-drawer-menu.png")

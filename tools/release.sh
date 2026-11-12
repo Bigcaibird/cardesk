@@ -94,7 +94,7 @@ fi
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/cardesk-release-XXXXXX")"
 echo "== 干净构建目录：$WORK"
 rsync -a --checksum \
-    --exclude build --exclude .gradle --exclude dist --exclude preview \
+    --exclude build --exclude .gradle --exclude dist --exclude dist-dev --exclude preview \
     "$REPO/" "$WORK/"
 
 # ---------------------------------------------------------------- 3) 构建

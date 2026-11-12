@@ -28,7 +28,7 @@ import java.io.FileOutputStream
  * 应用抽屉「禁用 / 启用」（第九十四轮）效果图。
  *
  * 1. `preview/y23-drawer-disabled.png`：禁用应用与可用应用同屏（图标压暗 + 已禁用）；
- * 2. `preview/y23-drawer-disable-menu.png`：禁用应用的 ⋮ 菜单（启用应用）；
+ * 2. `preview/y23-drawer-disable-menu.png`：禁用应用的应用菜单（启用应用）；
  * 3. `preview/y23-drawer-disable-confirm.png`：可用应用的禁用确认弹窗。
  */
 @RunWith(RobolectricTestRunner::class)
@@ -37,7 +37,6 @@ import java.io.FileOutputStream
 class DrawerDisablePreviewTest {
 
     private val dir = File("../preview").apply { mkdirs() }
-    private val moreGlyph = "\u22EE"
 
     private fun <T> findAll(root: View, type: Class<T>): List<T> {
         val out = ArrayList<T>()
@@ -68,14 +67,19 @@ class DrawerDisablePreviewTest {
         )
     }
 
-    private fun menuButton(page: View, label: String): TextView {
+    /**
+     * 找到指定显示名那个**应用格子**（长按弹菜单的宿主）。
+     *
+     * 第152轮：菜单入口从「右上角 ⋮ 按钮」改成了「**长按图标**」，
+     * 所以这里改成往上找带 [DrawerPage.APP_CELL_MARK] 标记的祖先。
+     */
+    private fun menuButton(page: View, label: String): View {
         var node: View? = text(page, label)
         while (node != null) {
-            val button = findAll(node, TextView::class.java).firstOrNull { it.text.toString() == moreGlyph }
-            if (button != null) return button
+            if (node.tag === DrawerPage.APP_CELL_MARK) return node
             node = node.parent as? View
         }
-        error("找不到 $label 格子的 ⋮ 按钮")
+        error("找不到「$label」格子的图标列")
     }
 
     private fun shot(view: View, name: String) {
@@ -105,7 +109,7 @@ class DrawerDisablePreviewTest {
         assertNotNull("禁用应用应有已禁用标记", findAll(page, TextView::class.java).firstOrNull { it.text == "已禁用" })
         shot(page, "y23-drawer-disabled.png")
 
-        menuButton(page, "微信车载").performClick()
+        menuButton(page, "微信车载").performLongClick()
         shadowOf(Looper.getMainLooper()).idle()
         assertNotNull("禁用应用菜单应含启用应用", findAll(page, TextView::class.java).firstOrNull { it.text == "启用应用" })
         shot(page, "y23-drawer-disable-menu.png")
@@ -127,7 +131,7 @@ class DrawerDisablePreviewTest {
         page.layout(0, 0, 1920, 1080)
         shadowOf(Looper.getMainLooper()).idle()
 
-        menuButton(page, "示例应用").performClick()
+        menuButton(page, "示例应用").performLongClick()
         shadowOf(Looper.getMainLooper()).idle()
         text(page, "禁用应用").performClick()
         shadowOf(Looper.getMainLooper()).idle()

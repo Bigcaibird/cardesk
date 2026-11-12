@@ -921,6 +921,13 @@ class LauncherView(context: Context) : FrameLayout(context) {
             onPrev = { MusicController.get().previous() }
             onNext = { MusicController.get().next() }
             onSource = { openSourceMenu(navPage.sourceAnchor) }
+            // 第148轮：**点音乐卡上的封面图** = 切换「歌曲图片当卡片背景」。
+            //
+            // 桌面不是普通 Activity，点完必须立刻给一句话反馈 ——
+            // 关掉背景后卡片只是变成纯色，不说的话用户会以为「点了没反应」。
+            onCoverBackdropToggled = { enabled ->
+                toast(if (enabled) "封面背景已开启" else "封面背景已关闭")
+            }
             onPipFullscreen = { togglePipFullscreen() }
             onSplitToggle = { togglePipFullscreen() }
             pip.onOpenFullscreen = { pkg -> openAppFullscreen(pkg) }
@@ -1383,6 +1390,10 @@ class LauncherView(context: Context) : FrameLayout(context) {
      */
     private fun showDrawer() {
         if (::drawerPage.isInitialized && drawerPage.parent != null) return
+        // 第152轮：打开前先清一遍浮层。
+        // 抽屉页是**长期持有的同一个实例**，上一次没清干净的菜单 / 弹窗
+        // 会跟着实例一起回到窗口上，盖住图标、把所有点击吃掉。
+        drawerPage.clearOverlays()
         drawerPage.reload()
         // 第四十九轮：抽屉改成设计板 `s03-apps` 的**页面级卡片**
         // （left 44 / top 73 / 宽 1876 / 高 867），状态栏和 Dock 仍然可见 ——
@@ -1403,6 +1414,15 @@ class LauncherView(context: Context) : FrameLayout(context) {
             return
         }
         Logx.event(LogTags.DRAWER, "关闭应用抽屉")
+        // 第152轮：抽屉一关，浮层（长按弹出的应用菜单 / 重命名 / 禁用确认）**立刻**清掉。
+        //
+        // 抽屉页是**长期持有的同一个实例**，`removeView` 只是把它从窗口摘掉，
+        // 实例内部的浮层还挂着 —— 下次打开抽屉它们又盖在上面，
+        // 菜单的遮罩会把点击全吃掉，点图标一点反应都没有。
+        //
+        // 放在动画回调前面（而不是回调里）是有意的：浮层不该跟着抽屉
+        // 在屏幕上多停留 240ms。
+        drawerPage.clearOverlays()
         // 面板下滑 56px + 淡出（240ms），结束后摘掉。
         drawerPage.playClose {
             content.removeView(drawerPage)
@@ -3235,6 +3255,11 @@ private fun showCam() {
         // 第111轮：右侧固定「车况卡」的显隐跟着偏好走。
         // 设置页开关 → `prefs.carStatusCardVisible` → 这里 → 场景页。
         scenePage.showCarStatusCard = prefs.carStatusCardVisible
+        // 第148轮：「歌曲图片当卡片背景」的开关跟着偏好走。
+        //
+        // 设置页开关和「点封面图」操作的是**同一个键**（`prefs.navCoverBackdropEnabled`），
+        // 所以这里每轮灌一遍就够 —— 谁改都行，下一轮立刻生效。
+        navPage.coverBackdropEnabled = prefs.navCoverBackdropEnabled
         // 第114轮：首页中央大字歌词的**整体缩放**跟着设置走
         // （设置页滑杆 → `prefs.sceneLyricScalePct` → 这里 → 场景页）。
         scenePage.lyricScale = prefs.sceneLyricScalePct / 100f
@@ -3542,6 +3567,13 @@ private fun showCam() {
             return true
         }
         if (drawerShowing()) {
+            // 第152轮：抽屉里的浮层（长按弹出的应用菜单 / 重命名 / 禁用确认）
+            // **优先于**抽屉本身关闭。
+            //
+            // 不这样分级的话，「长按打开菜单 → 按返回」会连抽屉一起关掉，
+            // 菜单还残留在抽屉页实例里；下次打开抽屉菜单又盖在上面，
+            // 它的遮罩把点击全吃掉，点图标一点反应都没有。
+            if (drawerPage.closeTopOverlay()) return true
             closeDrawer()
             return true
         }

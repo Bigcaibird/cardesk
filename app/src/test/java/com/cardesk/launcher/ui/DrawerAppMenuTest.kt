@@ -28,12 +28,12 @@ import org.robolectric.annotation.Config
  * 应用抽屉的应用菜单（第九十五轮 C5）回归。
  *
  * 钉住三件事：
- * 1. 格子右上角「⋮」菜单能打开（重命名 / 应用信息 / 卸载 / 取消）；
+ * 1. **长按图标**能打开应用菜单（重命名 / 应用信息 / 卸载 / 取消）；
  * 2. 重命名写入 `launcher_app_alias`，抽屉立刻用别名显示；
  * 3. 别名留空 = 恢复系统名称。
  *
  * 注意：Robolectric 里卡面自己的 MainActivity 也是 LAUNCHER 应用，页面里会出现两个
- * 「⋮」，所以必须按「示例应用」格子的祖先去取 ⋮，不能取页面里第一个。
+ * 应用格子，所以必须按「示例应用」格子的祖先去找那个带标记的格子，不能取页面里第一个。
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w1920dp-h1080dp-land")
@@ -42,7 +42,6 @@ class DrawerAppMenuTest {
     private val pkg = "com.example.demo"
     private val cls = "com.example.demo.MainActivity"
     private val demoLabel = "示例应用"
-    private val moreGlyph = "\u22EE"
 
     private fun activity(): MainActivity {
         val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
@@ -80,15 +79,19 @@ class DrawerAppMenuTest {
     private fun text(root: View, value: String): TextView =
         findAll(root, TextView::class.java).first { it.text.toString() == value }
 
-    /** 找到指定显示名那个格子的「⋮」按钮。 */
-    private fun menuButtonOfDemo(page: View, label: String = demoLabel): TextView {
+    /**
+     * 找到指定显示名那个**应用格子**（长按弹菜单的宿主）。
+     *
+     * 第152轮：菜单入口从「右上角 ⋮ 按钮」改成了「**长按图标**」，
+     * 所以这里改成往上找带 [DrawerPage.APP_CELL_MARK] 标记的祖先。
+     */
+    private fun menuButtonOfDemo(page: View, label: String = demoLabel): View {
         var node: View? = text(page, label)
         while (node != null) {
-            val button = findAll(node, TextView::class.java).firstOrNull { it.text.toString() == moreGlyph }
-            if (button != null) return button
+            if (node.tag === DrawerPage.APP_CELL_MARK) return node
             node = node.parent as? View
         }
-        error("找不到示例应用格子的 ⋮ 按钮")
+        error("找不到「$label」格子的图标列")
     }
 
     private fun drawer(a: MainActivity): DrawerPage {
@@ -113,7 +116,7 @@ class DrawerAppMenuTest {
         val grid = findAll(page, GridLayout::class.java).first()
         assertTrue("注入的示例应用应该出现在抽屉里", grid.childCount >= 1)
 
-        menuButtonOfDemo(page).performClick()
+        menuButtonOfDemo(page).performLongClick()
         shadowOf(Looper.getMainLooper()).idle()
         assertNotNull("菜单应包含重命名", findAll(page, TextView::class.java).firstOrNull { it.text == "重命名" })
         assertNotNull("菜单应包含应用信息", findAll(page, TextView::class.java).firstOrNull { it.text == "应用信息" })
@@ -129,7 +132,7 @@ class DrawerAppMenuTest {
         prefs.setAppAlias(pkg, "")
         val page = drawer(a)
 
-        menuButtonOfDemo(page).performClick()
+        menuButtonOfDemo(page).performLongClick()
         shadowOf(Looper.getMainLooper()).idle()
         findAll(page, TextView::class.java).first { it.text == "重命名" }.performClick()
         shadowOf(Looper.getMainLooper()).idle()
@@ -152,7 +155,7 @@ class DrawerAppMenuTest {
         val page = drawer(a)
         assertNotNull("应先显示旧别名", findAll(page, TextView::class.java).firstOrNull { it.text == "旧别名" })
 
-        menuButtonOfDemo(page, "旧别名").performClick()
+        menuButtonOfDemo(page, "旧别名").performLongClick()
         shadowOf(Looper.getMainLooper()).idle()
         findAll(page, TextView::class.java).first { it.text == "重命名" }.performClick()
         shadowOf(Looper.getMainLooper()).idle()

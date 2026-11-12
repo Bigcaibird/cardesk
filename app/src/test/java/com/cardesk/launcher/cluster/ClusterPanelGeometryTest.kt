@@ -47,12 +47,15 @@ class ClusterPanelGeometryTest {
     // ------------------------------------------------------------ widthRatio
 
     @Test
-    fun `widthRatio 不低于五分之一 不高于整屏`() {
+    fun `widthRatio 不低于十分之一 不高于整屏`() {
         assertEquals(
             ClusterPanelGeometry.MIN_WIDTH_RATIO,
             ClusterPanelGeometry.widthRatio(0.01f),
             0.0001f,
         )
+        // 第149轮：下限从 1/5 放宽到 1/10 —— 10% 必须能原样透过去，不能被夹到 20%。
+        assertEquals(0.1f, ClusterPanelGeometry.widthRatio(0.1f), 0.0001f)
+        assertEquals(0.1f, ClusterPanelGeometry.MIN_WIDTH_RATIO, 0.0001f)
         assertEquals(1f, ClusterPanelGeometry.widthRatio(5f), 0.0001f)
     }
 
