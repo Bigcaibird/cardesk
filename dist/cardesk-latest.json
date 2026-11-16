@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1162",
-  "versionCode": 4258,
-  "tag": "v1.0.1162",
-  "name": "CarDesk 4258 / 1.0.1162-system",
-  "notes": "4258：竖向车模再放大（图区 250×312、缩放 0.97，车长约 +9%）",
-  "publishedAt": "2026-11-16T06:00:19Z",
+  "version": "1.0.1163",
+  "versionCode": 4259,
+  "tag": "v1.0.1163",
+  "name": "CarDesk 4259 / 1.0.1163-system",
+  "notes": "4259：胎压胶囊与车轮同一水平线、离车体固定 24px 留缝，且不随门态移动",
+  "publishedAt": "2026-11-16T06:59:36Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4258.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4258.apk",
-    "size": 3473827,
-    "sha256": "e1d6d8e415f5662e160e2dec55ac0b2544d2b6035970d75e2a4557f7c91dbf9b"
+    "name": "CarDesk-platform-ecarx-cardesk-4259.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4259.apk",
+    "size": 3477703,
+    "sha256": "0c8b47eb5086dcdff175bbddf55e459755b3e3caa01a9c6d01df6ef757374940"
   }
 }

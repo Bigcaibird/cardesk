@@ -3,6 +3,7 @@ package com.cardesk.launcher.ui
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.PointF
 import android.graphics.RectF
 import com.cardesk.launcher.core.Palettes
 import com.cardesk.launcher.core.Skin
@@ -43,6 +44,8 @@ class CarStatusTirePillTest {
     private val cardH = 380f
 
     /** 车模图区（第182轮竖放：x=71，y=34，246×300，水平居中）。 */
+    private var lastScene: ScenePage? = null
+
     private val image = RectF(71f, 34f, 317f, 334f)
 
     /** 真机 TPMS 报的是 kPa（这里画成 bar 的显示口径）。 */
@@ -61,6 +64,7 @@ class CarStatusTirePillTest {
         // `Skin.apply(resolvePalette())` 一次（按系统时间解日夜），会覆盖前面套的值。
         Skin.apply(if (night) Palettes.night else Palettes.day)
         val scene = ScenePage(activity)
+        lastScene = scene
         val vehicleInfo = VehicleInfo(ambientTemp = 24f, rangeKm = 386, tires = tires, source = "测试")
         scene.bind(vehicleInfo, HvacState(), 0)
 
@@ -74,22 +78,29 @@ class CarStatusTirePillTest {
             RectF::class.java,
             RectF::class.java,
             Boolean::class.javaPrimitiveType,
+            android.content.Context::class.java,
         ).apply { isAccessible = true }
-        m.invoke(scene, canvas, RectF(0f, 0f, cardW, cardH), vehicleInfo, image, null, true)
+        m.invoke(scene, canvas, RectF(0f, 0f, cardW, cardH), vehicleInfo, image, null, true, activity)
         return bmp
     }
 
-    /** 左上角那颗胶囊在卡里的矩形（与 `drawTirePills` 的摆位规则一致）。 */
+    /**
+     * 左上角那颗胶囊在卡里的矩形。
+     *
+     * 第183轮起摆位改成「按关车态参考框 + 后轮可上移」，不再能从图区四角直接算，
+     * 所以直接读 `drawTirePills` 记录下来的实际中心（`lastTirePillCenters`）。
+     */
     private fun pillRect(): RectF {
         val w = ScenePage::class.java.getDeclaredField("TIRE_PILL_W").apply { isAccessible = true }
             .get(null) as Float
         val h = ScenePage::class.java.getDeclaredField("TIRE_PILL_H").apply { isAccessible = true }
             .get(null) as Float
-        val inset = ScenePage::class.java.getDeclaredField("CAR_TIRE_INSET").apply { isAccessible = true }
-            .get(null) as Float
-        val cx = image.left + w / 2f + inset
-        val cy = image.top + h / 2f + inset
-        return RectF(cx - w / 2f, cy - h / 2f, cx + w / 2f, cy + h / 2f)
+        val centersField = ScenePage::class.java.getDeclaredField("lastTirePillCenters")
+            .apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        val centers = centersField.get(lastScene!!) as List<PointF>
+        val c = centers[0]
+        return RectF(c.x - w / 2f, c.y - h / 2f, c.x + w / 2f, c.y + h / 2f)
     }
 
     /** 相对亮度（0..1）。 */

@@ -7,6 +7,7 @@ import android.graphics.Canvas
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.PointF
 import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
@@ -203,6 +204,15 @@ class ScenePage(context: Context) : View(context) {
             field = next
             invalidate()
         }
+
+    /** 第183轮：最近一次画出的四颗胎压中心（画布坐标）。测试/验收用来核对「与门态无关」。 */
+    internal var lastTirePillCenters: List<PointF> = emptyList()
+
+    /** 第184轮：最近一次绘制车模用的图区（画布坐标），供测试把 mask 像素映射回来。 */
+    internal var lastCarImageRect: RectF? = null
+
+    /** 临时诊断：胶囊布局用到的 r / image / ref。 */
+    internal var debugPillGeom: String = ""
 
     /**
      * 当前主题下的车模配色（夜 / 日两套）。
@@ -2413,6 +2423,9 @@ class ScenePage(context: Context) : View(context) {
      * 只读 [info]（每秒由 `LauncherView` 刷新一次），**不会额外触发任何通道读取**；
      * 车窗沿用本页的乐观值合并（[resolveWindowOpenFlags]）。
      */
+    /** 当前车型对应的资产目录（null = 没烘焙，走 2D 回退）。 */
+    private fun assetDirOrNull(): String? = CarModels.assetDir(carModel)
+
     private fun car3dPose(): CarPose {
         // 调试注入优先（仅 debuggable 变体，见 Car3dDebugPose）：模拟器截图用。
         com.cardesk.launcher.core.car3d.Car3dDebugPose.pose?.let { return it }
@@ -2632,7 +2645,8 @@ class ScenePage(context: Context) : View(context) {
         drawSnapshotStatusText(canvas, r, items)
 
         // —— 胎压：四个小胶囊贴到各自的轮子旁（锚点来自资产）——
-        drawTirePills(canvas, r, i, imageRect, car3d.lastCarBounds, topDown)
+        lastCarImageRect = RectF(imageRect)
+        drawTirePills(canvas, r, i, imageRect, closedRefBounds(context, assetDirOrNull(), imageRect), topDown, context)
     }
 
     /**
@@ -2694,6 +2708,115 @@ class ScenePage(context: Context) : View(context) {
     }
 
     /**
+     * 第183轮：四颗胎压的**中心坐标**（画布坐标）。抽成纯函数是为了让测试/验收能拿到数字，
+     * 也保证「开门态」与「全关态」用的是同一套位置（只依赖 [ref] 关车态参考框）。
+     *
+     * 俯视竖放时：k=0 左上前轮、1 右上前轮、2 左下后轮、3 右下后轮；
+     * 后轮两颗在第184轮改为「卡内侧下方两角」（由 `drawTirePills` 覆盖），这里只给初值。
+     */
+    /** 胶囊矩形到「关车态车体像素」的最近距离（设计 px）；用来判断上移后会不会贴住车漆。 */
+    private fun minDistanceToCar(mask: android.graphics.Bitmap, image: RectF, left: Float, top: Float): Float {
+        val pillW = TIRE_PILL_W
+        val pillH = TIRE_PILL_H
+        val sx = mask.width / image.width()
+        val sy = mask.height / image.height()
+        val pad = 12f
+        val x0 = ((left - pad - image.left) * sx).toInt().coerceAtLeast(0)
+        val y0 = ((top - pad - image.top) * sy).toInt().coerceAtLeast(0)
+        val x1 = ((left + pillW + pad - image.left) * sx).toInt().coerceAtMost(mask.width - 1)
+        val y1 = ((top + pillH + pad - image.top) * sy).toInt().coerceAtMost(mask.height - 1)
+        var best = Float.MAX_VALUE
+        val r = RectF(left, top, left + pillW, top + pillH)
+        for (y in y0..y1) {
+            for (x in x0..x1) {
+                if ((mask.getPixel(x, y) ushr 24) < 200) continue
+                val px = image.left + x / sx
+                val py = image.top + y / sy
+                val dx = when {
+                    px < r.left -> r.left - px
+                    px > r.right -> px - r.right
+                    else -> 0f
+                }
+                val dy = when {
+                    py < r.top -> r.top - py
+                    py > r.bottom -> py - r.bottom
+                    else -> 0f
+                }
+                val d = kotlin.math.hypot(dx, dy)
+                if (d < best) best = d
+            }
+        }
+        return if (best == Float.MAX_VALUE) 999f else best
+    }
+
+    internal fun tirePillCenters(r: RectF, image: RectF, ref: RectF?, topDown: Boolean): List<PointF> {
+        val hw = TIRE_PILL_W / 2f
+        val hh = TIRE_PILL_H / 2f
+        val out = ArrayList<PointF>(4)
+        for (k in 0 until 4) {
+            if (!topDown) {
+                val lx = (r.left + CAR_TIRE_LEGACY_X[k] * CAR_STATUS_CARD_W)
+                    .coerceIn(r.left + 4f + hw, r.right - 4f - hw)
+                val ly = (r.top + CAR_TIRE_LEGACY_Y[k] * CAR_STATUS_CARD_H)
+                    .coerceIn(r.top + 4f + hh, r.top + CAR_STATUS_CARD_H - 4f - hh)
+                out.add(PointF(lx, ly))
+                continue
+            }
+            val insetX = hw + CAR_TIRE_INSET
+            val insetY = hh + CAR_TIRE_INSET
+            var x = if (k % 2 == 0) image.left + insetX else image.right - insetX
+            var y = if (k < 2) image.top + insetY else image.bottom - insetY
+            // 第184轮：前轮两颗贴「关车态车体框」左右两侧、上下留 6px（此前贴的是图区边，离车体可能不足 6px）。
+            if (ref != null && k < 2) {
+                x = if (k % 2 == 0) ref.left - 6f - hw else ref.right + 6f + hw
+                y = ref.top - 6f - hh
+            }
+            if (ref != null) {
+                val vy = y + hh > ref.top - 6f && y - hh < ref.bottom + 6f
+                val vx = x + hw > ref.left - 6f && x - hw < ref.right + 6f
+                if (vy) {
+                    if (k % 2 == 0) {
+                        if (x + hw > ref.left - 6f) x = ref.left - 6f - hw
+                    } else if (x - hw < ref.right + 6f) {
+                        x = ref.right + 6f + hw
+                    }
+                }
+                if (vx) {
+                    if (k < 2) {
+                        if (y + hh > ref.top - 6f) y = ref.top - 6f - hh
+                    } else {
+                        val gap = (y - hh) - ref.bottom
+                        if (gap < 6f) y = ref.bottom + 6f + hh
+                    }
+                }
+            }
+            x = x.coerceIn(r.left + 4f + hw, r.right - 4f - hw)
+            y = y.coerceIn(r.top + 4f + hh, r.top + CAR_STATUS_CARD_H - 4f - hh)
+            out.add(PointF(x, y))
+        }
+        return out
+    }
+
+    /**
+     * 关车态（`closed`）车体实心外接框，换算成画布坐标。
+     *
+     * 关键：**只看 closed 一张图**，与当前门态无关 —— 这样开门时胶囊不会跟着车体框变大而外推
+     * （用户第183轮反馈「开门后胎压离车更远」就是旧逻辑按当前状态算造成的）。
+     */
+    private fun closedRefBounds(context: Context, dir: String?, image: RectF): RectF? {
+        if (dir == null || !Car3dSettings.enabled) return null
+        val (slotW, slotH) = Car3dAssets.slotOf(context, dir, Car3dAssets.VIEW_CARDTOP) ?: return null
+        val n = Car3dAssets.closedBoundsNorm(context, dir, Car3dAssets.VIEW_CARDTOP, slotW, slotH)
+            ?: return null
+        return RectF(
+            image.left + n.left * image.width(),
+            image.top + n.top * image.height(),
+            image.left + n.right * image.width(),
+            image.top + n.bottom * image.height(),
+        )
+    }
+
+    /**
      * 胎压贴轮（第170轮）：四个小胶囊画在各自轮子旁边，不再排一排放在卡底。
      *
      * 锚点取 `anchors.<view>.tires.{fl,fr,rl,rr}`（兼容扁平写法 `tire_*`）；
@@ -2713,8 +2836,9 @@ class ScenePage(context: Context) : View(context) {
         r: RectF,
         i: VehicleInfo,
         image: RectF,
-        carBounds: RectF?,
+        closedRef: RectF?,
         topDown: Boolean,
+        context: Context,
     ) {
         text.typeface = Typeface.DEFAULT
         text.textAlign = Paint.Align.CENTER
@@ -2734,44 +2858,37 @@ class ScenePage(context: Context) : View(context) {
         val legacyX = CAR_TIRE_LEGACY_X
         val legacyY = CAR_TIRE_LEGACY_Y
 
-        // 第181轮：俯视模式改成「贴车体四角外侧」——胶囊内缘离车体边界正好 [CAR_TIRE_INSET]，
-        // 这样车模下沉/缩小后胎压会跟着车走，不会出现「车缩了、胶囊还留在图区角上贴车」。
-        val cb = if (topDown) (carBounds ?: image) else image
+        // 第183轮（用户反馈）：胶囊位置**只按关车态参考框**算 —— 开门时车体框会变大，
+        // 旧逻辑会把胶囊往外推，看起来「开门后胎压离车更远」；现在位置与门态无关。
+        // 第184轮：后轮两颗不能在车尾正下方（那里只有 380 卡高、会和状态文字打架），
+        // 改到「卡内侧下方两角」：x 贴卡边 14px；y 让底边离状态文字顶边 6px。
+        val ref = if (topDown) (closedRef ?: image) else null
+        debugPillGeom = "r=$r image=$image ref=$ref top=$topDown"
+        val centers = tirePillCenters(r, image, ref, topDown).toMutableList()
+        if (topDown) {
+            // 第185轮（用户澄清）：「胎压的位置和车轮在同一水平线」—— y 取竖版锚点 tires.*[1]，
+            // x 仍贴卡边（锚点在左半走左列、右半走右列），保证不压车。
+            val anchors = Car3dAssets.anchors(context, assetDirOrNull(), Car3dAssets.VIEW_CARDTOP)
+            if (anchors != null) {
+                val keys = arrayOf("tires.fl", "tires.fr", "tires.rl", "tires.rr")
+                val body = ref ?: image
+                for (k in 0 until 4) {
+                    val a = anchors[keys[k]] ?: continue
+                    // x：离「关车态车体框」左右边固定留 GAP（用户：稍微留点缝隙，不是贴卡边）。
+                    val x = if (a.x < 0.5f) body.left - CAR_TIRE_GAP - pillW / 2f
+                    else body.right + CAR_TIRE_GAP + pillW / 2f
+                    centers[k] = PointF(
+                        x.coerceIn(r.left + 4f + pillW / 2f, r.right - 4f - pillW / 2f),
+                        (image.top + a.y * image.height())
+                            .coerceIn(r.top + 4f + pillH / 2f, r.bottom - 4f - pillH / 2f),
+                    )
+                }
+            }
+        }
         val items = ArrayList<Item>(4)
         for (k in 0 until 4) {
-            val (px, py) = if (topDown) {
-                val hw = pillW / 2f
-                val hh = pillH / 2f
-                // 起点：图区四角 + [CAR_TIRE_INSET]。
-                var x = if (k % 2 == 0) image.left + insetX else image.right - insetX
-                var y = if (k < 2) image.top + insetY else image.bottom - insetY
-                // 若和车体（实心外接框）确实重叠，再往对应方向让到 6px；错开的轴不动。
-                if (carBounds != null) {
-                    if (y + hh > cb.top && y - hh < cb.bottom) {
-                        if (k % 2 == 0) {
-                            if (x + hw > cb.left - 6f) x = cb.left - 6f - hw
-                        } else {
-                            if (x - hw < cb.right + 6f) x = cb.right + 6f + hw
-                        }
-                    }
-                    if (x + hw > cb.left && x - hw < cb.right) {
-                        if (k < 2) {
-                            if (y + hh > cb.top - 6f) y = cb.top - 6f - hh
-                        } else {
-                            if (y - hh < cb.bottom + 6f) y = cb.bottom + 6f + hh
-                        }
-                    }
-                }
-                x = x.coerceIn(r.left + 4f + hw, r.right - 4f - hw)
-                y = y.coerceIn(r.top + 4f + hh, r.top + CAR_STATUS_CARD_H - 4f - hh)
-                x to y
-            } else {
-                val lx = (r.left + legacyX[k] * CAR_STATUS_CARD_W)
-                    .coerceIn(r.left + 4f + pillW / 2f, r.right - 4f - pillW / 2f)
-                val ly = (r.top + legacyY[k] * CAR_STATUS_CARD_H)
-                    .coerceIn(r.top + 4f + pillH / 2f, r.top + CAR_STATUS_CARD_H - 4f - pillH / 2f)
-                lx to ly
-            }
+            val px = centers[k].x
+            val py = centers[k].y
 
             val raw = i.tires.getOrNull(k)?.takeIf { !it.isNaN() && it > 0f }
             val bad = raw == null
@@ -2795,6 +2912,8 @@ class ScenePage(context: Context) : View(context) {
                 items[a] = moved
             }
         }
+
+        lastTirePillCenters = items.map { PointF(it.cx, it.cy) }
 
         for (it in items) {
             val left = it.cx - pillW / 2f
@@ -3618,6 +3737,15 @@ class ScenePage(context: Context) : View(context) {
          * （见 `drawTirePills`），所以换车型/门态也不会压到车。
          */
         const val CAR_TIRE_INSET = 14f
+
+        /** 第184轮：后轮两颗胶囊贴卡边的外边距（设计 px）。 */
+        const val CAR_TIRE_EDGE_MARGIN = 14f
+
+        /** 第185轮：胎压胶囊与「关车态车体框」固定留缝（设计 px）。 */
+        const val CAR_TIRE_GAP = 24f
+
+        /** 第184轮：后轮两颗胶囊中心 y（卡内设计 px，底边离状态文字顶边 6px）。 */
+        const val CAR_TIRE_REAR_Y = 310f
 
         // -------------------------------------------------- 胎压胶囊（第180轮：字号 ×2）
         //

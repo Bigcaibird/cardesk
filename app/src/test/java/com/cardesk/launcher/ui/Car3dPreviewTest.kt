@@ -20,6 +20,8 @@ import com.cardesk.launcher.vehicle.HvacState
 import com.cardesk.launcher.vehicle.VehicleInfo
 import java.io.File
 import java.io.FileOutputStream
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import java.time.Duration
 import org.junit.After
 import org.junit.Before
@@ -114,6 +116,110 @@ class Car3dPreviewTest {
         FileOutputStream(File(dir, "car3d-$name.png")).use {
             big.compress(Bitmap.CompressFormat.PNG, 100, it)
         }
+    }
+
+    @Test
+    fun `第185轮 胎压与车轮同一水平线 位置与门态无关`() {
+        val app = RuntimeEnvironment.getApplication()
+        Car3dSettings.enabled = true
+        data class R(val centers: List<android.graphics.PointF>, val ref: RectF, val image: RectF, val anchors: Map<String, com.cardesk.launcher.core.car3d.CardSnapshot.NormPoint>)
+
+        fun render(doors: List<Boolean?>): R {
+            val page = ScenePage(app)
+            page.carModel = "01"
+            page.showCarStatusCard = true
+            page.bind(
+                VehicleInfo(
+                    rangeKm = 386, fuelPercent = 62,
+                    doorsClosed = doors, doorsAllClosed = doors.all { it == true },
+                    hoodClosed = true, trunkClosed = true,
+                    windowsOpen = booleanArrayOf(false, false, false, false), windowsAllClosed = true,
+                    tires = floatArrayOf(240f, 240f, 238f, 235f),
+                ),
+                HvacState(), 0,
+            )
+            page.measure(
+                View.MeasureSpec.makeMeasureSpec(1920, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
+            )
+            page.layout(0, 0, 1920, 1080)
+            page.draw(Canvas(Bitmap.createBitmap(1920, 1080, Bitmap.Config.ARGB_8888)))
+            val image = RectF(page.lastCarImageRect!!)
+            val slot = Car3dAssets.slotOf(app, "lynk01", Car3dAssets.VIEW_CARDTOP)!!
+            val n = Car3dAssets.closedBoundsNorm(app, "lynk01", Car3dAssets.VIEW_CARDTOP, slot.first, slot.second)!!
+            val ref = RectF(
+                image.left + n.left * image.width(), image.top + n.top * image.height(),
+                image.left + n.right * image.width(), image.top + n.bottom * image.height(),
+            )
+            val anchors = Car3dAssets.anchors(app, "lynk01", Car3dAssets.VIEW_CARDTOP)!!
+            return R(page.lastTirePillCenters, ref, image, anchors)
+        }
+
+        val a = render(listOf(true, true, true, true))
+        val b = render(listOf(false, true, true, true))
+        val closed = a.centers
+        assertEquals("四颗胎压", 4, closed.size)
+        for (k in 0 until 4) {
+            assertEquals("第 $k 颗 x 与门态无关", closed[k].x, b.centers[k].x, 0.01f)
+            assertEquals("第 $k 颗 y 与门态无关", closed[k].y, b.centers[k].y, 0.01f)
+        }
+        // y 和对应车轮锚点同一水平线；x 贴卡边（左 14..66 / 右 322..374）
+        val keys = arrayOf("tires.fl", "tires.fr", "tires.rl", "tires.rr")
+        for (k in 0 until 4) {
+            val an = a.anchors[keys[k]] ?: error("缺锚点 $k")
+            val wantY = a.image.top + an.y * a.image.height()
+            assertEquals("第 $k 颗 y 应与锚点同水平线", wantY, closed[k].y, 0.6f)
+            val wantX = if (an.x < 0.5f) a.ref.left - 24f - 26f else a.ref.right + 24f + 26f
+            assertEquals("第 $k 颗 x 应离车体 24px", wantX, closed[k].x, 0.6f)
+        }
+        assertEquals("前轮两颗同 y", closed[0].y, closed[1].y, 0.01f)
+        assertEquals("后轮两颗同 y", closed[2].y, closed[3].y, 0.01f)
+        // 状态文字保守框：x 从卡内 16 起、基线 352、13px 字 → 取 339..356
+        val statusRect = RectF(1488f + 16f, 376f + 339f, 1488f + 250f, 376f + 356f)
+        for (k in 0 until 4) {
+            val pill = RectF(closed[k].x - 26f, closed[k].y - 23f, closed[k].x + 26f, closed[k].y + 23f)
+            assertFalse("第 $k 颗胶囊不能压状态文字：$pill vs $statusRect", RectF.intersects(pill, statusRect))
+        }
+        // 与车漆像素最近距离 ≥6px
+        val slot3 = Car3dAssets.slotOf(app, "lynk01", Car3dAssets.VIEW_CARDTOP)!!
+        val mask = Car3dAssets.closedBitmap(app, "lynk01", Car3dAssets.VIEW_CARDTOP, slot3.first, slot3.second)!!
+        val sx = a.image.width() / mask.width
+        val sy = a.image.height() / mask.height
+        val dists = FloatArray(4)
+        for (k in 0 until 4) {
+            val pl = closed[k].x - 26f; val pt = closed[k].y - 23f
+            val pr = closed[k].x + 26f; val pb = closed[k].y + 23f
+            var best = Float.MAX_VALUE
+            for (my in 0 until mask.height step 2) {
+                for (mx in 0 until mask.width step 2) {
+                    if ((mask.getPixel(mx, my) ushr 24) < 200) continue
+                    val ax = a.image.left + mx * sx
+                    val ay = a.image.top + my * sy
+                    if (ax < pl - 80f || ax > pr + 80f || ay < pt - 80f || ay > pb + 80f) continue
+                    val dx = when { ax < pl -> pl - ax; ax > pr -> ax - pr; else -> 0f }
+                    val dy = when { ay < pt -> pt - ay; ay > pb -> ay - pb; else -> 0f }
+                    val d = kotlin.math.hypot(dx, dy)
+                    if (d < best) best = d
+                }
+            }
+            dists[k] = best
+            assertTrue("第 $k 颗胶囊离车漆应在 20~40px，实际 $best", best in 20f..40f)
+        }
+        val out = java.io.File("../preview/review13").apply { mkdirs() }
+        java.io.File(out, "pill-centers-01.txt").writeText(
+            "closed: " + closed.joinToString(" ") { "(%.1f, %.1f)".format(it.x - 1488f, it.y - 376f) } +
+                "\nlf    : " + b.centers.joinToString(" ") { "(%.1f, %.1f)".format(it.x - 1488f, it.y - 376f) } +
+                "\nanchors: fl(%.3f,%.3f) fr(%.3f,%.3f) rl(%.3f,%.3f) rr(%.3f,%.3f)".format(
+                    a.anchors["tires.fl"]!!.x, a.anchors["tires.fl"]!!.y,
+                    a.anchors["tires.fr"]!!.x, a.anchors["tires.fr"]!!.y,
+                    a.anchors["tires.rl"]!!.x, a.anchors["tires.rl"]!!.y,
+                    a.anchors["tires.rr"]!!.x, a.anchors["tires.rr"]!!.y,
+                ) +
+                "\ndist-to-paint(px): %.1f / %.1f / %.1f / %.1f".format(dists[0], dists[1], dists[2], dists[3]) +
+                "\nimage: (%.1f, %.1f)-(%.1f, %.1f)".format(
+                    a.image.left - 1488f, a.image.top - 376f, a.image.right - 1488f, a.image.bottom - 376f,
+                ),
+        )
     }
 
     @Test

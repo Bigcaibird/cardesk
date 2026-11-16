@@ -3,6 +3,7 @@ package com.cardesk.launcher.core.car3d
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.RectF
 import com.cardesk.launcher.core.CarModels
 import com.cardesk.launcher.core.Prefs
 import com.cardesk.launcher.core.log.LogTags
@@ -330,6 +331,60 @@ object Car3dAssets {
         return if (model(context, FALLBACK_DIR) != null) FALLBACK_DIR else null
     }
 
+    /**
+     * 关车态（`closed`）底图（槽位分辨率），给「胶囊离车体实际像素 ≥6px」用。
+     * 与 [closedBoundsNorm] 共用同一张缓存位图（LRU 里本来就有），不额外解码。
+     */
+    fun closedBitmap(context: Context, dir: String?, view: String, w: Int, h: Int, color: String? = null): Bitmap? {
+        val d = effectiveDir(context, dir) ?: return null
+        if (w <= 0 || h <= 0) return null
+        return stateBitmap(context, d, view, STATE_CLOSED, w, h, color)
+    }
+
+    private val closedBounds = HashMap<String, RectF?>()
+
+    /**
+     * 关车态（`closed`）车体实心像素的归一化外接框（0..1，相对整张图）。
+     *
+     * 第183轮：胎压胶囊位置必须**与门态无关** —— 开门图的车体框更大，按它算会把胶囊往外推。
+     * 这里只在 closed 图上扫一次（alpha≥200），按 `dir/view@WxH` 缓存；`reset()` 清空。
+     */
+    fun closedBoundsNorm(
+        context: Context,
+        dir: String?,
+        view: String,
+        w: Int,
+        h: Int,
+        color: String? = null,
+    ): RectF? {
+        val d = effectiveDir(context, dir) ?: return null
+        if (w <= 0 || h <= 0) return null
+        val key = "$d/$view@${w}x$h"
+        val cached = synchronized(this) { closedBounds[key] }
+        if (cached != null) return cached
+        if (synchronized(this) { closedBounds.containsKey(key) }) return null
+        val bmp = stateBitmap(context, d, view, STATE_CLOSED, w, h, color) ?: run {
+            synchronized(this) { closedBounds[key] = null }
+            return null
+        }
+        var l = w; var t = h; var r = -1; var b = -1
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                if ((bmp.getPixel(x, y) ushr 24) >= 200) {
+                    if (x < l) l = x
+                    if (x > r) r = x
+                    if (y < t) t = y
+                    if (y > b) b = y
+                }
+            }
+        }
+        val rect = if (r < 0 || b < 0) null else RectF(
+            l.toFloat() / w, t.toFloat() / h, (r + 1).toFloat() / w, (b + 1).toFloat() / h,
+        )
+        synchronized(this) { closedBounds[key] = rect }
+        return rect
+    }
+
     fun model(context: Context, dir: String?): Model? {
         if (dir.isNullOrEmpty()) return null
         synchronized(this) {
@@ -505,6 +560,7 @@ object Car3dAssets {
             missing.clear()
             failures.clear()
             animUsable.clear()
+            closedBounds.clear()
             bytes = 0
             lastError = null
         }

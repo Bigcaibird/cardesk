@@ -408,6 +408,16 @@ def run_top_only(args, dst, slot):
 
     anchors = _load_anchors(slot)
     top_anchors = anchors.get(TOP_ONLY_VIEW, {}) if isinstance(anchors, dict) else {}
+    if vertical and isinstance(top_anchors, dict) and top_anchors:
+        # 母版逆时针 90°（车头朝右 → 朝上）：归一化坐标 (x,y) → (y, 1-x)
+        def _rot_node(node):
+            if isinstance(node, dict):
+                return {k: _rot_node(v) for k, v in node.items()}
+            if isinstance(node, (list, tuple)) and len(node) == 2:
+                x, y = float(node[0]), float(node[1])
+                return [round(y, 4), round(1.0 - x, 4)]
+            return node
+        top_anchors = _rot_node(top_anchors)
     model = {
         "format": "cardesk.car3d/1",
         "model": meta["model"],
