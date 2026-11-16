@@ -48,6 +48,16 @@ object Car3dPainter {
      */
     class Scene(private val host: View) {
 
+        /**
+         * 最近一次绘制里「车模实心像素」的外接框（画布坐标）。
+         *
+         * 第181轮：胎压胶囊要「浮在四角但不贴车」，需要一个真实的车体边界；
+         * 位图四周有大量透明留白（阴影/取景），用绘制矩形当车体边界会算不准。
+         */
+        var lastCarBounds: android.graphics.RectF? = null
+            private set
+
+
         private var dir: String? = null
         private var rich = false
         private var target: CarPose? = null
@@ -184,11 +194,42 @@ object Car3dPainter {
                 rect
             }
             canvas.drawBitmap(bmp, null, dst, filterPaint)
+            lastCarBounds = opaqueBounds(bmp, dst)
             if (unknown && animKind == null) {
                 // 「读不到」角标：一个很小的暗点，和车况卡图例的「--」对应。
                 canvas.drawCircle(dst.right - 9f, dst.top + 9f, 4.5f, badgePaint)
             }
             return true
+        }
+
+        /** 扫 alpha≥200 的实心像素，映射到画布坐标；全透明返回 null。 */
+        private fun opaqueBounds(bmp: android.graphics.Bitmap, dst: android.graphics.RectF): android.graphics.RectF? {
+            val bw = bmp.width
+            val bh = bmp.height
+            if (bw <= 0 || bh <= 0) return null
+            var minX = bw
+            var minY = bh
+            var maxX = -1
+            var maxY = -1
+            for (y in 0 until bh) {
+                for (x in 0 until bw) {
+                    if (((bmp.getPixel(x, y) ushr 24) and 0xFF) >= 200) {
+                        if (x < minX) minX = x
+                        if (y < minY) minY = y
+                        if (x > maxX) maxX = x
+                        if (y > maxY) maxY = y
+                    }
+                }
+            }
+            if (maxX < 0) return null
+            val sx = dst.width() / bw
+            val sy = dst.height() / bh
+            return android.graphics.RectF(
+                dst.left + minX * sx,
+                dst.top + minY * sy,
+                dst.left + (maxX + 1) * sx,
+                dst.top + (maxY + 1) * sy,
+            )
         }
 
         /** 清掉本地状态（测试用；资产缓存清理由 [Car3dAssets.reset] 负责）。 */

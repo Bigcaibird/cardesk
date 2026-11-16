@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1158",
-  "versionCode": 4254,
-  "tag": "v1.0.1158",
-  "name": "CarDesk 4254 / 1.0.1158-system",
-  "notes": "4254：去掉全部车型的门缝橙色描边；修复 03 俯视车顶白斑（统一俯视光位）",
-  "publishedAt": "2026-11-16T03:55:09Z",
+  "version": "1.0.1159",
+  "versionCode": 4255,
+  "tag": "v1.0.1159",
+  "name": "CarDesk 4255 / 1.0.1159-system",
+  "notes": "第181轮：车况卡车模整体下沉 10px、缩到 92%，四角胎压与车模留缝（≥14px，离车不足 6px 自动外让）；门缝橙色描边全下线；纯俯视 32 态（01/03/05），隐藏已无意义的「车况卡视角」设置项。",
+  "publishedAt": "2026-11-16T04:59:58Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4254.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4254.apk",
-    "size": 3467711,
-    "sha256": "e9857f64e425ba95b0bbe756b5a41cc27a43f26121a5720a13081b6f441c212b"
+    "name": "CarDesk-platform-ecarx-cardesk-4255.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4255.apk",
+    "size": 3468807,
+    "sha256": "3fa99b36b13560ba97f077a175fbcb096cfd1b438be9b1819841d94db4c99b57"
   }
 }

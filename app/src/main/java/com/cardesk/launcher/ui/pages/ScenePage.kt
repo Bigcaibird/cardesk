@@ -2611,7 +2611,19 @@ class ScenePage(context: Context) : View(context) {
         } else {
             carArea
         }
-        val car3dPainted = car3d.paint(canvas, context, cardView, image, fit = false)
+        // 第181轮（选型 A）：俯视车模**整体下沉 [CAR_TOP_SHIFT_Y] + 缩到 [CAR_TOP_SCALE]**，
+        // 让四角胎压有呼吸感；宽高比不变，中心仍是图区中心（只加垂直位移）。
+        // 03/05 的旧 3/4 视角不走这段（它们没有俯视资产，保持原尺寸）。
+        val imageRect = if (topDown) {
+            val cx = image.centerX()
+            val cy = image.centerY()
+            val hw = image.width() / 2f * CAR_TOP_SCALE
+            val hh = image.height() / 2f * CAR_TOP_SCALE
+            RectF(cx - hw, cy - hh + CAR_TOP_SHIFT_Y, cx + hw, cy + hh + CAR_TOP_SHIFT_Y)
+        } else {
+            image
+        }
+        val car3dPainted = car3d.paint(canvas, context, cardView, imageRect, fit = false)
         if (!car3dPainted) {
             val frame = CarTopPainter.frame(carArea.centerX(), carArea.centerY(), CAR_STATUS_MODEL_W, CAR_STATUS_MODEL_H)
             CarTopPainter.draw(canvas, frame, CarTopGeometryFactory.of(carModel), carColors)
@@ -2622,7 +2634,7 @@ class ScenePage(context: Context) : View(context) {
         drawSnapshotStatusText(canvas, r, items)
 
         // —— 胎压：四个小胶囊贴到各自的轮子旁（锚点来自资产）——
-        drawTirePills(canvas, r, i, image, dir, usedView, topDown)
+        drawTirePills(canvas, r, i, imageRect, car3d.lastCarBounds, topDown)
     }
 
     /**
@@ -2703,8 +2715,7 @@ class ScenePage(context: Context) : View(context) {
         r: RectF,
         i: VehicleInfo,
         image: RectF,
-        dir: String?,
-        usedView: String,
+        carBounds: RectF?,
         topDown: Boolean,
     ) {
         text.typeface = Typeface.DEFAULT
@@ -2715,8 +2726,9 @@ class ScenePage(context: Context) : View(context) {
         // 第178轮（俯视横置）：四颗胎压先按「图区四角、离车 12px」摆 ——
         // fl 左上 / fr 右上 / rl 左下 / rr 右下，不画引线；实拍后再按车轮廓微调。
         // 可调常量：胶囊中心离图区左右/上下边的距离（实拍后按车轮廓微调这里）。
-        val insetX = pillW / 2f + CAR_TIRE_INSET
-        val insetY = pillH / 2f + CAR_TIRE_INSET
+        val tireInset = CAR_TIRE_INSET
+        val insetX = pillW / 2f + tireInset
+        val insetY = pillH / 2f + tireInset
 
         class Item(val value: String, val abnormal: Boolean, val cx: Float, val cy: Float)
 
@@ -2724,21 +2736,43 @@ class ScenePage(context: Context) : View(context) {
         val legacyX = CAR_TIRE_LEGACY_X
         val legacyY = CAR_TIRE_LEGACY_Y
 
+        // 第181轮：俯视模式改成「贴车体四角外侧」——胶囊内缘离车体边界正好 [CAR_TIRE_INSET]，
+        // 这样车模下沉/缩小后胎压会跟着车走，不会出现「车缩了、胶囊还留在图区角上贴车」。
+        val cb = if (topDown) (carBounds ?: image) else image
         val items = ArrayList<Item>(4)
         for (k in 0 until 4) {
-            val px = if (topDown) {
-                (if (k % 2 == 0) image.left + insetX else image.right - insetX)
-                    .coerceIn(r.left + 4f + pillW / 2f, r.right - 4f - pillW / 2f)
+            val (px, py) = if (topDown) {
+                val hw = pillW / 2f
+                val hh = pillH / 2f
+                // 起点：图区四角 + [CAR_TIRE_INSET]。
+                var x = if (k % 2 == 0) image.left + insetX else image.right - insetX
+                var y = if (k < 2) image.top + insetY else image.bottom - insetY
+                // 若和车体（实心外接框）确实重叠，再往对应方向让到 6px；错开的轴不动。
+                if (carBounds != null) {
+                    if (y + hh > cb.top && y - hh < cb.bottom) {
+                        if (k % 2 == 0) {
+                            if (x + hw > cb.left - 6f) x = cb.left - 6f - hw
+                        } else {
+                            if (x - hw < cb.right + 6f) x = cb.right + 6f + hw
+                        }
+                    }
+                    if (x + hw > cb.left && x - hw < cb.right) {
+                        if (k < 2) {
+                            if (y + hh > cb.top - 6f) y = cb.top - 6f - hh
+                        } else {
+                            if (y - hh < cb.bottom + 6f) y = cb.bottom + 6f + hh
+                        }
+                    }
+                }
+                x = x.coerceIn(r.left + 4f + hw, r.right - 4f - hw)
+                y = y.coerceIn(r.top + 4f + hh, r.top + CAR_STATUS_CARD_H - 4f - hh)
+                x to y
             } else {
-                (r.left + legacyX[k] * CAR_STATUS_CARD_W)
+                val lx = (r.left + legacyX[k] * CAR_STATUS_CARD_W)
                     .coerceIn(r.left + 4f + pillW / 2f, r.right - 4f - pillW / 2f)
-            }
-            val py = if (topDown) {
-                (if (k < 2) image.top + insetY else image.bottom - insetY)
+                val ly = (r.top + legacyY[k] * CAR_STATUS_CARD_H)
                     .coerceIn(r.top + 4f + pillH / 2f, r.top + CAR_STATUS_CARD_H - 4f - pillH / 2f)
-            } else {
-                (r.top + legacyY[k] * CAR_STATUS_CARD_H)
-                    .coerceIn(r.top + 4f + pillH / 2f, r.top + CAR_STATUS_CARD_H - 4f - pillH / 2f)
+                lx to ly
             }
 
             val raw = i.tires.getOrNull(k)?.takeIf { !it.isNaN() && it > 0f }
@@ -3563,12 +3597,23 @@ class ScenePage(context: Context) : View(context) {
 
         /** 第178轮：01 的俯视横置图区 356×246，水平居中、比原 3/4 区略偏上。 */
         const val CAR_STATUS_CAR_X = 16f
+        /** 第181轮选型 A：俯视车模整体下移量（设计 px，卡内坐标）。 */
+        const val CAR_TOP_SHIFT_Y = 10f
+
+        /** 第181轮选型 A：俯视车模相对原图区的缩放（92%，保持宽高比）。 */
+        const val CAR_TOP_SCALE = 0.92f
+
         const val CAR_STATUS_CAR_TOP = 34f
         const val CAR_STATUS_CAR_W = 356f
         const val CAR_STATUS_CAR_H = 246f
 
-        /** 俯视模式下胎压胶囊中心离车模图区左右/上下边的距离（设计像素，可调）。 */
-        const val CAR_TIRE_INSET = 12f
+        /**
+         * 第181轮选型 A：俯视模式下胎压胶囊**内缘离车体边界**的目标距离（设计 px）。
+         *
+         * 起点仍是「图区四角 + 本值」，但若离车体不足 6px 会自动再往外让到 6px
+         * （见 `drawTirePills`），所以换车型/门态也不会压到车。
+         */
+        const val CAR_TIRE_INSET = 14f
 
         // -------------------------------------------------- 胎压胶囊（第180轮：字号 ×2）
         //

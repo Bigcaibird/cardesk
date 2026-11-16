@@ -72,11 +72,10 @@ class CarStatusTirePillTest {
             RectF::class.java,
             VehicleInfo::class.java,
             RectF::class.java,
-            String::class.java,
-            String::class.java,
+            RectF::class.java,
             Boolean::class.javaPrimitiveType,
         ).apply { isAccessible = true }
-        m.invoke(scene, canvas, RectF(0f, 0f, cardW, cardH), vehicleInfo, image, null, "", true)
+        m.invoke(scene, canvas, RectF(0f, 0f, cardW, cardH), vehicleInfo, image, null, true)
         return bmp
     }
 
