@@ -35,6 +35,21 @@ data class Palette(
     val ok: Int,
     val warn: Int,
     val danger: Int,
+    /**
+     * 车窗打开的告警色（黄）。
+     *
+     * 第180轮新增：白天是**白底**，原来那个亮黄 `#F5C542` 落在白底上基本看不见
+     * （对比度只有 1.4:1）—— 和「深底深字」是同一类毛病。
+     * 日间压深一档到 `#B07A00`（对比度 ~3.8:1），仍然是黄的。
+     */
+    val windowOpen: Int = 0xFFF5C542.toInt(),
+    /**
+     * 车门 / 尾门打开的告警色（橙）。
+     *
+     * 夜间沿用参考包的 `#FF9F43`（`Palettes.CAR_STATE_WARN`）；
+     * 日间压深到 `#B7791F` —— 亮橙落在白底上同样读不出来。
+     */
+    val carStateWarn: Int = 0xFFFF9F43.toInt(),
     // —— 「浮屿 Flat Isle」新增 token（第四十九轮）——
     /** 强调色上的文字色（accent 底上的字）。 */
     val accentInk: Int = 0xFFFFFFFF.toInt(),
@@ -128,6 +143,8 @@ object Palettes {
         ok = 0xFF4CC38A.toInt(),
         warn = 0xFFE0A340.toInt(),
         danger = 0xFFE2574C.toInt(),
+        windowOpen = 0xFFF5C542.toInt(),
+        carStateWarn = 0xFFFF9F43.toInt(),
         accentInk = 0xFF0B1413.toInt(),
         dock = 0xFF1C2029.toInt(),
         scrim = 0xA808090C.toInt(),
@@ -156,6 +173,8 @@ object Palettes {
         ok = 0xFF1F9D5F.toInt(),
         warn = 0xFFB7791F.toInt(),
         danger = 0xFFC8413A.toInt(),
+        windowOpen = 0xFFB07A00.toInt(),
+        carStateWarn = 0xFFB7791F.toInt(),
         accentInk = 0xFFFFFFFF.toInt(),
         dock = 0xFFFFFFFF.toInt(),
         scrim = 0x61181A20.toInt(),

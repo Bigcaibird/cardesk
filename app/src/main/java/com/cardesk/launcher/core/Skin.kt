@@ -40,6 +40,8 @@ object Skin {
         OK = pal.ok
         WARN = pal.warn
         DANGER = pal.danger
+        WINDOW_OPEN = pal.windowOpen
+        CAR_STATE_WARN = pal.carStateWarn
         NAV_BG = pal.dock
         NAV_STROKE = pal.stroke
         GLASS_FILL = pal.surfaceSoft
@@ -87,6 +89,21 @@ object Skin {
     var OK = 0xFF4CC38A.toInt()
     var WARN = 0xFFE0A340.toInt()
     var DANGER = 0xFFE2574C.toInt()
+
+    /**
+     * 车窗打开的告警色（黄）。
+     *
+     * 第180轮新增：日间是**白底**，亮黄落在上面看不见，
+     * 所以日间用压深一档的版本（见 `Palette.windowOpen`）。
+     */
+    var WINDOW_OPEN = 0xFFF5C542.toInt()
+
+    /**
+     * 车门 / 尾门打开的告警色（橙）。
+     *
+     * 夜间 = 参考包的 `#FF9F43`，日间压深一档（白底上亮橙看不清）。
+     */
+    var CAR_STATE_WARN = 0xFFFF9F43.toInt()
 
     // —— 面（第四十九轮起全部不透明纯色 + 1px 描边）——
     /** 底栏/导航栏底色。 */

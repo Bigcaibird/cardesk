@@ -37,6 +37,11 @@ dist/*.apk_副本
 # 属于本机产物，不入库；需要时跑一次单测就重新生成。
 preview/
 
+# ---------------------------------------------------------------- Robolectric 离线依赖
+# .robolectric-deps/ 里是指向 ~/.m2 的 android-all jar 软链
+# （给 tools/robolectric-offline.init.gradle 用，让 Robolectric 不用联网拉 jar）。
+.robolectric-deps/
+
 # ---------------------------------------------------------------- 设计板冗余
 # design/png/ 已经是设计板原图，这个压缩包是同一份内容的副本
 design/pngs-1920x1080.zip

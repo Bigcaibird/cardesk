@@ -156,12 +156,14 @@ abstract class DialogSheet(
      *
      * 设计板 s06~s12 的标题行没有画关闭键，但**关闭是必须保留的功能**，
      * 所以统一放在面板右上角，用设计语言里的胶囊形态。
+     *
+     * [sizePx]：默认 24（设计板规格）；第180轮起车辆相关弹窗改成 28（字太小看不清）。
      */
-    protected fun addClose(right: Int = 36, top: Int = 36): TextView =
-        placeEnd(closePill(), right, top, 150, 66)
+    protected fun addClose(right: Int = 36, top: Int = 36, sizePx: Float = 24f): TextView =
+        placeEnd(closePill(sizePx), right, top, 150, 66)
 
     /** 「关闭」胶囊本体（不自动摆放，方便放到面板的其它位置）。 */
-    protected fun closePill(): TextView = Ui.text(context, "关闭", 24f, pal.textDim).apply {
+    protected fun closePill(sizePx: Float = 24f): TextView = Ui.text(context, "关闭", sizePx, pal.textDim).apply {
         gravity = Gravity.CENTER
         background = Ui.round(Skin.surfaceSoft, Shape.PILL, 1f, Skin.NAV_STROKE)
         pressFeedback()

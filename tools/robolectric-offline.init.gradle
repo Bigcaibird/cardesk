@@ -1,0 +1,12 @@
+// 本机预览用的 Robolectric 离线依赖配置（不入库，仅本机跑离屏渲染测试时用）。
+//
+// 背景：Robolectric 默认会从 Maven 拉 android-all 并在 ~ 下建 .robolectric-download-lock，
+// 本机测试 worker 写不了那个锁文件 → 每次都 IllegalStateException。
+// 这里指到仓库里已经软链好的本地 jar，走离线解析器，不再碰网络和锁文件。
+allprojects {
+    tasks.withType(Test).configureEach {
+        systemProperty 'robolectric.offline', 'true'
+        systemProperty 'robolectric.dependency.dir', new File(rootProject.projectDir, '.robolectric-deps').absolutePath
+        systemProperty 'robolectric.logging.enabled', 'false'
+    }
+}

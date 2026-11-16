@@ -68,20 +68,20 @@ class DoorAlertDialog(
     }
 
     /** 说明文字。 */
-    private val detail: TextView = Ui.text(context, DoorAlert.detail(openItems), 22f, pal.textDim)
+    private val detail: TextView = Ui.text(context, DoorAlert.detail(openItems), 28f, pal.textDim)
 
     init {
         addTitle()
-        addClose()
+        addClose(sizePx = 28f)
 
         car.view = com.cardesk.launcher.core.car3d.Car3dAssets.VIEW_DIALOG
         place(car, CAR_LEFT, CAR_TOP, CAR_W, CAR_H)
         place(row, 40, LIST_TOP, PANEL_W - 80, LIST_H)
-        place(detail, 40, DETAIL_TOP, PANEL_W - 80, 40)
+        place(detail, 40, DETAIL_TOP, PANEL_W - 80, 44)
 
         // —— 底部按钮：手动关闭 ——
         place(
-            primaryButton("我知道了", 24f) { onClose?.invoke() },
+            primaryButton("我知道了", 28f) { onClose?.invoke() },
             PANEL_W - 40 - 220, BOTTOM_TOP, 220, 66,
         )
 
@@ -122,14 +122,14 @@ class DoorAlertDialog(
 
         row.removeAllViews()
         openItems.forEachIndexed { index, item ->
-            val chip = Ui.text(context, item.label, 24f, pal.warn, bold = true).apply {
+            val chip = Ui.text(context, item.label, 30f, pal.carStateWarn, bold = true).apply {
                 gravity = Gravity.CENTER
-                background = Ui.round(Skin.surfaceSoft, Shape.PILL, 1f, pal.warn)
-                setPadding(26, 12, 26, 12)
+                background = Ui.round(Skin.surfaceSoft, Shape.PILL, 1f, pal.carStateWarn)
+                setPadding(30, 14, 30, 14)
                 pressFeedback()
             }
-            row.addView(chip, LinearLayout.LayoutParams(-2, 58).apply {
-                if (index > 0) marginStart = 14
+            row.addView(chip, LinearLayout.LayoutParams(-2, 66).apply {
+                if (index > 0) marginStart = 16
             })
         }
 
@@ -166,10 +166,15 @@ class DoorAlertDialog(
         const val CAR_LEFT = 24
         const val CAR_TOP = 84
 
-        /** 开门清单 / 说明 / 按钮的纵向位置（面板内坐标）。 */
-        const val LIST_TOP = 500
-        const val LIST_H = 60
-        const val DETAIL_TOP = 566
+        /**
+         * 开门清单 / 说明 / 按钮的纵向位置（面板内坐标）。
+         *
+         * 第180轮：胶囊行字 24 → 30、行高 58 → 66，说明字 22 → 28，
+         * 纵向跟着往下挪了一档。
+         */
+        const val LIST_TOP = 496
+        const val LIST_H = 66
+        const val DETAIL_TOP = 570
         const val BOTTOM_TOP = 690
     }
 }
@@ -217,18 +222,18 @@ class VehicleStatusDialog(
     private val hint = Ui.text(
         context,
         "引擎盖无数据通道 · 开着的车门/车窗在图上高亮",
-        12f,
-        Skin.TEXT_DIM,
+        20f,
+        Skin.TEXT_SOFT,
     )
 
     init {
         addTitle()
-        addClose()
+        addClose(sizePx = 28f)
 
         place(car, CAR_LEFT, CAR_TOP, CAR_W, CAR_H)
-        place(hint, 40, HINT_TOP, PANEL_W - 80, 28)
+        place(hint, 40, HINT_TOP, PANEL_W - 80, 32)
         place(
-            primaryButton("关闭", 24f) { onClose?.invoke() },
+            primaryButton("关闭", 28f) { onClose?.invoke() },
             PANEL_W - 40 - 220, VEHICLE_BOTTOM_TOP, 220, 66,
         )
         update(doorsClosed, windowsOpen, hoodClosed, trunkClosed, carModel)
@@ -262,13 +267,28 @@ class VehicleStatusDialog(
 
         /** dialog 车模槽（340×300 的资产等比放进 712×330）。 */
         const val CAR_W = 712
-        const val CAR_H = 430
+
+        /**
+         * 车模槽高（第180轮：430 → 440）。
+         *
+         * 标签字号翻倍后上下两条标签带从 34 涨到 56，图区矮了 22 ——
+         * 这里把槽位同步加高 10，车模大小基本不变。
+         */
+        const val CAR_H = 440
         const val CAR_LEFT = 24
-        const val CAR_TOP = 84
+
+        /**
+         * 车模槽上沿（第180轮：84 → 106）。
+         *
+         * 标签放大后第一排标签更高（44 → 原来的 24），
+         * 84 的话会顶到右上角「关闭」胶囊（36..102）下面那一行 ——
+         * 标签行整体下移 22，两个不再叠。
+         */
+        const val CAR_TOP = 106
 
         /** 车辆状态面板比门未关弹窗矮：没有胶囊行/列表，只有大图 + 一行说明。 */
         const val VEHICLE_PANEL_H = 720
-        const val HINT_TOP = 520
+        const val HINT_TOP = 546
         const val VEHICLE_BOTTOM_TOP = 620
 
         fun hasOpen(doorsClosed: List<Boolean?>?, hoodClosed: Boolean?, trunkClosed: Boolean?): Boolean {
@@ -356,35 +376,59 @@ private class AnnotatedCarView(context: Context, private val pal: Palette) : Vie
         drawRow(canvas, intArrayOf(5, 6, 7, 8), h - BAND_H + 4f, w)
     }
 
-    /** 画一行标签：整体水平居中，超出宽度时从左边距开始排。 */
+    /**
+     * 画一行标签：整体水平居中，超出宽度时从左边距开始排。
+     *
+     * ## 第180轮：字号 12 → 22（快 2 倍）
+     *
+     * 原来 12px 的标签放在 760 宽的面板里几乎看不清（预览图上一排小点点）。
+     * 放大后一行五个「左前门 开」在 760px 面板里**排不开**，
+     * 所以这里加了**等比缩字号**兜底：装不下就一档一档往下缩，
+     * 缩到 [LABEL_SP_MIN] 为止 —— 宁可字小一点，也不让标签溢出面板。
+     *
+     * 胶囊底色也跟着主题走（原来写死深色 + 主题字色 = 白底上的「一坨黑」）。
+     */
     private fun drawRow(canvas: Canvas, idxs: IntArray, top: Float, w: Float) {
         text.typeface = Typeface.DEFAULT
-        text.textSize = 12f
         text.textAlign = Paint.Align.CENTER
 
-        val labels = ArrayList<String>(idxs.size)
+        // 注意：这里要的是「长度 = idxs.size 的列表」，不是 `ArrayList(n)`（那是**容量**，
+        // 下标赋值会 IndexOutOfBounds）。
+        val labels = MutableList(idxs.size) { "" }
         val widths = FloatArray(idxs.size)
-        for (k in idxs.indices) {
-            labels.add(items[idxs[k]].label + " " + com.cardesk.launcher.core.CarStatus.stateText(items[idxs[k]].open))
-            widths[k] = text.measureText(labels[k]) + PILL_PAD_X * 2f
+        val avail = w - 8f
+
+        var size = LABEL_SP
+        var total = 0f
+        while (true) {
+            text.textSize = size
+            total = ROW_GAP * (idxs.size - 1).coerceAtLeast(0)
+            for (k in idxs.indices) {
+                labels[k] = items[idxs[k]].label + " " + com.cardesk.launcher.core.CarStatus.stateText(items[idxs[k]].open)
+                widths[k] = text.measureText(labels[k]) + PILL_PAD_X * 2f
+                total += widths[k]
+            }
+            if (total <= avail || size <= LABEL_SP_MIN) break
+            size = maxOf(LABEL_SP_MIN, size - 1f)
         }
-        val total = widths.sum() + ROW_GAP * (idxs.size - 1)
+
         var x = ((w - total) / 2f).coerceAtLeast(4f)
         for (k in idxs.indices) {
             val item = items[idxs[k]]
             val open = item.open == true
             val isWindow = idxs[k] in 5..8
             val color = when {
-                !open -> Skin.TEXT_DIM
-                isWindow -> WINDOW_YELLOW
-                else -> pal.warn
+                !open -> pal.textDim
+                isWindow -> pal.windowOpen
+                else -> pal.carStateWarn
             }
             val left = x
             val right = x + widths[k]
             x = right + ROW_GAP
 
             box.style = Paint.Style.FILL
-            box.color = 0xE010141B.toInt()
+            // 第180轮：底色跟随主题（夜里深灰、白天浅灰），不再写死深色。
+            box.color = pal.surfaceStrong
             canvas.drawRoundRect(left, top, right, top + PILL_H, PILL_RADIUS, PILL_RADIUS, box)
             box.style = Paint.Style.STROKE
             box.strokeWidth = 1f
@@ -407,14 +451,24 @@ private class AnnotatedCarView(context: Context, private val pal: Palette) : Vie
     }
 
     private companion object {
-        /** 车窗打开 = 黄色（用户指定）。 */
-        const val WINDOW_YELLOW = 0xFFF5C542.toInt()
+        /**
+         * 标签带总高（设计 px）：一行 pill + 上下留白。
+         *
+         * 第180轮：字号翻倍后 pill 从 24 涨到 40，带高 34 → 56。
+         */
+        const val BAND_H = 56f
 
-        /** 标签带总高（设计 px）：一行 pill 24 + 上下留白。 */
-        const val BAND_H = 34f
-        const val PILL_H = 24f
-        const val PILL_RADIUS = 12f
-        const val PILL_PAD_X = 8f
-        const val ROW_GAP = 8f
+        /** 标签胶囊高（12px 字 → 22px 字，胶囊也跟着长高）。 */
+        const val PILL_H = 40f
+        const val PILL_RADIUS = 20f
+
+        /** 标签字号（第180轮：12 → 22）。 */
+        const val LABEL_SP = 22f
+
+        /** 标签字号下限（一行五个标签放不下时等比缩到这儿为止）。 */
+        const val LABEL_SP_MIN = 16f
+
+        const val PILL_PAD_X = 12f
+        const val ROW_GAP = 10f
     }
 }

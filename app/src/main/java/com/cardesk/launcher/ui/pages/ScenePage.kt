@@ -2662,10 +2662,11 @@ class ScenePage(context: Context) : View(context) {
                 x += text.measureText("、")
             }
             text.color = when (part.kind) {
-                CardSnapshot.StatusKind.WINDOW -> WINDOW_OPEN_YELLOW
-                CardSnapshot.StatusKind.DOOR -> Palettes.CAR_STATE_WARN
+                // 第180轮：告警色也跟着日夜走 —— 亮橙 / 亮黄落在白底上读不出来。
+                CardSnapshot.StatusKind.WINDOW -> Skin.WINDOW_OPEN
+                CardSnapshot.StatusKind.DOOR -> Skin.CAR_STATE_WARN
                 CardSnapshot.StatusKind.GENERIC ->
-                    if (doors.isNotEmpty() || trunkOpen) Palettes.CAR_STATE_WARN else WINDOW_OPEN_YELLOW
+                    if (doors.isNotEmpty() || trunkOpen) Skin.CAR_STATE_WARN else Skin.WINDOW_OPEN
                 CardSnapshot.StatusKind.NONE -> Skin.TEXT_DIM
             }
             canvas.drawText(part.text, x, y, text)
@@ -2687,6 +2688,15 @@ class ScenePage(context: Context) : View(context) {
      *
      * 锚点取 `anchors.<view>.tires.{fl,fr,rl,rr}`（兼容扁平写法 `tire_*`）；
      * 没锚点就用「图框四角偏内」兜底，不写死具体像素。异常（<2.0 / >2.8 bar）橙色。
+     *
+     * ## 第180轮：胶囊底色原来写死成深色（`0xE010141B`）
+     *
+     * 那个深色是给**夜间**配的：夜里卡片本身是深色，深胶囊 + 浅字才读得出。
+     * 白天卡片是白的，而字色跟着主题走（`Skin.TEXT` = 白底上的深灰）——
+     * **深底深字**叠在一起，四个胎压就成了四坨黑（真机反馈）。
+     *
+     * 现在底色也走主题 token（[Skin.surfaceStrong]）：
+     * 夜里是深灰胶囊 + 浅字，白天是浅灰胶囊 + 深字，两套都读得出来。
      */
     private fun drawTirePills(
         canvas: Canvas,
@@ -2700,8 +2710,8 @@ class ScenePage(context: Context) : View(context) {
         text.typeface = Typeface.DEFAULT
         text.textAlign = Paint.Align.CENTER
 
-        val pillW = 30f
-        val pillH = 23f
+        val pillW = TIRE_PILL_W
+        val pillH = TIRE_PILL_H
         // 第178轮（俯视横置）：四颗胎压先按「图区四角、离车 12px」摆 ——
         // fl 左上 / fr 右上 / rl 左下 / rr 右下，不画引线；实拍后再按车轮廓微调。
         // 可调常量：胶囊中心离图区左右/上下边的距离（实拍后按车轮廓微调这里）。
@@ -2759,23 +2769,27 @@ class ScenePage(context: Context) : View(context) {
             val top = it.cy - pillH / 2f
             val right = left + pillW
             val bottom = top + pillH
-            val color = if (it.abnormal) Palettes.CAR_STATE_WARN else Skin.ACCENT
+            // 异常胎压用琥珀色（日夜各一套：夜里 #E0A340，白天 #B7791F —— 白底上亮琥珀也看不清）。
+            val color = if (it.abnormal) Skin.WARN else Skin.ACCENT
 
             fill.style = Paint.Style.FILL
-            fill.color = 0xE010141B.toInt()
-            canvas.drawRoundRect(left, top, right, bottom, 9f, 9f, fill)
+            // 底色跟着主题走（第180轮）：夜里深灰胶囊、白天浅灰胶囊，
+            // 不再是写死的 `0xE010141B` —— 那个深色在白底上配深字就是「一坨黑」。
+            fill.color = Skin.surfaceStrong
+            canvas.drawRoundRect(left, top, right, bottom, TIRE_PILL_RADIUS, TIRE_PILL_RADIUS, fill)
             fill.style = Paint.Style.STROKE
             fill.strokeWidth = 1f
             fill.color = (color and 0x00FFFFFF) or (170 shl 24)
-            canvas.drawRoundRect(left, top, right, bottom, 9f, 9f, fill)
+            canvas.drawRoundRect(left, top, right, bottom, TIRE_PILL_RADIUS, TIRE_PILL_RADIUS, fill)
             fill.style = Paint.Style.FILL
 
-            text.textSize = 11f
-            text.color = if (it.abnormal) Palettes.CAR_STATE_WARN else Skin.TEXT
-            canvas.drawText(it.value, it.cx, top + 13f, text)
-            text.textSize = 7f
+            // 数值 22px（原 11px 的 2 倍）、单位 14px（原 7px 的 2 倍）。
+            text.textSize = TIRE_PILL_VALUE_SP
+            text.color = if (it.abnormal) Skin.WARN else Skin.TEXT
+            canvas.drawText(it.value, it.cx, top + TIRE_PILL_VALUE_BASELINE, text)
+            text.textSize = TIRE_PILL_UNIT_SP
             text.color = Skin.TEXT_SOFT
-            canvas.drawText("bar", it.cx, top + 21f, text)
+            canvas.drawText("bar", it.cx, top + TIRE_PILL_UNIT_BASELINE, text)
         }
         text.textAlign = Paint.Align.LEFT
     }
@@ -3556,6 +3570,37 @@ class ScenePage(context: Context) : View(context) {
         /** 俯视模式下胎压胶囊中心离车模图区左右/上下边的距离（设计像素，可调）。 */
         const val CAR_TIRE_INSET = 12f
 
+        // -------------------------------------------------- 胎压胶囊（第180轮：字号 ×2）
+        //
+        // 原来胶囊是 30×23，数值 11px、单位「bar」7px —— 远看就是一排小点，
+        // 真机反馈要求「放大到 2 倍」。几何跟着字号一起放大（宽高都 ×2 附近），
+        // 否则 22px 的数字会顶出胶囊。
+        //
+        // 胶囊**左/上边缘**离图区边的距离只由 [CAR_TIRE_INSET] 决定
+        // （中心 = inset + 胶囊半径），所以放大后胶囊右边会多吃进车模一点，
+        // 这是「字号 ×2」必然的代价 —— 位置参数保持不变，视觉上仍是贴角。
+
+        /** 胎压胶囊宽。 */
+        const val TIRE_PILL_W = 52f
+
+        /** 胎压胶囊高。 */
+        const val TIRE_PILL_H = 46f
+
+        /** 胎压胶囊圆角。 */
+        const val TIRE_PILL_RADIUS = 17f
+
+        /** 胎压数值字号（原 11 → 22，整 2 倍）。 */
+        const val TIRE_PILL_VALUE_SP = 22f
+
+        /** 胎压单位「bar」字号（原 7 → 14，整 2 倍）。 */
+        const val TIRE_PILL_UNIT_SP = 14f
+
+        /** 数值基线（相对胶囊上沿）。 */
+        const val TIRE_PILL_VALUE_BASELINE = 24f
+
+        /** 单位基线（相对胶囊上沿）。 */
+        const val TIRE_PILL_UNIT_BASELINE = 39f
+
         /** 老视角（hero/card）胎压胶囊位置，卡片相对坐标（fl/fr/rl/rr），沿用第177轮手调值。 */
         val CAR_TIRE_LEGACY_X = floatArrayOf(0.435f, 0.156f, 0.845f, 0.541f)
         val CAR_TIRE_LEGACY_Y = floatArrayOf(0.735f, 0.371f, 0.590f, 0.193f)
@@ -3573,8 +3618,12 @@ class ScenePage(context: Context) : View(context) {
         /** 状态文字基线（相对卡顶，第一行）。 */
         const val CAR_STATUS_STATUS_Y = 352f
 
-        /** 车窗打开 = 黄色（用户指定）。 */
-        const val WINDOW_OPEN_YELLOW = 0xFFF5C542.toInt()
+        /**
+         * 车窗打开 = 黄色（用户指定）。
+         *
+         * 第180轮：颜色搬到 `Palette.windowOpen`（日夜两套），
+         * 这里只留个说明，不再有第二个颜色来源。
+         */
 
         /**
          * 图例**左列**取 `CarStatus.items` 的哪几项。
