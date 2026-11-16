@@ -17,15 +17,14 @@ import org.robolectric.annotation.GraphicsMode
 /**
  * 俯视 32 态资产（第179轮）的合约测试。
  *
- * 01 现在只装 `cardtop` 一套：16 种车门组合 × 尾门 2 种 = 32 张状态图
- * + 每状态一张 `<state>__gap` 门缝橙色高亮。
+ * 01 现在只装 `cardtop` 一套：16 种车门组合 × 尾门 2 种 = 32 张状态图。
+ * （第180轮起门缝橙色描边已下线，运行时不读 `<state>__gap`。）
  *
- * 盯五件事：
+ * 盯四件事：
  * 1. `cardtop` 存在且槽位是 356×264；
  * 2. 不同门组合画出来**确实不同**（不是同一张图改名）；
  * 3. 三门组合缺图时按「门数递减」回退，且命中状态可解释；
- * 4. 尾门组合（`_trunk`）能解出来；
- * 5. 每个状态都有 `__gap`（门缝高亮不会静默丢）。
+ * 4. 尾门组合（`_trunk`）能解出来。
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w1920dp-h1080dp-land")
@@ -48,9 +47,6 @@ class Car3dAssetOrientationTest {
 
     private fun top(state: String): Bitmap? =
         Car3dAssets.stateBitmap(context, "lynk01", Car3dAssets.VIEW_CARDTOP, state, W, H)
-
-    private fun gap(state: String): Bitmap? =
-        Car3dAssets.gapBitmap(context, "lynk01", Car3dAssets.VIEW_CARDTOP, state, W, H)
 
     private fun diffRatio(a: Bitmap, b: Bitmap): Double {
         require(a.width == b.width && a.height == b.height)
@@ -115,15 +111,6 @@ class Car3dAssetOrientationTest {
         assertNotNull("lf_trunk 必须有图", trunk)
         assertTrue("应命中带 trunk 的状态，实际 ${trunk!!.second}", trunk.second.endsWith("trunk"))
         assertNotNull("尾门单态必须是 closed_trunk", top("closed_trunk"))
-    }
-
-    @Test
-    fun `每个门状态都有门缝高亮 overlay`() {
-        for (state in listOf("lf", "rf", "lb", "rb", "all", "closed_trunk")) {
-            assertNotNull("$state 缺 __gap 差分图", gap(state))
-        }
-        // 窗不参与 overlay
-        assertEquals(null, gap("win"))
     }
 
     private companion object {

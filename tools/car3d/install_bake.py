@@ -273,8 +273,8 @@ def install_top_only(slot, dst, model_name):
             # 变化面积随开门数线性增长，阈值按门数放宽（4 门全开 ~44%，实测 21~26%）
             doors_open = sum(1 for on in _top_state_semantics(st)["doors"] if on)
             limit = min(0.55, max(0.15, 0.09 * doors_open + 0.06))
-            if _gap_overlay(closed_master, state_master, os.path.join(out_dir, st + "__gap.webp"), limit):
-                gaps += 1
+            # 运行时已不再叠加门缝高亮（用户 m04741）：gap 只留档在 top32/，不进 APK
+            _ = (closed_master, state_master)
     return installed, missing, gaps
 
 
@@ -412,7 +412,7 @@ def run_top_only(args, dst, slot):
                 "slot": list(TOP_ONLY_SIZE),
                 "colors": ["dark"],
                 "defaultColor": "dark",
-                "gaps": gaps > 0,
+                "gaps": False,
             }
         },
         "states": {st: _top_state_semantics(st) for st in TOP_STATES},

@@ -10,6 +10,7 @@ import com.cardesk.launcher.ui.widget.CarTopStatusView
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Before
@@ -47,6 +48,28 @@ class Car3dPaintTest {
     fun tearDown() {
         Car3dAssets.reset()
         Car3dSettings.enabled = true
+    }
+
+    /**
+     * 第180轮：门缝橙色描边下线。
+     *
+     * 资产里还留着 `<state>__gap` 文件（留档），但运行时只该画状态底图；
+     * 这里逐像素比对「painter 画出来的」与「直接用 stateBitmap 画的」，相等才说明没再叠 gap。
+     */
+    @Test
+    fun `不再叠加门缝描边 渲染结果与状态底图逐像素一致`() {
+        val p = pose(lf = true)
+        val (drew, bmp) = paintScene("lynk01", p, 356, 264, Car3dAssets.VIEW_CARDTOP)
+        assertTrue("应画出车模", drew)
+        val state = CarPoseResolver.resolve(null, p, rich = false).stateKey
+        val expected = Car3dAssets.stateBitmap(
+            context, "lynk01", Car3dAssets.VIEW_CARDTOP, state, 356, 264,
+        )
+        assertNotNull("应有 $state 底图", expected)
+        assertTrue(
+            "画面必须与状态底图完全一致（不再叠 __gap 描边），state=$state",
+            bmp.sameAs(expected!!),
+        )
     }
 
     private fun pose(

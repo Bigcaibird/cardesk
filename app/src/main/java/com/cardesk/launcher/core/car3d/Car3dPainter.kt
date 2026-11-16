@@ -148,30 +148,22 @@ object Car3dPainter {
             // 车漆：绘制时才读（设置页切换后下一帧就换图，不需要重建状态机）。
             val color = Car3dSettings.paint
             var bmp: android.graphics.Bitmap? = null
-            // 实际命中的状态名：门缝 `__gap` 必须叠在「真正画出来那张底图」上。
-            var matched: String? = null
             if (kind != null && animDurationMs > 0 && animFrames > 0) {
                 val elapsed = now - animStart
                 if (elapsed >= animDurationMs) {
                     animKind = null
-                    val r = Car3dAssets.stateBitmapNamed(context, d, view, stateKey, w, h, color)
-                    bmp = r?.first
-                    matched = r?.second
+                    bmp = Car3dAssets.stateBitmap(context, d, view, stateKey, w, h, color)
                 } else {
                     val i = (elapsed * animFrames / animDurationMs).toInt().coerceIn(0, animFrames - 1)
                     val frame = if (animReverse) animFrames - 1 - i else i
                     bmp = Car3dAssets.animBitmap(context, d, view, kind.key, frame, w, h, color)
                     if (bmp == null) {
-                        val r = Car3dAssets.stateBitmapNamed(context, d, view, stateKey, w, h, color)
-                        bmp = r?.first
-                        matched = r?.second
+                        bmp = Car3dAssets.stateBitmap(context, d, view, stateKey, w, h, color)
                     }
                     host.postInvalidateOnAnimation()
                 }
             } else {
-                val r = Car3dAssets.stateBitmapNamed(context, d, view, stateKey, w, h, color)
-                bmp = r?.first
-                matched = r?.second
+                bmp = Car3dAssets.stateBitmap(context, d, view, stateKey, w, h, color)
             }
             if (bmp == null) return false
             // fit=true：把 rect 当**区域**，按位图自身宽高比等比放进去并居中。
@@ -192,12 +184,6 @@ object Car3dPainter {
                 rect
             }
             canvas.drawBitmap(bmp, null, dst, filterPaint)
-            // 门缝橙色高亮：底图画完再叠同状态的 `__gap`（缺图就跳过，不画任何替代标记）。
-            // 动画过程中不叠（帧与 overlay 不同源，会闪），播完落到目标态时自然叠上。
-            if (animKind == null && matched != null) {
-                Car3dAssets.gapBitmap(context, d, view, matched, w, h, color)
-                    ?.let { canvas.drawBitmap(it, null, dst, filterPaint) }
-            }
             if (unknown && animKind == null) {
                 // 「读不到」角标：一个很小的暗点，和车况卡图例的「--」对应。
                 canvas.drawCircle(dst.right - 9f, dst.top + 9f, 4.5f, badgePaint)

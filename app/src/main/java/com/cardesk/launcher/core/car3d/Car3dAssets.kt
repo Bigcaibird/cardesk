@@ -370,8 +370,8 @@ object Car3dAssets {
     /**
      * 同 [stateBitmap]，但把**实际命中的状态名**一并返回。
      *
-     * 门缝橙色高亮（`<state>__gap`）必须画在「真正画出来的那张底图」上：
-     * 请求 `lf_rf_lb` 但资产只有 `lf_rf` 时，要叠的是 `lf_rf__gap` 而不是 `lf_rf_lb__gap`。
+     * 用途：调用方/测试想知道「请求 `lf_rf_lb`、资产只有 `lf_rf` 时到底画了哪张」。
+     * （第180轮起门缝 `__gap` 叠加已下线，不再按命中状态找差分图。）
      */
     fun stateBitmapNamed(
         context: Context,
@@ -408,33 +408,6 @@ object Car3dAssets {
         }
         if (declaredTop || fails >= FAILS_BEFORE_BROKEN) {
             markBroken(d, "连续 $fails 次解不出任何状态（回退 2D）")
-        }
-        return null
-    }
-
-    /**
-     * 门缝橙色高亮贴片（`<state>__gap`，俯视家族用）。
-     *
-     * 资产安装时会把「该状态相对 closed 变化的细边」染成橙色单独出一张；这里只按
-     * **实际命中的状态**找，找不到就返回 null（调用方直接跳过，不画任何替代标记）。
-     * 窗开（`win`）没有 overlay —— 窗的开关只由卡面文字表达。
-     */
-    fun gapBitmap(
-        context: Context,
-        dir: String?,
-        view: String,
-        state: String,
-        w: Int,
-        h: Int,
-        color: String? = null,
-    ): Bitmap? {
-        if (w <= 0 || h <= 0) return null
-        if (state == CarPoseResolver.STATE_WINDOW || state == CarPoseResolver.STATE_CLOSED) return null
-        val d = effectiveDir(context, dir) ?: return null
-        val m = model(context, d) ?: return null
-        val c = effectiveColor(m, color ?: Car3dSettings.paint)
-        for (v in viewChain(m, view)) {
-            fetch(context, d, v, "${state}__gap", w, h, c)?.let { return it }
         }
         return null
     }

@@ -102,15 +102,9 @@ class Car3dAssetsTest {
         assertEquals(344, bmp!!.width)
     }
 
-    @Test
-    fun `门缝高亮 overlay 可解码`() {
-        val bmp = Car3dAssets.gapBitmap(context, "lynk01", Car3dAssets.VIEW_CARDTOP, "lf", 356, 264)
-        assertNotNull("lf 状态必须有 __gap 差分图", bmp)
-        assertEquals(356, bmp!!.width)
-        assertEquals(264, bmp.height)
-        // 窗不参与 overlay
-        assertNull(Car3dAssets.gapBitmap(context, "lynk01", Car3dAssets.VIEW_CARDTOP, "win", 356, 264))
-    }
+    // 第180轮：门缝橙色描边已整体下线（用户要求「所有机型的橙色描边都去掉」）。
+    // 运行时只取 `<state>` 底图、不再 decode `<state>__gap`；资产里即使留着 gap 文件也不影响渲染。
+    // 渲染层面的验证在 Car3dPaintTest「不再叠加门缝描边」。
 
     @Test
     fun `未知目录回退主资产且不崩`() {

@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1156",
-  "versionCode": 4252,
-  "tag": "v1.0.1156",
-  "name": "CarDesk 4252 / 1.0.1156-system",
-  "notes": "写实车模改为俯视-only 32 门态（领克 01/03/05）：任意车门/尾门组合精确对应、门缝橙色描边高亮、胎压四颗在车模四角；车况卡、车辆状态面板、开门提醒统一为俯视；隐藏已失效的「车况卡视角」设置项。资产 1.10MB，APK 3.56MB（此前 2.38MB）。",
-  "publishedAt": "2026-11-16T00:14:19Z",
+  "version": "1.0.1158",
+  "versionCode": 4254,
+  "tag": "v1.0.1158",
+  "name": "CarDesk 4254 / 1.0.1158-system",
+  "notes": "4254：去掉全部车型的门缝橙色描边；修复 03 俯视车顶白斑（统一俯视光位）",
+  "publishedAt": "2026-11-16T03:55:09Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4252.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4252.apk",
-    "size": 3563172,
-    "sha256": "264c4fee7d97c077aa42d066ecf319593cf2d96e0d3c143f7533fcf16f936966"
+    "name": "CarDesk-platform-ecarx-cardesk-4254.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4254.apk",
+    "size": 3467711,
+    "sha256": "e9857f64e425ba95b0bbe756b5a41cc27a43f26121a5720a13081b6f441c212b"
   }
 }

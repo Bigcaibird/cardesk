@@ -22,7 +22,7 @@
         "dark"
       ],
       "defaultColor": "dark",
-      "gaps": true
+      "gaps": false
     }
   },
   "states": {
