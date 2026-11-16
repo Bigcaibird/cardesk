@@ -147,6 +147,22 @@ object StartupTrace {
     }
 
     /**
+     * 打一个启动分段（**只打第一次**）。
+     *
+     * 给「每一帧都会走到的代码」用 —— 比如 `onDraw`。
+     * 首帧的耗时是启动优化的关键指标（真车上首帧绘制要 3.4 秒），
+     * 但 `onDraw` 每秒能走几十次，不能每次都打。
+     *
+     * @return true = 这一次是首次，已经打了点
+     */
+    @Synchronized
+    fun markOnce(label: String): Boolean {
+        if (marks.containsKey(label)) return false
+        mark(label)
+        return true
+    }
+
+    /**
      * 桌面**完全可见**时打一条汇总（进程内只打一次）。
      *
      * 汇总把全部分段压成一行 `名称=距onCreate毫秒`，方便一眼看出时间花在哪：

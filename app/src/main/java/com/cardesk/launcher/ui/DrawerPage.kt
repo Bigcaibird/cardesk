@@ -181,9 +181,22 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
         }
         panel.addView(foot, abs(PANEL_PAD, FOOT_TOP, PANEL_W - PANEL_PAD * 2, 26))
 
-        reload()
-        // 排障场景：「抽屉打不开 / 抽屉里没应用」——打开落盘（含已加载数量）。
-        Logx.event(LogTags.DRAWER, "抽屉打开", "apps" to currentPackages.size)
+        // 第191轮：**构造时不再 `reload()`**。
+        //
+        // `reload()` 要做两件重活：
+        // 1. `queryIntentActivities` —— 跨进程问 PackageManager 要**全部**可启动应用；
+        // 2. 给每个应用 `loadIcon` —— 每个图标都是一次资源读取 + 解码。
+        //
+        // 模拟器上这一段就要 **95ms**（实测 `warmup:begin` → `warmup:drawer`），
+        // 真机上更慢 —— 而抽屉在启动这条路上**根本用不到**：
+        // 桌面构造它只是为了「万一用户马上点应用键」。
+        //
+        // 以前这里是白干两遍：构造时 `reload()` 一次，
+        // `LauncherView.showDrawer()` 打开时又 `reload()` 一次。
+        // 现在只在**真正打开时**加载一次 —— 打开反而比原来快了。
+        //
+        // 构造本身只留「摆骨架」（二十来个 View），很快。
+        Logx.i(LogTags.DRAWER, "抽屉页构造完成（应用列表按需加载）")
     }
 
     private fun segment(text: String, active: Boolean): TextView =

@@ -104,19 +104,7 @@ object Permissions {
      * @return true = 已有权限（可以立刻取位置）
      */
     fun ensureLocation(activity: Activity): Boolean {
-        if (hasLocationPermission(activity)) {
-            Logx.i(
-                LogTags.WEATHER, "定位权限已具备",
-                "granted" to true,
-                "state" to describeLocationState(activity),
-            )
-            return true
-        }
-        // 先试特权路径：system app 可以直接把自己的 AppOps 打开，
-        // 不依赖车机有没有权限弹窗 UI。
-        if (tryGrantAppOps(activity)) {
-            return true
-        }
+        if (ensureLocationSilently(activity)) return true
         // 再走系统弹窗。
         try {
             activity.requestPermissions(LOCATION_PERMISSIONS, REQUEST_LOCATION)
@@ -125,6 +113,60 @@ object Permissions {
             Logx.w(LogTags.WEATHER, "发起定位权限申请失败", t)
         }
         return false
+    }
+
+    /**
+     * 定位权限的**静默**部分：只看权限、试特权路径，**不弹任何框**。
+     *
+     * ## 为什么要拆出来（第191轮）
+     *
+     * 这一段全是**跨进程调用**：
+     *
+     * - `checkSelfPermission` → PackageManagerService；
+     * - `tryGrantAppOps` → AppOpsService（`unsafeCheckOpNoThrow` + `setMode`）。
+     *
+     * 真车（领克 dcy11，Android 9）上开机那几秒系统自己也在忙，
+     * 这些 IPC 要几百毫秒到几秒。以前它跑在**主线程**上，
+     * 而且时机正好卡在启动页淡出动画中间（`LOCATION_CHECK_DELAY_MS = 3500`，
+     * 而淡出动画只要 220ms）——
+     * 结果就是启动页被多压了 **3.7 秒**（诊断包：`launchServicesStarted=16054`
+     * → `desktopReady=19252`）。
+     *
+     * 拆开之后：静默判定放**后台线程**，
+     * 只有「真的要弹系统授权框」那一步才回主线程（弹框必须在主线程）。
+     *
+     * @return true = 现在就能取到位置；false = 需要弹系统授权框
+     */
+    fun ensureLocationSilently(context: Context): Boolean {
+        if (hasLocationPermission(context)) {
+            Logx.i(
+                LogTags.WEATHER, "定位权限已具备",
+                "granted" to true,
+                "state" to describeLocationState(context),
+            )
+            return true
+        }
+        // 先试特权路径：system app 可以直接把自己的 AppOps 打开，
+        // 不依赖车机有没有权限弹窗 UI。
+        return tryGrantAppOps(context)
+    }
+
+    /**
+     * 在**主线程**弹定位授权框。
+     *
+     * 与 [ensureLocationSilently] 配对：静默判定在后台线程做，
+     * 判定说「要弹框」之后，**回主线程**调这个。
+     *
+     * （`requestPermissions` 必须在主线程调 —— 系统会直接往这个 Activity
+     * 的窗口上盖授权弹窗。）
+     */
+    fun requestLocationDialog(activity: Activity) {
+        try {
+            activity.requestPermissions(LOCATION_PERMISSIONS, REQUEST_LOCATION)
+            Logx.i(LogTags.WEATHER, "已发起定位权限申请", "requestCode" to REQUEST_LOCATION)
+        } catch (t: Throwable) {
+            Logx.w(LogTags.WEATHER, "发起定位权限申请失败", t)
+        }
     }
 
     /**

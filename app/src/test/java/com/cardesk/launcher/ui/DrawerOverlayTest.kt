@@ -228,6 +228,9 @@ class DrawerOverlayTest {
         val a = activity()
         injectLauncherApp(a)
         val drawer = DrawerPage(a, com.cardesk.launcher.core.Palettes.night)
+        // 第191轮：抽屉的应用列表改成**按需加载**（构造时不再查 PackageManager），
+        // 这里补一次 reload()，等价于「打开抽屉」时会发生的事。
+        drawer.reload()
         a.setContentView(drawer)
         shadowOf(Looper.getMainLooper()).idle()
 
@@ -239,6 +242,9 @@ class DrawerOverlayTest {
         val a = activity()
         injectLauncherApp(a)
         val drawer = DrawerPage(a, com.cardesk.launcher.core.Palettes.night)
+        // 第191轮：抽屉的应用列表改成**按需加载**（构造时不再查 PackageManager），
+        // 这里补一次 reload()，等价于「打开抽屉」时会发生的事。
+        drawer.reload()
         a.setContentView(drawer)
         shadowOf(Looper.getMainLooper()).idle()
 

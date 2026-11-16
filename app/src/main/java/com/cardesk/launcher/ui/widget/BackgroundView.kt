@@ -114,6 +114,9 @@ class BackgroundView(context: Context) : View(context) {
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        // 首帧耗时打点（第191轮）：壁纸是 1920×1080 的整屏位图，
+        // 冷启动时这一笔可能是几百毫秒到几秒 —— 要能一眼看出是不是它。
+        com.cardesk.launcher.core.StartupTrace.markOnce("draw:bg")
         val w = width.toFloat()
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return

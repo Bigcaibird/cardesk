@@ -40,9 +40,24 @@ import com.cardesk.launcher.ui.LauncherView
  *
  * 1. `onCreate`：只初始化日志/崩溃兜底/全屏，然后 **`setContentView(启动页)`**；
  * 2. 启动页画出第一帧（`splashFirstFrame`）后，才 `post` 去构造 `LauncherView`；
- * 3. 桌面自己画出第一帧（`launcherFirstFrame`）后，调 `startServices()` 拉起天气 /
- *    定时刷新 / 导航引导，再启动媒体、氛围灯、任务调度与权限延迟检查；
- * 4. 启动页淡出（[SPLASH_FADE_MS]），并打一行 `启动完成` 汇总。
+ * 3. 桌面自己画出第一帧（`launcherFirstFrame`）后，**立刻淡出启动页**
+ *    （[SPLASH_FADE_MS]）—— 用户从这一刻起就看到桌面了；
+ * 4. 启动页淡完之后才做重活（[startHeavyStartup]）：天气 / 定时刷新 / 导航引导，
+ *    再启动媒体、氛围灯、任务调度与权限延迟检查；
+ * 5. 最后调 `startDeferredAmapActions()` 拉起画中画承载，并向高德索要区域信息。
+ *
+ * ## 第191轮：把「重活」整体挪到启动页淡出之后
+ *
+ * 旧顺序是 `首帧 → 重活 → 淡出启动页`，而重活里全是跨进程调用
+ * （车机光感、天气联网、导航广播、媒体会话、氛围灯、AppOps 权限检查），
+ * 真机上要 **8.1 秒**（诊断包 11-16 11:17 的冷启动：
+ * `launcherReady=10720` → `launchServicesStarted=16054` → `desktopReady=19252`）。
+ *
+ * 结果是：**桌面 7.6 秒就画好了，用户却要盯启动页盯到 19.2 秒。**
+ * 桌面早就绪了，只是被启动页盖着 —— 那是纯粹的观感损失。
+ *
+ * 现在改成 `首帧 → 淡出 → 重活`：用户在 7.8 秒左右就看到桌面，
+ * 数据随后慢慢补齐（天气、歌词、车况本来就是慢慢来的）。
  *
  * 期间 `onResume` / `onNewIntent` / 返回键等回调可能早于桌面就绪，
  * 统一走 [whenLauncherReady] 排队，绝不 NPE。
@@ -91,6 +106,14 @@ class MainActivity : Activity() {
      * 都可能走到 [onDesktopReady]，承载只该做一次。
      */
     private var desktopReadyDone = false
+
+    /**
+     * 「重活」是否已经做过（第191轮）。
+     *
+     * 幂等：启动页淡出正常路径与「没有启动页」的兜底分支都会走到
+     * [startHeavyStartup]，天气 / 媒体 / 权限这些只该起一次。
+     */
+    private var heavyStartupStarted = false
 
     /**
      * 桌面。第九十三轮改成可空：
@@ -242,6 +265,49 @@ class MainActivity : Activity() {
         runCatching { view.notifyFirstFrame() }
             .onFailure { Logx.w(LogTags.APP, "通知桌面首帧失败", it) }
 
+        // 第191轮：**启动页立刻淡出**，重活挪到淡出**之后**。
+        //
+        // ## 为什么改这里
+        //
+        // 旧顺序是：
+        //
+        // ```
+        // 首帧 → startServices() → startLaunchServices() → 淡出启动页
+        // ```
+        //
+        // 而 `startServices()` / `startLaunchServices()` 里全是**跨进程调用**
+        // （车机光感通道、天气联网、导航引导广播、媒体会话、氛围灯、
+        // AppOps 权限检查）—— 真机（领克 dcy11，Android 9）上这两段加起来
+        // **8.1 秒**（诊断包 11-16 11:17 那次冷启动：`launcherReady=10720` →
+        // `launchServicesStarted=16054` → `desktopReady=19252`）。
+        //
+        // 也就是说：**桌面第一帧 7.6 秒就画好了，用户却要盯启动页盯到 19.2 秒。**
+        // 桌面早就绪了，只是被启动页盖着。
+        //
+        // 现在改成：
+        //
+        // ```
+        // 首帧 → 淡出启动页（220ms）→ 重活
+        // ```
+        //
+        // 用户在 7.8 秒左右就看到桌面，重活在**桌面已经可见**之后才做 ——
+        // 数据慢慢补齐，但画面不再被人为挡住。
+        fadeOutSplash()
+
+        // 桌面就绪前排队下来的动作（全局 Dock Intent 等）。
+        runPendingReadyActions()
+    }
+
+    /**
+     * 启动页淡出**之后**才做的重活（第191轮）。
+     *
+     * 幂等：重复调用直接返回。
+     */
+    private fun startHeavyStartup(view: LauncherView) {
+        if (heavyStartupStarted) return
+        heavyStartupStarted = true
+        StartupTrace.mark("heavyBegin")
+
         // 天气 / 定时刷新 / 导航引导（见 LauncherView.startServices）。
         runCatching { view.startServices() }
             .onFailure { Logx.w(LogTags.APP, "启动桌面服务失败", it) }
@@ -250,11 +316,6 @@ class MainActivity : Activity() {
         // 媒体 / 氛围灯 / 任务调度 / 权限延迟检查。
         startLaunchServices(view)
         StartupTrace.mark("launchServicesStarted")
-
-        // 桌面就绪前排队下来的动作（全局 Dock Intent 等）。
-        runPendingReadyActions()
-
-        fadeOutSplash()
     }
 
     /**
@@ -369,6 +430,7 @@ class MainActivity : Activity() {
             // 没有启动页（异常路径）也照样做「桌面完全启动后」的动作，
             // 否则画中画永远不会承载。
             onDesktopReady()
+            launcher?.let { startHeavyStartup(it) }
             return
         }
         splash = null
@@ -377,10 +439,24 @@ class MainActivity : Activity() {
             .setDuration(SPLASH_FADE_MS)
             .withEndAction {
                 (current.parent as? ViewGroup)?.removeView(current)
+                // 第191轮：**启动页真正消失**的时刻 ——
+                // 这才是用户「能看到桌面了」的那个点。
+                //
+                // 以前只能拿 `desktopReady` 近似（它在那之前还夹着 8 秒重活），
+                // 数字对不上「用户盯了多久启动页」。
+                StartupTrace.mark("splashGone")
                 // 关键：不能写 `current.post { ... }` ——
                 // 启动页刚被摘掉，已经脱离窗口，那个 Runnable 永远不会执行
                 // （见 [mainHandler] 的注释）。
-                mainHandler.post { onDesktopReady() }
+                mainHandler.post {
+                    // 第191轮：重活挪到这里 —— 启动页**已经淡完**，
+                    // 桌面完全可见了，才开始做天气 / 媒体 / 权限这些跨进程调用。
+                    //
+                    // 顺序与旧版一致（服务 → 媒体/氛围灯 → 唤起高德），
+                    // 只是整体搬到了启动页淡出之后。
+                    launcher?.let { startHeavyStartup(it) }
+                    onDesktopReady()
+                }
             }
             .start()
     }
@@ -486,18 +562,22 @@ class MainActivity : Activity() {
      * 拿不到也不影响任何功能（真正弹窗的时机在设置页）。
      */
     private val recordAudioCheck = Runnable {
-        runCatching {
-            val granted = com.cardesk.launcher.core.Permissions.hasRecordAudioAppOp(applicationContext)
-            if (!granted) {
-                com.cardesk.launcher.core.Permissions.tryGrantRecordAudioAppOps(applicationContext)
-            }
-            Logx.i(
-                LogTags.AMBIENT,
-                "录音权限检查（不弹窗）",
-                "granted" to granted,
-                "state" to com.cardesk.launcher.core.Permissions.describeRecordAudioState(this@MainActivity),
-            )
-        }.onFailure { Logx.w(LogTags.AMBIENT, "录音权限检查失败", it) }
+        // 第191轮：AppOps 查询/写入是**跨进程调用**，真机上开机那几秒要几百毫秒到几秒。
+        // 放主线程上会卡住启动页淡出动画和桌面首帧 → 挪到后台线程。
+        Thread {
+            runCatching {
+                val granted = com.cardesk.launcher.core.Permissions.hasRecordAudioAppOp(applicationContext)
+                if (!granted) {
+                    com.cardesk.launcher.core.Permissions.tryGrantRecordAudioAppOps(applicationContext)
+                }
+                Logx.i(
+                    LogTags.AMBIENT,
+                    "录音权限检查（不弹窗）",
+                    "granted" to granted,
+                    "state" to com.cardesk.launcher.core.Permissions.describeRecordAudioState(this@MainActivity),
+                )
+            }.onFailure { Logx.w(LogTags.AMBIENT, "录音权限检查失败", it) }
+        }.apply { name = "cardesk-perm-audio" }.start()
     }
 
     /**
@@ -524,10 +604,33 @@ class MainActivity : Activity() {
         }.onFailure { Logx.w(LogTags.AMBIENT, "恢复氛围灯失败", it) }
     }
 
-    /** 申请定位权限（延后一点，别和桌面首帧抢）。 */
+    /**
+     * 申请定位权限（延后一点，别和桌面首帧抢）。
+     *
+     * ## 第191轮：静默判定挪到后台线程
+     *
+     * 判定要查 PackageManagerService 和 AppOpsService（**跨进程调用**），
+     * 真车开机那几秒系统自己也在忙 —— 这段在主线程上要几百毫秒到几秒。
+     *
+     * 以前它跑在主线程，而且 `LOCATION_CHECK_DELAY_MS = 3500` 正好卡在
+     * 启动页淡出动画（220ms）中间 → 启动页被多压 **3.7 秒**。
+     *
+     * 现在：静默判定在后台线程做，只有「真的要弹系统授权框」才回主线程
+     * （弹框必须在主线程）。
+     */
     private val locationCheck = Runnable {
-        runCatching { com.cardesk.launcher.core.Permissions.ensureLocation(this) }
-            .onFailure { Logx.w(LogTags.WEATHER, "定位权限处理失败", it) }
+        Thread {
+            val granted = runCatching {
+                com.cardesk.launcher.core.Permissions.ensureLocationSilently(applicationContext)
+            }.getOrDefault(false)
+            if (granted) return@Thread
+            // 需要系统授权框 → 回主线程弹。
+            mainHandler.post {
+                runCatching {
+                    com.cardesk.launcher.core.Permissions.requestLocationDialog(this@MainActivity)
+                }.onFailure { Logx.w(LogTags.WEATHER, "定位权限处理失败", it) }
+            }
+        }.apply { name = "cardesk-perm-location" }.start()
     }
 
     override fun onRequestPermissionsResult(
@@ -720,7 +823,23 @@ class MainActivity : Activity() {
      * 用户拒绝后不会被反复弹走（每次 onCreate 都会弹）。
      */
     private fun checkNotificationPermission() {
-        if (NotificationAccess.isReferenceGranted(this)) {
+        // 第191轮：查询通知监听服务白名单是**跨进程调用**，
+        // 真机上开机那几秒要几百毫秒 —— 放主线程上会卡住启动页淡出动画。
+        // 判定放后台线程；只有「要跳系统设置页」才回主线程。
+        Thread {
+            val granted = runCatching { NotificationAccess.isReferenceGranted(this@MainActivity) }
+                .getOrDefault(false)
+            mainHandler.post { handleNotificationPermissionResult(granted) }
+        }.apply { name = "cardesk-perm-notification" }.start()
+    }
+
+    /**
+     * 通知使用权判定的结果处理（**主线程**）。
+     *
+     * 「跳系统设置页」必须在主线程做（要起 Activity）。
+     */
+    private fun handleNotificationPermissionResult(granted: Boolean) {
+        if (granted) {
             if (notificationGuideShown) {
                 Logx.i(LogTags.APP, "通知使用权已授予", "state" to NotificationAccess.describeEnumeration(this))
             }

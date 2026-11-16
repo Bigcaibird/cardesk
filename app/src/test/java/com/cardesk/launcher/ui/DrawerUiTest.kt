@@ -88,6 +88,9 @@ class DrawerUiTest {
     /** 抽屉页面（摆好布局，能量到真实位置）。 */
     private fun drawer(a: MainActivity): DrawerPage {
         val page = DrawerPage(a, Palettes.night)
+        // 第191轮：抽屉的应用列表改成**按需加载**（构造时不再查 PackageManager），
+        // 这里补一次 reload()，等价于「打开抽屉」时会发生的事。
+        page.reload()
         a.setContentView(page)
         page.measure(
             View.MeasureSpec.makeMeasureSpec(1920, View.MeasureSpec.EXACTLY),

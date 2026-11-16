@@ -6,6 +6,7 @@ import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.content.Context
 import android.content.Intent
+import android.graphics.Canvas
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -197,9 +198,34 @@ class LauncherView(context: Context) : FrameLayout(context) {
      * 而且真车上每次写都可能触发系统 UI 重排。只在签名变化时重写。
      */
     private var lastPolicySignature: String? = null
+
+    /**
+     * 策略写系统的**序号**（第191轮）。
+     *
+     * `applyOemPolicy()` 现在跑在后台线程（写 `policy_control` / overscan
+     * 是跨进程调用，卡在首帧前面太贵）。
+     *
+     * 换肤重建会**再触发一次** —— 万一两次重叠着跑，
+     * 用这个序号让**旧的那次**在动手写之前就作废，
+     * 免得两个线程交叉写系统设置。
+     */
+    private val policyApplySeq = java.util.concurrent.atomic.AtomicInteger(0)
     private var taskList: com.cardesk.launcher.ui.dialogs.TaskListDialog? = null
     private var taskEditor: com.cardesk.launcher.ui.dialogs.TaskEditorDialog? = null
     private var overlayDialog: View? = null
+
+    /**
+     * 启动分段打点（第191轮）。
+     *
+     * `build()` / `startServices()` 里的每一步都是「主线程同步做」，
+     * 哪一步慢只能靠打点才看得出来 ——
+     * 真车（领克 dcy11，Android 9）上一次冷启动里，
+     * `build()` 自己就占了 4.6 秒。
+     *
+     * 全部打到 [com.cardesk.launcher.core.StartupTrace]，
+     * 诊断包 `summary.txt` 的「冷启动」段能直接看到细到步的耗时。
+     */
+    private fun mark(label: String) = com.cardesk.launcher.core.StartupTrace.mark(label)
 
     /**
      * 「有车门未关」弹窗（第136轮）。
@@ -514,6 +540,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
             }
             com.cardesk.launcher.vehicle.AdaptapiDayNight.attach(context.applicationContext)
         }.onFailure { Logx.w(LogTags.THEME, "启动车机昼夜通道失败", it) }
+        mark("svc:dayNight")
 
         // 天气：桌面起来就拉一次
         runCatching {
@@ -534,6 +561,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
             handler.removeCallbacks(weatherRefresh)
             handler.postDelayed(weatherRefresh, WEATHER_REFRESH_MS)
         }.onFailure { Logx.w(LogTags.WEATHER, "启动天气子系统失败", it) }
+        mark("svc:weather")
 
         // 导航引导数据源：没有导航时不显示任何东西（`visibility="gone"`）。
         runCatching {
@@ -599,6 +627,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
             // 否则交给 onAttachedToWindow()。
             if (isAttachedToWindow) navGuideSource?.start()
         }.onFailure { Logx.w(LogTags.NAV_UI, "启动导航引导数据源失败", it) }
+        mark("svc:navGuide")
 
         // 「向高德索要区域信息」**挪到 [startDeferredAmapActions]**（第112轮）——
         // 那个广播带 `FLAG_INCLUDE_STOPPED_PACKAGES`，注释里写得很清楚：
@@ -703,7 +732,23 @@ class LauncherView(context: Context) : FrameLayout(context) {
             pipHostingWatchdog,
             com.cardesk.launcher.core.DesktopReadyGate.DEFAULT_WATCHDOG_MS,
         )
+        // 第191轮：首帧之后的**空闲补建**。
+        //
+        // 抽屉页这种「启动时不需要、但很快就会用到」的重 View 在这里补上，
+        // 用户点「应用」键时就不会有延迟。
+        //
+        // 用 `post` 而不是直接调：此刻主线程正在收尾这一帧，
+        // 直接调会把这一帧拖长（首帧本来就贵）。
+        handler.removeCallbacks(deferredUiWarmup)
+        handler.post(deferredUiWarmup)
     }
+
+    /**
+     * 空闲补建（延迟到首帧之后做，见 [notifyFirstFrame]）。
+     *
+     * 独立成字段是为了能 `removeCallbacks` 去重。
+     */
+    private val deferredUiWarmup = Runnable { warmupDeferredUi() }
 
     /**
      * 兜底看门狗：`desktopReady` 迟迟不来时，自己开始承载。
@@ -826,6 +871,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
     // --------------------------------------------------------------- 构建 / 换肤
 
     private fun build() {
+        mark("build:enter")
         setBackgroundColor(pal.bgTop)
         background.palette = pal
         background.wallpaper = prefs.wallpaper
@@ -938,6 +984,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
             }
         }
         // 导航页（navCanvas / desktopNavPage）：左地图卡（承载画中画）+ 右组合卡（胎压/音乐）
+        mark("build:scenePage")
         navPage = NavPage(context, pal).apply {
             // 双画 / 全屏态同步
             syncPipState(prefs.dualPip, pipFullscreen)
@@ -978,23 +1025,17 @@ class LauncherView(context: Context) : FrameLayout(context) {
             navPage.pipSecondary.adoptContent(carried.view, carried.pkg)
         }
         // 抽屉是**浮层**，不是整页
-        drawerPage = DrawerPage(context, pal).apply {
-            onClose = { closeDrawer() }
-            onOpenApp = { pkg, name, mini ->
-                if (mini) {
-                    // 979 —— 非桌面首页静默不打开
-                    // 超过 2 个时关掉最老的腾位（不是「已达上限」）。
-                    // 全程没有 Toast，这里也不弹，失败原因由 FLOAT 域日志给出。
-                    showFloat(pkg, name)
-                } else {
-                    prefs.lastAppPkg = pkg
-                    Logx.event(LogTags.DRAWER, "全屏启动应用", "pkg" to pkg, "label" to name)
-                    runCatching {
-                        val intent = context.packageManager.getLaunchIntentForPackage(pkg)
-                        if (intent != null) context.startActivity(intent)
-                    }.onFailure { Logx.w(LogTags.DRAWER, "启动失败", it, "pkg" to pkg) }
-                }
-            }
+        mark("build:navPage")
+        // 第191轮：抽屉页**按需构造**（见 [ensureDrawerPage]）。
+        //
+        // 它只在用户点 Dock「应用」键时才需要 —— 启动这条最关键的路上
+        // 不该背着一整页的 View 树（真机上光构造它就要 1 秒以上：
+        // 抽屉页自己会建二十来个 View + 形状 drawable，还要过一遍 Prefs）。
+        //
+        // 换肤重建时如果它**已经存在**，用新配色重建一份 ——
+        // 老实例已经被 `content.removeAllViews()` 摘掉了，重建是对的。
+        if (::drawerPage.isInitialized) {
+            drawerPage = createDrawerPage()
         }
         pageHost.addView(scenePage, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         pageHost.addView(navPage, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
@@ -1027,6 +1068,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
         content.addView(floatLayer, Ui.frame(Design.W.toInt(), Design.H.toInt()))
 
         // 顶部状态栏
+        mark("build:drawerPage")
         statusBar = ShellStatusBar(context).apply {
             onAvatar = { showSettings() }
             // 第九十五轮补丁：「驾驶模式 · xx」胶囊 → 驾驶模式页（以前误绑到空调页）。
@@ -1074,6 +1116,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
         }
         buildBottomBar()
         refreshDockQuickApps()
+        mark("build:dock")
 
         // 媒体来源菜单（musicSourceMenu/sceneSourceMenu）：放在最上层，遮罩可点空白收起
         sourceMenu = SourceMenuLayer(context, pal).apply {
@@ -1095,10 +1138,13 @@ class LauncherView(context: Context) : FrameLayout(context) {
             pipFullscreen = true
             enterPipFullscreen()
         }
+        mark("build:showPage")
         refresh()
+        mark("build:refresh")
         // 第五十六轮：启动就把「沉浸系统导航栏」写进 `policy_control` ——
         // 否则系统自带 Dock 平时还是那个状态，点桌面 Dock 就会把它唤出来。
         applyOemPolicy()
+        mark("build:oemPolicy")
         // 第九十三轮：UI 骨架构建完成（启动分段计时，见 core/StartupTrace）。
         com.cardesk.launcher.core.StartupTrace.mark("uiBuilt")
     }
@@ -1447,6 +1493,68 @@ class LauncherView(context: Context) : FrameLayout(context) {
     // --------------------------------------------------------------- 抽屉浮层
 
     /**
+     * 抽屉页（`DrawerPage`）—— **按需构造**（第191轮）。
+     *
+     * ## 为什么不在 `build()` 里建
+     *
+     * 抽屉页是**浮层**：只有用户点 Dock「应用」键才会出现。
+     * 但它自己要建二十来个 View + 一堆形状 drawable，还要过一遍 Prefs ——
+     * 真机（领克 dcy11）上光构造就 1 秒以上，
+     * 而启动这条路上每一秒都是用户盯着启动页的时间。
+     *
+     * 所以：启动时不建 → 桌面第一帧更快出来；
+     * 第一帧之后由 [warmupDeferredUi] 在**空闲时**补建，
+     * 用户真去点「应用」键时它已经就绪，不会有延迟。
+     *
+     * 兜底：万一用户比 [warmupDeferredUi] 更快，[showDrawer] 里当场建。
+     */
+    private fun ensureDrawerPage(): DrawerPage {
+        if (!::drawerPage.isInitialized) {
+            drawerPage = createDrawerPage()
+        }
+        return drawerPage
+    }
+
+    /** 新建一个抽屉页实例（回调都绑好）。 */
+    private fun createDrawerPage(): DrawerPage = DrawerPage(context, pal).apply {
+        onClose = { closeDrawer() }
+        onOpenApp = { pkg, name, mini ->
+            if (mini) {
+                // 979 —— 非桌面首页静默不打开
+                // 超过 2 个时关掉最老的腾位（不是「已达上限」）。
+                // 全程没有 Toast，这里也不弹，失败原因由 FLOAT 域日志给出。
+                showFloat(pkg, name)
+            } else {
+                prefs.lastAppPkg = pkg
+                Logx.event(LogTags.DRAWER, "全屏启动应用", "pkg" to pkg, "label" to name)
+                runCatching {
+                    val intent = context.packageManager.getLaunchIntentForPackage(pkg)
+                    if (intent != null) context.startActivity(intent)
+                }.onFailure { Logx.w(LogTags.DRAWER, "启动失败", it, "pkg" to pkg) }
+            }
+        }
+    }
+
+    /**
+     * 桌面第一帧之后的**空闲补建**（第191轮）。
+     *
+     * 把「启动时不需要、但很快就会用到」的重 View 在第一帧之后补上，
+     * 用户就感觉不到它们的构造耗时。
+     *
+     * 必须在**主线程**（View 不是线程安全的），但排在第一帧之后 ——
+     * 那时桌面已经画出来了，即使这会儿卡一下，用户看到的也是**完整的桌面**，
+     * 而不是「启动页还盖着、又不动了」。
+     */
+    fun warmupDeferredUi() {
+        if (!::drawerPage.isInitialized) {
+            mark("warmup:begin")
+            runCatching { ensureDrawerPage() }
+                .onFailure { Logx.w(LogTags.DRAWER, "预热抽屉页失败", it) }
+        }
+        mark("warmup:drawer")
+    }
+
+    /**
      * 打开应用抽屉浮层
      * 抽屉是盖在桌面之上的浮层，不是整页；打开时抑制画中画触摸。
      */
@@ -1455,16 +1563,20 @@ class LauncherView(context: Context) : FrameLayout(context) {
         // 画中画全屏时它盖在根容器最上层，抽屉插在状态栏之前 → 会被压在下面看不见。
         // 先还原（留在当前页，不把用户拽走），抽屉才露得出来。
         exitPipFullscreenIfNeeded(page)
+        // 第191轮：抽屉页是**按需构造**的 —— 这里可能还没建过。
+        // 正常情况下 [warmupDeferredUi] 已经在第一帧之后补建好了，
+        // 这里是「用户比补建更快」的兜底。
+        val drawer = ensureDrawerPage()
         // 第152轮：打开前先清一遍浮层。
         // 抽屉页是**长期持有的同一个实例**，上一次没清干净的菜单 / 弹窗
         // 会跟着实例一起回到窗口上，盖住图标、把所有点击吃掉。
-        drawerPage.clearOverlays()
-        drawerPage.reload()
+        drawer.clearOverlays()
+        drawer.reload()
         // 第四十九轮：抽屉改成设计板 `s03-apps` 的**页面级卡片**
         // （left 44 / top 73 / 宽 1876 / 高 867），状态栏和 Dock 仍然可见 ——
         // 所以它插在**状态栏之前**，不能 bringToFront。
         val index = if (::statusBar.isInitialized) content.indexOfChild(statusBar) else content.childCount
-        content.addView(drawerPage, index, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        content.addView(drawer, index, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         Logx.event(LogTags.DRAWER, "打开应用抽屉")
         // 面板上滑 + 遮罩淡入（200ms / 180ms）。
         drawerPage.playOpen()
@@ -2040,17 +2152,76 @@ class LauncherView(context: Context) : FrameLayout(context) {
         // 浮窗只在桌面首页可用；切走时全部最小化（:965-977）
         floatLayer?.onPageChanged(target)
 
-        val canAnimate = animate && old != target && views.all { it.width > 0 && it.height > 0 }
-        if (!canAnimate) {
+        // 不切页（`old == target`）或者明确不要动画 → 老实归位。
+        if (!animate || old == target) {
             views.forEachIndexed { i, v -> restPage(v, i == target) }
             return
         }
 
-        // 向前翻时旧页上移、新页下移进入；向后翻反之
-        val forward = target > old
+        // 第191轮：**横滑**，方向跟着页号走。
+        //
+        // 往下一页 → 新页从**右**边进、旧页往**左**退；
+        // 往上一页 → 反过来。
+        //
+        // 跟主翻页手势（单指横滑）方向一致 —— 手指往左划，页面就往左走。
+        //
+        // ## 关键：进入页必须先量出尺寸（原来就是「硬切」的根因）
+        //
+        // 旧代码的动画门槛是 `views.all { it.width > 0 && it.height > 0 }`。
+        // 而**离开**的那页永远是可见的、量过的，**进入**的那页却是 `GONE` ——
+        // `GONE` 的视图不参与测量，它从开机起就没量过，`width` 永远是 0。
+        //
+        // 于是 `canAnimate` 永远是 false → `restPage()` 直接把两页一显一隐
+        // → **切页其实一直是「硬切」，从来没有动画过**。
+        // 这就是用户说的「切换太过僵硬」的真正原因。
+        //
+        // 现在：先按 [layoutPageForAnimation] 把进入页量一次，
+        // 门槛也改成看 [pageHost]（两页的共同容器，一定有尺寸）。
+        val forward = PageTransitionSpec.forward(old, target)
+        val pageWidth = pageHost.width
+        if (!layoutPageForAnimation(views[target])) {
+            // 还是量不出来（容器还没尺寸）→ 老实归位，不演。
+            views.forEachIndexed { i, v -> restPage(v, i == target) }
+            return
+        }
         pageHost.bringChildToFront(views[target])
-        slidePage(views[old], old, entering = false, translation = if (forward) -60f else 60f, gen = gen)
-        slidePage(views[target], target, entering = true, translation = if (forward) 60f else -60f, gen = gen)
+        slidePage(
+            views[old], old, entering = false,
+            translation = PageTransitionSpec.exitTranslation(pageWidth, forward), gen = gen,
+        )
+        slidePage(
+            views[target], target, entering = true,
+            translation = PageTransitionSpec.enterTranslation(pageWidth, forward), gen = gen,
+        )
+    }
+
+    /**
+     * 把即将进入的页面**手动量一次**（第191轮）。
+     *
+     * ## 为什么需要
+     *
+     * 页面平时是 `GONE`（不画、不吃触摸）。`GONE` 的视图**不参与测量**，
+     * 所以它从开机起就没量过 —— `width` / `height` 一直是 0。
+     *
+     * 而切页动画要按**页宽**算位移距离，还要靠尺寸把页面画出来。
+     * 尺寸是 0 的话，位移就是 0，动画等于没动。
+     *
+     * 这里按 [pageHost] 的尺寸手动 `measure` + `layout` 一次 ——
+     * 跟 `ViewGroup` 自己做的事一样，只是提前了一帧。
+     * 下一帧正常的布局流程会再算一遍，结果一致。
+     *
+     * @return true = 量到了，可以演动画
+     */
+    private fun layoutPageForAnimation(page: View): Boolean {
+        val w = pageHost.width
+        val h = pageHost.height
+        if (w <= 0 || h <= 0) return false
+        page.measure(
+            View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY),
+        )
+        page.layout(0, 0, w, h)
+        return page.width > 0 && page.height > 0
     }
 
     /** 无动画时把页面归位。 */
@@ -2058,14 +2229,21 @@ class LauncherView(context: Context) : FrameLayout(context) {
         view.animate().cancel()
         view.visibility = if (current) View.VISIBLE else View.GONE
         view.alpha = 1f
+        view.translationX = 0f
         view.translationY = 0f
         view.scaleX = 1f
         view.scaleY = 1f
     }
 
     /**
-     * 单页进出动画
-     * 旧页 alpha→0、translationY→±60、scale→0.98；新页反向；alpha 600ms、其余 700ms。
+     * 单页进出动画（第191轮：横滑 + 交叉淡入 + 轻微缩放）。
+     *
+     * - **横滑**：`translationX`，方向跟页号走（跟单指横滑手势一致）；
+     * - **交叉淡入**：alpha，新页淡入比旧页淡出快一点；
+     * - **轻微缩放**：0.96 ↔ 1.0，做纵深；
+     * - **260ms** + 强减速曲线。
+     *
+     * 数值规格全在 [PageTransitionSpec]（纯 Kotlin，可 JVM 单测）。
      */
     private fun slidePage(view: View, index: Int, entering: Boolean, translation: Float, gen: Int) {
         if (view.width > 0) {
@@ -2079,27 +2257,60 @@ class LauncherView(context: Context) : FrameLayout(context) {
         val scaleFrom: Float
         val scaleTo: Float
         if (entering) {
-            alphaFrom = 0f; alphaTo = 1f
-            transFrom = translation; transTo = 0f
-            scaleFrom = 0.98f; scaleTo = 1f
+            // 第191轮：**从当前画面接着走**，而不是从头开始。
+            //
+            // 用户连点两下切页时，第二轮动画会打断第一轮：
+            // 那一瞬间页面正停在半路（比如 alpha 0.4、位移 100px）。
+            // 如果这里一律从「alpha 0、位移 ±22% 页宽」重新开始，
+            // 页面会**跳一下** —— 又变成用户说的「僵硬」。
+            //
+            // 判据：
+            // - alpha 在 (0, 1) 之间 → 说明它正淡入/淡出到一半，接着走；
+            // - alpha == 1 → 它是「停好的隐藏页」（`restPage` 归位时置 1），
+            //   要从头淡入（alpha 0）；
+            // - alpha == 0 → 它正淡出到一半，接着走（起点就是 0）。
+            val cur = view.alpha
+            alphaFrom = if (cur > 0.01f && cur < 0.99f) cur else 0f
+            alphaTo = 1f
+            // 位移同理：非零说明正飞到一半，从那儿接着飞。
+            transFrom = if (view.translationX != 0f) view.translationX else translation
+            transTo = 0f
+            scaleFrom = PageTransitionSpec.ENTER_SCALE; scaleTo = 1f
         } else {
             alphaFrom = view.alpha; alphaTo = 0f
-            transFrom = view.translationY; transTo = translation
-            scaleFrom = if (view.scaleX <= 0f) 1f else view.scaleX; scaleTo = 0.98f
+            transFrom = view.translationX; transTo = translation
+            scaleFrom = if (view.scaleX <= 0f) 1f else view.scaleX
+            scaleTo = PageTransitionSpec.EXIT_SCALE
         }
         view.visibility = View.VISIBLE
         view.alpha = alphaFrom
-        view.translationY = transFrom
+        view.translationX = transFrom
+        // 竖向位移必须清干净：老版本留下的 translationY 不清的话，
+        // 页面会带着一个上/下偏移做横滑，看着像「斜着飘过去」。
+        view.translationY = 0f
         view.scaleX = scaleFrom
         view.scaleY = scaleFrom
 
-        val alphaAnim = ObjectAnimator.ofFloat(view, View.ALPHA, alphaFrom, alphaTo).apply { duration = 600L }
-        val transAnim = ObjectAnimator.ofFloat(view, View.TRANSLATION_Y, transFrom, transTo).apply { duration = 700L }
-        val scaleXAnim = ObjectAnimator.ofFloat(view, View.SCALE_X, scaleFrom, scaleTo).apply { duration = 700L }
-        val scaleYAnim = ObjectAnimator.ofFloat(view, View.SCALE_Y, scaleFrom, scaleTo).apply { duration = 700L }
+        val alphaAnim = ObjectAnimator.ofFloat(view, View.ALPHA, alphaFrom, alphaTo).apply {
+            duration = PageTransitionSpec.FADE_DURATION
+        }
+        val transAnim = ObjectAnimator.ofFloat(view, View.TRANSLATION_X, transFrom, transTo).apply {
+            duration = PageTransitionSpec.DURATION
+        }
+        val scaleXAnim = ObjectAnimator.ofFloat(view, View.SCALE_X, scaleFrom, scaleTo).apply {
+            duration = PageTransitionSpec.DURATION
+        }
+        val scaleYAnim = ObjectAnimator.ofFloat(view, View.SCALE_Y, scaleFrom, scaleTo).apply {
+            duration = PageTransitionSpec.DURATION
+        }
 
         val set = AnimatorSet().apply {
-            interpolator = PathInterpolator(0.2f, 0.8f, 0.2f, 1f)
+            interpolator = PathInterpolator(
+                PageTransitionSpec.INTERPOLATOR_X1,
+                PageTransitionSpec.INTERPOLATOR_Y1,
+                PageTransitionSpec.INTERPOLATOR_X2,
+                PageTransitionSpec.INTERPOLATOR_Y2,
+            )
             playTogether(alphaAnim, transAnim, scaleXAnim, scaleYAnim)
             addListener(object : AnimatorListenerAdapter() {
                 private var cancelled = false
@@ -2114,6 +2325,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
                     if (cancelled || gen != pageGen) return
                     if (!entering && page != index) view.visibility = View.GONE
                     view.alpha = 1f
+                    view.translationX = 0f
                     view.translationY = 0f
                     view.scaleX = 1f
                     view.scaleY = 1f
@@ -2667,41 +2879,58 @@ private fun showCam() {
         //
         // `immersive.navigation` 是把导航栏**从窗口布局里摘掉**：
         // 不再收触摸，只有「从底部向上滑」的系统手势能临时把它叫出来。
-        val globalDock = prefs.globalDockEnabled
-        val navInsets = runCatching {
-            com.cardesk.launcher.core.dock.NavInsets.applied(context)
-        }.getOrDefault(false)
-        val overlay = runCatching {
-            android.provider.Settings.canDrawOverlays(context)
-        }.getOrDefault(false)
-        lastPolicySignature = policySignature(globalDock, navInsets, overlay)
-        Logx.i(
-            LogTags.SYS,
-            "应用原车 Dock/状态栏策略",
-            "globalDock" to globalDock,
-            "navInsets" to navInsets,
-            "overlay" to overlay,
-            "hideDock" to prefs.hideDock,
-            "hideStatus" to prefs.hideStatus,
-            "oemNavImmersive" to prefs.oemNavImmersive,
-        )
-        val applied = com.cardesk.launcher.core.dock.GlobalDockPolicyGate.apply(context)
-        if (!applied) {
-            Logx.w(
+        //
+        // 第191轮：下面这些全是**跨进程写系统设置**
+        // （`policy_control` / overscan / 状态栏开关），
+        // 真机上每次写都可能触发系统 UI 重排、要几百毫秒到几秒。
+        //
+        // 以前它在 `build()` 里**主线程同步**做 —— 卡在首帧前面。
+        // 现在放到后台线程：写完再回主线程记签名。
+        //
+        // 顺序上没问题：策略只影响「系统 Dock / 状态栏怎么避让」，
+        // 晚几十毫秒生效用户看不出来；卡住首帧才看得出来。
+        Thread {
+            val seq = policyApplySeq.incrementAndGet()
+            val globalDock = prefs.globalDockEnabled
+            val navInsets = runCatching {
+                com.cardesk.launcher.core.dock.NavInsets.applied(context)
+            }.getOrDefault(false)
+            val overlay = runCatching {
+                android.provider.Settings.canDrawOverlays(context)
+            }.getOrDefault(false)
+            Logx.i(
                 LogTags.SYS,
-                "policy_control 写入失败（已用 overscan 兜底）",
+                "应用原车 Dock/状态栏策略",
                 "globalDock" to globalDock,
+                "navInsets" to navInsets,
+                "overlay" to overlay,
+                "hideDock" to prefs.hideDock,
+                "hideStatus" to prefs.hideStatus,
+                "oemNavImmersive" to prefs.oemNavImmersive,
             )
-            // 没有系统权限时至少把状态栏开关用 overscan 兜住，避免桌面被原车栏压住
-            if (prefs.hideDock) com.cardesk.launcher.core.SystemOps.setOverscan(context, 0, 0, 0, 0)
-        }
-        // 全局 Dock 模式下原车导航栏要么被 RRO 预留、要么被 immersive.navigation 摘掉，
-        // 都不需要再靠 overscan 挪 Dock（lowerDock 与 globalDock 互斥，这里自然是 0）。
-        val overscan = if (prefs.lowerDock && !prefs.hideDock) -50 else 0
-        com.cardesk.launcher.core.SystemOps.setOverscan(context, 0, 0, 0, overscan)
-        if (prefs.hideStatus) {
-            com.cardesk.launcher.core.SystemOps.setStatusBarDisabled(context, 0x00000008 or 0x00000004)
-        }
+            // 已经有更新的一次在跑了 → 这一次作废（别两个线程交叉写系统设置）。
+            if (policyApplySeq.get() != seq) return@Thread
+            val applied = com.cardesk.launcher.core.dock.GlobalDockPolicyGate.apply(context)
+            if (!applied) {
+                Logx.w(
+                    LogTags.SYS,
+                    "policy_control 写入失败（已用 overscan 兜底）",
+                    "globalDock" to globalDock,
+                )
+                // 没有系统权限时至少把状态栏开关用 overscan 兜住，避免桌面被原车栏压住
+                if (prefs.hideDock) com.cardesk.launcher.core.SystemOps.setOverscan(context, 0, 0, 0, 0)
+            }
+            // 全局 Dock 模式下原车导航栏要么被 RRO 预留、要么被 immersive.navigation 摘掉，
+            // 都不需要再靠 overscan 挪 Dock（lowerDock 与 globalDock 互斥，这里自然是 0）。
+            val overscan = if (prefs.lowerDock && !prefs.hideDock) -50 else 0
+            com.cardesk.launcher.core.SystemOps.setOverscan(context, 0, 0, 0, overscan)
+            if (prefs.hideStatus) {
+                com.cardesk.launcher.core.SystemOps.setStatusBarDisabled(context, 0x00000008 or 0x00000004)
+            }
+            // 签名回主线程记 —— 后面 `syncGlobalDockPolicy()` 靠它避免重复写。
+            val signature = policySignature(globalDock, navInsets, overlay)
+            handler.post { lastPolicySignature = signature }
+        }.apply { name = "cardesk-oem-policy" }.start()
     }
 
     /** 按键映射（dialog_custom_keys 等价物）。 */
@@ -3811,10 +4040,23 @@ private fun showCam() {
         }
     }
 
+    /**
+     * 桌面**第一帧**真正画出来的那一刻（启动分段打点，第191轮）。
+     *
+     * 为什么在这里打、而不是在某个子 View 的 `onDraw` 里：
+     * `DockBarView` 是**共享**的 —— 全局 Dock（悬浮窗）是另一个实例，
+     * 它先画的话就把打点消费掉了，看不出是桌面的哪一段慢。
+     * [dispatchDraw] 只有桌面这一棵树上会走到。
+     */
+    override fun dispatchDraw(canvas: Canvas) {
+        super.dispatchDraw(canvas)
+        // `markOnce` —— `dispatchDraw` 每帧都会走，不能每次都打点。
+        com.cardesk.launcher.core.StartupTrace.markOnce("draw:launcher")
+    }
+
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        MusicController.get().addListener(mediaListener)
-        // 导航引导数据源跟着窗口生命周期起停
+        MusicController.get().addListener(mediaListener)        // 导航引导数据源跟着窗口生命周期起停
         navGuideSource?.start()
         // 第138轮：状态栏连接类图标（蜂窝 / WiFi / 热点 / 蓝牙）按**真实状态**显示。
         // 采样器跟窗口生命周期起停 —— 后台时不用采（车机本来就在省电）。

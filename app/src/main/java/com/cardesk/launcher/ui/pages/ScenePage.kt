@@ -730,6 +730,7 @@ class ScenePage(context: Context) : View(context) {
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        com.cardesk.launcher.core.StartupTrace.markOnce("draw:scene")
         hits.clear()
         drawGuide(canvas)
         drawWeather(canvas)

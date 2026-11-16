@@ -6281,3 +6281,236 @@ Dock 立刻变直角 —— 说明**默认值这一路本身也生效了**。
   装旧包 → 改设置 → 原地升级 → 再清数据回默认，
   四步走完才能同时证明「默认值生效」和「已存值没被冲掉」；
   只截一张当前画面的图，这两件事**一件都证明不了**。
+
+
+## 第191轮：启动提速 + 切页过渡动画（用户报「启动慢」「切换僵硬」）
+
+### 一、两条用户反馈
+
+1. **启动加载慢**：车机开机后黑屏一段时间才出桌面；
+2. **切换僵硬**：切页「一帧硬切」，看着卡顿。
+
+两条都不是「参数没调好」，是**根因级的**：一个把 8 秒的重活挡在启动页后面，
+一个让切页动画**从来没有跑过**。
+
+### 二、启动：真车冷启动 19.2 秒里，8.1 秒是白挡的
+
+#### 2.1 现象（诊断包 `cardesk-logs-20261116-115454`，真机 2026-11-16 11:17）
+
+`summary.txt` 的「冷启动」段：
+
+```
+onCreate=0  window=106  splashFirstFrame=654  uiBuilt=2018991  launcherCreated=6410
+launcherFirstFrame=6470  launcherReady=10720  servicesBegin=10817  servicesDone=15531
+servicesStarted=15538  launchServicesStarted=16054  desktopReady=19252
+```
+
+（`uiBuilt` 那次是开机后第一次、ART 还在验证 dex；同一天稍晚的两次热启动
+`uiBuilt` 只有 6.2 秒。）
+
+拉平成时间轴（相对 `onCreate`）：
+
+| 阶段 | 真车 | 模拟器 | 干什么的 |
+|---|---|---|---|
+| `window` → `splashFirstFrame` | 548ms | 40ms | 启动页第一帧 |
+| `splashFirstFrame` → `uiBuilt` | **5.9s** | 390ms | 建整棵 UI 树 |
+| `uiBuilt` → `launcherFirstFrame` | 162ms | 12ms | |
+| `launcherFirstFrame` → `launcherReady` | **3.4s** | 105ms | 桌面**第一帧真的画出来** |
+| `launcherReady` → `servicesDone` | **4.4s** | 33ms | 天气 / 导航引导 / 车机光感 |
+| `servicesDone` → `desktopReady` | **3.8s** | 283ms | 媒体 / 氛围灯 / 权限检查 |
+
+#### 2.2 关键发现：**桌面 7.6 秒就绪，用户却盯启动页盯到 19.2 秒**
+
+旧顺序是：
+
+```
+桌面第一帧 → startServices() → startLaunchServices() → 淡出启动页
+```
+
+`startServices()` / `startLaunchServices()` 里全是**跨进程调用**
+（车机光感通道、天气联网、导航引导广播、媒体会话、氛围灯、AppOps 权限检查），
+真机上这两段加起来 **8.1 秒**（`launcherReady=10720` → `launchServicesStarted=16054` → `desktopReady=19252`）。
+
+也就是说：**桌面第一帧 7.6 秒就画好了，只是被启动页盖着不让看。**
+那 11.4 秒是纯粹的观感损失 —— 数据慢慢来本来就该是「桌面已可见、数据在补」。
+
+更糟的是最后那 3.8 秒：`servicesDone → desktopReady` 本该只是启动页淡出的
+220ms，实际花了 3.8 秒。原因是 `LOCATION_CHECK_DELAY_MS = 3500` ——
+**定位权限检查正好卡在淡出动画中间**，而它在主线程上查 AppOps（跨进程），
+把淡出动画的 end action 饿死了。
+
+#### 2.3 改法
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | **启动页在桌面第一帧就淡出**，重活挪到淡出**之后** | `MainActivity.onLauncherFirstFrame` / `fadeOutSplash` / 新增 `startHeavyStartup` |
+| 2 | 定位 / 录音 / 通知使用权检查**挪到后台线程**（只有弹框才回主线程） | `MainActivity` + `Permissions.ensureLocationSilently` / `requestLocationDialog` |
+| 3 | `applyOemPolicy()`（写 `policy_control` / overscan / 状态栏开关）**挪到后台线程** | `LauncherView.applyOemPolicy` |
+| 4 | 抽屉页**按需构造**（启动路上不背它），首帧之后空闲补建 | `LauncherView.ensureDrawerPage` / `warmupDeferredUi` |
+| 5 | `DrawerPage` 构造时**不再 `reload()`**（那是查全部应用 + 逐个读图标） | `DrawerPage.init` |
+| 6 | 启动分段**细到步**（`build:*` / `svc:*` / `draw:*`） | `core/StartupTrace.mark` / `markOnce` |
+
+第 5 条单独说：以前 `DrawerPage` 的构造里调 `reload()`，
+而 `showDrawer()` 打开时**又调一次** —— 同一份「查全部可启动应用 + 逐个 `loadIcon`」
+白干两遍。模拟器上单次 **95ms**（`warmup:begin` → `warmup:drawer`），
+真机更慢。现在只在打开时加载一次，**打开抽屉反而比原来快**。
+
+#### 2.4 判据与实测
+
+单测：`PermissionsTest` / `DrawerUiTest` 等 6 个抽屉用例补了一次 `reload()`
+（抽屉的内容改成「打开时加载」，测试里要显式加载 —— 见
+`DrawerPage.reload()` 的注释）。
+
+模拟器（API 28，AVD `cardesk28`，端口 5560）冷启动 5 轮，
+`tools/startup_bench.sh`（空载）：
+
+| 指标 | 改前 | 改后 |
+|---|---|---|
+| `am start -W` TotalTime（均值） | ~554ms | **~337ms**（217~442） |
+| **启动页消失**（= 用户能看到桌面） | ~962ms（旧口径 `desktopReady`） | **~580ms**（524~617，新的 `splashGone` 打点） |
+| `uiBuilt`（UI 树建完） | 251ms | ~230ms（164~295） |
+| 抽屉页构造 | 80ms（在 `build()` 里） | **2~10ms**（首帧之后） |
+
+真车（领克 dcy11 / Android 9）推算：启动页从 **19.2s → ~7.8s**，
+去掉的是那 11.4 秒「桌面早就绪了却被盖住」的时间。
+
+#### 2.5 顺手加的排障工具
+
+- `tools/startup_bench.sh` —— 反复「force-stop → 启动」，把 `am start -W` 的
+  TotalTime 和 `StartupTrace` 的分段一起打出来，用于对比优化前/后；
+- `tools/capture_page_transition.sh` —— 用系统 `animator_duration_scale`
+  把动画放慢 10 倍再逐帧 `screencap`，抓切页过渡的中间帧；
+- `StartupTrace.markOnce()` —— 给「每帧都会走到的代码」（`onDraw`）打点用，
+  只打第一次。
+
+### 三、切页：动画**从来没有跑过**（这才是「僵硬」的根因）
+
+#### 3.1 现象
+
+用户报「切换太过僵硬导致显得有些卡顿」。
+
+第一反应是「动画参数不好看」（竖滑 600ms + 交叉淡入 + 缩放 0.98）。
+但改完参数实测发现：**中间帧一个都抓不到，切页就是一帧硬切。**
+
+#### 3.2 根因：进入页从来没被测量过
+
+旧代码的动画门槛：
+
+```kotlin
+val canAnimate = animate && old != target && views.all { it.width > 0 && it.height > 0 }
+```
+
+而**进入**的那页平时是 `GONE` —— `GONE` 的视图**不参与测量**，
+它从开机起就没量过，`width` 永远是 0。
+
+于是 `canAnimate` **永远是 false** → 走 `restPage()` 把两页一显一隐 →
+**切页从来没有动画过**。
+
+（离开的那页是可见的、量过的，所以门槛挂在进入页上 —— 这个门槛
+本来是想防止「没量好的页面动起来画不出来」，没想到正好把动画**永远挡死**了。）
+
+#### 3.3 改法
+
+1. **进入页先量一次**：`LauncherView.layoutPageForAnimation()` ——
+   按 `pageHost` 的尺寸手动 `measure` + `layout` 一遍
+   （跟 `ViewGroup` 自己做的事一样，只是提前了一帧）；
+2. 门槛改成看 `pageHost`（两页的共同容器，一定有尺寸）；
+3. 动画本身重做成 **横滑**：
+   - 位移从 `translationY` 改成 `translationX`，
+     **方向跟着页号走**（往下一页 = 新页从右边进）；
+   - 260ms（车机 HMI 节奏：低于 200ms 觉得跳，高于 320ms 觉得粘）；
+   - 强减速曲线 `PathInterpolator(0.15f, 0.9f, 0.2f, 1.0f)`；
+   - 交叉淡入 200ms（新页淡入比旧页淡出快）+ 0.96↔1.0 的轻微缩放做纵深；
+   - 位移只走**页宽的 22%** —— 1920 宽的屏上整屏横移太重，
+     会像「换了个应用」而不是「翻了一页」。
+
+   数值规格全在 `ui/PageTransitionSpec.kt`（纯 Kotlin，可 JVM 单测）。
+
+**方向为什么要改**：桌面的主翻页手势是**单指横滑**
+（`core/PageGesture.SINGLE_FINGER_PX`），动画却往上下动 ——
+手指往左划、页面往上跑，视觉和触觉互相打架。
+
+#### 3.4 判据
+
+- `PageTransitionSpecTest`（**10 项**）—— 位移比例、时长、插值器、
+  「进入方向与退出方向互为反号」；
+- `PageTransitionAnimationTest`（**5 项**，Robolectric 真跑 `LauncherView`）——
+  切页后进入页必须**可见 + 位移非 0 + 半透明**（硬切的话三条全挂）；
+  正向从右边进、反向从左边进；位移 = 页宽 22%；动画结束后两页归位。
+
+**回归有效性已验**：把 `layoutPageForAnimation` 临时改成永远返回 `false`
+（模拟老行为），`PageTransitionAnimationTest` **5 项里挂 4 项**；
+改回来全绿。
+
+#### 3.5 模拟器实测
+
+API 28 模拟器，`tools/capture_page_transition.sh` 逐帧抓，
+用「音乐卡头部最左亮像素的 x」当特征点量位移：
+
+| 切页 | 特征点 x 的变化 | 结论 |
+|---|---|---|
+| **正向**（场景页 → 导航页） | `1813 → 1440 → 1375` | 新页从**右**边进，往左滑进位 ✅ |
+| **反向**（导航页 → 场景页） | `1375 → 1813` | 旧页往**右**退 ✅ |
+
+位移量 `1813 − 1375 = 438px`，与规格的 `1920 × 22% = 422px` 一致（差值是
+特征点本身的取样误差）。
+
+另外把动画放慢 10 倍抓过一组连续帧：导航页的音乐卡**一帧一帧**从右往左推进画面，
+落位时归位 —— 方向、缓动、交叉淡入都对。
+（这组抓帧一开始抓不到中间帧 —— 正是「动画压根没跑」的第一个线索。）
+
+效果图：
+
+- `preview/r191-transition-slide.png` —— 横滑过渡四帧（**新页从右进、旧页往左退**，
+  中间两帧是过渡中间态；底部状态栏=Dock 不动）；
+- `preview/r191-page-pair.png` —— 场景页 / 导航页两页落位后的对照；
+- `preview/r191-transition-frame.png` —— 放慢 10 倍抓到的那一帧中间态；
+- `preview/r191-drawer.png` —— 抽屉页改造后实拍（列表 21 项、加载 33ms、图标与禁用态正常）。
+
+### 四、影响面
+
+| 文件 | 改了什么 |
+|---|---|
+| `ui/MainActivity.kt` | 启动页提前淡出；重活后置；权限检查挪后台线程 |
+| `ui/LauncherView.kt` | 进入页预测量（**切页动画的根因修复**）；横滑过渡；抽屉按需构造；`applyOemPolicy` 后台化 |
+| `ui/PageTransitionSpec.kt`（新） | 切页动画的数值规格（纯 Kotlin） |
+| `ui/DrawerPage.kt` | 构造时不再 `reload()` |
+| `core/Permissions.kt` | 拆出 `ensureLocationSilently` / `requestLocationDialog` |
+| `core/StartupTrace.kt` | 新增 `markOnce` |
+| `tools/startup_bench.sh`（新） | 冷启动基准 |
+| `tools/capture_page_transition.sh`（新） | 抓切页过渡帧 |
+
+单测：**2268 → 2283 项全绿**（基线取新增用例前的 `testDebugUnitTest` 结果 2268 项；
+本轮新增 15 项 = `PageTransitionSpecTest` 10 + `PageTransitionAnimationTest` 5，
+6 个抽屉用例补 `reload()`；最终 `testSystemUnitTest` 2283 项 / 0 失败）。
+
+### 五、产物
+
+| 项 | 值 |
+|---|---|
+| 包 | `dist/CarDesk-platform-ecarx-cardesk-4267.apk` |
+| 包名 / 版本 | `com.ecarx.cardesk` / 4267 / 1.0.1171-system |
+| 大小 | 3 487 167 字节 |
+| 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
+| SHA-256 | `47c1b3c29f2b19cccbc3dd9ce52095fb3527b9a89e771280d78cbd15285c8639` |
+| 更新清单 | `dist/cardesk-latest.json`（R2 key `cardesk/CarDesk-platform-ecarx-cardesk-4267.apk`） |
+
+### 六、教训
+
+- **「动画参数不好看」和「动画压根没跑」是两件事**。
+  本轮一开始是照着「竖滑 → 横滑、600ms → 260ms」去调的，
+  改完抓帧发现**一个中间帧都抓不到** —— 顺着这条线查下去，
+  才发现根因是进入页 `GONE` 从来没被测量过，动画门槛永远不通过。
+  **参数是最后一步，根因是第一步**：先把「这段代码到底有没有执行」验清楚，
+  再谈「执行得好不好看」。
+- **门槛条件写在「进入的那一侧」时要格外小心**。
+  离开的页永远可见、量过；进入的页平时是 `GONE`、量不到。
+  一个为了「防止没量好的页面动起来画不出来」而设的门槛，
+  刚好把动画**永远挡死**了 —— 而且不报错、不留痕。
+- **「快」和「看得见」是两回事**。
+  真车上桌面第一帧 7.6 秒就画好了，却因为启动页盖着，用户到 19.2 秒才看见 ——
+  这 11.4 秒不是「慢」，是**白挡**。
+  优化启动不一定要让代码跑得更快，有时候只要**别把做好的东西盖住**。
+- **重复的活是最容易漏掉的**。
+  抽屉页构造时 `reload()` 一次、打开时又 `reload()` 一次 ——
+  同一份「查全部应用 + 逐个读图标」白干两遍，模拟器上 95ms。
