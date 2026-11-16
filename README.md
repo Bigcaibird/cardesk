@@ -6264,6 +6264,9 @@ Dock 立刻变直角 —— 说明**默认值这一路本身也生效了**。
 | 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
 | SHA-256 | `182af47d1c8f700ab075d60276fc3d09236c54b0741c88344722127b0267b55b` |
 | 更新清单 | `dist/cardesk-latest.json`（R2 key `cardesk/CarDesk-platform-ecarx-cardesk-4266.apk`） |
+| 提交 | `0a1a5bf`（第167+186~190 轮合并提交） |
+| GitHub Release | [`v1.0.1170`](https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1170) —— **已发布**，附件为 4266 的 APK（3,483,211 B，远端 digest 与本地 SHA-256 一致） |
+| R2 上传 | **未做** —— 环境里没有 `R2_AK` / `R2_SK`（凭据只从环境变量读，环境里没有就不做） |
 
 ### 八、教训
 
