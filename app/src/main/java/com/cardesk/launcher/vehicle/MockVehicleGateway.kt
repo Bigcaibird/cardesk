@@ -88,8 +88,18 @@ class MockVehicleGateway(
     var simWindowsOpen: BooleanArray = booleanArrayOf(false, false, false, false)
         private set
 
-    val simHoodClosed: Boolean = true
-    val simTrunkClosed: Boolean = true
+    /**
+     * 引擎盖 / 后备箱开闭（`true` = 关）。
+     *
+     * **可变**（第188轮）：调试姿态注入（`Car3dDebugPose`）要能造出
+     * 「四门 + 引擎盖 + 后备箱」这种 6 处未关的场景 ——
+     * 弹窗的胶囊行在 5 处以上会换行，这是必须能在模拟器上验的版式。
+     */
+    @Volatile
+    var simHoodClosed: Boolean = true
+
+    @Volatile
+    var simTrunkClosed: Boolean = true
 
     /**
      * 逐扇模拟开窗（**仅调试用**：`Car3dDebugPose` 的单窗截图需要逐扇值；真车通道不走这里）。

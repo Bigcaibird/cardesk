@@ -208,8 +208,15 @@ class DockBarView(context: Context) : View(context) {
      */
     private val coverFallback = Skin.ACCENT_SOFT
 
-    /** Dock 圆角（设计 px）：构造时从 `Prefs` 读，设置页改了走 [refreshAll]。 */
-    private var cornerRadius: Float = 36f
+    /**
+     * Dock 圆角（设计 px）：构造时从 `Prefs` 读，设置页改了走 [refreshAll]。
+     *
+     * 第190轮：默认值 36 → 0（用户：「dock栏圆角默认改成0px吧」）。
+     * 这个**字段初值**也要跟 `Prefs.dockCornerRadius` 的默认值一致 ——
+     * 否则「还没 attach 到窗口」（比如预览渲染、单测里直接 new 出来）的那一瞬间
+     * 仍然是 36px 的圆角，跟用户设置里的默认值对不上。
+     */
+    private var cornerRadius: Float = 0f
 
     private val bgPath = Path()
 
@@ -241,7 +248,7 @@ class DockBarView(context: Context) : View(context) {
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        cornerRadius = runCatching { Prefs(context).dockCornerRadius.toFloat() }.getOrDefault(36f)
+        cornerRadius = runCatching { Prefs(context).dockCornerRadius.toFloat() }.getOrDefault(0f)
         live.add(java.lang.ref.WeakReference(this))
         invalidate()
     }
@@ -257,7 +264,7 @@ class DockBarView(context: Context) : View(context) {
         val h = height.toFloat()
         // 第四十九轮「浮屿」：Dock 底改成**不透明扁平面** + 1px 描边（不再是半透明玻璃）。
         // 第五十轮对齐设计板 s01：Dock 1872×96 / 圆角 36。
-        // 第183轮：① 圆角改成设置项（`Prefs.dockCornerRadius`，默认 36，0..52）；
+        // 第183轮：① 圆角改成设置项（`Prefs.dockCornerRadius`，第190轮默认 0，0..52）；
         //          ② Dock 紧贴屏幕底部，所以**只圆上面两个角**，下面两个是直角
         //             （否则贴底后屏幕最底部两侧会露出三角形缺口）。
         val radius = cornerRadius.coerceIn(0f, minOf(h, w) / 2f)
@@ -1475,7 +1482,7 @@ private fun tempItem(canvas: Canvas, right: Float, passenger: Boolean): Float {
         fun refreshAll(context: Context) {
             val radius = runCatching {
                 Prefs(context.applicationContext).dockCornerRadius.toFloat()
-            }.getOrDefault(36f)
+            }.getOrDefault(0f)
             for (ref in live) {
                 val v = ref.get() ?: continue
                 v.cornerRadius = radius

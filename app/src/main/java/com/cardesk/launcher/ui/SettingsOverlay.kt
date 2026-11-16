@@ -130,9 +130,6 @@ class SettingsOverlay(
     var onShowRestart: (() -> Unit)? = null
     var onShowAccent: (() -> Unit)? = null
 
-    /** 保留兼容：内置的「Dock 生效应用」面板已改用共享的 AppPickerDialog。 */
-    var onShowDockApps: (() -> Unit)? = null
-
     /** 「指定隐藏状态栏的应用」选择器（MainActivity.openDesignDockAppPicker 的另一半）。 */
     var onShowStatusApps: (() -> Unit)? = null
 
@@ -3003,12 +3000,14 @@ class SettingsOverlay(
             prefs.hideHomeDock = it
             logSetting("home_dock_hidden", "隐藏桌面 Dock", from, it)
         }
-        switchRow("隐藏原车 Dock", prefs.hideDock) {
+        switchRow("隐藏原车 Dock", prefs.hideDock, "对所有应用生效") {
             val from = prefs.hideDock
             prefs.hideDock = it
             logSetting("dockbar_hide_dock", "隐藏原车 Dock", from, it)
         }
-        // 第183轮：Dock 圆角可调（0..52 设计 px，默认 36）。
+        // 第183轮：Dock 圆角可调（0..52 设计 px）。
+        // 第190轮：默认值 36 → 0（用户：「dock栏圆角默认改成0px吧」）——
+        // 滑杆本身保留，用户想找回圆角随时能拖回去。
         // Dock 现在紧贴屏幕底部，圆角只作用在上面两个角；拖动时桌面/全局 Dock 实时重绘。
         sliderRow("Dock 圆角", prefs.dockCornerRadius, 0, 52, " px") {
             val from = prefs.dockCornerRadius
@@ -3016,19 +3015,10 @@ class SettingsOverlay(
             com.cardesk.launcher.ui.shell.DockBarView.refreshAll(context)
             logSettingDebug("dock_corner_radius", "Dock 圆角", from, it)
         }
-        pickerRow("Dock 生效应用", dockAppSummary(prefs.hideDockApps)) {
-            // 排障场景：Dock 生效应用名单没生效 —— 记下打开选择器时的名单
-            Logx.event(
-                LogTags.SETTING,
-                "打开 Dock 生效应用选择器",
-                "current" to prefs.hideDockApps.joinToString(","),
-            )
-            onShowDockApps?.invoke()
-        }
-        // 第149轮：这里原来还有一行 actionButton「指定隐藏原车 Dock 的应用（已选 N 个）…」，
-        // 和上面那行 `pickerRow("Dock 生效应用")` **打开的是同一个选择器、写的是同一个键**
-        // —— 纯重复。第149轮删掉，只留 pickerRow：
-        // 它的值显示的是**具体 App 名**（"QQ音乐、设置 等3个"），比「已选 N 个」信息多。
+        // 第189轮：原来的「Dock 生效应用」名单**整行删掉** ——
+        // 「隐藏原车 Dock」改成全局生效（`immersive.navigation=*`），不再按名单挑应用；
+        // 留着这一行会让人以为还能挑，而且老名单的含义会悄悄反转
+        // （以前是「只对这些生效」，现在全局了）。
         switchRow("隐藏原车状态栏", prefs.hideStatus) {
             val from = prefs.hideStatus
             prefs.hideStatus = it

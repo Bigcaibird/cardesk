@@ -177,7 +177,7 @@ class PreviewRenderTest {
         call(launcher, "showAccentPicker")
         shot("16-color.png")
         call(launcher, "onBack")
-        call(launcher, "showDockApps")
+        call(launcher, "showStatusApps")
         shot("17-app-picker.png")
         call(launcher, "onBack")
         call(launcher, "showKeys")

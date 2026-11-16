@@ -721,6 +721,24 @@ class GlobalDockService : Service() {
     // ---------------------------------------------------------------- Dock 回调
 
     /**
+     * 桌面切页 → 同步全局 Dock 的页号。
+     *
+     * ## 为什么需要
+     *
+     * 全局 Dock 是**另一个 [DockBarView] 实例**（悬浮窗里画的那条），
+     * 页内 Dock 的 `activePage` 更新（`LauncherView.showPage`）**不会**传到它。
+     * 以前这里写死 0 —— 于是站在画中画页上，全局 Dock 的主页键
+     * 仍然高亮成「当前页」，指示本身就是错的。
+     *
+     * 服务与桌面**同进程**（manifest 里没有 `android:process`），
+     * 所以直接走静态引用即可，不需要广播。
+     */
+    private fun setActivePage(page: Int) {
+        dock?.activePage = page
+        Logx.i(LogTags.DOCK, "全局 Dock 页号同步", "page" to page)
+    }
+
+    /**
      * 接上 Dock 的按钮。
      *
      * 与桌面里的语义差别（全局窗口没有页面上下文）：
@@ -733,8 +751,25 @@ class GlobalDockService : Service() {
      * - 空调类动作直接调 [VehicleController]：进程内、全局有效、点了立即生效。
      */
     private fun wireCallbacks(bar: DockBarView) {
-        bar.activePage = 0
-        bar.onHome = { goHome() }
+        // 页号由桌面切页时同步过来（[onActivePage]）——
+        // 写死 0 的话，站在画中画页上 home 键还会高亮成「当前页」。
+        bar.activePage = lastActivePage
+        bar.onHome = {
+            // 画中画全屏时，主页键 = **退出全屏**。
+            //
+            // 为什么不能只发 HOME intent：
+            // - 画中画全屏时承载面是独立图层，会盖住桌面窗口 → 桌面走 `onStop`，
+            //   HOME intent 只是「把桌面拉到前台」，**碰不到画中画的全屏层**；
+            // - 而全屏层还在 → 用户眼前什么都没变，就是「主页键没反应」。
+            //
+            // 所以直接让桌面处理（[MainActivity.onExternalHome]），把全屏层收掉。
+            if (pipFullscreen) {
+                runCatching { MainActivity.onExternalHome() }
+                    .onFailure { Logx.w(LogTags.DOCK, "外部 HOME 处理失败", it) }
+            } else {
+                goHome()
+            }
+        }
         // 第九十五轮 C3：主页键长按 = 最近任务（回桌面打开我们自己的最近任务页）。
         bar.onHomeLongPress = { toLauncher(MainActivity.ACTION_RECENTS) }
 
@@ -1183,6 +1218,46 @@ class GlobalDockService : Service() {
         /** 桌面 onResume / onPause 通知：HOME 前台时全局窗口要隐身。 */
         fun onHomeForeground(homeForeground: Boolean) {
             active?.setHomeForeground(homeForeground)
+        }
+
+        /**
+         * 桌面切页通知：把当前页号同步给全局 Dock。
+         *
+         * 全局 Dock 是独立的 [DockBarView] 实例，它的 `activePage` 决定
+         * 主页键的高亮（当前页 = 高亮）。不同步的话它永远停在 0。
+         */
+        fun onActivePage(page: Int) {
+            lastActivePage = page
+            active?.setActivePage(page)
+        }
+
+        /**
+         * 上一次已知的桌面页号。
+         *
+         * 放在 companion 里（而不是服务实例字段）：服务可能晚于切页才起来
+         * （[ensureStarted] 被设置页 / 开机广播拉起），起来时要把页号补上。
+         */
+        @Volatile
+        private var lastActivePage = 0
+
+        /**
+         * 桌面那边是不是**画中画全屏**态。
+         *
+         * 放 companion 里（服务与桌面同进程，静态引用直连）。
+         * 全局 Dock 的主页键靠它决定「退出全屏」还是「回桌面」。
+         */
+        @Volatile
+        private var pipFullscreen = false
+
+        /**
+         * 桌面进 / 出画中画全屏时通知全局 Dock。
+         *
+         * 全局 Dock 是**另一个窗口**，它的主页键看不见桌面里的画中画状态；
+         * 桌面切页 / 进全屏这些状态变化都要主动同步过来。
+         */
+        fun onPipFullscreen(state: Boolean) {
+            pipFullscreen = state
+            Logx.i(LogTags.DOCK, "画中画全屏态同步", "fullscreen" to state)
         }
 
         /**

@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1163",
-  "versionCode": 4259,
-  "tag": "v1.0.1163",
-  "name": "CarDesk 4259 / 1.0.1163-system",
-  "notes": "4259：胎压胶囊与车轮同一水平线、离车体固定 24px 留缝，且不随门态移动",
-  "publishedAt": "2026-11-16T06:59:36Z",
+  "version": "1.0.1170",
+  "versionCode": 4266,
+  "tag": "v1.0.1170",
+  "name": "CarDesk 4266 / 1.0.1170-system",
+  "notes": "第190轮：Dock 栏圆角默认值 36 → 0（直角横条）；只改默认值，老用户已设的值保留",
+  "publishedAt": "2026-11-16T11:59:52Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4259.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4259.apk",
-    "size": 3477703,
-    "sha256": "0c8b47eb5086dcdff175bbddf55e459755b3e3caa01a9c6d01df6ef757374940"
+    "name": "CarDesk-platform-ecarx-cardesk-4266.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4266.apk",
+    "size": 3483211,
+    "sha256": "182af47d1c8f700ab075d60276fc3d09236c54b0741c88344722127b0267b55b"
   }
 }

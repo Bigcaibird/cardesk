@@ -27,6 +27,7 @@ import com.cardesk.launcher.core.NavSlots
 import com.cardesk.launcher.core.PageGesture
 import com.cardesk.launcher.core.Prefs
 import com.cardesk.launcher.core.Skin
+import com.cardesk.launcher.core.dock.GlobalDockService
 import com.cardesk.launcher.core.media.LyricTimeline
 import com.cardesk.launcher.core.media.MusicController
 import com.cardesk.launcher.core.media.TrackInfo
@@ -1230,6 +1231,9 @@ class LauncherView(context: Context) : FrameLayout(context) {
      * —— 重建时承载面被换成了新的，不重新提到最层就会掉回导航页的地图卡里。
      */
     private fun enterPipFullscreen() {
+        // 全局 Dock（另一个窗口）也得知道进全屏了 —— 它的主页键靠这个判「退出全屏」。
+        // 放在这里而不是调用点：换肤重建那条路也走这个函数。
+        GlobalDockService.onPipFullscreen(true)
         navPage.pip.visibility = android.view.View.VISIBLE
         navPage.syncPipState(prefs.dualPip, true)
         // 全屏：画中画铺满整块画布（不留白）
@@ -1270,9 +1274,15 @@ class LauncherView(context: Context) : FrameLayout(context) {
      * 分隔条单击和返回键都走这里（两条路径必须完全一致：
      * 之前返回键那条只切了页面，**没把画中画挂回地图卡、也没恢复留白**，
      * 结果画中画继续盖在导航页上、而且是全屏尺寸。
+     *
+     * @param targetPage 还原后落在哪一页。默认导航页（分隔条「还原」和返回键
+     *   都该回画中画那一页）；切页动作会把目标页带进来，
+     *   免得「先还原再切页」变成两次动作、用户看到中间态。
      */
-    fun exitPipFullscreen() {
+    fun exitPipFullscreen(targetPage: Int = PAGE_NAV) {
         pipFullscreen = false
+        // 全局 Dock（另一个窗口）也得知道全屏态没了 —— 它的主页键靠这个判「退出全屏」。
+        GlobalDockService.onPipFullscreen(false)
         // 还原：画中画要挂回导航页的地图卡，不能留在根容器里
         navPage.restorePipToMapCard()
         // 玻璃条也要放回导航页
@@ -1283,12 +1293,41 @@ class LauncherView(context: Context) : FrameLayout(context) {
         navPage.syncPipState(prefs.dualPip, false)
         // 还原后恢复内容留白（导航页里不能被 Dock 压住）
         navPage.applyPipContentInset(false)
-        showPage(PAGE_NAV)
+        showPage(targetPage)
         refreshPip()
         // 尺寸从「全屏」变回「分屏」后，重新给承载应用发一次启动 ——
         // 否则应用会按全屏尺寸绘制（被放大裁切），或者地图图层直接黑掉。
         // （resize 稳定后重新加载）。
         navPage.pip.relaunchAfterResize()
+    }
+
+    /**
+     * 画中画全屏态是个**盖在根容器最上层**的层（[enterPipFullscreen] 把它
+     * `bringChildToFront` 到 1920×1080 的设计画布）。
+     *
+     * ## 为什么需要一个统一的「先还原」闸口
+     *
+     * 全屏时它把整个屏幕盖住 —— 这时候切页、开抽屉、开最近任务，
+     * **用户眼前一个像素都不会变**：页面索引变了、浮层也开了，
+     * 只是全屏层还盖在上面。真机表现就是「Dock 切屏按钮点了没反应」
+     * （诊断包 11-16 11:25~11:37 有 22 次切页全部无视觉反馈）。
+     *
+     * 所以凡是「要让别的东西露出来」的动作，都必须先过这个闸口。
+     * 之前只有 `goHome()` 和返回键会还原（[exitPipFullscreen]），
+     * 切页 / 抽屉 / 最近任务都不管 —— 这就是漏网的那几条路。
+     *
+     * @return true = 确实做过还原（调用方不要再重复处理）
+     */
+    private fun exitPipFullscreenIfNeeded(targetPage: Int): Boolean {
+        if (!pipFullscreen) return false
+        Logx.event(
+            LogTags.NAV_UI,
+            "动作前还原画中画全屏",
+            "to" to targetPage,
+            "pkg" to prefs.pipApp,
+        )
+        exitPipFullscreen(targetPage)
+        return true
     }
 
     /** 全屏时提到根容器上的玻璃条（还原时放回导航页）。 */
@@ -1413,6 +1452,9 @@ class LauncherView(context: Context) : FrameLayout(context) {
      */
     private fun showDrawer() {
         if (::drawerPage.isInitialized && drawerPage.parent != null) return
+        // 画中画全屏时它盖在根容器最上层，抽屉插在状态栏之前 → 会被压在下面看不见。
+        // 先还原（留在当前页，不把用户拽走），抽屉才露得出来。
+        exitPipFullscreenIfNeeded(page)
         // 第152轮：打开前先清一遍浮层。
         // 抽屉页是**长期持有的同一个实例**，上一次没清干净的菜单 / 弹窗
         // 会跟着实例一起回到窗口上，盖住图标、把所有点击吃掉。
@@ -1484,6 +1526,25 @@ class LauncherView(context: Context) : FrameLayout(context) {
             return
         }
         showPage(PAGE_SCENE)
+    }
+
+    /**
+     * 全局 Dock 的主页键 / 系统 HOME 键走这条路（由 [com.cardesk.launcher.MainActivity] 转过来）。
+     *
+     * ## 与 [goHome] 的区别
+     *
+     * [goHome] 是**页内 Dock** 的主页键，语义是「回桌面页」；
+     * 全局 Dock 的主页键 / 系统 HOME 键的语义是「把桌面拉到前台」——
+     * 非全屏时**不动页号**（老行为：用户可能就停在画中画页，别把他拽走）。
+     *
+     * 只有**画中画全屏**时才接管：全屏层盖住整个屏幕，
+     * 不还原的话用户眼前什么都没变（真机：全屏下 home 键「没反应」，
+     * 诊断包 11-16 11:27~11:37 点了 12 次 home 全部无反馈）。
+     */
+    fun handleExternalHome() {
+        if (!pipFullscreen) return
+        Logx.event(LogTags.DOCK, "外部 HOME：先还原画中画全屏", "pkg" to prefs.pipApp)
+        goHome()
     }
 
     /**
@@ -1582,6 +1643,8 @@ class LauncherView(context: Context) : FrameLayout(context) {
     private fun showRecents() {
         Logx.event(LogTags.APP, "打开最近任务")
         if (recentTasksPage != null) return
+        // 同抽屉：最近任务页也插在状态栏之前，画中画全屏层会把它压在下面。
+        exitPipFullscreenIfNeeded(page)
         val page = RecentTasksPage(context, pal).apply {
             onClose = { closeRecents() }
             onOpenApp = { app ->
@@ -1942,7 +2005,18 @@ class LauncherView(context: Context) : FrameLayout(context) {
     }
 
     private fun showPage(target: Int, animate: Boolean) {
-        Logx.i(LogTags.APP, "切页", "from" to page, "to" to target, "animate" to animate)
+        // 画中画全屏时它盖在根容器最上层，不还原就切页 = 用户眼前什么都没变。
+        // 这条闸口必须排在切页日志**之前**，否则日志里只会看到「切页成功」，
+        // 排查时完全看不出上面还压着一层全屏画中画。
+        if (exitPipFullscreenIfNeeded(target)) return
+        Logx.i(
+            LogTags.APP,
+            "切页",
+            "from" to page,
+            "to" to target,
+            "animate" to animate,
+            "fullscreen" to pipFullscreen,
+        )
         closeClimate()
         if (sourceMenu.isOpen) sourceMenu.hide()
         val old = page
@@ -1950,6 +2024,9 @@ class LauncherView(context: Context) : FrameLayout(context) {
         prefs.lastPage = target
         dots.index = target
         dock.activePage = target
+        // 全局 Dock（悬浮窗）是**另一个 View 实例**，页号要单独同步过去 ——
+        // 否则它永远停在 0，站在画中画页上 home 键还高亮成「当前页」。
+        GlobalDockService.onActivePage(target)
         // 切页后自绘状态栏的显隐要跟着变（对标 App 的同步逻辑：导航页隐藏）
         applyDockVisibility()
 
@@ -2545,17 +2622,23 @@ private fun showCam() {
         showOverlayDialog(dialog)
     }
 
-    /** Dock 生效应用选择（`MainActivity.openDesignDockAppPicker`）。 */
-    fun showDockApps() {
+    /**
+     * 状态栏生效应用选择（`AppPickerDialog`）。
+     *
+     * 第189轮：原来的「Dock 生效应用」选择器删掉了 ——
+     * 「隐藏原车 Dock」改成全局生效，不再按名单挑应用；
+     * 状态栏这一侧的名单还在用，所以保留这个入口（顺带被预览测试当通用选择器用）。
+     */
+    fun showStatusApps() {
         val dialog = com.cardesk.launcher.ui.dialogs.AppPickerDialog(
             context, pal,
             multiSelect = true,
-            preselected = prefs.hideDockApps,
-            title = "指定隐藏原车 Dock 的应用",
+            preselected = prefs.hideStatusApps,
+            title = "指定隐藏状态栏的应用",
         )
         // 勾选即生效，没有确认按钮
         dialog.onChanged = { set ->
-            prefs.hideDockApps = set
+            prefs.hideStatusApps = set
             applyOemPolicy()
         }
         dialog.onClose = { closeOverlayDialog(dialog) }
@@ -2824,33 +2907,8 @@ private fun showCam() {
             dialog.onClose = { closeOverlayDialog(dialog) }
             showOverlayDialog(dialog)
         }
-        overlay.onShowDockApps = {
-            val dialog = com.cardesk.launcher.ui.dialogs.AppPickerDialog(
-                context, pal,
-                multiSelect = true,
-                preselected = prefs.hideDockApps,
-                title = "指定隐藏原车 Dock 的应用",
-            )
-            dialog.onChanged = { set ->
-                prefs.hideDockApps = set
-                applyOemPolicy()
-            }
-            dialog.onClose = { closeOverlayDialog(dialog) }
-            showOverlayDialog(dialog)
-        }
         overlay.onShowStatusApps = {
-            val dialog = com.cardesk.launcher.ui.dialogs.AppPickerDialog(
-                context, pal,
-                multiSelect = true,
-                preselected = prefs.hideStatusApps,
-                title = "指定隐藏状态栏的应用",
-            )
-            dialog.onChanged = { set ->
-                prefs.hideStatusApps = set
-                applyOemPolicy()
-            }
-            dialog.onClose = { closeOverlayDialog(dialog) }
-            showOverlayDialog(dialog)
+            showStatusApps()
         }
         // Dock 快捷应用配置（第五十四轮）：与「长按 Dock 槽位」进同一个面板。
         overlay.onShowDockQuickApps = { showDockQuickApps() }

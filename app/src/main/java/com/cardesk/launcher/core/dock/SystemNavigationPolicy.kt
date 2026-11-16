@@ -43,9 +43,10 @@ object SystemNavigationPolicy {
      * - 先按 `:` 切段，丢弃空段和所有 `immersive.*` 段；
      * - [hideStatus] 为真 → 在剩余段后追加 `immersive.status=*`，
      *   [hideStatusPackages] 非空时按 `*,-pkg1,-pkg2` 追加豁免（这些应用**保留**状态栏）；
-     * - [hideStatus] 为假 → 只返回剩余段，空则返回 null（调用方写 `"null"` 复位）；
-     * - [navInsets] **不影响输出**（只用于 apply 的日志/snapshot 诊断）；
-     * - 任何情况下都不写 `immersive.navigation` / `immersive.full`。
+     * - [hideNavigation] 为真 → 追加 `immersive.navigation=*`（第189轮）：
+     *   「隐藏原车 Dock」改成**全局生效**，所有 App 都去掉系统 Dock；
+     * - 两个开关都为假 → 只返回剩余段，空则返回 null（调用方写 `"null"` 复位）；
+     * - [navInsets] **不影响输出**（只用于 apply 的日志/snapshot 诊断）。
      *
      * 返回 null 表示不需要策略。
      */
@@ -54,19 +55,29 @@ object SystemNavigationPolicy {
         hideStatus: Boolean,
         hideStatusPackages: Set<String>,
         navInsets: Boolean,
+        hideNavigation: Boolean = false,
     ): String? {
         val remaining = remainingSegments(current)
-        if (!hideStatus) return remaining.takeIf { it.isNotEmpty() }?.joinToString(SegmentSeparator)
-        val exemptions = hideStatusPackages
-            .asSequence()
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .distinct()
-            .sortedWith(String.CASE_INSENSITIVE_ORDER)
-            .map { "-$it" }
-            .toList()
-        val status = (listOf("*") + exemptions).joinToString(ExemptionSeparator)
-        return (remaining + "immersive.status=$status").joinToString(SegmentSeparator)
+        val out = ArrayList<String>()
+        if (hideNavigation) {
+            out.add("immersive.navigation=*")
+        }
+        if (hideStatus) {
+            val exemptions = hideStatusPackages
+                .asSequence()
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct()
+                .sortedWith(String.CASE_INSENSITIVE_ORDER)
+                .map { "-$it" }
+                .toList()
+            val status = (listOf("*") + exemptions).joinToString(ExemptionSeparator)
+            out.add("immersive.status=$status")
+        }
+        if (out.isEmpty()) {
+            return remaining.takeIf { it.isNotEmpty() }?.joinToString(SegmentSeparator)
+        }
+        return (remaining + out).joinToString(SegmentSeparator)
     }
 
     /** 读当前 `policy_control` → [merge] → 交给 `SystemOps.applyPolicyControl` 写回。 */
@@ -75,6 +86,7 @@ object SystemNavigationPolicy {
         hideStatus: Boolean,
         hideStatusPackages: Set<String>,
         navInsets: Boolean,
+        hideNavigation: Boolean = false,
     ): Boolean {
         val prefs = prefs(context)
         val current = readPolicy(context)
@@ -88,7 +100,7 @@ object SystemNavigationPolicy {
             // 排障场景：退出后策略没还原 —— 先确认进入前到底是什么值
             Logx.d(LogTags.SYS, "全局 Dock：记录 policy_control 原值", "original" to current)
         }
-        val value = merge(current, hideStatus, hideStatusPackages, navInsets)
+        val value = merge(current, hideStatus, hideStatusPackages, navInsets, hideNavigation)
         val ok = SystemOps.applyPolicyControl(context, value)
         if (ok) {
             prefs.edit()
@@ -101,6 +113,7 @@ object SystemNavigationPolicy {
                 "value" to value,
                 "hideStatus" to hideStatus,
                 "hideStatusPackages" to hideStatusPackages.joinToString(","),
+                "hideNavigation" to hideNavigation,
                 "navInsets" to navInsets,
             )
         } else {
@@ -110,6 +123,7 @@ object SystemNavigationPolicy {
                 "全局 Dock：policy_control 应用失败",
                 "value" to value,
                 "hideStatus" to hideStatus,
+                "hideNavigation" to hideNavigation,
                 "navInsets" to navInsets,
             )
         }

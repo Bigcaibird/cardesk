@@ -97,10 +97,18 @@ class CarTopStatusView(context: Context) : View(context) {
                 view = effView,
             )
             // 俯视：沿用 120×240 设计外框（与 2D 车模/命中区完全对齐）；
-            // 其它视角（dialog/hero）：整块区域等比居中，避免槽位比例与资产不一致时压扁。
+            // 其它视角（dialog/hero/cardtop）：按**资产自己的比例**等比居中。
+            //
+            // 第189轮修「车模变形」：原来这里给的是**整个槽位**（弹窗是 712×404 的横槽）
+            // ＋ `fit = true`。但 `fit = true` 救不了 —— 位图在解码时
+            // （`Car3dAssets.decodeScaled`）就已经被缩放成了槽位尺寸，
+            // 等比那一步是在一张**已经拉变形**的图上做的，等于没做：
+            // 竖版的俯视资产（264×356）塞进横槽 → 车被压成一辆「横躺着的车」。
+            //
+            // 现在目标矩形直接按资产比例算好，解码时不会变形。
             val top = effView == Car3dAssets.VIEW_TOP
-            val rect = if (top) car3dRect(context, dir, frame, w, h) else RectF(0f, 0f, w, h)
-            if (car3d.paint(canvas, context, effView, rect, fit = !top)) return
+            val rect = if (top) car3dRect(context, dir, frame, w, h) else aspectRect(context, dir, effView, w, h)
+            if (car3d.paint(canvas, context, effView, rect, fit = false)) return
         }
 
         CarTopPainter.draw(canvas, frame, geo, colors)
@@ -187,6 +195,43 @@ class CarTopStatusView(context: Context) : View(context) {
         val spec = Car3dAssets.slotOf(context, dir, effective)
         val aspectW = (spec?.first ?: 344).toFloat()
         val aspectH = (spec?.second ?: 224).toFloat()
+        val s = minOf(w / aspectW, h / aspectH)
+        val rw = aspectW * s
+        val rh = aspectH * s
+        return RectF((w - rw) / 2f, (h - rh) / 2f, (w + rw) / 2f, (h + rh) / 2f)
+    }
+
+    /**
+     * 按**资产自己的宽高比**在视图区域里等比居中（第189轮）。
+     *
+     * ## 为什么必须有这一步
+     *
+     * 车模位图是在解码时缩放到目标尺寸的（[Car3dAssets.decodeScaled]
+     * → `Bitmap.createScaledBitmap(raw, w, h)`），
+     * 所以**目标矩形的比例必须和资产一致**，否则车会被拉变形。
+     *
+     * 「车门未关」弹窗的槽位是 712×404（横），而现在的俯视资产是 264×356（竖）——
+     * 以前直接把位图缩放到 712×404，车就被压成一辆「横躺着的车」
+     * （用户反馈：「车子的模型变形了，比例不对」）。
+     *
+     * 这里改成：先按资产比例算出目标矩形（299×404），再交给绘制层 ——
+     * 解码出来的位图比例天然正确，车不会被拉。
+     */
+    private fun aspectRect(
+        context: Context,
+        dir: String,
+        effView: String,
+        w: Float,
+        h: Float,
+    ): RectF {
+        val used = runCatching {
+            Car3dAssets.usedView(context, dir, effView)
+        }.getOrNull() ?: effView
+        val slot = Car3dAssets.slotOf(context, dir, used)
+        val aspectW = slot?.first?.toFloat() ?: 0f
+        val aspectH = slot?.second?.toFloat() ?: 0f
+        // 资产没声明槽位 → 只能按整块区域画（老资产路径）。
+        if (aspectW <= 0f || aspectH <= 0f) return RectF(0f, 0f, w, h)
         val s = minOf(w / aspectW, h / aspectH)
         val rw = aspectW * s
         val rh = aspectH * s

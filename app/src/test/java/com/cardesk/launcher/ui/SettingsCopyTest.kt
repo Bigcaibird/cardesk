@@ -127,6 +127,8 @@ class SettingsCopyTest {
         "开启后保持 ISS 关闭" to "语义",
         "关：只看预设；开：展开全部滑杆" to "语义",
         "续航卡自适应时会吃掉行尾剩余宽度" to "语义",
+        // 第189轮：「隐藏原车 Dock」改成全局生效，副标题说明这一点。
+        "对所有应用生效" to "语义",
         // —— 选项说明（不写就分不清选项）——
         "上一句 / 当前句 / 下一句" to "选项",
         "歌词块始终居中" to "选项",
@@ -255,10 +257,10 @@ class SettingsCopyTest {
             shadowOf(android.os.Looper.getMainLooper()).idle()
             subtitles += markedTexts(bodyOf(overlay), SettingsOverlay.SUBTITLE_MARK)
         }
-        // 互斥 2 + ISS 语义 1 + 自定义参数 1 + 续航卡 1 = 5
+        // 互斥 2 + ISS 语义 1 + 自定义参数 1 + 续航卡 1 + 隐藏原车 Dock 全局 1 = 6
         assertEquals(
             "开关副标题应该只剩互斥 / 语义那几条，实际：$subtitles",
-            5,
+            6,
             subtitles.size,
         )
     }

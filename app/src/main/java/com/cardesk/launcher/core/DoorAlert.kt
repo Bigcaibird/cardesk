@@ -110,8 +110,25 @@ object DoorAlert {
      */
     fun detail(items: List<Item>): String {
         if (items.isEmpty()) return ""
-        return summary(items) + " 还没关好，请检查"
+        return summary(items) + " " + HINT
     }
+
+    /**
+     * 副标题（**两行版**）：清单一行、提示一行。
+     *
+     * ## 为什么需要它（第188轮）
+     *
+     * 未关部件多的时候，「清单 + 提示」一行放不下，TextView 会自动折行 ——
+     * 但折点由宽度决定，很可能从「还 | 没关好」中间断开，读起来别扭。
+     * 这里在**已知放不下**时主动拆成两行：上面是清单，下面是提示。
+     */
+    fun detailTwoLines(items: List<Item>): String {
+        if (items.isEmpty()) return ""
+        return summary(items) + "\n" + HINT
+    }
+
+    /** 提示后缀（和 [detail] / [detailTwoLines] 共用，避免两处文案走样）。 */
+    const val HINT: String = "还没关好，请检查"
 
     /** 引擎盖名（与车况卡一致）。 */
     const val HOOD_LABEL: String = "引擎盖"

@@ -34,7 +34,6 @@ class OemDockPolicyTest {
             OemDockPolicy.buildPolicyValue(
                 hideDock = false,
                 hideStatus = false,
-                hideDockPackages = emptySet(),
                 hideStatusPackages = emptySet(),
             )
         )
@@ -44,15 +43,15 @@ class OemDockPolicyTest {
     fun buildPolicyValue_navigationOnly() {
         assertEquals(
             "immersive.navigation=*",
-            OemDockPolicy.buildPolicyValue(true, false, emptySet(), emptySet()),
+            OemDockPolicy.buildPolicyValue(true, false, emptySet()),
         )
     }
 
     @Test
     fun buildPolicyValue_bothJoinedWithColon() {
         assertEquals(
-            "immersive.navigation=com.a:immersive.status=com.b",
-            OemDockPolicy.buildPolicyValue(true, true, setOf("com.a"), setOf("com.b")),
+            "immersive.navigation=*:immersive.status=com.b",
+            OemDockPolicy.buildPolicyValue(true, true, setOf("com.b")),
         )
     }
 
@@ -60,7 +59,7 @@ class OemDockPolicyTest {
     fun buildPolicyValue_statusOnly() {
         assertEquals(
             "immersive.status=com.b",
-            OemDockPolicy.buildPolicyValue(false, true, emptySet(), setOf("com.b")),
+            OemDockPolicy.buildPolicyValue(false, true, setOf("com.b")),
         )
     }
 
@@ -120,7 +119,6 @@ class OemDockPolicyTest {
             OemDockPolicy.buildPolicyValue(
                 hideDock = false,
                 hideStatus = false,
-                hideDockPackages = emptySet(),
                 hideStatusPackages = emptySet(),
                 immersivePackages = listOf("com.cardesk.launcher"),
             ),
@@ -128,13 +126,15 @@ class OemDockPolicyTest {
     }
 
     @Test
-    fun buildPolicyValue_immersivePackagesMergeWithHideList() {
+    fun buildPolicyValue_hideDockIsGlobalAndCoversImmersiveList() {
+        // 第189轮：「隐藏原车 Dock」改成**全局生效** —— 所有 App 都去掉系统 Dock。
+        // 以前是「只对名单里的 App 生效」（外加桌面自己），所以那个开关
+        // 看起来只对桌面 App 管用。现在是 "*"，沉浸名单被它盖掉。
         assertEquals(
-            "immersive.navigation=com.self,com.other",
+            "immersive.navigation=*",
             OemDockPolicy.buildPolicyValue(
                 hideDock = true,
                 hideStatus = false,
-                hideDockPackages = setOf("com.other"),
                 hideStatusPackages = emptySet(),
                 immersivePackages = listOf("com.self"),
             ),
@@ -142,17 +142,46 @@ class OemDockPolicyTest {
     }
 
     @Test
-    fun buildPolicyValue_immersiveListWinsWhenHideDockListIsEmpty() {
-        // 「隐藏原车 Dock」打开但名单为空 = 全部应用；
-        // 此时沉浸名单是「自己 ∪ 全部」→ 还是 "*"。
+    fun buildPolicyValue_hideDockOffKeepsImmersiveListOnly() {
+        // 没开「隐藏原车 Dock」时，只有「总是沉浸」的名单生效（一般是桌面自己）——
+        // 这条名单**不**是「隐藏原车 Dock」的实现方式，两者别混。
+        assertEquals(
+            "immersive.navigation=com.self",
+            OemDockPolicy.buildPolicyValue(
+                hideDock = false,
+                hideStatus = false,
+                hideStatusPackages = emptySet(),
+                immersivePackages = listOf("com.self"),
+            ),
+        )
+    }
+
+    @Test
+    fun buildPolicyValue_hideDockOnIgnoresOldHideList() {
+        // 第189轮：「隐藏原车 Dock」改成全局生效后，**不再有**「Dock 生效应用」名单。
+        // 老用户存下来的名单（Prefs.hideDockApps）不再参与生成策略 ——
+        // 留着它会让开关看起来「只对那几个 App 生效」，正是用户要改掉的行为。
         assertEquals(
             "immersive.navigation=*",
             OemDockPolicy.buildPolicyValue(
                 hideDock = true,
                 hideStatus = false,
-                hideDockPackages = emptySet(),
                 hideStatusPackages = emptySet(),
-                immersivePackages = listOf("com.self"),
+                immersivePackages = emptyList(),
+            ),
+        )
+    }
+
+    @Test
+    fun buildPolicyValue_hideDockOnKeepsStatusExemptions() {
+        // 全局隐藏 Dock 不影响状态栏那一侧的名单（这里沿用 OemDockPolicy 的语义：
+        // 名单里写什么就命中什么，空集才是「全部」）。
+        assertEquals(
+            "immersive.navigation=*:immersive.status=com.b",
+            OemDockPolicy.buildPolicyValue(
+                hideDock = true,
+                hideStatus = true,
+                hideStatusPackages = setOf("com.b"),
             ),
         )
     }
@@ -164,7 +193,6 @@ class OemDockPolicyTest {
             OemDockPolicy.buildPolicyValue(
                 hideDock = false,
                 hideStatus = true,
-                hideDockPackages = emptySet(),
                 hideStatusPackages = setOf("com.b"),
                 immersivePackages = listOf("com.self"),
             ),
@@ -178,7 +206,6 @@ class OemDockPolicyTest {
             OemDockPolicy.buildPolicyValue(
                 hideDock = false,
                 hideStatus = false,
-                hideDockPackages = emptySet(),
                 hideStatusPackages = emptySet(),
                 immersivePackages = listOf("  ", "", " com.self "),
             ),

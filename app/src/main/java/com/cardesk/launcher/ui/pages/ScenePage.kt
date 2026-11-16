@@ -555,23 +555,37 @@ class ScenePage(context: Context) : View(context) {
         val i = info
         text.textAlign = Paint.Align.LEFT
         text.typeface = Typeface.DEFAULT
-        text.textSize = 22f
+        // 第189轮：标题字号 22 → 24（[TRIP_TITLE_SP]）。
+        text.textSize = TRIP_TITLE_SP
         text.color = Skin.TEXT_DIM
-        canvas.drawText("行程", rect.left + 20f, rect.top + 34f, text)
+        canvas.drawText("行程", rect.left + 20f, rect.top + TRIP_TITLE_BASE, text)
 
         val pad = 20f
         val cw = (rect.width() - pad * 2f) / 2f
         val colX = floatArrayOf(rect.left + pad, rect.left + pad + cw)
-        val rowTop = floatArrayOf(rect.top + 48f, rect.top + 100f)
+        val rowTop = floatArrayOf(rect.top + TRIP_CELL_TOP_1, rect.top + TRIP_CELL_TOP_2)
         val cellW = cw - 6f
-        drawTripCell(canvas, colX[0], rowTop[0], "里程", VehicleStats.formatTripDistanceKm(i?.tripKm), cellW)
-        drawTripCell(
-            canvas, colX[1], rowTop[0], "时长",
+        // 第189轮：四个数值**一起**量，取都放得下的最大字号（见 [fitValueSize]）——
+        // 「平均油耗 6.8 L/100km」是最长的那个，其它三格跟着降到同一档，
+        // 免得同一张卡里两个格子的数字一大一小。
+        val values = listOf(
+            VehicleStats.formatTripDistanceKm(i?.tripKm),
             VehicleStats.formatTripDuration(i?.tripDurationMs),
-            cellW,
+            VehicleStats.formatFuelConsumption(i?.trip1AvgFuel),
+            VehicleStats.formatOdometer(i?.odometerKm?.takeIf { it > 0 }),
         )
-        drawTripCell(canvas, colX[0], rowTop[1], "平均油耗", VehicleStats.formatFuelConsumption(i?.trip1AvgFuel), cellW)
-        drawTripCell(canvas, colX[1], rowTop[1], "总里程", VehicleStats.formatOdometer(i?.odometerKm?.takeIf { it > 0 }), cellW)
+        val narrow = cellW < 150f
+        val valueSp = fitValueSize(
+            values,
+            cellW,
+            if (narrow) TRIP_VALUE_SP_NARROW else TRIP_VALUE_SP,
+            TRIP_VALUE_SP_MIN,
+        )
+        val labelSp = if (narrow) TRIP_LABEL_SP_NARROW else TRIP_LABEL_SP
+        drawTripCell(canvas, colX[0], rowTop[0], "里程", values[0], cellW, labelSp, valueSp)
+        drawTripCell(canvas, colX[1], rowTop[0], "时长", values[1], cellW, labelSp, valueSp)
+        drawTripCell(canvas, colX[0], rowTop[1], "平均油耗", values[2], cellW, labelSp, valueSp)
+        drawTripCell(canvas, colX[1], rowTop[1], "总里程", values[3], cellW, labelSp, valueSp)
     }
 
     /**
@@ -582,9 +596,10 @@ class ScenePage(context: Context) : View(context) {
         val i = info
         text.textAlign = Paint.Align.LEFT
         text.typeface = Typeface.DEFAULT
-        text.textSize = 22f
+        // 第189轮：和行程卡同一档字号（两个卡在底排并排，字号不一致会很扎眼）。
+        text.textSize = TRIP_TITLE_SP
         text.color = Skin.TEXT_DIM
-        canvas.drawText("车门车窗", rect.left + 20f, rect.top + 34f, text)
+        canvas.drawText("车门车窗", rect.left + 20f, rect.top + TRIP_TITLE_BASE, text)
 
         val doors = i?.doorsClosed
         val doorText = when {
@@ -613,12 +628,22 @@ class ScenePage(context: Context) : View(context) {
         val pad = 20f
         val cw = (rect.width() - pad * 2f) / 2f
         val colX = floatArrayOf(rect.left + pad, rect.left + pad + cw)
-        val rowTop = floatArrayOf(rect.top + 48f, rect.top + 100f)
+        val rowTop = floatArrayOf(rect.top + TRIP_CELL_TOP_1, rect.top + TRIP_CELL_TOP_2)
         val cellW = cw - 6f
-        drawTripCell(canvas, colX[0], rowTop[0], "车门", doorText, cellW)
-        drawTripCell(canvas, colX[1], rowTop[0], "车窗", windowText, cellW)
-        drawTripCell(canvas, colX[0], rowTop[1], "后备箱", trunkText, cellW)
-        drawTripCell(canvas, colX[1], rowTop[1], "引擎盖", hoodText, cellW)
+        // 第189轮：和行程卡一样，四个值一起量字号（这里的最长值是「部分不可读」）。
+        val values = listOf(doorText, windowText, trunkText, hoodText)
+        val narrow = cellW < 150f
+        val valueSp = fitValueSize(
+            values,
+            cellW,
+            if (narrow) TRIP_VALUE_SP_NARROW else TRIP_VALUE_SP,
+            TRIP_VALUE_SP_MIN,
+        )
+        val labelSp = if (narrow) TRIP_LABEL_SP_NARROW else TRIP_LABEL_SP
+        drawTripCell(canvas, colX[0], rowTop[0], "车门", values[0], cellW, labelSp, valueSp)
+        drawTripCell(canvas, colX[1], rowTop[0], "车窗", values[1], cellW, labelSp, valueSp)
+        drawTripCell(canvas, colX[0], rowTop[1], "后备箱", values[2], cellW, labelSp, valueSp)
+        drawTripCell(canvas, colX[1], rowTop[1], "引擎盖", values[3], cellW, labelSp, valueSp)
     }
 
     // ---------------------------------------------------------------- 底部卡片顺序
@@ -1756,18 +1781,48 @@ class ScenePage(context: Context) : View(context) {
         label: String,
         value: String,
         maxWidth: Float = 300f,
+        labelSp: Float = TRIP_LABEL_SP,
+        valueSp: Float = TRIP_VALUE_SP,
     ) {
         text.textAlign = Paint.Align.LEFT
         text.typeface = Typeface.DEFAULT
-        text.textSize = 19f
+        // 第189轮：标签 19 → 21（[TRIP_LABEL_SP]），数值 24 → 27（[TRIP_VALUE_SP]）。
+        text.textSize = labelSp
         text.color = Skin.TEXT_SOFT
-        canvas.drawText(fitText(label, maxWidth), x, top + 15f, text)
+        canvas.drawText(fitText(label, maxWidth), x, top + TRIP_LABEL_BASE, text)
 
         text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         // 卡被压窄时（卡片库加卡 / 小档）数值跟着缩，避免压到相邻单元格。
-        text.textSize = if (maxWidth < 150f) 20f else 24f
+        text.textSize = valueSp
         text.color = Skin.TEXT
-        canvas.drawText(fitText(value, maxWidth), x, top + 44f, text)
+        canvas.drawText(fitText(value, maxWidth), x, top + TRIP_VALUE_BASE, text)
+    }
+
+    /**
+     * 一张卡里的几个数值**一起**量，取**都放得下**的最大字号。
+     *
+     * ## 为什么不每格各缩各的
+     *
+     * 「平均油耗 6.8 L/100km」比「里程 128.4 km」长一截。
+     * 以前是每格自己 `fitText` —— 放不下就截断成「6.8 L/100…」，数字看着像坏了。
+     * 现在改成整卡取同一档：最长的那个放不下就**整卡降一档**，
+     * 四格字号一样大，数字也完整。
+     */
+    private fun fitValueSize(
+        values: List<String>,
+        maxWidth: Float,
+        target: Float,
+        min: Float,
+    ): Float {
+        text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        var size = target
+        while (size > min) {
+            text.textSize = size
+            if (values.all { text.measureText(it) <= maxWidth }) break
+            size -= 1f
+        }
+        text.textSize = size
+        return size
     }
 
     // ---------------------------------------------------------------- 底部卡片
@@ -2588,15 +2643,20 @@ class ScenePage(context: Context) : View(context) {
         hits[CAR_STATUS_CARD_HIT_KEY] = RectF(r)
 
         // —— 标题 + 详情入口（整卡可点，详情只是可发现性）——
+        //
+        // 第189轮：这两个字**再放大一倍**（13/12 → 26/24）。
+        // 以前 13px 的「车况」在 388 宽的卡上几乎是个角标，模拟器实拍看着像
+        // 「卡片自带的一行小字」，用户直接说「太小了」。
+        // 放大后标题和胎压数值（22px）同一档，状态行（26px）也比标题醒目。
         text.textAlign = Paint.Align.LEFT
         text.typeface = Typeface.DEFAULT
-        text.textSize = 13f
+        text.textSize = CAR_STATUS_TITLE_SP
         text.color = Skin.TEXT_DIM
-        canvas.drawText("车况", r.left + 16f, r.top + 14f + 12f, text)
+        canvas.drawText("车况", r.left + 16f, r.top + CAR_STATUS_TITLE_TOP + CAR_STATUS_TITLE_SP, text)
         text.textAlign = Paint.Align.RIGHT
-        text.textSize = 12f
+        text.textSize = CAR_STATUS_LINK_SP
         text.color = Skin.ACCENT
-        canvas.drawText("详情 ›", r.right - 16f, r.top + 14f + 12f, text)
+        canvas.drawText("详情 ›", r.right - 16f, r.top + CAR_STATUS_TITLE_TOP + CAR_STATUS_TITLE_SP, text)
         text.textAlign = Paint.Align.LEFT
 
         val assetDir = CarModels.assetDir(carModel)
@@ -2675,7 +2735,10 @@ class ScenePage(context: Context) : View(context) {
         }
         val parts = CardSnapshot.statusParts(doors, windows, trunkOpen)
         text.typeface = Typeface.DEFAULT
-        text.textSize = 13f
+        // 第189轮：状态行也**放大一倍**（13 → 26）。最长的一句是
+        // 「左前门、右后门 未关」（约 10 个汉字 ≈ 260px），卡内可用宽 388-32=356px，
+        // 放得下；≥3 处未关时会合并成「车门未关」这种短句，更没问题。
+        text.textSize = CAR_STATUS_STATUS_SP
         text.textAlign = Paint.Align.LEFT
         val y = r.top + CAR_STATUS_STATUS_Y
         var x = r.left + 16f
@@ -3747,7 +3810,7 @@ class ScenePage(context: Context) : View(context) {
         /** 第184轮：后轮两颗胶囊中心 y（卡内设计 px，底边离状态文字顶边 6px）。 */
         const val CAR_TIRE_REAR_Y = 310f
 
-        // -------------------------------------------------- 胎压胶囊（第180轮：字号 ×2）
+        // -------------------------------------------------- 胎压胶囊（第180轮：字号 ×2；第189轮：再放大）
         //
         // 原来胶囊是 30×23，数值 11px、单位「bar」7px —— 远看就是一排小点，
         // 真机反馈要求「放大到 2 倍」。几何跟着字号一起放大（宽高都 ×2 附近），
@@ -3756,27 +3819,32 @@ class ScenePage(context: Context) : View(context) {
         // 胶囊**左/上边缘**离图区边的距离只由 [CAR_TIRE_INSET] 决定
         // （中心 = inset + 胶囊半径），所以放大后胶囊右边会多吃进车模一点，
         // 这是「字号 ×2」必然的代价 —— 位置参数保持不变，视觉上仍是贴角。
+        //
+        // 第189轮：卡片自带文字（标题/详情/状态行）整体翻倍之后，
+        // 胎压数字还是 22px 就显得**不成比例**（用户：「折中：胎压数字 22→32」）。
+        // 胶囊几何跟着放大到 72×62：数值 32px、单位 20px。
+        // 数字宽度要放得下：「2.4」三个字符约 54px，胶囊 72px 够。
 
-        /** 胎压胶囊宽。 */
-        const val TIRE_PILL_W = 52f
+        /** 胎压胶囊宽（第189轮：52 → 72）。 */
+        const val TIRE_PILL_W = 72f
 
-        /** 胎压胶囊高。 */
-        const val TIRE_PILL_H = 46f
+        /** 胎压胶囊高（第189轮：46 → 62）。 */
+        const val TIRE_PILL_H = 62f
 
-        /** 胎压胶囊圆角。 */
-        const val TIRE_PILL_RADIUS = 17f
+        /** 胎压胶囊圆角（第189轮：17 → 22，约为胶囊高的一半）。 */
+        const val TIRE_PILL_RADIUS = 22f
 
-        /** 胎压数值字号（原 11 → 22，整 2 倍）。 */
-        const val TIRE_PILL_VALUE_SP = 22f
+        /** 胎压数值字号（第180轮 11 → 22；第189轮 22 → 32）。 */
+        const val TIRE_PILL_VALUE_SP = 32f
 
-        /** 胎压单位「bar」字号（原 7 → 14，整 2 倍）。 */
-        const val TIRE_PILL_UNIT_SP = 14f
+        /** 胎压单位「bar」字号（第180轮 7 → 14；第189轮 14 → 20）。 */
+        const val TIRE_PILL_UNIT_SP = 20f
 
-        /** 数值基线（相对胶囊上沿）。 */
-        const val TIRE_PILL_VALUE_BASELINE = 24f
+        /** 数值基线（相对胶囊上沿；第189轮：24 → 31）。 */
+        const val TIRE_PILL_VALUE_BASELINE = 31f
 
-        /** 单位基线（相对胶囊上沿）。 */
-        const val TIRE_PILL_UNIT_BASELINE = 39f
+        /** 单位基线（相对胶囊上沿；第189轮：39 → 54）。 */
+        const val TIRE_PILL_UNIT_BASELINE = 54f
 
         /** 老视角（hero/card）胎压胶囊位置，卡片相对坐标（fl/fr/rl/rr），沿用第177轮手调值。 */
         val CAR_TIRE_LEGACY_X = floatArrayOf(0.435f, 0.156f, 0.845f, 0.541f)
@@ -3794,6 +3862,74 @@ class ScenePage(context: Context) : View(context) {
 
         /** 状态文字基线（相对卡顶，第一行）。 */
         const val CAR_STATUS_STATUS_Y = 352f
+
+        // -------------------------------------------------- 车况卡字号（第189轮：×2）
+        //
+        // 用户反馈：「车况卡所有字体再放大一倍」。
+        //
+        // 这里只放大**卡片自带的三处文字**（标题 / 详情入口 / 状态行）：
+        // 胎压胶囊里的数值（22px）和单位（14px）**不动** —— 它们在第180轮
+        // 已经从 11/7 整翻过一倍，再翻一倍的话胶囊得撑到 104×92，
+        // 388 宽的卡里四颗大胶囊会把车模挤没，得不偿失。
+        //
+        // 放大后的层级：状态行 26 = 标题 26 > 详情入口 24 > 胎压数值 22 > 单位 14。
+
+        /** 车况卡标题（「车况」）字号（第189轮：13 → 26）。 */
+        const val CAR_STATUS_TITLE_SP = 26f
+
+        /** 车况卡标题基线相对「卡顶 + [CAR_STATUS_TITLE_TOP]」的偏移（= 字号本身）。 */
+        const val CAR_STATUS_TITLE_TOP = 12f
+
+        /** 车况卡「详情 ›」字号（第189轮：12 → 24，比标题小一档）。 */
+        const val CAR_STATUS_LINK_SP = 24f
+
+        /** 车况卡状态行字号（第189轮：13 → 26）。 */
+        const val CAR_STATUS_STATUS_SP = 26f
+
+        // -------------------------------------------------- 底部卡片字号（第189轮）
+        //
+        // 用户反馈：「行程卡的字号也整体调大一点，现在太小了」。
+        //
+        // 底排卡片高只有 150px，而一行要放「标题 + 标签 + 数值 + 标签 + 数值」五行字，
+        // 所以放大不是无脑乘 2 —— 按**可见字形高度**重新排了一遍：
+        //
+        //   标题 24 + 标签 21 + 数值 27 + 标签 21 + 数值 27 = 120
+        //   上下留白 10 + 4，四道行间距各 4  →  合计 150，一像素不浪费。
+        //
+        // 「车门车窗」卡和行程卡在底排并排，字号必须一致，否则一眼就看出来不对。
+
+        /** 底部卡片标题字号（第189轮：22 → 24）。 */
+        const val TRIP_TITLE_SP = 24f
+
+        /** 底部卡片标题基线（相对卡顶）。 */
+        const val TRIP_TITLE_BASE = 31f
+
+        /** 单元格标签字号（第189轮：19 → 21）。 */
+        const val TRIP_LABEL_SP = 21f
+
+        /** 单元格标签基线（相对单元格顶）。 */
+        const val TRIP_LABEL_BASE = 20f
+
+        /** 单元格数值字号（第189轮：24 → 27；放不下会整卡一起降档）。 */
+        const val TRIP_VALUE_SP = 27f
+
+        /** 单元格数值字号下限。 */
+        const val TRIP_VALUE_SP_MIN = 20f
+
+        /** 卡片被压窄时的数值字号（原来是 24）。 */
+        const val TRIP_VALUE_SP_NARROW = 24f
+
+        /** 卡片被压窄时的标签字号（原来是 19）。 */
+        const val TRIP_LABEL_SP_NARROW = 19f
+
+        /** 数值基线（相对单元格顶）。 */
+        const val TRIP_VALUE_BASE = 51f
+
+        /** 第一行单元格顶（相对卡顶）。 */
+        const val TRIP_CELL_TOP_1 = 36f
+
+        /** 第二行单元格顶（相对卡顶）。 */
+        const val TRIP_CELL_TOP_2 = 92f
 
         /**
          * 车窗打开 = 黄色（用户指定）。

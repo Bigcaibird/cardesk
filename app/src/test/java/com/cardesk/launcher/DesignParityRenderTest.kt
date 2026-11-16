@@ -132,7 +132,7 @@ class DesignParityRenderTest {
         call(launcher, "onBack")
         call(launcher, "onBack")
 
-        call(launcher, "showDockApps")
+        call(launcher, "showStatusApps")
         shot("08-picker.png")
         call(launcher, "onBack")
 

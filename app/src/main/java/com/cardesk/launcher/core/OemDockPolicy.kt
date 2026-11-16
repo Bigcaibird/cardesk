@@ -93,7 +93,8 @@ object OemDockPolicy {
         return set
     }
 
-    /** 把集合编码成持久化字符串（排序去空）。 */
+    /**
+     * 把集合编码成持久化字符串（排序去空）。 */
     fun encodePackages(apps: Collection<String>): String =
         apps.map { it.trim() }
             .filter { it.isNotEmpty() }
@@ -114,48 +115,35 @@ object OemDockPolicy {
     /**
      * 生成 `policy_control` 的值。
      *
-     * @param hideDock 是否隐藏原车 Dock
+     * @param hideDock 是否隐藏原车 Dock —— **全局生效**（所有 App 都去掉系统 Dock）
      * @param hideStatus 是否隐藏系统状态栏
-     * @param hideDockPackages 命中时隐藏 Dock 的包名集合
      * @param hideStatusPackages 命中时隐藏状态栏的包名集合
      * @param immersivePackages **总是**沉浸的包名集合（一般是桌面自己）。
-     *        与 [hideDockPackages] 的区别：后者受「隐藏原车 Dock」开关控制，
-     *        前者不受开关控制 —— 用来把**自己**从系统导航栏的触摸区里摘出来。
+     *        只在 [hideDock] 关闭时生效 —— 打开时是「全部」，它被 `*` 覆盖了。
      * @return null 表示不需要写策略（两项都不开）
      */
     fun buildPolicyValue(
         hideDock: Boolean,
         hideStatus: Boolean,
-        hideDockPackages: Collection<String>?,
         hideStatusPackages: Collection<String>?,
         immersivePackages: Collection<String>? = null,
     ): String? {
-        // 导航栏的沉浸名单 = 总是沉浸的 ∪ （开关打开时的隐藏名单）
-        val navigation = LinkedHashSet<String>()
-        fun addAll(source: Collection<String>?) {
-            source?.forEach { raw ->
+        val sb = StringBuilder()
+        if (hideDock) {
+            // 第189轮：「隐藏原车 Dock」**全局生效** —— 所有 App 都去掉系统 Dock。
+            // 以前这里是「只对名单里的 App 生效」（外加桌面自己），
+            // 于是勾上开关只对指定 App 管用、对其它 App 一点用没有。
+            sb.append("immersive.navigation=*")
+        } else {
+            // 没开全局隐藏时，只沉浸「总是沉浸」的那几个（一般是桌面自己）。
+            val navigation = LinkedHashSet<String>()
+            immersivePackages?.forEach { raw ->
                 val pkg = raw.trim()
                 if (pkg.isNotEmpty()) navigation.add(pkg)
             }
-        }
-        addAll(immersivePackages)
-        if (hideDock) {
-            val list = hideDockPackages.orEmpty().mapNotNull { raw ->
-                raw.trim().ifEmpty { null }
+            if (navigation.isNotEmpty()) {
+                sb.append("immersive.navigation=").append(formatApps(navigation))
             }
-            if (list.isEmpty()) {
-                // 空名单 = **全部应用**（语义，参见 [formatApps]）。
-                // 这时「隐藏原车 Dock」比「只沉浸自己」更强，直接接管整个名单。
-                navigation.clear()
-                navigation.add("*")
-            } else {
-                addAll(list)
-            }
-        }
-        val sb = StringBuilder()
-        if (navigation.isNotEmpty()) {
-            sb.append("immersive.navigation=")
-            sb.append(formatApps(navigation))
         }
         if (hideStatus) {
             if (sb.isNotEmpty()) sb.append(':')
@@ -170,8 +158,7 @@ object OemDockPolicy {
             "生成原车 Dock/状态栏策略",
             "hideDock" to hideDock,
             "hideStatus" to hideStatus,
-            "immersive" to formatApps(navigation),
-            "dockApps" to formatApps(hideDockPackages),
+            "immersive" to immersivePackages?.joinToString(","),
             "statusApps" to formatApps(hideStatusPackages),
             "policy" to value,
         )

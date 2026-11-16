@@ -25,10 +25,11 @@ import com.cardesk.launcher.vehicle.VehicleController
  * adb shell am broadcast -a com.cardesk.launcher.DEBUG_POSE --es lf 1
  * adb shell am broadcast -a com.cardesk.launcher.DEBUG_POSE --es wins 1
  * adb shell am broadcast -a com.cardesk.launcher.DEBUG_POSE --es trunk 1
+ * adb shell am broadcast -a com.cardesk.launcher.DEBUG_POSE --es hood 1
  * adb shell am broadcast -a com.cardesk.launcher.DEBUG_POSE --es clear 1
  * ```
  *
- * 门/窗参数可任意组合（`lf`/`rf`/`lb`/`rb`/`wins`/`trunk`），值 `1`/`true` = 开。
+ * 门/窗参数可任意组合（`lf`/`rf`/`lb`/`rb`/`wins`/`trunk`/`hood`），值 `1`/`true` = 开。
  * 广播只写 [pose]，`ScenePage` / `CarTopStatusView` 在下一帧绘制时优先用它；
  * 1Hz 的刷新会把新姿态带进重绘（≤1s 生效）。
  *
@@ -64,8 +65,11 @@ object Car3dDebugPose {
             on(intent, WIN_KEYS[k]) || on(intent, "wins")
         }
         val trunk = on(intent, "trunk")
-        if (!doors.any { it } && !windows.any { it } && !trunk) return null
-        return CarPose(doors = doors, windows = windows, trunk = trunk)
+        // 第188轮：引擎盖也能注入了 —— 不然模拟器上凑不出「4 门 + 引擎盖 + 后备箱」
+        // 这种 6 处未关（弹窗胶囊行换行的版式就验不了）。
+        val hood = on(intent, "hood")
+        if (!doors.any { it } && !windows.any { it } && !trunk && !hood) return null
+        return CarPose(doors = doors, windows = windows, trunk = trunk, hood = hood)
     }
 
     /** 仅在 debuggable 变体注册；重复调用只装一次。 */
@@ -127,6 +131,11 @@ object Car3dDebugPose {
         }
         // 逐扇写入（单窗截图要用）；`wins` 四扇全开时也走这条路。
         gw.setWindowsOpenEach(p?.windows ?: BooleanArray(CarPose.DOOR_COUNT))
+        // 第188轮：引擎盖 / 后备箱也写进模拟通道 ——
+        // 模拟器上要能造出「4 门 + 引擎盖 + 后备箱」= 6 处未关，
+        // 弹窗胶囊行换行那一版式才能在真运行时上验。
+        gw.simHoodClosed = !(p?.hood ?: false)
+        gw.simTrunkClosed = !(p?.trunk ?: false)
     }
 
     /** 测试用：清掉注入值。 */

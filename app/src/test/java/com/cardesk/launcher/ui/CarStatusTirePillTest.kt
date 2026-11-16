@@ -135,10 +135,11 @@ class CarStatusTirePillTest {
         val fill = bmp.px(fx, fy)
         var top = Int.MAX_VALUE
         var bottom = Int.MIN_VALUE
-        // 数值行：胶囊上沿 +6 .. +25（数值基线在 +24，再往下就是「bar」的笔画了）；
+        // 数值行：胶囊上沿 +6 .. +34（第189轮胶囊放大到 72×62、数值基线在 +31，
+        // 数字顶在 +8；「bar」的单位行从 +40 才开始，不会串进来）；
         // 左右各让开 10px，避开圆角弧和描边。
         val y0 = (pill.top + 6f).toInt()
-        val y1 = (pill.top + 25f).toInt()
+        val y1 = (pill.top + 34f).toInt()
         val x0 = (pill.left + 10f).toInt()
         val x1 = (pill.right - 10f).toInt()
         for (y in y0..y1) {
@@ -200,10 +201,12 @@ class CarStatusTirePillTest {
     }
 
     /**
-     * 字号是原来的 **2 倍**：数值行的高度 ≈ 11px 字号的 2 倍。
+     * 字号：第180轮是原来的 **2 倍**（11 → 22）；
+     * 第189轮随卡片文字一起再放大 —— 数值 **32px**（≈ 原来的 2.9 倍）、
+     * 胶囊 72×62（用户选的口径：「胎压数字 22→32、胶囊加到 72×62」）。
      */
     @Test
-    fun `胎压数值字号是原来的两倍`() {
+    fun `胎压数值字号随第189轮放大到 32px`() {
         val bmp = renderPills(night = true)
         val pill = pillRect()
         val drawn = valueTextHeight(bmp, pill)
@@ -223,8 +226,8 @@ class CarStatusTirePillTest {
 
         val ratio = drawn.toDouble() / refH
         assertTrue(
-            "胎压数值字号应该是原来的 2 倍（实际 ${String.format("%.2f", ratio)} 倍，高度 $drawn / $refH）",
-            ratio > 1.8 && ratio < 2.2,
+            "胎压数值字号应该是 11px 的约 2.9 倍（实际 ${String.format("%.2f", ratio)} 倍，高度 $drawn / $refH）",
+            ratio > 2.5 && ratio < 3.3,
         )
     }
 

@@ -453,11 +453,13 @@ class Prefs(context: Context) {
     // ------------------------------------------------------------------ 原车 Dock / 状态栏
 
     /**
-     * 「Dock 生效应用」：命中这些包时隐藏原车 Dock（`dockbar_hide_dock_pkgs`）。
+     * 「Dock 生效应用」：**第189轮起已废弃**（读写都不再发生）。
      *
-     * 选择器在**一个都不选**时写入哨兵 `__dockbar_no_apps__`（= 一个都不隐藏）
-     * 空集本身在 `policy_control` 里表示 `*`（= 全部隐藏），两者语义相反。
-     * 写入时统一走 [OemDockPolicy.NO_APPS] 哨兵，别让空集漏出去。
+     * 「隐藏原车 Dock」改成**全局生效**（`immersive.navigation=*`，所有 App 都去掉系统 Dock），
+     * 不再按名单挑应用，设置页里的选择器也整行删掉了。
+     *
+     * 保留这个属性只是为了**别把老用户存下来的名单弄丢**（将来要恢复按名单豁免时还能用）。
+     * 键名 `dockbar_hide_dock_pkgs`。
      */
     var hideDockApps: Set<String>
         get() = OemDockPolicy.decodePackages(stringValue("dockbar_hide_dock_pkgs", ""))
@@ -757,17 +759,23 @@ class Prefs(context: Context) {
         set(value) = setIntValue("desk_tpms_value_sp", value.coerceIn(10, 48))
 
     /**
-     * Dock 栏圆角（`dock_corner_radius`，设计 px，默认 36，范围 0..52）。
+     * Dock 栏圆角（`dock_corner_radius`，设计 px，**默认 0**，范围 0..52）。
      *
      * 第183轮：用户要「Dock 的圆角做成可调整的」，所以把原来写死在
      * [com.cardesk.launcher.ui.shell.DockBarView] 里的 36f 提到设置里。
-     * 默认 36 = 改动前观感，不动设置的人画面不变。
      *
-     * 注意：Dock 现在**紧贴屏幕底部**（底边不留 8px 边距），所以这个圆角作用在
+     * 第190轮：**默认值 36 → 0**（用户：「dock栏圆角默认改成0px吧」）。
+     * 圆角是「浮屿」语言的一部分，但 Dock 本身已经是一块贴底的不透明平面，
+     * 上面两个角留白反而像「没贴到边」；改成直角后 Dock 就是一条干净的横条。
+     *
+     * 注意：只改**默认值** —— 已经手动拖过滑杆的老用户保留自己设的值
+     * （`dock_corner_radius` 一旦写过就一直生效）。
+     *
+     * 另外：Dock 现在**紧贴屏幕底部**（底边不留 8px 边距），所以这个圆角作用在
      * **上面两个角**，下面两个角是直角 —— 否则屏幕最底部两侧会露出两个三角形。
      */
     var dockCornerRadius: Int
-        get() = intValue("dock_corner_radius", 36).coerceIn(0, 52)
+        get() = intValue("dock_corner_radius", 0).coerceIn(0, 52)
         set(value) = setIntValue("dock_corner_radius", value.coerceIn(0, 52))
 
     /**

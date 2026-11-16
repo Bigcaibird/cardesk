@@ -203,6 +203,7 @@ class MainActivity : Activity() {
         val container = root ?: return
         val view = LauncherView(this)
         launcher = view
+        instance = this
         // 加在最底层：启动页（后加的那个）盖在它上面。
         container.addView(
             view,
@@ -655,7 +656,26 @@ class MainActivity : Activity() {
      * 第九十三轮：桌面可能还没构造（启动页阶段），此时先排队，首帧后执行。
      */
     private fun handleGlobalDockIntent(intent: Intent?) {
-        val action = intent?.getStringExtra(EXTRA_ACTION) ?: return
+        val action = intent?.getStringExtra(EXTRA_ACTION)
+        if (action == null) {
+            // 没有 EXTRA_ACTION、但带 CATEGORY_HOME → 全局 Dock 的主页键 / 系统 HOME 键。
+            //
+            // 这条路以前什么都不做：HOME intent 只是把桌面拉到前台。
+            // 画中画全屏时全屏层盖住整个屏幕，**不还原用户眼前就没变化** ——
+            // 真机表现就是「全屏下 home 键没反应」。
+            // 非全屏时保持老行为（只拉前台、不动页号）。
+            val isHome = intent?.categories?.contains(Intent.CATEGORY_HOME) == true
+            if (isHome) {
+                Logx.event(LogTags.DOCK, "外部 HOME intent")
+                whenLauncherReady { view ->
+                    view.post {
+                        runCatching { view.handleExternalHome() }
+                            .onFailure { Logx.w(LogTags.DOCK, "外部 HOME 处理失败", it) }
+                    }
+                }
+            }
+            return
+        }
         // 动作是一次性的：同一个 Intent 再被系统复用时不该重复执行。
         runCatching { intent.removeExtra(EXTRA_ACTION) }
         Logx.event(LogTags.DOCK, "全局 Dock 带回桌面动作", "action" to action)
@@ -677,6 +697,7 @@ class MainActivity : Activity() {
             .onFailure { Logx.w(LogTags.MEDIA, "媒体会话停止失败", it) }
         pendingReadyActions.clear()
         launcher = null
+        if (instance === this) instance = null
         splash = null
         root = null
         Logx.i(LogTags.APP, "onDestroy")
@@ -810,6 +831,35 @@ class MainActivity : Activity() {
     companion object {
         /** 系统相册选壁纸的请求码（第 105 轮）。 */
         private const val REQ_WALLPAPER = 0x5101
+
+        /**
+         * 当前活着的桌面 Activity（全局 Dock 要把动作递进来时用）。
+         *
+         * ## 为什么需要静态引用
+         *
+         * 全局 Dock 的主页键发的是 **HOME intent**。桌面已经在前台时，
+         * Android **不一定**把这个 intent 重新送进 `onNewIntent` ——
+         * 系统可能只把已有的 task 挪到前面（模拟器 API 28 实测就是如此），
+         * 于是「画中画全屏时按主页键」这条命令**根本到不了桌面**。
+         *
+         * 所以全局 Dock 多带一条路：窗口还在屏幕上时**直接调用**
+         * [onExternalHome]，不指望 intent。
+         */
+        @Volatile
+        private var instance: MainActivity? = null
+
+        /**
+         * 全局 Dock 主页键 / 系统 HOME：桌面窗口还在屏幕上时，
+         * 直接让桌面处理 —— 画中画全屏时它必须先还原，
+         * 否则全屏层盖住整个屏幕，用户眼前什么都没变。
+         *
+         * 非全屏时是空操作（[LauncherView.handleExternalHome] 里有闸口）。
+         */
+        @JvmStatic
+        fun onExternalHome() {
+            val act = instance ?: return
+            act.launcher?.handleExternalHome()
+        }
 
         /**
          * 全局 Dock 的「回桌面后要做什么」（第八十七轮）。

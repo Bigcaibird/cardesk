@@ -11,7 +11,9 @@ import org.junit.Test
  * 「隐藏原车 Dock 时 policy_control 到底写什么」的全部决策，不需要模拟器/Roborule。
  *
  * 重点守住的约定（记录设计与实测结论，见 SystemNavigationPolicy 的 KDoc）：
- * - 任何情况下都不写 `immersive.navigation` / `immersive.full`；
+ * - 默认**不写** `immersive.navigation` / `immersive.full`；
+ * - 第189轮起多了一个 `hideNavigation` 开关：「隐藏原车 Dock」改成**全局生效**
+ *   时才写 `immersive.navigation=*`（所有 App 都去掉系统 Dock）；
  * - `navInsets` 不改变输出（覆盖包只当可选增强，模拟器上 /data 装的 overlay 不生效）；
  * - 非沉浸策略段原样保留，别把别的功能正在用的策略抹掉。
  */
@@ -22,7 +24,14 @@ class SystemNavigationPolicyTest {
         hideStatus: Boolean = true,
         hideStatusPackages: Set<String> = emptySet(),
         navInsets: Boolean = false,
-    ): String? = SystemNavigationPolicy.merge(current, hideStatus, hideStatusPackages, navInsets)
+        hideNavigation: Boolean = false,
+    ): String? = SystemNavigationPolicy.merge(
+        current,
+        hideStatus,
+        hideStatusPackages,
+        navInsets,
+        hideNavigation,
+    )
 
     // ---------------------------------------------------------------- 基础输入
 
@@ -135,10 +144,10 @@ class SystemNavigationPolicyTest {
         )
     }
 
-    // ---------------------------------------------------------------- 绝不写 navigation / full
+    // ---------------------------------------------------------------- 默认不写 navigation / full
 
     @Test
-    fun `任何输入都不会写出 immersive navigation 或 immersive full`() {
+    fun `默认不写 immersive navigation 或 immersive full`() {
         val currents = listOf(
             null,
             "",
@@ -173,5 +182,47 @@ class SystemNavigationPolicyTest {
         val output = merge("immersive.status=*:foo=bar", hideStatus = true, hideStatusPackages = setOf("com.a"))
         assertEquals("foo=bar:immersive.status=*,-com.a", output)
         assertTrue(output!!.split(':').count { it.startsWith("immersive.status=") } == 1)
+    }
+
+    // ---------------------------------------- 第189轮：hideNavigation = 全局隐藏原车 Dock
+
+    @Test
+    fun `hideNavigation 打开时写出全局导航栏沉浸`() {
+        assertEquals(
+            "immersive.navigation=*",
+            merge(null, hideStatus = false, hideNavigation = true),
+        )
+    }
+
+    @Test
+    fun `hideNavigation 打开时与状态栏沉浸同时存在`() {
+        assertEquals(
+            "immersive.navigation=*:immersive.status=*,-com.a",
+            merge(null, hideStatus = true, hideStatusPackages = setOf("com.a"), hideNavigation = true),
+        )
+    }
+
+    @Test
+    fun `hideNavigation 打开时保留非沉浸策略段`() {
+        assertEquals(
+            "foo=bar:immersive.navigation=*",
+            merge("foo=bar:immersive.navigation=com.old", hideStatus = false, hideNavigation = true),
+        )
+    }
+
+    @Test
+    fun `hideNavigation 打开时不会写出 immersive full`() {
+        val output = merge("immersive.full=com.old", hideStatus = false, hideNavigation = true)
+        assertEquals("immersive.navigation=*", output)
+        assertFalse(output.orEmpty().contains("immersive.full"))
+    }
+
+    @Test
+    fun `hideNavigation 开关不影响 navInsets`() {
+        val current = "foo=bar"
+        assertEquals(
+            merge(current, hideStatus = true, navInsets = false, hideNavigation = true),
+            merge(current, hideStatus = true, navInsets = true, hideNavigation = true),
+        )
     }
 }

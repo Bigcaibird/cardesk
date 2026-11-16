@@ -163,21 +163,26 @@ class Car3dPreviewTest {
             assertEquals("第 $k 颗 x 与门态无关", closed[k].x, b.centers[k].x, 0.01f)
             assertEquals("第 $k 颗 y 与门态无关", closed[k].y, b.centers[k].y, 0.01f)
         }
-        // y 和对应车轮锚点同一水平线；x 贴卡边（左 14..66 / 右 322..374）
+        // y 和对应车轮锚点同一水平线；x 贴车体（离车体 24px，胶囊自己往外长）
+        //
+        // 第189轮：胶囊从 52×46 放大到 72×62 → 半宽 26 → 36、半高 23 → 31。
+        // 胶囊的**右边缘**位置没变（还是离车体 24px），只是左边缘多长出去 20px。
+        val pillHalfW = 36f
+        val pillHalfH = 31f
         val keys = arrayOf("tires.fl", "tires.fr", "tires.rl", "tires.rr")
         for (k in 0 until 4) {
             val an = a.anchors[keys[k]] ?: error("缺锚点 $k")
             val wantY = a.image.top + an.y * a.image.height()
             assertEquals("第 $k 颗 y 应与锚点同水平线", wantY, closed[k].y, 0.6f)
-            val wantX = if (an.x < 0.5f) a.ref.left - 24f - 26f else a.ref.right + 24f + 26f
+            val wantX = if (an.x < 0.5f) a.ref.left - 24f - pillHalfW else a.ref.right + 24f + pillHalfW
             assertEquals("第 $k 颗 x 应离车体 24px", wantX, closed[k].x, 0.6f)
         }
         assertEquals("前轮两颗同 y", closed[0].y, closed[1].y, 0.01f)
         assertEquals("后轮两颗同 y", closed[2].y, closed[3].y, 0.01f)
-        // 状态文字保守框：x 从卡内 16 起、基线 352、13px 字 → 取 339..356
-        val statusRect = RectF(1488f + 16f, 376f + 339f, 1488f + 250f, 376f + 356f)
+        // 状态文字保守框：x 从卡内 16 起、基线 352、26px 字（第189轮 13 → 26）→ 取 326..356
+        val statusRect = RectF(1488f + 16f, 376f + 326f, 1488f + 250f, 376f + 356f)
         for (k in 0 until 4) {
-            val pill = RectF(closed[k].x - 26f, closed[k].y - 23f, closed[k].x + 26f, closed[k].y + 23f)
+            val pill = RectF(closed[k].x - pillHalfW, closed[k].y - pillHalfH, closed[k].x + pillHalfW, closed[k].y + pillHalfH)
             assertFalse("第 $k 颗胶囊不能压状态文字：$pill vs $statusRect", RectF.intersects(pill, statusRect))
         }
         // 与车漆像素最近距离 ≥6px
@@ -187,8 +192,8 @@ class Car3dPreviewTest {
         val sy = a.image.height() / mask.height
         val dists = FloatArray(4)
         for (k in 0 until 4) {
-            val pl = closed[k].x - 26f; val pt = closed[k].y - 23f
-            val pr = closed[k].x + 26f; val pb = closed[k].y + 23f
+            val pl = closed[k].x - pillHalfW; val pt = closed[k].y - pillHalfH
+            val pr = closed[k].x + pillHalfW; val pb = closed[k].y + pillHalfH
             var best = Float.MAX_VALUE
             for (my in 0 until mask.height step 2) {
                 for (mx in 0 until mask.width step 2) {
@@ -286,14 +291,15 @@ class Car3dPreviewTest {
         doors: List<Boolean?>,
         windows: BooleanArray = booleanArrayOf(false, false, false, false),
         hoodClosed: Boolean? = true,
+        trunkClosed: Boolean? = true,
     ) = DoorAlertDialog(
         RuntimeEnvironment.getApplication(),
         Palettes.night,
-        DoorAlert.openItems(doors, hoodClosed, true),
+        DoorAlert.openItems(doors, hoodClosed, trunkClosed),
         doors,
         windows,
         hoodClosed,
-        true,
+        trunkClosed,
         "01",
     )
 
@@ -307,6 +313,23 @@ class Car3dPreviewTest {
         // 附加：3/4 视角才看得见的两种状态（开窗 / 四门全开）。
         shotDialog(dialogFor(listOf(true, true, true, true), windows = booleanArrayOf(true, true, true, true)), "14-dialog-hero-win")
         shotDialog(dialogFor(listOf(false, false, false, false)), "15-dialog-hero-all-open")
+    }
+
+    /**
+     * 第188轮：未关处数变多时弹窗的版式（胶囊行换行 + 说明不裁切）。
+     *
+     * 5 处 / 6 处未关是这一版必须扛住的极限 —— 修复前胶囊会被压扁成一团。
+     */
+    @Test
+    fun `第188轮 弹窗 多处未关`() {
+        shotDialog(
+            dialogFor(listOf(false, false, false, false), hoodClosed = false),
+            "39-dialog-five-open",
+        )
+        shotDialog(
+            dialogFor(listOf(false, false, false, false), hoodClosed = false, trunkClosed = false),
+            "40-dialog-six-open",
+        )
     }
 
     @Test

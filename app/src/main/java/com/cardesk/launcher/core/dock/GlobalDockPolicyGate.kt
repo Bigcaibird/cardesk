@@ -15,10 +15,12 @@ import com.cardesk.launcher.core.log.Logx
  * 全局 Dock 有两种运行路径，必须写**两套完全不同**的 policy：
  *
  * 1. `NavInsets.applied()` 为真（真车、平台签名 + RRO 生效）：
- *    原车导航栏的 112px 已经由系统预留，**绝不能**再写
- *    `immersive.navigation` / `immersive.full` —— 写了预留区就塌掉，
- *    其它应用的内容会跑到我们的 Dock 底下。这条路径只保留状态栏沉浸，
- *    交给 [SystemNavigationPolicy]（它保证只输出 `immersive.status`）。
+ *    原车导航栏的 112px 已经由系统预留。这条路径默认只保留状态栏沉浸，
+ *    交给 [SystemNavigationPolicy]。
+ *    **第189轮例外**：用户要求「隐藏原车 Dock」对**所有 App** 生效，
+ *    所以开关打开时这里也会写 `immersive.navigation=*`。
+ *    代价要说清楚：预留区会因此塌陷，其它应用的内容可能跑到我们的 Dock 底下
+ *    （设置页的 note 已经写明这一点）—— 这是「全局隐藏」的必然代价。
  * 2. `NavInsets.applied()` 为假（默认 / 普通安装包 / 模拟器）：
  *    没有预留区，而 `TYPE_APPLICATION_OVERLAY`(2038) 的窗口层级**低于**
  *    系统导航栏，原车 nav 条会画在我们 Dock 上面。所以这条路径必须
@@ -128,10 +130,14 @@ object GlobalDockPolicyGate {
     /**
      * 全局 Dock 开启中：两条路径。
      *
-     * 注意这里**不看** `prefs.hideDock`：原车 Dock 在全局 Dock 模式下
-     * 要么被 RRO 预留（applied 分支，原车 Dock 一直活着），要么被
-     * `immersive.navigation=*` 整体关掉（!applied 分支）。
-     * 再叠加「隐藏原车 Dock」开关只会让两个开关互相打架。
+     * 第189轮起**要看** `prefs.hideDock` 了：以前完全不看，
+     * 于是「隐藏原车 Dock」这个开关在全局 Dock 模式下**一点用没有**
+     * （原车 Dock 要么被 RRO 预留、要么被 `immersive.navigation=*` 整体关掉），
+     * 用户看到的就是「这个开关只对桌面 App 生效」。
+     *
+     * 现在两条路径都把它接上：
+     * - 预留区路径 → [SystemNavigationPolicy] 多写一段 `immersive.navigation=*`；
+     * - 无预留区路径 → 本来就是 `*`，顺手把状态栏豁免名单也带上。
      */
     private fun applyGlobalDock(
         context: Context,
@@ -139,25 +145,26 @@ object GlobalDockPolicyGate {
         navInsetsApplied: Boolean,
     ): Boolean {
         if (navInsetsApplied) {
-            // 预留区由 RRO 保住：只写状态栏沉浸，永不碰 navigation/full。
+            // 预留区由 RRO 保住：状态栏按开关沉浸；
+            // 「隐藏原车 Dock」打开时**额外**写 `immersive.navigation=*`（第189轮）。
             Logx.event(
                 LogTags.SYS,
-                "全局 Dock：接管导航栏高度路径（不写 immersive.navigation）",
+                "全局 Dock：接管导航栏高度路径",
                 "hideStatus" to prefs.hideStatus,
+                "hideDock" to prefs.hideDock,
             )
             return SystemNavigationPolicy.apply(
                 context = context,
                 hideStatus = prefs.hideStatus,
                 hideStatusPackages = prefs.hideStatusApps.toSet(),
                 navInsets = true,
+                hideNavigation = prefs.hideDock,
             )
         }
         // 没有预留区：让原车导航栏整体让位（B 方案，Lead 已在模拟器验过）。
         val value = OemDockPolicy.buildPolicyValue(
             hideDock = true,
             hideStatus = prefs.hideStatus,
-            // 空名单 + hideDock=true → navigation 输出 "*"，即所有应用都去掉导航栏。
-            hideDockPackages = emptyList(),
             hideStatusPackages = prefs.hideStatusApps,
         )
         Logx.event(
@@ -182,7 +189,6 @@ object GlobalDockPolicyGate {
         val value = OemDockPolicy.buildPolicyValue(
             hideDock = prefs.hideDock,
             hideStatus = prefs.hideStatus,
-            hideDockPackages = prefs.hideDockApps,
             hideStatusPackages = prefs.hideStatusApps,
             immersivePackages = immersivePackages,
         )
