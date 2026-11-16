@@ -6628,7 +6628,21 @@ CarDesk Dock 从 968 一路铺到 1080，中间无空隙。
 
 - 单测：**2283 → 2291 项全绿**（新增 `DockHeightAlignmentTest` 8 项），0 失败。
 
-### 六、顺带订正一条过期结论
+### 六、产物
+
+| 项 | 值 |
+|---|---|
+| 包 | `dist/CarDesk-platform-ecarx-cardesk-4268.apk` |
+| 包名 / 版本 | `com.ecarx.cardesk` / 4268 / 1.0.1172-system |
+| 大小 | 3 487 227 字节 |
+| 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
+| SHA-256 | `4d5792acf1475da91beffd011ff8269d5db42191139f2cdc65aafc70d8fa1501` |
+| 更新清单 | `dist/cardesk-latest.json`（R2 key `cardesk/CarDesk-platform-ecarx-cardesk-4268.apk`） |
+| 提交 | `34ec0be` |
+| GitHub Release | [`v1.0.1172`](https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1172) —— **已发布**，附件为 4268 的 APK（3 487 227 B，远端 digest 与本地 SHA-256 一致） |
+| R2 上传 | **未做** —— 环境里没有 `R2_AK` / `R2_SK`（凭据只从环境变量读，环境里没有就不做；与第132/133/136/190/191轮一致） |
+
+### 七、顺带订正一条过期结论
 
 `NavInsets` 的类注释一直写着（第八十七轮在 Android 10 / test-keys 上测的）：
 
@@ -6639,7 +6653,7 @@ CarDesk Dock 从 968 一路铺到 1080，中间无空隙。
 本轮把注释改成实测值，并写明「预留区通没通现在用
 `DockBottomProbe.systemNavBarHeightPx` 直接读，不再靠推断」。
 
-### 七、教训
+### 八、教训
 
 - **「系统让出来的空间」和「自己画的东西」必须用同一个数**。
   这一条 8px 的缝不是画错了，是**两个地方各写各的数**（RRO 写 112、Dock 写 104），
