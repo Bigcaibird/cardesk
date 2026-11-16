@@ -1,0 +1,362 @@
+{
+  "format": "cardesk.car3d/1",
+  "model": "05",
+  "name": "领克 05",
+  "dims": {
+    "lengthMm": 4592,
+    "widthMm": 1879,
+    "heightMm": 1628,
+    "wheelbaseMm": 2734
+  },
+  "views": {
+    "cardtop": {
+      "master": [
+        712,
+        528
+      ],
+      "slot": [
+        356,
+        264
+      ],
+      "colors": [
+        "dark"
+      ],
+      "defaultColor": "dark",
+      "gaps": true
+    }
+  },
+  "states": {
+    "closed": {
+      "doors": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "trunk": false
+    },
+    "lf": {
+      "doors": [
+        true,
+        false,
+        false,
+        false
+      ],
+      "trunk": false
+    },
+    "rf": {
+      "doors": [
+        false,
+        true,
+        false,
+        false
+      ],
+      "trunk": false
+    },
+    "lb": {
+      "doors": [
+        false,
+        false,
+        true,
+        false
+      ],
+      "trunk": false
+    },
+    "rb": {
+      "doors": [
+        false,
+        false,
+        false,
+        true
+      ],
+      "trunk": false
+    },
+    "lf_rf": {
+      "doors": [
+        true,
+        true,
+        false,
+        false
+      ],
+      "trunk": false
+    },
+    "lf_lb": {
+      "doors": [
+        true,
+        false,
+        true,
+        false
+      ],
+      "trunk": false
+    },
+    "lf_rb": {
+      "doors": [
+        true,
+        false,
+        false,
+        true
+      ],
+      "trunk": false
+    },
+    "rf_lb": {
+      "doors": [
+        false,
+        true,
+        true,
+        false
+      ],
+      "trunk": false
+    },
+    "rf_rb": {
+      "doors": [
+        false,
+        true,
+        false,
+        true
+      ],
+      "trunk": false
+    },
+    "lb_rb": {
+      "doors": [
+        false,
+        false,
+        true,
+        true
+      ],
+      "trunk": false
+    },
+    "lf_rf_lb": {
+      "doors": [
+        true,
+        true,
+        true,
+        false
+      ],
+      "trunk": false
+    },
+    "lf_rf_rb": {
+      "doors": [
+        true,
+        true,
+        false,
+        true
+      ],
+      "trunk": false
+    },
+    "lf_lb_rb": {
+      "doors": [
+        true,
+        false,
+        true,
+        true
+      ],
+      "trunk": false
+    },
+    "rf_lb_rb": {
+      "doors": [
+        false,
+        true,
+        true,
+        true
+      ],
+      "trunk": false
+    },
+    "all": {
+      "doors": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "trunk": false
+    },
+    "closed_trunk": {
+      "doors": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "trunk": true
+    },
+    "lf_trunk": {
+      "doors": [
+        true,
+        false,
+        false,
+        false
+      ],
+      "trunk": true
+    },
+    "rf_trunk": {
+      "doors": [
+        false,
+        true,
+        false,
+        false
+      ],
+      "trunk": true
+    },
+    "lb_trunk": {
+      "doors": [
+        false,
+        false,
+        true,
+        false
+      ],
+      "trunk": true
+    },
+    "rb_trunk": {
+      "doors": [
+        false,
+        false,
+        false,
+        true
+      ],
+      "trunk": true
+    },
+    "lf_rf_trunk": {
+      "doors": [
+        true,
+        true,
+        false,
+        false
+      ],
+      "trunk": true
+    },
+    "lf_lb_trunk": {
+      "doors": [
+        true,
+        false,
+        true,
+        false
+      ],
+      "trunk": true
+    },
+    "lf_rb_trunk": {
+      "doors": [
+        true,
+        false,
+        false,
+        true
+      ],
+      "trunk": true
+    },
+    "rf_lb_trunk": {
+      "doors": [
+        false,
+        true,
+        true,
+        false
+      ],
+      "trunk": true
+    },
+    "rf_rb_trunk": {
+      "doors": [
+        false,
+        true,
+        false,
+        true
+      ],
+      "trunk": true
+    },
+    "lb_rb_trunk": {
+      "doors": [
+        false,
+        false,
+        true,
+        true
+      ],
+      "trunk": true
+    },
+    "lf_rf_lb_trunk": {
+      "doors": [
+        true,
+        true,
+        true,
+        false
+      ],
+      "trunk": true
+    },
+    "lf_rf_rb_trunk": {
+      "doors": [
+        true,
+        true,
+        false,
+        true
+      ],
+      "trunk": true
+    },
+    "lf_lb_rb_trunk": {
+      "doors": [
+        true,
+        false,
+        true,
+        true
+      ],
+      "trunk": true
+    },
+    "rf_lb_rb_trunk": {
+      "doors": [
+        false,
+        true,
+        true,
+        true
+      ],
+      "trunk": true
+    },
+    "all_trunk": {
+      "doors": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "trunk": true
+    }
+  },
+  "anchors": {
+    "cardtop": {
+      "lf": [
+        0.5601,
+        0.2712
+      ],
+      "rf": [
+        0.5601,
+        0.7217
+      ],
+      "lb": [
+        0.3641,
+        0.2914
+      ],
+      "rb": [
+        0.3641,
+        0.7015
+      ],
+      "trunk": [
+        0.1463,
+        0.4965
+      ],
+      "tires": {
+        "fl": [
+          0.7793,
+          0.3662
+        ],
+        "fr": [
+          0.7793,
+          0.6268
+        ],
+        "rl": [
+          0.2357,
+          0.3662
+        ],
+        "rr": [
+          0.2357,
+          0.6266
+        ]
+      }
+    }
+  },
+  "anim": {},
+  "attribution": "3D 模型：领克官方线上展厅（hall.lynkco.com.cn）公开资产，本 App 个人自用；官方未声明授权，请勿商用再分发"
+}

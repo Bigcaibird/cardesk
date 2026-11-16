@@ -112,6 +112,21 @@ object CardLayout {
      */
     private val DEFAULT_VISIBLE = setOf(TRIP_CARD, MUSIC, CLIMATE, TIRE, RANGE)
 
+    /**
+     * 第179轮：**胎压卡从桌面移除**（用户需求「把首页的胎压卡片移除吧」）。
+     *
+     * 做法不是只改默认可见：老设备的偏好里可能已经把胎压卡摆上桌，
+     * 只改默认值对它们无效。所以排布与设置页统一走 [active] 过滤，
+     * 让这个 id 在任何布局里都不参与绘制、也进不了卡片库。
+     *
+     * 常量与 [title] 保留：老偏好里仍会出现 `tire:...`，[decode] 需要认得它，
+     * 直接丢弃会让整份布局解析失败并回退默认（用户自定义的排序就丢了）。
+     */
+    val REMOVED: Set<String> = setOf(TIRE)
+
+    /** 过滤掉已下线的卡：排布、设置页列表都用它。 */
+    fun active(layout: List<Slot>): List<Slot> = layout.filterNot { it.id in REMOVED }
+
     /** 偏好键（第九十五轮起，替代旧的 `scene_bottom_card_order_v1`）。 */
     const val KEY = "scene_card_layout_v2"
 

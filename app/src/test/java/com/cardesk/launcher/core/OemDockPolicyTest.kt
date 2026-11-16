@@ -184,4 +184,27 @@ class OemDockPolicyTest {
             ),
         )
     }
+
+    // ---------------------------------------------------------------- 第180轮：Dock 让位
+
+    @Test
+    fun `沉浸型播放器在前台时全局 Dock 让位`() {
+        assertTrue(OemDockPolicy.hidesGlobalDockFor("com.netease.cloudmusic.iot"))
+        assertTrue(OemDockPolicy.hidesGlobalDockFor("com.luna.music.car"))
+    }
+
+    @Test
+    fun `遵守导航栏 inset 的应用不让位`() {
+        // QQ 音乐车机版自己做了安全区适配，Dock 压不到它。
+        assertFalse(OemDockPolicy.hidesGlobalDockFor("com.tencent.qqmusiccar"))
+        assertFalse(OemDockPolicy.hidesGlobalDockFor("com.cardesk.launcher"))
+        assertFalse(OemDockPolicy.hidesGlobalDockFor("com.ecarx.qq.tool"))
+    }
+
+    @Test
+    fun `空包名不让位`() {
+        assertFalse(OemDockPolicy.hidesGlobalDockFor(null))
+        assertFalse(OemDockPolicy.hidesGlobalDockFor(""))
+        assertFalse(OemDockPolicy.hidesGlobalDockFor("   "))
+    }
 }

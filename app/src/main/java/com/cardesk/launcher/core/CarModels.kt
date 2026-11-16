@@ -123,4 +123,31 @@ object CarModels {
 
     /** —— 只有 `03` 是内置资源。 */
     fun isBundled(modelId: String): Boolean = normalize(modelId) == MODEL_03
+
+    /**
+     * 车型 → 写实车模（`core/car3d`）的资产目录名（见 `assets/car3d/<dir>/`）。
+     *
+     * 返回 `null` / 目录不存在都表示「这台车没有烘焙图」，运行时静默回退
+     * [CarTopPainter] 自绘车模，**不会崩、也不会每次重试 IO**（见 `core/car3d/Car3dAssets.kt`）。
+     *
+     * 第163轮（占位阶段）：六个车型**全部**指向 `lynk01` 的占位资产，
+     * 这样 preview 截图、真机演示都能看到 3D 效果。真实烘焙图按车型逐个替换后，
+     * 这里改成 `MODEL_01 -> "lynk01"` / `MODEL_05 -> "lynk05"` / `MODEL_03 -> "lynk03"`，
+     * 没烘焙的车型返回 `null` 即可（自动回退 2D）。
+     */
+    /**
+     * 车型编号 → `assets/car3d/<dir>/` 目录名（第168轮：01/05 已各自烘焙）。
+     *
+     * 还没烘焙的车型先回退 `lynk01`（领克 01 是主资产，形状最接近），
+     * 缺目录时由 [com.cardesk.launcher.core.car3d.Car3dAssets.effectiveDir] 再兜底一次。
+     */
+    fun assetDir(modelId: String): String? = when (normalize(modelId)) {
+        MODEL_01 -> "lynk01"
+        MODEL_05 -> "lynk05"
+        MODEL_03, MODEL_03PLUS -> "lynk03"
+        // 02/02HB 还没有烘焙资产：先借 01 的图（车身都是 SUV，比例接近），
+        // 资产到了改成各自的目录即可。
+        MODEL_02, MODEL_02HB -> "lynk01"
+        else -> null
+    }
 }

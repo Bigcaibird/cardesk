@@ -17,10 +17,20 @@ import android.os.Looper
 import android.view.MotionEvent
 import android.view.View
 import com.cardesk.launcher.core.BottomCardOrder
+import com.cardesk.launcher.core.CarModels
+import com.cardesk.launcher.core.CarStatus
+import com.cardesk.launcher.core.CarStatusItem
+import com.cardesk.launcher.core.CarTopGeometryFactory
+import com.cardesk.launcher.core.CarTopPainter
 import com.cardesk.launcher.core.Design
 import com.cardesk.launcher.core.Palettes
 import com.cardesk.launcher.core.Skin
 import com.cardesk.launcher.core.VehicleStats
+import com.cardesk.launcher.core.car3d.Car3dAssets
+import com.cardesk.launcher.core.car3d.CardSnapshot
+import com.cardesk.launcher.core.car3d.Car3dSettings
+import com.cardesk.launcher.core.car3d.Car3dPainter
+import com.cardesk.launcher.core.car3d.CarPose
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.core.media.CoverAccent
@@ -37,6 +47,7 @@ import com.cardesk.launcher.vehicle.TireOrder
 import com.cardesk.launcher.vehicle.VehicleInfo
 import kotlin.math.abs
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 /**
  * 首页 / 场景页（1920×1080）。
@@ -205,6 +216,14 @@ class ScenePage(context: Context) : View(context) {
         } else {
             com.cardesk.launcher.core.CarColors.day
         }
+
+    /**
+     * 写实车模（第163轮）：胎压卡 / 车况卡两个槽位共用一个状态机。
+     *
+     * 同一台车、同一套动画，只是位图尺寸不同（72×144 / 88×176），
+     * 尺寸差异由 [Car3dAssets] 的 LRU 分别缓存。
+     */
+    private val car3d = Car3dPainter.Scene(this)
 
     /** 当前句歌词（大号高亮）。 */
     var lyricCurrent: String = ""
@@ -400,6 +419,11 @@ class ScenePage(context: Context) : View(context) {
     /** 点击车窗图标的回调（用于下发关窗指令 0/50）。 */
     var onToggleWindow: ((Boolean) -> Unit)? = null
 
+    /**
+     * 车况卡整卡点击（第166轮 C 版）：`LauncherView` 弹「车辆状态」面板。
+     */
+    var onOpenVehicleStatus: (() -> Unit)? = null
+
     fun bind(info: VehicleInfo, state: HvacState, wallpaper: Int) {
         this.info = info
         this.state = state
@@ -417,6 +441,10 @@ class ScenePage(context: Context) : View(context) {
         strokeJoin = Paint.Join.ROUND
     }
     private val text = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 1f
+    }
     private val hits = LinkedHashMap<String, RectF>()
 
     /** 音乐卡来源行的设计坐标矩形（来源菜单锚点）；未绘制时为 null。 */
@@ -1738,7 +1766,7 @@ class ScenePage(context: Context) : View(context) {
     private fun layoutBottomCards(): LinkedHashMap<String, RectF> {
         val out = LinkedHashMap<String, RectF>()
         val widths = com.cardesk.launcher.core.CardLayout.widths(
-            cardLayout,
+            com.cardesk.launcher.core.CardLayout.active(cardLayout),
             rightEnd - left,
             CARD_GAP,
             naturalWidth = { id -> cardWidth(id) },
@@ -2371,13 +2399,30 @@ class ScenePage(context: Context) : View(context) {
      * 避免两处画法各改各的、慢慢长得不一样。
      */
     private fun drawCarTop(canvas: Canvas, cx: Float, cy: Float, w: Float, h: Float) {
-        drawCarTop(canvas, com.cardesk.launcher.core.CarTopPainter.frame(cx, cy, w, h))
+        CarTopPainter.draw(
+            canvas,
+            CarTopPainter.frame(cx, cy, w, h),
+            CarTopGeometryFactory.of(carModel),
+            carColors,
+        )
     }
 
-    /** 委托给 [com.cardesk.launcher.core.CarTopPainter]（几何由本页的车型决定）。 */
-    private fun drawCarTop(canvas: Canvas, frame: com.cardesk.launcher.core.CarTopPainter.Frame) {
-        val geo = com.cardesk.launcher.core.CarTopGeometryFactory.of(carModel)
-        com.cardesk.launcher.core.CarTopPainter.draw(canvas, frame, geo, carColors)
+    /**
+     * 当前车控信号 → car3d 的策展姿态。
+     *
+     * 只读 [info]（每秒由 `LauncherView` 刷新一次），**不会额外触发任何通道读取**；
+     * 车窗沿用本页的乐观值合并（[resolveWindowOpenFlags]）。
+     */
+    private fun car3dPose(): CarPose {
+        // 调试注入优先（仅 debuggable 变体，见 Car3dDebugPose）：模拟器截图用。
+        com.cardesk.launcher.core.car3d.Car3dDebugPose.pose?.let { return it }
+        val i = info
+        return CarPose.of(
+            i?.doorsClosed,
+            resolveWindowOpenFlags(),
+            i?.hoodClosed,
+            i?.trunkClosed,
+        )
     }
 
     /**
@@ -2479,59 +2524,38 @@ class ScenePage(context: Context) : View(context) {
     // ---------------------------------------------------------------- 车况卡
 
     /**
-     * 车况卡（**第三十六轮第三轮改造新增**）：基于俯视车模显示
-     * 每一个车门 / 车窗 / 后备箱盖 / 引擎盖的开闭状态。
+     * 车况卡「快照版」（第167轮，按用户参考图放大为 388×450）。
      *
-     * 版式（设计坐标 1920×1080，**与行程卡同宽**，左右边界都是 `1456 / 1876`）：
-     * `
-     * 行程卡 (1456..1876, 292..404)
-     * 车况卡 (1456..1876, 424..654)
-     * ┌──────────────────────────────────────────────────┐
-     * │ 左前门 关 ╭─────╮ 右前门 关 │
-     * │ 左前窗 关 │ 车 │ 右前窗 关 │
-     * │ 左后门 关 │ 模 │ 右后门 关 │
-     * │ 左后窗 关 ╰─────╯ 右后窗 关 │
-     * │ 后备箱 关 引擎盖 关 │
-     * └──────────────────────────────────────────────────┘
-     * `
+     * ```
+     * 车况 · 快照                        ← 15px dim
+     * 386  km 续航                       ← 44px + 14px
+     * ▓▓▓▓▓▓▓░░░░░░░░░                  ← 260×6 进度条
+     * 油量 62% · 预估到达有余            ← 12px dim
+     * ┌───────────────────────────┐
+     * │ 车模 356×250（三视角可选）  │      ← 车身上浮着胶囊 + 引线
+     * │ (门/窗/尾门只报异常；四轮胎压常驻) │
+     * └───────────────────────────┘
+     * 平均油耗  本行程  总里程  保养     ← 11px 标签 / 15px 值
+     * 6.8L     128.4km  12480km  --      （没数据显 --，不编）
+     * ```
      *
-     * 文字提示**分到车模左右两侧**：左列 = 车身上左边的部件、右列 = 右边的部件，
-     * 同一行左右一一对应（行 1 = 两个前门、行 2 = 两个前窗……），
-     * 所以看一眼文字就知道说的是车身上哪一块。
-     *
-     * ## 面板画法
-     *
-     * 车模上每一块门 / 窗 / 盖对应**一个矩形**（几何见
-     * [com.cardesk.launcher.core.CarStatusGeometryFactory]：
-     *
-     * | 状态 | 画法 |
-     * | --- | --- |
-     * | 开 | 橙色实心高亮 |
-     * | 关 | 淡描边（勾个轮廓，不抢注意力） |
-     * | 读不到 | 中性灰描边 —— **不猜**，读不到 ≠ 关着 |
-     *
-     * ## 读不到怎么显示
-     *
-     * 只要这张卡是**显示**的，就**始终画**（它有车模这个固定视觉主体，
-     * 而且用户明确要求要有）：读不到的那几项显示「--」，**不猜**——
-     * 「读不到」和「关着」是两回事（这条口径与 `VehicleStats.interpretDoorClosed` 一致）。
-     *
-     * ## 显隐
-     *
-     * 第111轮起这张卡有自己的开关 [showCarStatusCard]。
-     * 关掉时**整张卡不画**——车窗命中区（`carWin0..3`）也不会注册，
-     * 点那个位置不会再下发「切换全部车窗」命令。
+     * 胶囊位置来自资产 `anchors.<view>`，缺锚点时按车模框均匀排布；
+     * 整卡命中 → [onOpenVehicleStatus]（车辆状态面板 10 项全列表）。
      */
     private fun drawCarStatusCard(canvas: Canvas) {
-        // 第111轮：车况卡可隐藏。提前返回 ⇒ 车窗命中区不注册 ⇒ 点空白处不会误触车窗开关。
         if (!showCarStatusCard) return
         val i = info ?: return
         val doors = i.doorsClosed
         val windows = resolveWindowOpenFlags()
         val hood = i.hoodClosed
         val trunk = i.trunkClosed
+        // 调试姿态注入（仅 debuggable 变体收到广播时非 null）：卡面文字与车模保持一致；
+        // 真实车控链路不受影响，只是让模拟器截图不自相矛盾。
+        val dp = com.cardesk.launcher.core.car3d.Car3dDebugPose.pose
+        val effDoors: List<Boolean?>? = dp?.doors?.map { !it } ?: doors
+        val effWindows: BooleanArray? = dp?.windows ?: windows
+        val effTrunk: Boolean? = dp?.trunk?.let { !it } ?: trunk
         if (doors == null && windows == null && hood == null && trunk == null) {
-            // 只在「从有值变成没值」时记一条，避免每秒刷屏。
             if (!carStatusEmptyLogged) {
                 carStatusEmptyLogged = true
                 Logx.w(LogTags.SIGNAL, "车况卡全部读不到（车门/车窗/盖）")
@@ -2547,160 +2571,236 @@ class ScenePage(context: Context) : View(context) {
             CAR_STATUS_CARD_TOP + CAR_STATUS_CARD_H,
         )
         card(canvas, r)
+        // 整卡可点：点开「车辆状态」面板。
+        hits[CAR_STATUS_CARD_HIT_KEY] = RectF(r)
 
-        // —— 标题（第四十九轮「浮屿」加的）——
+        // —— 标题 + 详情入口（整卡可点，详情只是可发现性）——
         text.textAlign = Paint.Align.LEFT
         text.typeface = Typeface.DEFAULT
-        text.textSize = 21f
+        text.textSize = 13f
         text.color = Skin.TEXT_DIM
-        canvas.drawText("车况", r.left + 24f, r.top + 33f, text)
+        canvas.drawText("车况", r.left + 16f, r.top + 14f + 12f, text)
+        text.textAlign = Paint.Align.RIGHT
+        text.textSize = 12f
+        text.color = Skin.ACCENT
+        canvas.drawText("详情 ›", r.right - 16f, r.top + 14f + 12f, text)
+        text.textAlign = Paint.Align.LEFT
 
-        // —— 1. 车模（与胎压卡同一套自绘车模，按车型出几何）——
-        //
-        // 车模**居中**在卡里，左右两侧各放一列文字提示，
-        // 所以文字和它在车身上的位置能直接对上（左边那一列 = 车左边那几个面）。
-        val geo = com.cardesk.launcher.core.CarTopGeometryFactory.of(carModel)
-        val statusGeo = com.cardesk.launcher.core.CarStatusGeometryFactory.of(geo)
-        val modelCx = (r.left + r.right) / 2f
-        val frame = com.cardesk.launcher.core.CarTopPainter.frame(
-            modelCx,
-            r.top + 40f + CAR_STATUS_MODEL_H / 2f,
-            CAR_STATUS_MODEL_W,
-            CAR_STATUS_MODEL_H,
+        val assetDir = CarModels.assetDir(carModel)
+        val dir = if (Car3dSettings.enabled) assetDir else null
+        // 第179轮：改成资产驱动 —— 只声明 cardtop 的车型走俯视方案（01 已迁，03/05 资产到了自动生效）；
+        // 三视角齐全的老资产继续走原逻辑。布局与是否开启 3D 无关，所以用 assetDir 而不是 dir。
+        val topDown = Car3dAssets.topDownOnly(context, assetDir)
+        val cardView = if (topDown) Car3dAssets.VIEW_CARDTOP else Car3dSettings.cardView
+
+        // —— 车模区：01 用俯视横置 356×246（略偏上）；03/05 保持旧的 356×292 ——
+        val areaTop = if (topDown) CAR_STATUS_CAR_TOP else CAR_STATUS_CAR_TOP_LEGACY
+        val areaH = if (topDown) CAR_STATUS_CAR_H else CAR_STATUS_CAR_H_LEGACY
+        val carArea = RectF(
+            r.left + CAR_STATUS_CAR_X,
+            r.top + areaTop,
+            r.left + CAR_STATUS_CAR_X + CAR_STATUS_CAR_W,
+            r.top + areaTop + areaH,
         )
-        drawCarTop(canvas, frame)
-
-        // —— 2. 面板叠加（顺序与右侧图例一一对应）——
-        val items = com.cardesk.launcher.core.CarStatus.items(doors, windows, hood, trunk)
-        val rects = statusGeo.rects()
-        for (k in items.indices) {
-            val g = rects[k]
-            val pr = RectF(frame.px(g.left), frame.py(g.top), frame.px(g.right), frame.py(g.bottom))
-            when (items[k].open) {
-                true -> {
-                    if (k < CAR_STATUS_DOOR_COUNT) {
-                        // —— 门开着：门板绕铰链「摆」出去（第四十五轮）——
-                        //
-                        // 车门示意是一张俯视车模，
-                        // 每一扇门是一块**能绕铰链翻开**的板，
-                        // 开门时旋转 ±45°。
-                        //
-                        // 我们先在**原位**画一个暗色「开口」（门原来的位置），
-                        // 再把门板绕铰链转出去画在橙色 —— 一眼就能看出是哪扇门开着。
-                        fill.color = carColors.panelGapFill
-                        canvas.drawRoundRect(pr, 2f, 2f, fill)
-                        stroke.color = carColors.panelGapLine
-                        stroke.strokeWidth = 1.2f
-                        canvas.drawRoundRect(pr, 2f, 2f, stroke)
-
-                        val pose = com.cardesk.launcher.core.DoorSwing.pose(k, g)
-                        canvas.save()
-                        canvas.rotate(pose.angleDeg, frame.px(pose.hingeX), frame.py(pose.hingeY))
-                        fill.color = carColors.panelOpenFill
-                        canvas.drawRoundRect(pr, 2f, 2f, fill)
-                        stroke.color = carColors.panelOpenLine
-                        stroke.strokeWidth = 1.6f
-                        canvas.drawRoundRect(pr, 2f, 2f, stroke)
-                        canvas.restore()
-                    } else {
-                        fill.color = carColors.panelOpenFill
-                        canvas.drawRoundRect(pr, 2f, 2f, fill)
-                        stroke.color = carColors.panelOpenLine
-                        stroke.strokeWidth = 1.6f
-                        canvas.drawRoundRect(pr, 2f, 2f, stroke)
-                    }
-                }
-                false -> {
-                    fill.color = carColors.panelClosedFill
-                    canvas.drawRoundRect(pr, 2f, 2f, fill)
-                    stroke.color = carColors.panelClosedLine
-                    stroke.strokeWidth = 1.2f
-                    canvas.drawRoundRect(pr, 2f, 2f, stroke)
-                }
-                null -> {
-                    stroke.color = carColors.panelUnknownLine
-                    stroke.strokeWidth = 1.2f
-                    canvas.drawRoundRect(pr, 2f, 2f, stroke)
-                }
-            }
-            // 车窗面板可点：车机侧只有「全车窗」这一个命令（`OemWindowController`），
-            // 所以点任意一扇窗 = 切换全部车窗。
-            if (k in CAR_STATUS_WINDOW_ITEMS) {
-                val slot = k - CAR_STATUS_WINDOW_ITEMS.first
-                hits[CAR_STATUS_WINDOW_HIT_KEYS[slot]] = expandWindowHit(pr, frame)
-            }
+        car3d.setPose(context, dir, car3dPose(), rich = true, view = cardView)
+        // 降级链可能落到不同比例的视角（如 card 缺失→hero），按**实际会用**的视角算比例。
+        val usedView = Car3dAssets.usedView(context, dir, cardView)
+        val slot = Car3dAssets.slotOf(context, dir, usedView)
+        val image = if (slot != null && slot.second > 0) {
+            fitIn(carArea, slot.first.toFloat() / slot.second)
+        } else {
+            carArea
+        }
+        val car3dPainted = car3d.paint(canvas, context, cardView, image, fit = false)
+        if (!car3dPainted) {
+            val frame = CarTopPainter.frame(carArea.centerX(), carArea.centerY(), CAR_STATUS_MODEL_W, CAR_STATUS_MODEL_H)
+            CarTopPainter.draw(canvas, frame, CarTopGeometryFactory.of(carModel), carColors)
         }
 
-        // —— 3. 文字提示：分到车模**左右两侧** ——
-        //
-        // 左列 = 车身上左边的部件、右列 = 右边的部件，同一行左右一一对应
-        // （行 1 = 两个前门、行 2 = 两个前窗、行 3 = 两个后门、行 4 = 两个后窗、
-        //   行 5 = 后备箱 / 引擎盖。
-        //
-        // 标签统一是 3 个汉字，所以「标签 → 状态」的间距可以定死；
-        // 状态**左对齐**跟在标签后面（不右对齐到列尾），两列才不会糊在一起。
-        // 第五十一轮按设计板 重排两列：
-        // 左列贴卡左沿（inset 24）、右列**整体右对齐**到卡右沿，
-        // 且右列是「状态 + 标签」（设计板 `关 右前门`，与左列 `左前门 关` 相反），
-        // 字号 14/15 → **21**（设计板就是 21px）。
-        val leftColX = r.left + CAR_STATUS_LEGEND_INSET
-        val rightEdge = r.right - CAR_STATUS_LEGEND_INSET
-        for (row in 0 until CAR_STATUS_ROWS) {
-            val baseline = r.top + 65f + row * CAR_STATUS_ROW_H
-            drawCarStatusLegend(canvas, items[CAR_STATUS_LEFT_ROWS[row]], leftColX, baseline)
-            drawCarStatusLegend(canvas, items[CAR_STATUS_RIGHT_ROWS[row]], rightEdge, baseline, rightAligned = true)
+        // —— 一行状态文字（最多两行）：只有车门/车窗，车窗黄色 ——
+        val items = CarStatus.items(effDoors, effWindows, hood, effTrunk)
+        drawSnapshotStatusText(canvas, r, items)
+
+        // —— 胎压：四个小胶囊贴到各自的轮子旁（锚点来自资产）——
+        drawTirePills(canvas, r, i, image, dir, usedView, topDown)
+    }
+
+    /**
+     * 车况卡状态文字（第174轮）：车窗也进文字，按「处数」决定展开还是合并。
+     *
+     * - 0 处 → 「全车已关」（暗色）；
+     * - 1~2 处（车门/车窗/尾门各算一处）→ 逐个列位置，车门橙、车窗黄、尾门橙；
+     * - ≥3 处 → 合并一句（「车门、窗未关」/只门/只窗的措辞由
+     *   [CardSnapshot.statusParts] 给出）。
+     *
+     * 车窗同时仍然在车模玻璃上叠黄（winpatches），两条表达互不冲突。
+     * 引擎盖没有数据通道，不参与。
+     */
+    private fun drawSnapshotStatusText(canvas: Canvas, r: RectF, items: List<CarStatusItem>) {
+        // 车门 0..3、尾门 4、车窗 5..8；三处以上合并成一句（见 CardSnapshot.statusParts）。
+        val doors = ArrayList<String>(4)
+        val windows = ArrayList<String>(4)
+        var trunkOpen = false
+        items.forEachIndexed { idx, it ->
+            if (it.open != true) return@forEachIndexed
+            when (idx) {
+                in CAR_STATUS_DOOR_ITEMS -> doors.add(it.label)
+                CAR_STATUS_TRUNK_ITEM -> trunkOpen = true
+                in CAR_STATUS_WINDOW_ITEMS -> windows.add(it.label)
+            }
+        }
+        val parts = CardSnapshot.statusParts(doors, windows, trunkOpen)
+        text.typeface = Typeface.DEFAULT
+        text.textSize = 13f
+        text.textAlign = Paint.Align.LEFT
+        val y = r.top + CAR_STATUS_STATUS_Y
+        var x = r.left + 16f
+        parts.forEachIndexed { i, part ->
+            if (i > 0) {
+                text.color = Skin.TEXT_DIM
+                canvas.drawText("、", x, y, text)
+                x += text.measureText("、")
+            }
+            text.color = when (part.kind) {
+                CardSnapshot.StatusKind.WINDOW -> WINDOW_OPEN_YELLOW
+                CardSnapshot.StatusKind.DOOR -> Palettes.CAR_STATE_WARN
+                CardSnapshot.StatusKind.GENERIC ->
+                    if (doors.isNotEmpty() || trunkOpen) Palettes.CAR_STATE_WARN else WINDOW_OPEN_YELLOW
+                CardSnapshot.StatusKind.NONE -> Skin.TEXT_DIM
+            }
+            canvas.drawText(part.text, x, y, text)
+            x += text.measureText(part.text)
+        }
+        // 0 处（全车已关）和 ≥3 处（合并句自带「未关」）都不补后缀；
+        // 只有 1~2 处的「位置」列表需要统一补「 未关」。
+        if (parts.isNotEmpty() &&
+            parts[0].kind != CardSnapshot.StatusKind.NONE &&
+            parts[0].kind != CardSnapshot.StatusKind.GENERIC
+        ) {
+            text.color = Skin.TEXT_DIM
+            canvas.drawText(" 未关", x, y, text)
         }
     }
 
     /**
-     * 车况卡图例里的一行。
+     * 胎压贴轮（第170轮）：四个小胶囊画在各自轮子旁边，不再排一排放在卡底。
      *
-     * - 左列：`标签 空格 状态`（`左前门 关`），左对齐到卡左沿；
-     * - 右列：`状态 空格 标签`（`关 右前门`），**整体右对齐**到卡右沿。
-     *
-     * 字号 21px、字色 `--textDim`（设计板）。
+     * 锚点取 `anchors.<view>.tires.{fl,fr,rl,rr}`（兼容扁平写法 `tire_*`）；
+     * 没锚点就用「图框四角偏内」兜底，不写死具体像素。异常（<2.0 / >2.8 bar）橙色。
      */
-    private fun drawCarStatusLegend(
+    private fun drawTirePills(
         canvas: Canvas,
-        item: com.cardesk.launcher.core.CarStatusItem,
-        x: Float,
-        baseline: Float,
-        rightAligned: Boolean = false,
+        r: RectF,
+        i: VehicleInfo,
+        image: RectF,
+        dir: String?,
+        usedView: String,
+        topDown: Boolean,
     ) {
-        val state = com.cardesk.launcher.core.CarStatus.stateText(item.open)
         text.typeface = Typeface.DEFAULT
-        text.textSize = CAR_STATUS_LEGEND_SIZE
+        text.textAlign = Paint.Align.CENTER
+
+        val pillW = 30f
+        val pillH = 23f
+        // 第178轮（俯视横置）：四颗胎压先按「图区四角、离车 12px」摆 ——
+        // fl 左上 / fr 右上 / rl 左下 / rr 右下，不画引线；实拍后再按车轮廓微调。
+        // 可调常量：胶囊中心离图区左右/上下边的距离（实拍后按车轮廓微调这里）。
+        val insetX = pillW / 2f + CAR_TIRE_INSET
+        val insetY = pillH / 2f + CAR_TIRE_INSET
+
+        class Item(val value: String, val abnormal: Boolean, val cx: Float, val cy: Float)
+
+        // 老资产（hero/card 视角）仍用第177轮用户手调的位置（卡片相对坐标）。
+        val legacyX = CAR_TIRE_LEGACY_X
+        val legacyY = CAR_TIRE_LEGACY_Y
+
+        val items = ArrayList<Item>(4)
+        for (k in 0 until 4) {
+            val px = if (topDown) {
+                (if (k % 2 == 0) image.left + insetX else image.right - insetX)
+                    .coerceIn(r.left + 4f + pillW / 2f, r.right - 4f - pillW / 2f)
+            } else {
+                (r.left + legacyX[k] * CAR_STATUS_CARD_W)
+                    .coerceIn(r.left + 4f + pillW / 2f, r.right - 4f - pillW / 2f)
+            }
+            val py = if (topDown) {
+                (if (k < 2) image.top + insetY else image.bottom - insetY)
+                    .coerceIn(r.top + 4f + pillH / 2f, r.top + CAR_STATUS_CARD_H - 4f - pillH / 2f)
+            } else {
+                (r.top + legacyY[k] * CAR_STATUS_CARD_H)
+                    .coerceIn(r.top + 4f + pillH / 2f, r.top + CAR_STATUS_CARD_H - 4f - pillH / 2f)
+            }
+
+            val raw = i.tires.getOrNull(k)?.takeIf { !it.isNaN() && it > 0f }
+            val bad = raw == null
+            val bar = raw?.let { it / 100f } ?: Float.NaN
+            val abnormal = !bad && (bar < 2.0f || bar > 2.8f)
+            val value = if (bad) "--" else String.format(java.util.Locale.US, "%.1f", bar)
+
+            items.add(Item(value, abnormal, px, py))
+        }
+
+        // 简单避让：两两之间保持至少 4px 间距（只在真的重叠时沿 y 推开）。
+        for (a in 0 until 4) for (b in a + 1 until 4) {
+            val ia = items[a]
+            val ib = items[b]
+            val ox = kotlin.math.abs(ia.cx - ib.cx)
+            val oy = kotlin.math.abs(ia.cy - ib.cy)
+            if (ox < pillW + 4f && oy < pillH + 4f) {
+                val push = (pillH + 4f - oy) / 2f
+                val up = if (a == 0) -push else push
+                val moved = Item(ia.value, ia.abnormal, ia.cx, ia.cy + up)
+                items[a] = moved
+            }
+        }
+
+        for (it in items) {
+            val left = it.cx - pillW / 2f
+            val top = it.cy - pillH / 2f
+            val right = left + pillW
+            val bottom = top + pillH
+            val color = if (it.abnormal) Palettes.CAR_STATE_WARN else Skin.ACCENT
+
+            fill.style = Paint.Style.FILL
+            fill.color = 0xE010141B.toInt()
+            canvas.drawRoundRect(left, top, right, bottom, 9f, 9f, fill)
+            fill.style = Paint.Style.STROKE
+            fill.strokeWidth = 1f
+            fill.color = (color and 0x00FFFFFF) or (170 shl 24)
+            canvas.drawRoundRect(left, top, right, bottom, 9f, 9f, fill)
+            fill.style = Paint.Style.FILL
+
+            text.textSize = 11f
+            text.color = if (it.abnormal) Palettes.CAR_STATE_WARN else Skin.TEXT
+            canvas.drawText(it.value, it.cx, top + 13f, text)
+            text.textSize = 7f
+            text.color = Skin.TEXT_SOFT
+            canvas.drawText("bar", it.cx, top + 21f, text)
+        }
         text.textAlign = Paint.Align.LEFT
-        text.color = Skin.TEXT_SOFT
-        val labelW = text.measureText(item.label)
-        val stateW = text.measureText(state)
-        val stateColor = when (item.open) {
-            true -> Palettes.CAR_STATE_WARN
-            false -> Skin.TEXT_SOFT
-            null -> Skin.TEXT_DIM
-        }
-        if (rightAligned) {
-            // 「状态 + 标签」整体右对齐到 x
-            val startX = x - stateW - CAR_STATUS_LEGEND_GAP - labelW
-            text.color = stateColor
-            canvas.drawText(state, startX, baseline, text)
-            text.color = Skin.TEXT_SOFT
-            canvas.drawText(item.label, startX + stateW + CAR_STATUS_LEGEND_GAP, baseline, text)
-        } else {
-            text.color = Skin.TEXT_SOFT
-            canvas.drawText(item.label, x, baseline, text)
-            text.color = stateColor
-            canvas.drawText(state, x + labelW + CAR_STATUS_LEGEND_GAP, baseline, text)
-        }
     }
+
+
+    /** 在 [area] 里按 [aspect]（= 宽/高）等比居中。 */
+    private fun fitIn(area: RectF, aspect: Float): RectF {
+        if (aspect <= 0f) return RectF(area)
+        val w = min(area.width(), area.height() * aspect)
+        val h = w / aspect
+        val cx = area.centerX()
+        val cy = area.centerY()
+        return RectF(cx - w / 2f, cy - h / 2f, cx + w / 2f, cy + h / 2f)
+    }
+
+
 
     /**
      * 车窗面板的点击热区。
      *
-     * 面板在设计空间里只有 9px 宽（折算到画布约 7px），手指根本点不准，
-     * 所以往外多扩一圈（车体外侧扩得多、内侧扩得少），保证有个能点到的区域。
+     * 第166轮 C 版后车况卡不再注册逐窗命中区（整卡可点开面板），
+     * 这个函数只留给「以后别的卡要用」的历史实现，**当前无调用**。
      */
-    private fun expandWindowHit(pr: RectF, frame: com.cardesk.launcher.core.CarTopPainter.Frame): RectF {
+    @Suppress("unused")
+    private fun expandWindowHit(pr: RectF, frame: CarTopPainter.Frame): RectF {
         val outward = 10f * frame.scale
         val inward = 4f * frame.scale
         val vertical = 8f * frame.scale
@@ -2969,32 +3069,20 @@ class ScenePage(context: Context) : View(context) {
                 return
             }
         }
-        // 车窗面板（车况卡上的车模）：点击切换车窗。
-        // 车机侧只有「全车窗」这一个命令（`OemWindowController.setWindowsClosed`），
-        // 所以点任意一扇窗 = 切换**全部**车窗。
-        for (slot in CAR_STATUS_WINDOW_HIT_KEYS.indices) {
-            val key = CAR_STATUS_WINDOW_HIT_KEYS[slot]
-            hits[key]?.let { r ->
-                if (r.contains(x, y)) {
-                    val next = !resolveWindowClosed()
-                    windowClosed = next
-                    // 下发后进入保护期：先用本地值显示，等车端回读到了再交给回读值。
-                    windowPendingClosed = next
-                    windowPendingUntil = android.os.SystemClock.uptimeMillis() + WINDOW_PENDING_MS
-                    // 排障场景：「点了车窗面板车没反应 / 状态反了」——记下点的是哪扇窗、目标状态。
-                    Logx.event(
-                        LogTags.SCENE,
-                        "车窗开关点击",
-                        "card" to "carStatus",
-                        "panel" to com.cardesk.launcher.core.CarStatus.WINDOW_LABELS[slot],
-                        "closed" to next,
-                        "x" to x,
-                        "y" to y,
-                    )
-                    onToggleWindow?.invoke(next)
-                    performClick()
-                    return
-                }
+        // 车况卡（第166轮 C 版）：整卡点击 → 打开「车辆状态」面板。
+        // 逐窗命中区（carWin0..3）随改版移除：车模不再兼任「车窗开关示意图」。
+        hits[CAR_STATUS_CARD_HIT_KEY]?.let { r ->
+            if (r.contains(x, y)) {
+                Logx.event(
+                    LogTags.SCENE,
+                    "车况卡点击",
+                    "card" to "carStatus",
+                    "x" to x,
+                    "y" to y,
+                )
+                onOpenVehicleStatus?.invoke()
+                performClick()
+                return
             }
         }
         // 播放键
@@ -3410,16 +3498,19 @@ class ScenePage(context: Context) : View(context) {
          */
         const val CAR_STATUS_CARD_W = 388f
 
-        /** 车况卡高。 */
-        const val CAR_STATUS_CARD_H = 250f
+        /** 车况卡高（第167轮快照版：388×450）。 */
+        const val CAR_STATUS_CARD_H = 380f
 
         /**
-         * 车况卡上沿。
+         * 车况卡上沿（第167轮快照版）。
          *
-         * 行程卡底边 452 → 留 14px 呼吸 → 466；
-         * 第五十二轮内容基线上移 37 → 429。
+         * 设计规范给的 460 是按「底部卡行在 960」估的；实测底部卡行上沿
+         * `LYRIC_BOTTOM_CARD_TOP = 764`，460+450 = 910 会**压下 146px**。
+         * 按「不许压底部卡行」的硬约束，上沿取 `764 - 450 - 8 = 306`，
+         * 卡片实际落位 **306..756**（右列 306 以上是空的，不压天气/行程卡）。
          */
-        const val CAR_STATUS_CARD_TOP = 490f
+        /** 卡底 756，底部卡行上沿 764（[LYRIC_BOTTOM_CARD_TOP]），留 8px。 */
+        const val CAR_STATUS_CARD_TOP = 376f
 
         /** 车况卡右缘相对 `rightEnd` 的内缩（0 = 与行程卡同一条右边界）。 */
         const val CAR_STATUS_CARD_RIGHT_INSET = 0f
@@ -3449,8 +3540,41 @@ class ScenePage(context: Context) : View(context) {
          */
         val CAR_STATUS_WINDOW_ITEMS = 5..8
 
+        /** `CarStatus.items` 里**后备箱**的下标（0..3 门、4 后备箱、5..8 窗、9 引擎盖）。 */
+        const val CAR_STATUS_TRUNK_ITEM = 4
+
         /** 车窗面板的点击命中键（与 `CarStatus.WINDOW_LABELS` 同序）。 */
-        val CAR_STATUS_WINDOW_HIT_KEYS = arrayOf("carWin0", "carWin1", "carWin2", "carWin3")
+        /** 车况卡整卡命中键（第166轮 C 版：点整张卡开「车辆状态」面板）。 */
+        const val CAR_STATUS_CARD_HIT_KEY = "carStatusCard"
+
+        /** 第178轮：01 的俯视横置图区 356×246，水平居中、比原 3/4 区略偏上。 */
+        const val CAR_STATUS_CAR_X = 16f
+        const val CAR_STATUS_CAR_TOP = 34f
+        const val CAR_STATUS_CAR_W = 356f
+        const val CAR_STATUS_CAR_H = 246f
+
+        /** 俯视模式下胎压胶囊中心离车模图区左右/上下边的距离（设计像素，可调）。 */
+        const val CAR_TIRE_INSET = 12f
+
+        /** 老视角（hero/card）胎压胶囊位置，卡片相对坐标（fl/fr/rl/rr），沿用第177轮手调值。 */
+        val CAR_TIRE_LEGACY_X = floatArrayOf(0.435f, 0.156f, 0.845f, 0.541f)
+        val CAR_TIRE_LEGACY_Y = floatArrayOf(0.735f, 0.371f, 0.590f, 0.193f)
+
+        /** 03/05 暂时保持旧图区（40..332 = 356×292）。 */
+        const val CAR_STATUS_CAR_TOP_LEGACY = 40f
+        const val CAR_STATUS_CAR_H_LEGACY = 292f
+
+        /**
+         * 车模左右为胎压胶囊预留的沟槽宽度（第176轮）：胎压不再压车身、也不画引线，
+         * 胶囊放进这两条沟槽里（左侧前/后、右侧前/后），靠纵向位置与轮子对应。
+         */
+        const val CAR_STATUS_TIRE_GUTTER = 32f
+
+        /** 状态文字基线（相对卡顶，第一行）。 */
+        const val CAR_STATUS_STATUS_Y = 352f
+
+        /** 车窗打开 = 黄色（用户指定）。 */
+        const val WINDOW_OPEN_YELLOW = 0xFFF5C542.toInt()
 
         /**
          * 图例**左列**取 `CarStatus.items` 的哪几项。
@@ -3458,10 +3582,7 @@ class ScenePage(context: Context) : View(context) {
          * 文字分到车模两侧后，左列全是车身上**左边**的部件、右列全是**右边**的，
          * 同一行左右两侧一一对应（行 1 = 两个前门，行 2 = 两个前窗……）。
          */
-        val CAR_STATUS_LEFT_ROWS = intArrayOf(0, 5, 2, 7, 4)
 
-        /** 图例**右列**取 `CarStatus.items` 的哪几项（与 [CAR_STATUS_LEFT_ROWS] 逐行对应）。 */
-        val CAR_STATUS_RIGHT_ROWS = intArrayOf(1, 6, 3, 8, 9)
 
         /** 面板「开」：橙色半透明填充（= `0xFFFF9F43`）。 */
 

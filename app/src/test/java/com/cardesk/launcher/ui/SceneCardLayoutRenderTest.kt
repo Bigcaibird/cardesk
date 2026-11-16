@@ -10,6 +10,7 @@ import com.cardesk.launcher.core.CardLayout
 import com.cardesk.launcher.core.Prefs
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -110,22 +111,17 @@ class SceneCardLayoutRenderTest {
             bmp4.compress(Bitmap.CompressFormat.PNG, 100, it)
         }
 
-        // 回归：默认布局**必须**把胎压卡画出来。
+        // 第179轮：用户要求「把首页的胎压卡片移除吧」。
         //
-        // 第112轮出过一次乌龙 —— 渲染测试为了给两张行程卡腾地方把胎压卡 `visible=false`，
-        // 结果交付出去的效果图里没有胎压卡，用户以为被删了。
-        // 这里把「默认布局 = 5 张可见、含胎压」钉死，别再靠肉眼。
-        val visibleIds = trips.filter { it.visible }.map { it.id }
+        // 胎压卡的 id 仍留在布局里（老设备的偏好编码要靠它解析，不丢排序），
+        // 但它被 [CardLayout.REMOVED] 过滤掉，**不参与排布、不绘制、设置页也不列**。
+        // 所以这里钉死的是「默认布局排出 4 张、且排布结果里没有胎压卡」。
+        val visibleIds = CardLayout.active(trips).filter { it.visible }.map { it.id }
         assertEquals(
             listOf(
-                CardLayout.RANGE, CardLayout.MUSIC, CardLayout.CLIMATE,
-                CardLayout.TIRE, CardLayout.TRIP_CARD,
+                CardLayout.RANGE, CardLayout.MUSIC, CardLayout.CLIMATE, CardLayout.TRIP_CARD,
             ),
             visibleIds,
-        )
-        assertTrue(
-            "胎压卡必须在默认布局里可见",
-            trips.any { it.id == CardLayout.TIRE && it.visible },
         )
         // 像素级：胎压卡那块**真的画了东西**（不是只排在布局里）。
         // 反射拿 `ScenePage.cardRects`（真实排布结果），取胎压卡的矩形。
@@ -133,15 +129,7 @@ class SceneCardLayoutRenderTest {
             .getDeclaredField("cardRects").apply { isAccessible = true }
         @Suppress("UNCHECKED_CAST")
         val cardRects = rectsField.get(scenePage) as Map<String, android.graphics.RectF>
-        val tireRect = cardRects[CardLayout.TIRE]
-        assertNotNull("胎压卡应该在排布结果里", tireRect)
-        var tirePixels = 0
-        for (y in tireRect!!.top.toInt() until tireRect.bottom.toInt()) {
-            for (x in tireRect.left.toInt() until tireRect.right.toInt()) {
-                if (bmp4.getPixel(x, y) != 0) tirePixels++
-            }
-        }
-        assertTrue("胎压卡那块应该画出了内容（实际 $tirePixels 像素）", tirePixels > 0)
+        assertNull("胎压卡已下线，排布结果里不应再有它", cardRects[CardLayout.TIRE])
 
         // 布局落盘往返：下一个进程读回来还是这份布局。
         val prefs = Prefs(activity.applicationContext)

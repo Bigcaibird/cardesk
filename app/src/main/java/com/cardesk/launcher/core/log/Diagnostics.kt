@@ -429,6 +429,17 @@ object Diagnostics {
         runCatching { sb.append(StatusSnapshot.notificationLine(app)).append('\n') }
             .onFailure { sb.append("通知使用权读取失败: ").append(it.message).append('\n') }
 
+        // 全局 Dock 与底部遮挡（第159轮）：
+        // 「网易云/汽水音乐打开后底部被 Dock 盖住」这件事以前说不清 ——
+        // 覆盖包 enabled 不等于 framework-res 真改了导航栏高度（假阳性），
+        // 诊断页也没有任何 Dock 占位信息。这一段把两件事都测出来：
+        // ① 系统导航栏**实测**高度（预留区通没通的真值）；
+        // ② dumpsys window 的窗口帧（前台 App 是不是铺满到了底）。
+        sb.append("\n---- 全局 Dock 与底部遮挡（第159轮）----\n")
+        runCatching {
+            sb.append(com.cardesk.launcher.core.dock.DockBottomProbe.diagnosticsText(app)).append('\n')
+        }.onFailure { sb.append("底部遮挡探测失败: ").append(it.message).append('\n') }
+
         // 定位状态：真机上「天气一直获取中」的原因有好几种
         // （AppOps 没打开 / 全局位置开关关着 / provider 没数据 / 不是 system app），
         // 之前只能翻几百行日志猜。这里直接给一行结论。

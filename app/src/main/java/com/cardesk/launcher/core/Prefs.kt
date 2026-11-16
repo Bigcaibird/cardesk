@@ -757,6 +757,20 @@ class Prefs(context: Context) {
         set(value) = setIntValue("desk_tpms_value_sp", value.coerceIn(10, 48))
 
     /**
+     * Dock 栏圆角（`dock_corner_radius`，设计 px，默认 36，范围 0..52）。
+     *
+     * 第183轮：用户要「Dock 的圆角做成可调整的」，所以把原来写死在
+     * [com.cardesk.launcher.ui.shell.DockBarView] 里的 36f 提到设置里。
+     * 默认 36 = 改动前观感，不动设置的人画面不变。
+     *
+     * 注意：Dock 现在**紧贴屏幕底部**（底边不留 8px 边距），所以这个圆角作用在
+     * **上面两个角**，下面两个角是直角 —— 否则屏幕最底部两侧会露出两个三角形。
+     */
+    var dockCornerRadius: Int
+        get() = intValue("dock_corner_radius", 36).coerceIn(0, 52)
+        set(value) = setIntValue("dock_corner_radius", value.coerceIn(0, 52))
+
+    /**
      * 桌面紧凑模式副歌词字号（`desk_desk_compact_sub_sp`，默认 20，范围 10..48）。
      */
     var deskCompactSubSp: Int

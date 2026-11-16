@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.MotionEvent
 import android.view.View
+import com.cardesk.launcher.core.Prefs
 import com.cardesk.launcher.core.DockLayout
 import com.cardesk.launcher.core.DockMediaLayout
 import com.cardesk.launcher.core.DockQuickApps
@@ -207,6 +208,11 @@ class DockBarView(context: Context) : View(context) {
      */
     private val coverFallback = Skin.ACCENT_SOFT
 
+    /** Dock 圆角（设计 px）：构造时从 `Prefs` 读，设置页改了走 [refreshAll]。 */
+    private var cornerRadius: Float = 36f
+
+    private val bgPath = Path()
+
     private val r = RectF()
     private val hit = LinkedHashMap<String, RectF>()
 
@@ -233,17 +239,41 @@ class DockBarView(context: Context) : View(context) {
     private val longPressRunnable = Runnable { fireLongPress(longPressKey) }
     private var longPressFired = false
 
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        cornerRadius = runCatching { Prefs(context).dockCornerRadius.toFloat() }.getOrDefault(36f)
+        live.add(java.lang.ref.WeakReference(this))
+        invalidate()
+    }
+
+    override fun onDetachedFromWindow() {
+        live.removeAll { it.get() == null || it.get() === this }
+        super.onDetachedFromWindow()
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val w = width.toFloat()
         val h = height.toFloat()
         // 第四十九轮「浮屿」：Dock 底改成**不透明扁平面** + 1px 描边（不再是半透明玻璃）。
-        // 第五十轮对齐设计板 s01：Dock 1872×96 / 圆角 36（这里是 1872×104，圆角取 36）。
-        canvas.drawRoundRect(RectF(0f, 0f, w, h), 36f, 36f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        // 第五十轮对齐设计板 s01：Dock 1872×96 / 圆角 36。
+        // 第183轮：① 圆角改成设置项（`Prefs.dockCornerRadius`，默认 36，0..52）；
+        //          ② Dock 紧贴屏幕底部，所以**只圆上面两个角**，下面两个是直角
+        //             （否则贴底后屏幕最底部两侧会露出三角形缺口）。
+        val radius = cornerRadius.coerceIn(0f, minOf(h, w) / 2f)
+        val radii = floatArrayOf(
+            radius, radius, // 左上
+            radius, radius, // 右上
+            0f, 0f,         // 右下（贴底）
+            0f, 0f,         // 左下（贴底）
+        )
+        bgPath.reset()
+        bgPath.addRoundRect(RectF(0f, 0f, w, h), radii, Path.Direction.CW)
+        canvas.drawPath(bgPath, Paint(Paint.ANTI_ALIAS_FLAG).apply {
             shader = null
             color = Skin.NAV_BG
         })
-        canvas.drawRoundRect(RectF(0f, 0f, w, h), 36f, 36f, stroke.apply {
+        canvas.drawPath(bgPath, stroke.apply {
             color = Skin.NAV_STROKE
             strokeWidth = 1.4f
         })
@@ -1435,5 +1465,23 @@ private fun tempItem(canvas: Canvas, right: Float, passenger: Boolean): Float {
 
         // 第三十九轮：媒体卡宽度改为**动态**（按右侧空调簇实际占位收敛），
         // 三个键的尺寸与间隙、文本区宽度都在 `core/DockMediaLayout.kt`（纯逻辑、可单测）。
+        // 第183轮：Dock 圆角可调（设置项 `dock_corner_radius`）。
+
+        /** 活着的 DockBarView 实例（桌面里一份、全局 Dock 窗口里一份）。 */
+        private val live =
+            java.util.concurrent.CopyOnWriteArrayList<java.lang.ref.WeakReference<DockBarView>>()
+
+        /** 设置页改完圆角后调用：重新读偏好 + 重绘所有实例。 */
+        fun refreshAll(context: Context) {
+            val radius = runCatching {
+                Prefs(context.applicationContext).dockCornerRadius.toFloat()
+            }.getOrDefault(36f)
+            for (ref in live) {
+                val v = ref.get() ?: continue
+                v.cornerRadius = radius
+                v.invalidate()
+            }
+        }
+
     }
 }

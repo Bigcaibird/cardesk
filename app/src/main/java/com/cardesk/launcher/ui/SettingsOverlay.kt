@@ -519,6 +519,16 @@ class SettingsOverlay(
         if (selectedKey == "wallpaper") select("wallpaper")
     }
 
+    /**
+     * 重建「车辆信息」页（第179轮）。
+     *
+     * 「车况卡视角」行的可见性取决于**当前车模编号对应的资产**与「写实车模」开关；
+     * 用户在本页里改车模/开关时立刻重建，避免出现「已经切成纯俯视车、这一行还挂着」。
+     */
+    fun refreshCarInfoPage() {
+        if (selectedKey == "carinfo") select("carinfo")
+    }
+
     private fun select(key: String) {
         selectedKey = key
         for ((k, row) in navRows) {
@@ -1882,8 +1892,11 @@ class SettingsOverlay(
 
     private fun cardsBody() {
         val store = com.cardesk.launcher.core.CardLayout.PrefsStore(prefs)
-        val layout = com.cardesk.launcher.core.CardLayout.normalize(
-            store.load() ?: com.cardesk.launcher.core.CardLayout.DEFAULT,
+        // 第179轮：胎压卡已从桌面下线（CardLayout.REMOVED），设置页也不再列它。
+        val layout = com.cardesk.launcher.core.CardLayout.active(
+            com.cardesk.launcher.core.CardLayout.normalize(
+                store.load() ?: com.cardesk.launcher.core.CardLayout.DEFAULT,
+            ),
         )
         section("桌面卡片")
 
@@ -2854,7 +2867,103 @@ class SettingsOverlay(
             val from = prefs.carModel
             prefs.carModel = modelId
             logSetting("tpms_car_model", "车模编号", from, modelId)
+            // 换车型可能换掉整套资产（纯俯视 ↔ 多视角），本页的行可见性要立刻跟着变。
+            refreshCarInfoPage()
         }
+        // 写实车模（第163轮）：离线烘焙图 + 纯 Canvas 合成（`core/car3d`）。
+        // 关掉立刻回到自绘俯视车模；资产缺失/解码失败时无论开关如何都会静默回退。
+        section("写实车模")
+        // 标题跟随当前车模（资产里的 name），切到 03/05 时不要还写「领克 01」。
+        val car3dName = runCatching {
+            com.cardesk.launcher.core.car3d.Car3dAssets
+                .model(context, com.cardesk.launcher.core.CarModels.assetDir(prefs.carModel))
+                ?.name
+        }.getOrNull()?.takeIf { it.isNotBlank() } ?: "写实车模"
+        switchRow(
+            "写实车模（$car3dName）",
+            com.cardesk.launcher.core.car3d.Car3dSettings.enabled,
+        ) { on ->
+            val from = com.cardesk.launcher.core.car3d.Car3dSettings.enabled
+            com.cardesk.launcher.core.car3d.Car3dSettings.set(prefs, on)
+            logSetting(com.cardesk.launcher.core.car3d.Car3dSettings.KEY, "写实车模", from, on)
+            // 关掉写实车模 = 「车况卡视角」也无意义，立刻重建本页把行收掉。
+            refreshCarInfoPage()
+        }
+        val attribution = runCatching {
+            com.cardesk.launcher.core.car3d.Car3dAssets
+                .model(context, com.cardesk.launcher.core.CarModels.assetDir(prefs.carModel))
+                ?.attribution
+        }.getOrNull()
+        // 授权署名是**法律声明**（设置页仅允许状态/风险/法律三类说明文字），
+        // 文案以「3D 模型：」开头以便设置页文案白名单识别（见 SettingsCopyTest）。
+        note(
+            if (attribution.isNullOrEmpty()) {
+                "3D 模型：占位图（cardesk 自绘），真实模型待替换"
+            } else if (attribution.startsWith("3D 模型：")) {
+                attribution
+            } else {
+                "3D 模型：$attribution"
+            }
+        )
+        // 车漆颜色（第166轮）：深灰 / 白 / 黑，切换立即重绘（chipRow 改完会调 onApply → refresh）。
+        val paintLabels = listOf("深灰", "白", "黑")
+        val paintIds = com.cardesk.launcher.core.car3d.Car3dSettings.PAINTS
+        val currentPaint = paintIds.indexOf(com.cardesk.launcher.core.car3d.Car3dSettings.paint)
+            .coerceAtLeast(0)
+        chipRow("车漆颜色", paintLabels, currentPaint, compact = true) { idx ->
+            val from = com.cardesk.launcher.core.car3d.Car3dSettings.paint
+            val to = paintIds.getOrElse(idx) { com.cardesk.launcher.core.car3d.Car3dSettings.PAINT_DARK }
+            com.cardesk.launcher.core.car3d.Car3dSettings.setPaint(prefs, to)
+            logSetting(com.cardesk.launcher.core.car3d.Car3dSettings.KEY_PAINT, "车漆颜色", from, to)
+        }
+        // 车况卡视角（第166轮）：3/4 侧视 ↔ 俯视，切换立即重绘（chipRow 改完会调 onApply）。
+        //
+        // 第179轮：三台车都改成纯俯视 32 态后，这个设置**没有意义**（卡固定俯视），
+        // 用户拍板把整行隐藏；写实车模总开关关掉时也不该出现。判定用资产驱动
+        // （topDownOnly），03/05 与 01 一样走隐藏，将来若回到多视角资产会自动恢复。
+        val assetDir = com.cardesk.launcher.core.CarModels.assetDir(prefs.carModel)
+        val topDownOnly = runCatching {
+            com.cardesk.launcher.core.car3d.Car3dAssets.topDownOnly(context, assetDir)
+        }.getOrDefault(false)
+        val showViewRow = showCardViewRow(
+            com.cardesk.launcher.core.car3d.Car3dSettings.enabled,
+            topDownOnly,
+        )
+        if (showViewRow) {
+        val cardViewIds = com.cardesk.launcher.core.car3d.Car3dSettings.CARD_VIEWS
+        val cardViewLabels = listOf("3/4 侧视", "俯视", "正前 3/4")
+        val currentCardView = cardViewIds.indexOf(com.cardesk.launcher.core.car3d.Car3dSettings.cardView)
+            .coerceAtLeast(0)
+        chipRow("车况卡视角", cardViewLabels, currentCardView, compact = true) { idx ->
+            val from = com.cardesk.launcher.core.car3d.Car3dSettings.cardView
+            val to = cardViewIds.getOrElse(idx) { com.cardesk.launcher.core.car3d.Car3dSettings.CARD_VIEW_HERO }
+            com.cardesk.launcher.core.car3d.Car3dSettings.setCardView(prefs, to)
+            logSetting(
+                com.cardesk.launcher.core.car3d.Car3dSettings.KEY_CARD_VIEW,
+                "车况卡视角",
+                from,
+                to,
+            )
+        }
+        // 缺资产时诚实提示（选中也会自动回退 3/4，不崩、不空白）。
+        val missingViews = ArrayList<String>(2)
+        if (!com.cardesk.launcher.core.car3d.Car3dAssets.hasView(
+                context, assetDir, com.cardesk.launcher.core.car3d.Car3dAssets.VIEW_CARDTOP,
+            )
+        ) {
+            missingViews.add("俯视")
+        }
+        if (!com.cardesk.launcher.core.car3d.Car3dAssets.hasView(
+                context, assetDir, com.cardesk.launcher.core.car3d.Car3dAssets.VIEW_CARD,
+            )
+        ) {
+            missingViews.add("正前 3/4")
+        }
+        if (missingViews.isNotEmpty()) {
+            // 以「当前：」开头 —— 设置页文案白名单里「状态」类的既定前缀。
+            note("当前：车模资产不含${missingViews.joinToString("、")}图，选中会先按 3/4 侧视显示")
+        }
+        }  // showViewRow
         chipRow("车辆数据源", listOf("自动探测", "模拟车辆", "真车通道"), prefs.vehicleSource) { idx ->
             val from = prefs.vehicleSource
             prefs.vehicleSource = idx
@@ -2898,6 +3007,14 @@ class SettingsOverlay(
             val from = prefs.hideDock
             prefs.hideDock = it
             logSetting("dockbar_hide_dock", "隐藏原车 Dock", from, it)
+        }
+        // 第183轮：Dock 圆角可调（0..52 设计 px，默认 36）。
+        // Dock 现在紧贴屏幕底部，圆角只作用在上面两个角；拖动时桌面/全局 Dock 实时重绘。
+        sliderRow("Dock 圆角", prefs.dockCornerRadius, 0, 52, " px") {
+            val from = prefs.dockCornerRadius
+            prefs.dockCornerRadius = it
+            com.cardesk.launcher.ui.shell.DockBarView.refreshAll(context)
+            logSettingDebug("dock_corner_radius", "Dock 圆角", from, it)
         }
         pickerRow("Dock 生效应用", dockAppSummary(prefs.hideDockApps)) {
             // 排障场景：Dock 生效应用名单没生效 —— 记下打开选择器时的名单
@@ -4445,3 +4562,13 @@ private class BoardSwitch(context: Context) : View(context) {
         const val KNOB = 38f
     }
 }
+
+/**
+ * 「车况卡视角」设置行是否显示（第179轮）。
+ *
+ * 只有「写实车模开着」且「当前车型资产不是纯俯视」时才有意义：
+ * 纯俯视资产下卡片固定俯视，三视角切换无效，整行隐藏（用户拍板）。
+ */
+internal fun showCardViewRow(car3dEnabled: Boolean, topDownOnly: Boolean): Boolean =
+    car3dEnabled && !topDownOnly
+

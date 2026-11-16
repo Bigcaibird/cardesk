@@ -12,6 +12,10 @@ import com.cardesk.launcher.core.CarTopGeometryFactory
 import com.cardesk.launcher.core.CarTopPainter
 import com.cardesk.launcher.core.DoorSwing
 import com.cardesk.launcher.core.Skin
+import com.cardesk.launcher.core.car3d.Car3dAssets
+import com.cardesk.launcher.core.car3d.Car3dPainter
+import com.cardesk.launcher.core.car3d.CarPose
+import com.cardesk.launcher.core.car3d.CarPoseResolver
 
 /**
  * 车况面板视图（第136轮新增）：**车模 + 每个门 / 盖的开闭高亮**。
@@ -49,8 +53,20 @@ class CarTopStatusView(context: Context) : View(context) {
     /** 后备箱：`true` = 关，`false` = 开，`null` = 读不到。 */
     var trunkClosed: Boolean? = null
 
+    /**
+     * 用哪个视角的烘焙图。
+     *
+     * 默认 [Car3dAssets.VIEW_TOP]（俯视）；
+     * 弹窗改成 [Car3dAssets.VIEW_DIALOG]（烘焙侧直出的小图，缺图回退 hero → top → 自绘）。
+     * 视角缺图时 [Car3dAssets] 自动回退 `top`，再不行回退自绘。
+     */
+    var view: String = Car3dAssets.VIEW_TOP
+
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    /** 写实车模状态机（弹窗是大图槽位，门 + 窗同时开时用 `all`，见 [CarPoseResolver]）。 */
+    private val car3d = Car3dPainter.Scene(this)
 
     override fun onDraw(canvas: Canvas) {
         val w = width.toFloat()
@@ -64,6 +80,29 @@ class CarTopStatusView(context: Context) : View(context) {
         }
         val geo = CarTopGeometryFactory.of(carModel)
         val frame = CarTopPainter.frame(w / 2f, h / 2f, w, h)
+
+        // 第163轮：先试写实烘焙车模；画得出来就整张图接管（含门/窗/尾门状态），
+        // 不再叠加 2D 面板层。画不出来（资产缺失 / 开关关闭）走原来的自绘路径。
+        val dir = CarModels.assetDir(carModel)
+        // 第179轮：纯俯视资产（只声明 cardtop）的车型，这里也用 cardtop；
+        // 三视角齐全的老资产仍按调用方给的 view。
+        val effView = if (Car3dAssets.topDownOnly(context, dir)) Car3dAssets.VIEW_CARDTOP else view
+        if (dir != null) {
+            car3d.setPose(
+                context,
+                dir,
+                com.cardesk.launcher.core.car3d.Car3dDebugPose.pose
+                    ?: CarPose.of(doorsClosed, windowsOpen, hoodClosed, trunkClosed),
+                rich = w >= CarPoseResolver.RICH_MIN_WIDTH_PX,
+                view = effView,
+            )
+            // 俯视：沿用 120×240 设计外框（与 2D 车模/命中区完全对齐）；
+            // 其它视角（dialog/hero）：整块区域等比居中，避免槽位比例与资产不一致时压扁。
+            val top = effView == Car3dAssets.VIEW_TOP
+            val rect = if (top) car3dRect(context, dir, frame, w, h) else RectF(0f, 0f, w, h)
+            if (car3d.paint(canvas, context, effView, rect, fit = !top)) return
+        }
+
         CarTopPainter.draw(canvas, frame, geo, colors)
 
         // —— 面板叠加（顺序与车况卡一一对应）——
@@ -113,6 +152,45 @@ class CarTopStatusView(context: Context) : View(context) {
                 }
             }
         }
+    }
+
+    /**
+     * 车模要占的矩形。
+     *
+     * - 俯视图：用 [CarTopPainter.Frame] 映射出的 120×240 设计外框（与桌面车况卡逐像素重合）；
+     * - 3/4 大图（hero）：按 [Car3dAssets.Model.views] 里的槽位宽高比**等比放进**本 View，
+     *   居中留白 —— 直接拉满会把车压扁，3/4 视角一旦变形（轮距/车顶线）非常显眼。
+     */
+    private fun car3dRect(
+        context: Context,
+        dir: String,
+        frame: CarTopPainter.Frame,
+        w: Float,
+        h: Float,
+    ): RectF {
+        if (view == Car3dAssets.VIEW_TOP) {
+            return RectF(
+                frame.px(0f),
+                frame.py(0f),
+                frame.px(CarModels.DESIGN_W),
+                frame.py(CarModels.DESIGN_H),
+            )
+        }
+        // 槽位比例：先看请求视角，再按回退链（dialog → hero → top）找，
+        // 都找不到才用 3/4 大图的默认比例 —— 否则新视角（dialog）在 model.json
+        // 声明之前会被错误比例压扁/拉长。
+        // 第179轮：按**有效视角**的比例算 —— top-only 新资产会落到 cardtop，
+        // 否则弹窗里 356×264 的俯视图会被 3/4 的默认比例压扁。
+        val effective = runCatching {
+            Car3dAssets.usedView(context, dir, view)
+        }.getOrNull() ?: view
+        val spec = Car3dAssets.slotOf(context, dir, effective)
+        val aspectW = (spec?.first ?: 344).toFloat()
+        val aspectH = (spec?.second ?: 224).toFloat()
+        val s = minOf(w / aspectW, h / aspectH)
+        val rw = aspectW * s
+        val rh = aspectH * s
+        return RectF((w - rw) / 2f, (h - rh) / 2f, (w + rw) / 2f, (h + rh) / 2f)
     }
 
     private companion object {

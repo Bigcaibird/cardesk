@@ -763,13 +763,19 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
     /**
      * 画中画内容区的上下留白（设计坐标 px）。
      *
-     * **与组合卡完全对齐**（根布局
-     * `paddingTop="8.0px" paddingBottom="126.0px"`——
-     * 组合卡底部那 126px 就是给浮在导航页之上的 Dock 栏（铺满屏宽×104 + 距底 8）让位的。
+     * ## 底部为什么是 0（第159轮实测订正）
      *
-     * 画中画那张卡**没有**对应的留白
-     * 于是承载应用的画面底部被 Dock 压住 —— 我们补上，
-     * 两栏顶部/底部对齐，画面既不被遮挡也不铺满。
+     * 底部 Dock 栏（铺满屏宽×104 + 距底 8）确实浮在页面之上，
+     * 但**导航页整块内容已经被压到 Dock 顶边之上了**：
+     * 导航页高度 = `LauncherView.DOCK_TOP_Y - navTop`（底边 = 976），
+     * 导航行再有 `bottomMargin = NAV_BOTTOM_GAP`（28），
+     * 于是画中画卡底边 = **948**，在 Dock 顶边 976 上方 28px。
+     *
+     * 所以这里**不需要**再留白 —— 留了反而会让承载内容不铺满卡片、
+     * 底部空出一条带子（第159轮那次误改就是这个效果，已撤）。
+     *
+     * 全屏态（[fullscreen] = true）置 0：画中画全屏就该铺满，
+     * 那时它被提到根容器最上层，压根不在 Dock 底下。
      */
     fun applyPipContentInset(fullscreen: Boolean) {
         val top = if (fullscreen) 0 else PIP_CONTENT_INSET_TOP
@@ -1605,15 +1611,33 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         /**
          * 画中画内容区顶部留白（设计 px）。
          *
-         * 与组合卡 `paddingTop=8` 对齐。
+         * 保持 **0**：状态栏是**浮层**（盖在页面之上），不是把内容往下推的那种，
+         * 顶部留白只会让画面凭空矮一截、上面多一条空带。
          */
         const val PIP_CONTENT_INSET_TOP = 0
 
         /**
          * 画中画内容区底部留白（设计 px）。
          *
-         * 与组合卡 `paddingBottom=126` 对齐——
-         * 这 126px 是给浮在导航页之上的 Dock 栏（铺满屏宽×104 + 距底 8）让位的。
+         * ## 保持 0 —— 底部**本来就不需要**留白（第159轮实测订正）
+         *
+         * 底部 Dock 栏（铺满屏宽×104、距底 8）确实浮在页面之上，
+         * 乍看会以为画中画内容会被压住。但**导航页整块内容已经被压到 Dock 顶边之上了**：
+         *
+         * - `LauncherView` 把导航页的高度设成 `DOCK_TOP_Y - navTop`
+         *   （导航页底边 = Dock 顶边 976）；
+         * - 导航行自己还有 `bottomMargin = NAV_BOTTOM_GAP`（28）。
+         *
+         * 于是画中画卡（地图卡）的底边 = 976 − 28 = **948**，
+         * 正好停在 Dock 顶边 976 **上方 28px** —— 内容**从来没有被挡过**。
+         *
+         * ## 第159轮那次「修复」为什么被撤掉
+         *
+         * 当时误以为内容底边是 1052、会被压 84px，于是把这里改成 112。
+         * 实际效果是**反向破坏**：承载内容不再铺满画中画卡，
+         * 卡片底部反而空出一条 112px 的带子（实测：占位玻璃块底边从 939 缩到 828）。
+         *
+         * 教训：算几何要先确认**每一层**的实际高度，别只看当前这一层的 margin。
          */
         const val PIP_CONTENT_INSET_BOTTOM = 0
     }

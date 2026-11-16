@@ -26,9 +26,13 @@ import org.robolectric.annotation.GraphicsMode
  * 本轮给车况卡补上独立开关（`Prefs.carStatusCardVisible`），
  * 行内那张改叫「续航」，两者各管各的。
  *
- * 这里验两件事：
- * 1. 隐藏时**车窗命中区不再注册** —— 点那个位置不会误触「切换全部车窗」；
- * 2. 隐藏时**那一块像素真的不画**（不是画了但看不见）。
+ * 第166轮 C 版改版后，车况卡**整卡**可点（打开「车辆状态」面板），
+ * 原来的逐窗命中区（`carWin0..3`）已移除。
+ *
+ * 这里验三件事：
+ * 1. 显示时整卡命中区注册、隐藏时**不再注册**；
+ * 2. 隐藏时**那一块像素真的不画**（不是画了但看不见）；
+ * 3. 开关默认开 + 可持久化。
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w1920dp-h1080dp-land")
@@ -36,7 +40,7 @@ import org.robolectric.annotation.GraphicsMode
 class CarStatusCardVisibilityTest {
 
     /** 车况卡的设计坐标（与 `ScenePage.CAR_STATUS_CARD_*` 一致）。 */
-    private val cardRegion = RectF(1488f, 490f, 1876f, 740f)
+    private val cardRegion = RectF(1488f, 376f, 1876f, 756f)
 
     private fun newScenePage(): ScenePage {
         val page = ScenePage(RuntimeEnvironment.getApplication())
@@ -88,24 +92,23 @@ class CarStatusCardVisibilityTest {
     }
 
     @Test
-    fun 车况卡显示时车窗命中区已注册() {
+    fun 车况卡显示时整卡命中区已注册() {
         val page = newScenePage()
         page.showCarStatusCard = true
         render(page)
         val keys = hitKeys(page)
-        for (k in listOf("carWin0", "carWin1", "carWin2", "carWin3")) {
-            assertTrue("车窗命中区 $k 应该已注册", k in keys)
-        }
+        assertTrue("整卡命中区 carStatusCard 应该已注册", "carStatusCard" in keys)
     }
 
     @Test
-    fun 车况卡隐藏时整张卡不画且不注册车窗命中区() {
+    fun 车况卡隐藏时整张卡不画且不注册命中区() {
         val page = newScenePage()
         page.showCarStatusCard = false
         render(page)
         val keys = hitKeys(page)
+        assertFalse("车况卡隐藏后不该再注册 carStatusCard", "carStatusCard" in keys)
         for (k in listOf("carWin0", "carWin1", "carWin2", "carWin3")) {
-            assertFalse("车况卡隐藏后不该再注册 $k", k in keys)
+            assertFalse("逐窗命中区 $k 已随 C 版改版移除", k in keys)
         }
     }
 

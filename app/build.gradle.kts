@@ -108,6 +108,18 @@ android {
     testOptions {
         unitTests.isReturnDefaultValues = true
         unitTests.isIncludeAndroidResources = true
+
+        // 测试 worker 的堆（第159轮）。
+        //
+        // AGP 默认只给 test worker 512MB，而 Robolectric 在**首次**初始化沙箱时
+        // 要把 android-all jar 解进内存 —— 512MB 直接 `OutOfMemoryError: Java heap space`，
+        // 表现为「测试类 classMethod FAILED」，但和被测代码毫无关系。
+        //
+        // 给到 3GB，离屏渲染测试（PreviewRenderTest 等起 Activity + 画 1920×1080 位图）
+        // 才有足够余量。堆开大不会拖慢正常用例 —— 用多少给多少。
+        unitTests.all {
+            it.maxHeapSize = "3g"
+        }
     }
 }
 

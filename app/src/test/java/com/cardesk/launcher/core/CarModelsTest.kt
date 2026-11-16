@@ -17,6 +17,17 @@ import org.junit.Test
 class CarModelsTest {
 
     @Test
+    fun `车型编号映射到各自的资产目录`() {
+        // 01/05 已各自烘焙；其余暂回退 01 主资产。
+        org.junit.Assert.assertEquals("lynk01", CarModels.assetDir("01"))
+        org.junit.Assert.assertEquals("lynk05", CarModels.assetDir("05"))
+        org.junit.Assert.assertEquals("lynk03", CarModels.assetDir("03"))
+        org.junit.Assert.assertEquals("lynk03", CarModels.assetDir("03+"))
+        org.junit.Assert.assertEquals("lynk01", CarModels.assetDir("02"))
+        org.junit.Assert.assertEquals("lynk01", CarModels.assetDir("02HB"))
+    }
+
+    @Test
     fun `车型集合符合预期`() {
         assertEquals(
             listOf("01", "02", "02HB", "03", "03+", "05"),

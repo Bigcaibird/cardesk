@@ -40,6 +40,29 @@ import com.cardesk.launcher.core.log.Logx
  */
 object OemDockPolicy {
 
+    /**
+     * 第180轮：**会让全局 Dock 主动让位的沉浸型播放器**。
+     *
+     * 这两类 App 自己 `hideNavigationBars`，画面直接铺到屏幕最底；
+     * 而 CarDesk 的全局 Dock 是悬浮窗，必然压住它们底部 112px（真机反馈
+     * 「汽水音乐 / 网易云音乐打开时界面被 Dock 挡住」）。
+     *
+     * App 侧改不了（`policy_control` 只有强制沉浸、没有强制不沉浸），
+     * 只能 Dock 侧让位：**这两个包在前台时把 Dock 隐藏**，退出后再显示。
+     *
+     * 只放**实测会铺满到底**的包；QQ 音乐车机版遵守导航栏 inset，不需要让位。
+     */
+    val IMMERSIVE_MEDIA_APPS: Set<String> = setOf(
+        "com.netease.cloudmusic.iot",
+        "com.luna.music.car",
+    )
+
+    /** 前台是这个包时，全局 Dock 是否应当让位（隐藏）。 */
+    fun hidesGlobalDockFor(pkg: String?): Boolean {
+        if (pkg.isNullOrBlank()) return false
+        return IMMERSIVE_MEDIA_APPS.contains(pkg)
+    }
+
     /** 「一个都不隐藏」的哨兵。 */
     const val NO_APPS = "__dockbar_no_apps__"
 

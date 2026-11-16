@@ -91,6 +91,14 @@ class MockVehicleGateway(
     val simHoodClosed: Boolean = true
     val simTrunkClosed: Boolean = true
 
+    /**
+     * 逐扇模拟开窗（**仅调试用**：`Car3dDebugPose` 的单窗截图需要逐扇值；真车通道不走这里）。
+     */
+    fun setWindowsOpenEach(open: BooleanArray) {
+        simWindowsOpen = BooleanArray(4) { open.getOrElse(it) { false } }
+        Logx.event(LogTags.WINDOW, "模拟车辆逐扇开窗", "open" to simWindowsOpen.joinToString(""))
+    }
+
     /** 模拟通道自己消化车窗开闭（真车通道不走这里）。 */
     override fun setWindowsOpen(open: Boolean): Boolean {
         simWindowsOpen = BooleanArray(4) { open }

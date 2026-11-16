@@ -101,7 +101,7 @@ class LauncherSmokeTest {
         assertNotNull("应该能找到导航页", navPage)
         val lp = navPage!!.layoutParams as ViewGroup.MarginLayoutParams
         // 第四十九轮按设计板 `s02-nav`：导航页内容是 left 44 / top 110 / 宽 1832 / 高 830
-        // 两张卡片，底部与 Dock 上沿（968）留 28 的缝。
+        // 两张卡片，底部与 Dock 上沿（`LauncherView.DOCK_TOP_Y`，第183轮起 = 976）留 28 的缝。
         assertEquals(
             "导航页应该从设计板的内容基线 73 开始",
             com.cardesk.launcher.ui.pages.NavPage.NAV_CONTENT_TOP,
@@ -109,7 +109,7 @@ class LauncherSmokeTest {
         )
         assertEquals(
             "导航页高度应该正好顶到 Dock 上沿",
-            968 - com.cardesk.launcher.ui.pages.NavPage.NAV_CONTENT_TOP,
+            com.cardesk.launcher.ui.LauncherView.DOCK_TOP_Y - com.cardesk.launcher.ui.pages.NavPage.NAV_CONTENT_TOP,
             lp.height,
         )
         assertEquals(

@@ -95,6 +95,20 @@ class MediaSourceIconRenderTest {
         val anchor = page.sourceAnchorRect
         assertNotNull("应该有来源行的命中区", anchor)
         val box = anchor!!
+        // 图标几何随音乐卡宽度缩放：`k = (w/338).coerceIn(0.62, 1.15)`
+        // （见 `ScenePage.drawMusicCard`）。第179轮胎压卡下线后卡片行重新分配宽度，
+        // 音乐卡变宽 → k 变化，所以这里按真实卡宽算 k，而不是写死偏移。
+        val musicRect = run {
+            val f = ScenePage::class.java.getDeclaredField("cardRects").apply { isAccessible = true }
+            @Suppress("UNCHECKED_CAST")
+            val m = f.get(page) as Map<String, android.graphics.RectF>
+            m["music"]
+        }
+        assertNotNull("音乐卡应该在排布结果里", musicRect)
+        val k = (musicRect!!.width() / 338f).coerceIn(0.62f, 1.15f)
+        val iconCy = musicRect.top + 10f + 12f
+        val iconCx = musicRect.left + 22f * k
+        val iconR = 16f * k / 2f
 
         // 图标框：命中区左缘就是图标左缘（两者共用 x+14k），
         // 垂直方向以命中区顶部往下 2~22 为准（k≈1，误差留足）。
@@ -120,7 +134,12 @@ class MediaSourceIconRenderTest {
         // 所以这一条能把「图标」和「圆点」分开。
         assertTrue(
             "音符符干的位置应该有墨（圆点的位置画不出这里）",
-            isBrandInk(bmp, (box.left + 10).toInt(), (box.top + 6).toInt(), brand),
+            isBrandInk(
+                bmp,
+                (iconCx + 0.28f * iconR).toInt(),
+                (iconCy - 0.88f * iconR).toInt(),
+                brand,
+            ),
         )
     }
 

@@ -2440,6 +2440,25 @@ echo "sdk.dir=/path/to/android-sdk" > local.properties
 > 没有时退化为 debug 签名 —— 也就是 clone 下来就能编译，只是装进 `/system/priv-app/`
 > 需要你自己的平台密钥。
 
+### 验收 APK 体积：先删旧包再打
+
+`:app:assembleSystem` 的增量打包偶尔会**复用上一次的** `app/build/outputs/apk/system/app-system.apk`
+（assets/res 变了、任务也显示执行了，但 APK 没重打），于是量到的字节数是旧包的。
+第 170 轮就踩过：连续两次打包都报 5,715,488 B，删包重打后是 4,945,722 B（差 770 KB）。
+
+验收体积时按这个顺序：
+
+```bash
+rm -f app/build/outputs/apk/system/app-system.apk
+./gradlew assembleSystem
+stat -f%z app/build/outputs/apk/system/app-system.apk   # macOS；Linux 用 stat -c%s
+```
+
+两个自检信号：① 连续两次打包字节数**完全相同**要怀疑是旧包；② 用
+`unzip -l …/app-system.apk | grep assets/car3d` 核对包内资产条目是否与
+`app/src/main/assets/car3d/` 一致。装包后再 `adb shell dumpsys package` 看
+`lastUpdateTime` 是否变化。
+
 ## 许可
 
 本仓库**暂未附带 LICENSE 文件**：在作者补充许可条款之前，请勿将本项目视为已授予

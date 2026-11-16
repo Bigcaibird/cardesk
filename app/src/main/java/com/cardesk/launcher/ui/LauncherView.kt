@@ -103,7 +103,20 @@ class LauncherView(context: Context) : FrameLayout(context) {
         private const val EDGE_WIDTH = 120f
 
         /** Dock 距屏幕底的设计像素（设计板 s01：底边 1072 → 距底 8）。 */
-        private const val DOCK_BOTTOM_MARGIN = 8
+        private const val DOCK_BOTTOM_MARGIN = 0
+
+        /**
+         * 全局 Dock 的**顶边**（设计坐标 px）= 976（1080 − 104，第183轮 Dock 贴底后）。
+         *
+         * = 屏幕底 1080 − Dock 距底 8 − Dock 高 104。
+         *
+         * ## 为什么它是公开的
+         *
+         * 导航页整块内容的高度就是按它算的（底边正好贴住 Dock 顶边），
+         * 单测要拿它跟画中画卡的底边做比较 ——
+         * 提出来才能让测试和代码**同源**，不会各写一个 976 然后悄悄漂移。
+         */
+        const val DOCK_TOP_Y = 976
 
         /** 右缘竖滑的接管阈值。 */
         private const val EDGE_SLOP = 40f
@@ -194,6 +207,12 @@ class LauncherView(context: Context) : FrameLayout(context) {
      * 因为这个弹窗会被**自动**关闭（门全关上时），而别的弹窗只会被用户关掉。
      */
     private var doorAlertDialog: com.cardesk.launcher.ui.dialogs.DoorAlertDialog? = null
+
+    /** 「车辆状态」面板（第166轮 C 版车况卡点开）。 */
+    private var vehicleStatusDialog: com.cardesk.launcher.ui.dialogs.VehicleStatusDialog? = null
+
+    /** 最近一次的车况快照（面板打开时先用它，避免等下一轮 ticker）。 */
+    private var lastVehicleInfo: com.cardesk.launcher.vehicle.VehicleInfo? = null
 
     /**
      * 用户**手动**关掉过车门告警（第136轮）。
@@ -413,6 +432,8 @@ class LauncherView(context: Context) : FrameLayout(context) {
     init {
         // 第五十八轮：卡片圆角是**全局可变 token**，启动时先按偏好摆好。
         com.cardesk.launcher.core.CardStyle.applyRadius(prefs.cardRadius)
+        // 第163轮：写实车模（car3d）开关也按偏好摆好 —— 进程内副本，绘制时只读一个 boolean。
+        com.cardesk.launcher.core.car3d.Car3dSettings.load(context, prefs)
         setBackgroundColor(0xFF05080F.toInt())
         addView(background, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         content.layoutParams = LayoutParams(Design.W.toInt(), Design.H.toInt())
@@ -898,6 +919,8 @@ class LauncherView(context: Context) : FrameLayout(context) {
             // 场景页自己默认是 true（= 升级前的现状），这里按偏好覆盖，
             // 免得 build() 之后到 refresh() 之前闪一下。
             showCarStatusCard = prefs.carStatusCardVisible
+            // 第166轮 C 版：车况卡整卡点击 → 车辆状态面板。
+            onOpenVehicleStatus = { openVehicleStatus() }
             onToggleWindow = { closed ->
                 // 模拟通道自己消化车窗开闭（这样桌面上的状态会跟着变）；
                 // 真车通道走原厂的 VfmiscManager，车窗只有下发、没有车况回读。
@@ -2234,6 +2257,45 @@ private fun showCam() {
         doorAlertDialog = created
     }
 
+    /** 车况卡点击：打开「车辆状态」面板（10 项逐项状态 + 3/4 车模）。 */
+    private fun openVehicleStatus() {
+        if (vehicleStatusDialog != null) return
+        if (overlayDialog != null) return
+        val info = lastVehicleInfo ?: runCatching { currentVehicleInfo() }.getOrNull() ?: return
+        val created = com.cardesk.launcher.ui.dialogs.VehicleStatusDialog(
+            context,
+            pal,
+            info.doorsClosed,
+            info.windowsOpen,
+            info.hoodClosed,
+            info.trunkClosed,
+            prefs.carModel,
+        )
+        created.onClose = {
+            closeOverlayDialog(created)
+            vehicleStatusDialog = null
+        }
+        showOverlayDialog(created)
+        vehicleStatusDialog = created
+        Logx.event(LogTags.SCENE, "打开车辆状态面板")
+    }
+
+    /** 面板开着时每秒同步（门/窗/盖变了要跟着变）。 */
+    private fun syncVehicleStatus(info: com.cardesk.launcher.vehicle.VehicleInfo) {
+        val dialog = vehicleStatusDialog ?: return
+        if (overlayDialog !== dialog) {
+            vehicleStatusDialog = null
+            return
+        }
+        dialog.update(
+            info.doorsClosed,
+            info.windowsOpen,
+            info.hoodClosed,
+            info.trunkClosed,
+            prefs.carModel,
+        )
+    }
+
     // --------------------------------------------------------------- Dock 快捷应用（第五十四轮）
 
     /**
@@ -3132,8 +3194,8 @@ private fun showCam() {
         } else {
             com.cardesk.launcher.ui.pages.NavPage.NAV_CONTENT_TOP
         }
-        // 高度跟着顶部一起算：底部对齐 Dock 上沿（1080 − 8 − 104 = 968）。
-        val navHeight = 968 - navTop
+        // 高度跟着顶部一起算：底部对齐 Dock 上沿（1080 − 104 = 976，第183轮起贴底无底边距）。
+        val navHeight = DOCK_TOP_Y - navTop
         (navPage.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
             if (lp.topMargin != navTop || lp.height != navHeight) {
                 lp.topMargin = navTop
@@ -3254,7 +3316,9 @@ private fun showCam() {
         // 有真值就显示真值，没有才回落到 `--%`。
         scenePage.fuelPercent = info.fuelPercent
         statusBar.fuelPercent = info.fuelPercent ?: ShellStatusBar.FUEL_UNKNOWN_VALUE
+        lastVehicleInfo = info
         scenePage.bind(info, state, prefs.wallpaper)
+        syncVehicleStatus(info)
         // 第136轮：车门 / 盖未关 → 桌面弹窗提示（全关自动关、可手动关）。
         syncDoorAlert(info)
         // 引导卡每秒重算一次 —— 红绿灯读秒要按秒往下走，

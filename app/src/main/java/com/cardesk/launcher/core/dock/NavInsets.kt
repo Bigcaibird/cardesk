@@ -44,6 +44,23 @@ import java.util.concurrent.atomic.AtomicBoolean
  * 因此调用方必须按 [applied] 分支：false 时全局 Dock 照常工作，只是「遮住」
  * 原车 Dock 而不是「顶替」它（高度差取决于原车 Dock 实际高度，见设计契约）。
  *
+ * ## 第 159 轮补：真车上的行为线索
+ *
+ * 同一个 CarDesk、同一条全局 Dock，
+ * **QQ 音乐车机版不遮挡**（窗口底边停在 968 = Dock 顶边），
+ * 而网易云 / 汽水音乐被挡（底边 1080）——
+ * 后两者是**自己申请了沉浸全屏**、无视了底部预留区。
+ *
+ * 这条对照说明「别的 App 底部被全局 Dock 盖住」**不是普遍现象**，
+ * 只发生在**沉浸型** App 上；而沉浸是 App 自己的选择，
+ * `policy_control` 只有强制沉浸、没有反向，所以**修 RRO 也解决不了它**。
+ *
+ * ⚠️ 但「预留区在这台车上到底通没通」目前**只是推断**，不是实测：
+ * 上述对照还有另一种解释 —— QQ 音乐可能是**自己**做了底部安全区适配，
+ * 跟系统预留区无关。要坐实得读**实测**的导航栏像素高度，
+ * 用 [DockBottomProbe.systemNavBarHeightPx]。
+ * 另注意 [applied] 只看「覆盖包 enabled」，**enabled ≠ 资源真的变了**。
+ *
  * 全部反射 + `runCatching`：普通签名构建（无 CHANGE_OVERLAY_PACKAGES）不能崩，
  * 拿不到系统服务 / 权限时统一返回 false，由调用方降级。
  *
