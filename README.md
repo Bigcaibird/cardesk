@@ -6494,6 +6494,9 @@ API 28 模拟器，`tools/capture_page_transition.sh` 逐帧抓，
 | 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
 | SHA-256 | `47c1b3c29f2b19cccbc3dd9ce52095fb3527b9a89e771280d78cbd15285c8639` |
 | 更新清单 | `dist/cardesk-latest.json`（R2 key `cardesk/CarDesk-platform-ecarx-cardesk-4267.apk`） |
+| 提交 | `44dfddf` |
+| GitHub Release | [`v1.0.1171`](https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1171) —— **已发布**，附件为 4267 的 APK（3 487 167 B，远端 digest 与本地 SHA-256 一致） |
+| R2 上传 | **未做** —— 环境里没有 `R2_AK` / `R2_SK`（凭据只从环境变量读，环境里没有就不做；与第132/133/136/190轮一致） |
 
 ### 六、教训
 
