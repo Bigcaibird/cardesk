@@ -42,8 +42,8 @@ class CarStatusTirePillTest {
     private val cardW = 388f
     private val cardH = 380f
 
-    /** 车模图区（`ScenePage` 常量：x=16，y=34，356×246）。 */
-    private val image = RectF(16f, 34f, 372f, 280f)
+    /** 车模图区（第182轮竖放：x=71，y=34，246×300，水平居中）。 */
+    private val image = RectF(71f, 34f, 317f, 334f)
 
     /** 真机 TPMS 报的是 kPa（这里画成 bar 的显示口径）。 */
     private val tires = floatArrayOf(240f, 240f, 238f, 235f)

@@ -74,6 +74,9 @@ WEBP_Q = 76
 TOP_ONLY_VIEW = "cardtop"
 TOP_ONLY_SIZE = (356, 264)      # 卡片里俯视横置的显示尺寸
 TOP_ONLY_MASTER = (712, 528)    # 烘焙母版（2×），安装时降采样
+# 竖放（车头朝上）：把 712×528 母版逆时针转 90° → 528×712，再降到 264×356
+TOP_ONLY_SIZE_V = (264, 356)
+TOP_ONLY_MASTER_V = (528, 712)
 TOP_DOOR_KEYS = [
     "closed",
     "lf", "rf", "lb", "rb",
@@ -123,8 +126,10 @@ def pick_source(slot_dir, prefix, state_or_anim, target=None, color=None):
 DUAL_WEBP_Q = 60
 
 
-def convert(src, size, out_webp, quality=None):
+def convert(src, size, out_webp, quality=None, rotate_ccw=False):
     im = Image.open(src).convert("RGBA")
+    if rotate_ccw:
+        im = im.transpose(Image.ROTATE_90)      # 逆时针 90°，车头朝右 → 朝上
     if im.size != size:
         im = im.resize(size, Image.LANCZOS)
     q = WEBP_Q if quality is None else quality
@@ -249,8 +254,9 @@ def _gap_overlay(closed_path, state_path, out_path, max_change=0.15):
     return True
 
 
-def install_top_only(slot, dst, model_name):
-    """只装 cardtop（俯视横置、单色、32 门态）+ 每个状态的 gap 高亮。"""
+def install_top_only(slot, dst, model_name, vertical=False):
+    """只装 cardtop（俯视、单色、32 门态）。vertical=True 时母版逆时针转 90°（车头朝上）。"""
+    size = TOP_ONLY_SIZE_V if vertical else TOP_ONLY_SIZE
     out_dir = os.path.join(dst, TOP_ONLY_VIEW, "dark")
     os.makedirs(out_dir, exist_ok=True)
     installed, missing = 0, []
@@ -259,7 +265,7 @@ def install_top_only(slot, dst, model_name):
         if not src:
             missing.append(st)
             continue
-        convert(src, TOP_ONLY_SIZE, os.path.join(out_dir, st + ".webp"))
+        convert(src, size, os.path.join(out_dir, st + ".webp"), rotate_ccw=vertical)
         installed += 1
     gaps = 0
     closed_master = pick_source(slot, "cardtop", "closed", None, None)
@@ -394,7 +400,8 @@ def _top_state_semantics(st):
 def run_top_only(args, dst, slot):
     """只装 cardtop（俯视横置、单色、32 门态）+ 门缝橙色高亮。"""
     meta = MODELS.get(args.model, {"model": args.model, "name": args.model, "dims": {}})
-    installed, missing, gaps = install_top_only(slot, dst, args.model)
+    vertical = bool(getattr(args, "vertical", False))
+    installed, missing, gaps = install_top_only(slot, dst, args.model, vertical=vertical)
     if not installed:
         print(f"!! {args.model}: 一张 cardtop 都没装上（先让烘焙侧出 top32）", file=sys.stderr)
         return 1
@@ -408,8 +415,8 @@ def run_top_only(args, dst, slot):
         "dims": meta["dims"],
         "views": {
             TOP_ONLY_VIEW: {
-                "master": list(TOP_ONLY_MASTER),
-                "slot": list(TOP_ONLY_SIZE),
+                "master": list(TOP_ONLY_MASTER_V if vertical else TOP_ONLY_MASTER),
+                "slot": list(TOP_ONLY_SIZE_V if vertical else TOP_ONLY_SIZE),
                 "colors": ["dark"],
                 "defaultColor": "dark",
                 "gaps": False,
@@ -436,6 +443,8 @@ def main():
     ap.add_argument("--src", required=True, help="bake<NN> 目录（用其 slot/ 子目录）")
     ap.add_argument("--model", default="lynk01", help="车型资产目录名，默认 lynk01")
     ap.add_argument("--dst", default=None, help="覆盖安装目标目录")
+    ap.add_argument("--vertical", action="store_true",
+                    help="俯视母版逆时针转 90°（车头朝上），slot 变竖版 264×356")
     ap.add_argument("--top-only", action="store_true",
                     help="只装 cardtop（俯视横置 32 门态 + 门缝橙色高亮），用于「只用俯视」方案")
     args = ap.parse_args()

@@ -49,8 +49,10 @@ class Car3dAssetsTest {
         assertTrue("车型名不能为空", m.name.isNotEmpty())
         // 第179轮：01 换成「俯视 32 态」单套资产，只声明 cardtop。
         assertTrue("必须有 cardtop 视角：${m.views.keys}", m.views.containsKey(Car3dAssets.VIEW_CARDTOP))
-        assertEquals(356, m.views[Car3dAssets.VIEW_CARDTOP]!!.slotW)
-        assertEquals(264, m.views[Car3dAssets.VIEW_CARDTOP]!!.slotH)
+        // 第182轮：竖放资产 slot 变 [264, 356]（横版是 [356, 264]），这里只要求「正数」，
+        // 不锁死方向 —— 卡片按 slot 宽高比算缩放，横/竖由资产决定。
+        assertTrue("slot 必须为正", m.views[Car3dAssets.VIEW_CARDTOP]!!.slotW > 0)
+        assertTrue("slot 必须为正", m.views[Car3dAssets.VIEW_CARDTOP]!!.slotH > 0)
         assertTrue(
             "状态缺项：${m.states}",
             m.states.containsAll(listOf("closed", "lf", "rf", "lb", "rb", "all", "closed_trunk")),

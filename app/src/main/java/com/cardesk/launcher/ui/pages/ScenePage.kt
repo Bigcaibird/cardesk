@@ -2593,15 +2593,13 @@ class ScenePage(context: Context) : View(context) {
         val topDown = Car3dAssets.topDownOnly(context, assetDir)
         val cardView = if (topDown) Car3dAssets.VIEW_CARDTOP else Car3dSettings.cardView
 
-        // —— 车模区：01 用俯视横置 356×246（略偏上）；03/05 保持旧的 356×292 ——
-        val areaTop = if (topDown) CAR_STATUS_CAR_TOP else CAR_STATUS_CAR_TOP_LEGACY
-        val areaH = if (topDown) CAR_STATUS_CAR_H else CAR_STATUS_CAR_H_LEGACY
-        val carArea = RectF(
-            r.left + CAR_STATUS_CAR_X,
-            r.top + areaTop,
-            r.left + CAR_STATUS_CAR_X + CAR_STATUS_CAR_W,
-            r.top + areaTop + areaH,
-        )
+        // —— 车模区（第182轮竖放）：俯视资产已是竖版，图区改 246×300、水平居中；
+        // 03/05 的旧 3/4 视角仍用 356×292 的旧区。比例一律按 model.json 的 slot 算，不硬编码。——
+        val boxW = if (topDown) CAR_TOP_BOX_W else CAR_STATUS_CAR_W
+        val boxH = if (topDown) CAR_TOP_BOX_H else CAR_STATUS_CAR_H_LEGACY
+        val boxTop = if (topDown) CAR_TOP_BOX_TOP else CAR_STATUS_CAR_TOP_LEGACY
+        val boxX = if (topDown) r.left + (CAR_STATUS_CARD_W - boxW) / 2f else r.left + CAR_STATUS_CAR_X
+        val carArea = RectF(boxX, r.top + boxTop, boxX + boxW, r.top + boxTop + boxH)
         car3d.setPose(context, dir, car3dPose(), rich = true, view = cardView)
         // 降级链可能落到不同比例的视角（如 card 缺失→hero），按**实际会用**的视角算比例。
         val usedView = Car3dAssets.usedView(context, dir, cardView)
@@ -3603,6 +3601,12 @@ class ScenePage(context: Context) : View(context) {
         /** 第181轮选型 A：俯视车模相对原图区的缩放（92%，保持宽高比）。 */
         const val CAR_TOP_SCALE = 0.92f
 
+        /** 第182轮：竖放车模图区（设计 px）——宽 246、高 300，水平居中。 */
+        const val CAR_TOP_BOX_W = 246f
+        const val CAR_TOP_BOX_H = 300f
+        const val CAR_TOP_BOX_TOP = 34f
+
+        /** 旧 3/4 视角（03/05 legacy）仍用 356×246 的横区起点。 */
         const val CAR_STATUS_CAR_TOP = 34f
         const val CAR_STATUS_CAR_W = 356f
         const val CAR_STATUS_CAR_H = 246f

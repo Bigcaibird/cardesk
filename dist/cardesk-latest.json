@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1159",
-  "versionCode": 4255,
-  "tag": "v1.0.1159",
-  "name": "CarDesk 4255 / 1.0.1159-system",
-  "notes": "第181轮：车况卡车模整体下沉 10px、缩到 92%，四角胎压与车模留缝（≥14px，离车不足 6px 自动外让）；门缝橙色描边全下线；纯俯视 32 态（01/03/05），隐藏已无意义的「车况卡视角」设置项。",
-  "publishedAt": "2026-11-16T04:59:58Z",
+  "version": "1.0.1161",
+  "versionCode": 4257,
+  "tag": "v1.0.1161",
+  "name": "CarDesk 4257 / 1.0.1161-system",
+  "notes": "4256：车况卡车模改为竖向（车头朝上）、胎压仍四角留缝",
+  "publishedAt": "2026-11-16T05:48:30Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4255.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4255.apk",
-    "size": 3468807,
-    "sha256": "3fa99b36b13560ba97f077a175fbcb096cfd1b438be9b1819841d94db4c99b57"
+    "name": "CarDesk-platform-ecarx-cardesk-4257.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4257.apk",
+    "size": 3473847,
+    "sha256": "fd53fc4c78a78c7bec083e30e2eb66b0e9c6d719c682ac684c1f77cb06198f3d"
   }
 }
