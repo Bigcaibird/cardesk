@@ -79,7 +79,7 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
      *
      * ## 这个机制是干什么的
      *
-     * 底部 Dock 栏（铺满屏宽×104、距底 8）是**浮在页面之上**的，
+     * 底部 Dock 栏（铺满屏宽×112、贴底）是**浮在页面之上**的，
      * 而画中画承载面在导航页里是 `MATCH_PARENT` 高度 ——
      * 万一承载面的底边伸进 Dock 那一段，应用里的底部按钮/POI 标签就点不到、也看不见。
      * 留白就是给这种情况用的：把承载内容整体收进来。
@@ -88,10 +88,10 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
      *
      * **当前布局下并不需要留白** —— 导航页整块内容已经被压到 Dock 顶边之上了：
      *
-     * - `LauncherView` 把导航页高度设成 `DOCK_TOP_Y - navTop`（底边 = Dock 顶边 976）；
+     * - `LauncherView` 把导航页高度设成 `DOCK_TOP_Y - navTop`（底边 = Dock 顶边 968）；
      * - 导航行再有 `bottomMargin = NAV_BOTTOM_GAP`（28）。
      *
-     * 于是画中画卡底边 = 976 − 28 = **948**，在 Dock 顶边 976 **上方 28px** ——
+     * 于是画中画卡底边 = 968 − 28 = **940**，在 Dock 顶边 968 **上方 28px** ——
      * 内容**从来没有被挡过**（离屏渲染逐像素实测：卡片描边底边 y=939）。
      *
      * ⚠️ 这段注释以前写的是「画面底部约 112px 被 Dock 压住」「组合卡用

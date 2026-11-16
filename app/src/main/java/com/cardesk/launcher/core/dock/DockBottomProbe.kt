@@ -39,8 +39,16 @@ object DockBottomProbe {
      *
      * 第183轮：用户要求 Dock **紧贴屏幕底部**，原来 Dock 下面留的 8px 底边距
      * （104 + 8 = 112）被去掉，所以这条常量从 112 改成 104。
+     *
+     * 第192轮：改回 **112** —— 和系统导航预留带（RRO 覆盖的
+     * `navigation_bar_height` = 112dp）**精确一致**。
+     *
+     * 为什么必须一致：系统按 112px 给所有 App 留底部带子，
+     * 而全局 Dock 只有 104 高时，中间那 8px 就是「系统留了位、却没人画」的缝
+     * —— 别的 App 让出了 112，Dock 只占 104，两边对不齐。
+     * 让 Dock 正好 112，预留带与 Dock 严丝合缝。
      */
-    const val DESIGN_BAR_HEIGHT = 104
+    const val DESIGN_BAR_HEIGHT = 112
 
     /** 设计画布宽度（与 `Design.W` 一致）。 */
     const val DESIGN_WIDTH = 1920
@@ -81,8 +89,7 @@ object DockBottomProbe {
      * 与 [GlobalDockService.applyGeometry] **同一套公式**：
      * 高度 = `round(屏宽 * 112 / 1920)` —— 按屏宽等比缩放，
      * 保证任何分辨率下 Dock 都「贴着底、和桌面里一样大」。
-     */
-    fun dockBarHeightPx(screenWidth: Int): Int =
+     */    fun dockBarHeightPx(screenWidth: Int): Int =
         (screenWidth * DESIGN_BAR_HEIGHT.toFloat() / DESIGN_WIDTH.toFloat())
             .roundToInt()
             .coerceAtLeast(1)
@@ -158,7 +165,7 @@ object DockBottomProbe {
      */
     fun reservedAreaEffective(context: Context): Boolean? {
         val actual = systemNavBarHeightPx(context) ?: return null
-        // 期望是 112px（= Dock 104 + 底边距 8）。
+        // 期望是 112px（第192轮起 Dock 本体就是 112 高，正好等于系统预留带）。
         // 容差给 4px：不同 ROM 的密度换算可能差一两像素。
         return actual >= EXPECTED_NAV_BAR_PX - 4
     }

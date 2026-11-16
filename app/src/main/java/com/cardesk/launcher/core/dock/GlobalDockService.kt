@@ -1124,7 +1124,15 @@ class GlobalDockService : Service() {
 
         /** Dock 自身设计尺寸（与 `LauncherView.buildBottomBar` 一致，第九十四轮起铺满全宽）。 */
         private const val DESIGN_DOCK_WIDTH = DESIGN_WIDTH
-        private const val DESIGN_DOCK_HEIGHT = 104
+
+        /**
+         * Dock 本体在设计层里的高度 —— 第192轮：104 → 112。
+         *
+         * **必须等于 [DESIGN_BAR_HEIGHT]**：Dock 要**铺满**整个设计层，
+         * 否则底边会露出一条宿主的不透明底 ——
+         * 那正是「系统预留了 112px、Dock 只画 104px」留下的 8px 缝。
+         */
+        private const val DESIGN_DOCK_HEIGHT = DESIGN_BAR_HEIGHT
 
         /** Dock 设计坐标左内边距（第九十四轮铺满整屏宽后不再留边）。 */
         private const val DOCK_LEFT_MARGIN = 0

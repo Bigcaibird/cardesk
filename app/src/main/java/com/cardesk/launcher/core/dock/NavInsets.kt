@@ -30,19 +30,38 @@ import java.util.concurrent.atomic.AtomicBoolean
  * 3. 覆盖包目标 `android`（framework-res），需要**平台签名**才能装/启，
  *    所以能力不足时全部降级（返回 false，由调用方退回 APPLICATION_OVERLAY）。
  *
- * ## 真机/模拟器的实测结论（第八十七轮，务必先读）
+ * ## 真机/模拟器的实测结论
  *
- * **RRO 只能当可选增强，绝不能成为功能前置条件。** 2026-10-31 在模拟器
- * （Android 10 / SDK 29 / userdebug / test-keys）上用平台测试密钥签名的覆盖包：
- * `adb install` 成功、`cmd overlay list` 显示 `[x]`（`STATE_ENABLED`，target=android），
- * 但 `dumpsys window` 里 NavigationBar0 的 surface 恒为 `1920 x 56`；
- * 补上 sw600dp/sw720dp/sw900dp 四套 qualifier、`adb reboot` 之后依旧 56。
- * `adb remount` 失败（镜像没有 overlayfs），无法验证「预装进 /system/overlay」。
- * 结论：放在 /data 的 overlay 改不了 framework-res 的尺寸，AOSP 需要把它预装到
- * 系统分区才生效；真车上允不允许由 ROM 决定（UNI 的车机允许）。
+ * **RRO 只能当可选增强，绝不能成为功能前置条件。**
  *
- * 因此调用方必须按 [applied] 分支：false 时全局 Dock 照常工作，只是「遮住」
- * 原车 Dock 而不是「顶替」它（高度差取决于原车 Dock 实际高度，见设计契约）。
+ * 第八十七轮（2026-10-31）在模拟器（Android 10 / SDK 29 / userdebug / test-keys）
+ * 上用平台测试密钥签名的覆盖包：`adb install` 成功、`cmd overlay list` 显示 `[x]`
+ * （`STATE_ENABLED`，target=android），但 `dumpsys window` 里 NavigationBar0 的
+ * surface 恒为 `1920 x 56`；补上 sw600dp/sw720dp/sw900dp 四套 qualifier、
+ * `adb reboot` 之后依旧 56。结论是「放在 /data 的 overlay 改不了 framework-res 的尺寸」。
+ *
+ * ⚠️ **第192轮订正**：上面那条结论**只对 Android 10 / test-keys 成立**。
+ * 在 API 28 模拟器（AVD `cardesk28`，1920×1080 @160dpi）上实测：
+ *
+ * - `cmd overlay list` → `[x] com.ecarx.cardesk.insets`；
+ * - NavigationBar 窗口 `Requested w=1920 h=112`、`mFrame=[0,968][1920,1080]`；
+ * - CarDesk 全局 Dock 窗口 `mFrame=[0,968][1920,1080]` —— **与预留带完全重合**。
+ *
+ * 也就是说 **RRO 在这台机器上真的生效了**，预留带确实是 112px。
+ * 所以「预留区通没通」不再是只能推断 —— 用
+ * [DockBottomProbe.systemNavBarHeightPx] 直接读实测值即可，
+ * 低于 [DockBottomProbe.EXPECTED_NAV_BAR_PX] 才算没通。
+ *
+ * 但**结论的方向没变**：预留带是**可选增强**。真车上能不能生效由 ROM 决定
+ * （AOSP 需要把它预装到系统分区；UNI 的车机允许），
+ * 所以调用方仍必须按 [applied] 分支：false 时全局 Dock 照常工作，只是「遮住」
+ * 原车 Dock 而不是「顶替」它。
+ *
+ * ## 第192轮：Dock 高度必须 == 预留带高度
+ *
+ * 预留带 112px，而 Dock 本体（第183轮起）只有 104 高 ——
+ * 中间 8px 就是「系统留了位、却没人画」的缝。
+ * 第192轮把 Dock 改成 **112**，两者严丝合缝（见 `DockBarView.DOCK_HEIGHT`）。
  *
  * ## 第 159 轮补：真车上的行为线索
  *

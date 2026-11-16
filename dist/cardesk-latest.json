@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1171",
-  "versionCode": 4267,
-  "tag": "v1.0.1171",
-  "name": "CarDesk 4267 / 1.0.1171-system",
-  "notes": "启动提速 + 切页过渡动画\n\n一、启动提速（真车开机从 19.2 秒看到桌面 → 约 7.8 秒）\n- 启动页在桌面第一帧画好时就淡出，重活（天气/导航引导/媒体/氛围灯/权限）挪到淡出之后做 —— 以前这 8 秒全挡在启动页后面，桌面早就绪了用户却看不见。\n- 定位/录音/通知使用权检查挪到后台线程（AppOps、PackageManager 都是跨进程调用，主线程上会把淡出动画饿死）。\n- 原车 Dock/状态栏策略（写 policy_control、overscan）挪到后台线程。\n- 抽屉页按需构造，不再在启动路上背一整页 View；抽屉构造时也不再重复查一遍全部应用和图标。\n\n二、切页过渡动画（以前是硬切，其实从来没有动画过）\n- 根因：进入页平时是 GONE，GONE 的视图不参与测量，width 永远是 0，动画门槛因此永远不通过 —— 切页一直是一帧硬切。\n- 现在：进入页先量一次尺寸，动画真正跑起来。\n- 横滑（方向跟着单指横滑手势走）+ 交叉淡入 + 轻微缩放，260ms，强减速曲线，位移走页宽的 22%。",
-  "publishedAt": "2026-11-16T14:10:43Z",
+  "version": "1.0.1172",
+  "versionCode": 4268,
+  "tag": "v1.0.1172",
+  "name": "CarDesk 4268 / 1.0.1172-system",
+  "notes": "Dock 按 112 走（对齐系统导航预留带）+ 图标整体放大\n\n一、Dock 与系统导航预留带对齐（原来差 8px）\n- 之前系统给所有 App 让出的底部预留带是 112px（RRO 覆盖 framework-res 的 navigation_bar_height），但 CarDesk 的 Dock 只有 104 高 —— 中间那 8px 是「系统留了位、却没人画」的缝，而且诊断判据带 4px 容差，一直没报出来。\n- 现在 Dock 本体做成 112 贴底：预留带、Dock 占位、Dock 绘制高度三个数字改成相等，桌面 Dock 顶边 976 → 968。\n- 实测（API 28 模拟器 dumpsys window）：系统导航栏与 CarDesk 全局 Dock 窗口的 frame 完全重合，都是 [0,968][1920,1080]；别的 App 的可用区（mAppBounds）正好停在 968。\n\n二、图标整体放大约 8%（跟 104 → 112 同一比例）\n- 导航键槽 60 → 64、键底板圆角 20 → 22、房子图标 13 → 15、应用宫格 7×7 → 8×8、分屏图标 ±14 → ±16、360 徽标 ±24×±15 → ±26×±16。\n- 快捷应用格 76 → 82；媒体卡高 88 → 96、封面 60 → 64、播放键 44 → 48、上下曲 40 → 44。\n- 空调图标槽 48 → 52、风扇 100×70 → 106×76。\n- 间隙一律不动 —— Dock 宽 1920 是死的，挤出来的宽度由中间的媒体卡让出（歌名区 236 → 220px，仍放得下）。\n\n三、校验\n- 单测 2283 → 2291 项全绿（新增 DockHeightAlignmentTest 8 项，钉死「Dock 高度 == 预留带高度」这个不变量）。\n- 模拟器实拍：桌面 Dock 顶边 968、底边 1080；导航页内容底边 940，从未被挡；叠在别的 App 上时预留带被完整填满、无空隙。",
+  "publishedAt": "2026-11-16T16:03:33Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4267.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4267.apk",
-    "size": 3487167,
-    "sha256": "47c1b3c29f2b19cccbc3dd9ce52095fb3527b9a89e771280d78cbd15285c8639"
+    "name": "CarDesk-platform-ecarx-cardesk-4268.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4268.apk",
+    "size": 3487227,
+    "sha256": "4d5792acf1475da91beffd011ff8269d5db42191139f2cdc65aafc70d8fa1501"
   }
 }

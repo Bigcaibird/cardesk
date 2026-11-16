@@ -15,45 +15,45 @@ class DockBottomProbeTest {
 
     @Test
     fun dockBarHeightScalesWithScreenWidth() {
-        // 1920 宽的车机：Dock 104（第183轮起贴底，不再有 8px 底边距）
-        assertEquals(104, DockBottomProbe.dockBarHeightPx(1920))
-        // 1280 宽：round(1280 * 104 / 1920) = round(69.33) = 69
-        assertEquals(69, DockBottomProbe.dockBarHeightPx(1280))
+        // 1920 宽的车机：Dock 112（第192轮起与系统导航预留带一样高，贴底）
+        assertEquals(112, DockBottomProbe.dockBarHeightPx(1920))
+        // 1280 宽：round(1280 * 112 / 1920) = round(74.67) = 75
+        assertEquals(75, DockBottomProbe.dockBarHeightPx(1280))
         // 再窄也不能算成 0（否则 Dock 直接消失）
         assertEquals(1, DockBottomProbe.dockBarHeightPx(1))
     }
 
     @Test
     fun dockTopSitsOneBarAboveScreenBottom() {
-        // 1080 高的屏幕，Dock 占底部 104 → 顶边在 976
-        assertEquals(976, DockBottomProbe.dockTopY(1080, 1920))
+        // 1080 高的屏幕，Dock 占底部 112 → 顶边在 968
+        assertEquals(968, DockBottomProbe.dockTopY(1080, 1920))
     }
 
     @Test
     fun immersiveAppIsFullyCovered() {
         // 沉浸型 App（网易云车机版 / 汽水音乐车机版：自己 hideNavigationBars）
-        // 画面一路铺到屏幕底 1080 → 被全局 Dock 整整盖住 104px
-        assertEquals(104, DockBottomProbe.overlapPx(1080, 976))
+        // 画面一路铺到屏幕底 1080 → 被全局 Dock 整整盖住 112px
+        assertEquals(112, DockBottomProbe.overlapPx(1080, 968))
     }
 
     @Test
     fun insetAwareAppIsNotCoveredAtAll() {
-        // 遵守系统导航栏 inset 的 App（QQ 音乐车机版）底边正好停在预留区上沿 976
+        // 遵守系统导航栏 inset 的 App（QQ 音乐车机版）底边正好停在预留区上沿 968
         // → 一像素都不压
-        assertEquals(0, DockBottomProbe.overlapPx(976, 976))
+        assertEquals(0, DockBottomProbe.overlapPx(968, 968))
     }
 
     @Test
     fun appEndingAboveDockTopHasNoOverlap() {
-        assertEquals(0, DockBottomProbe.overlapPx(900, 976))
+        assertEquals(0, DockBottomProbe.overlapPx(900, 968))
     }
 
     @Test
     fun reachesScreenBottomDetectsImmersiveApps() {
         assertTrue(DockBottomProbe.reachesScreenBottom(1080, 1080))
         assertTrue(DockBottomProbe.reachesScreenBottom(1079, 1080))
-        assertFalse(DockBottomProbe.reachesScreenBottom(976, 1080))
-        assertFalse(DockBottomProbe.reachesScreenBottom(975, 1080))
+        assertFalse(DockBottomProbe.reachesScreenBottom(968, 1080))
+        assertFalse(DockBottomProbe.reachesScreenBottom(967, 1080))
     }
 
     @Test

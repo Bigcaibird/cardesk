@@ -765,11 +765,11 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
      *
      * ## 底部为什么是 0（第159轮实测订正）
      *
-     * 底部 Dock 栏（铺满屏宽×104 + 距底 8）确实浮在页面之上，
+     * 底部 Dock 栏（铺满屏宽×112，贴底）确实浮在页面之上，
      * 但**导航页整块内容已经被压到 Dock 顶边之上了**：
-     * 导航页高度 = `LauncherView.DOCK_TOP_Y - navTop`（底边 = 976），
+     * 导航页高度 = `LauncherView.DOCK_TOP_Y - navTop`（底边 = 968），
      * 导航行再有 `bottomMargin = NAV_BOTTOM_GAP`（28），
-     * 于是画中画卡底边 = **948**，在 Dock 顶边 976 上方 28px。
+     * 于是画中画卡底边 = **940**，在 Dock 顶边 968 上方 28px。
      *
      * 所以这里**不需要**再留白 —— 留了反而会让承载内容不铺满卡片、
      * 底部空出一条带子（第159轮那次误改就是这个效果，已撤）。
@@ -1621,15 +1621,15 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
          *
          * ## 保持 0 —— 底部**本来就不需要**留白（第159轮实测订正）
          *
-         * 底部 Dock 栏（铺满屏宽×104、距底 8）确实浮在页面之上，
+         * 底部 Dock 栏（铺满屏宽×112、贴底）确实浮在页面之上，
          * 乍看会以为画中画内容会被压住。但**导航页整块内容已经被压到 Dock 顶边之上了**：
          *
          * - `LauncherView` 把导航页的高度设成 `DOCK_TOP_Y - navTop`
-         *   （导航页底边 = Dock 顶边 976）；
+         *   （导航页底边 = Dock 顶边 968）；
          * - 导航行自己还有 `bottomMargin = NAV_BOTTOM_GAP`（28）。
          *
-         * 于是画中画卡（地图卡）的底边 = 976 − 28 = **948**，
-         * 正好停在 Dock 顶边 976 **上方 28px** —— 内容**从来没有被挡过**。
+         * 于是画中画卡（地图卡）的底边 = 968 − 28 = **940**，
+         * 正好停在 Dock 顶边 968 **上方 28px** —— 内容**从来没有被挡过**。
          *
          * ## 第159轮那次「修复」为什么被撤掉
          *

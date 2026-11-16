@@ -22,7 +22,7 @@ import org.junit.Test
  * ```
  * 导航页底边 = DOCK_TOP_Y(968)          ← LauncherView 按 Dock 顶边算导航页高度
  * 导航行底边 = 968 − NAV_BOTTOM_GAP(28) = 940
- * 画中画卡底边 = 948                     ← 在 Dock 顶边 976 上方 28px
+ * 画中画卡底边 = 940                     ← 在 Dock 顶边 968 上方 28px
  * ```
  */
 class PipDockInsetTest {
@@ -44,8 +44,9 @@ class PipDockInsetTest {
 
     @Test
     fun pipCardBottomStaysAboveDockTop() {
-        // 画中画卡底边 = 导航行底边 = 948，在 Dock 顶边 976 **上方 28px**（第183轮 Dock 贴底）。
-        assertEquals(948, navRowBottom)
+        // 画中画卡底边 = 导航行底边 = 940，在 Dock 顶边 968 **上方 28px**
+        // （第192轮 Dock 高 104 → 112，顶边 976 → 968）。
+        assertEquals(940, navRowBottom)
         assertTrue(
             "画中画卡底边 $navRowBottom 伸进了 Dock（顶边 $dockTop）",
             navRowBottom <= dockTop,

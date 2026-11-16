@@ -62,7 +62,7 @@ import kotlin.math.min
  *  ├── pageHost 首页场景 / 车辆 / 应用（满屏 1920×1080）
  *  ├── PageDotsView 右侧页面指示器（三个点）
  *  ├── ShellStatusBar 顶部状态栏（左头像+状态胶囊，右图标+时间）
- *  ├── DockBarView 底部一体化控制栏 1920×104（铺满屏宽，入口/媒体/空调）
+ *  ├── DockBarView 底部一体化控制栏 1920×112（铺满屏宽，入口/媒体/空调）
  *  └── overlayHost 空调浮层 / 360 / 设置面板
  * `
  */
@@ -108,17 +108,20 @@ class LauncherView(context: Context) : FrameLayout(context) {
         private const val DOCK_BOTTOM_MARGIN = 0
 
         /**
-         * 全局 Dock 的**顶边**（设计坐标 px）= 976（1080 − 104，第183轮 Dock 贴底后）。
+         * 全局 Dock 的**顶边**（设计坐标 px）= 968（1080 − 112，第192轮）。
          *
-         * = 屏幕底 1080 − Dock 距底 8 − Dock 高 104。
+         * = 屏幕底 1080 − Dock 高 112。
          *
          * ## 为什么它是公开的
          *
          * 导航页整块内容的高度就是按它算的（底边正好贴住 Dock 顶边），
          * 单测要拿它跟画中画卡的底边做比较 ——
-         * 提出来才能让测试和代码**同源**，不会各写一个 976 然后悄悄漂移。
+         * 提出来才能让测试和代码**同源**，不会各写一个数字然后悄悄漂移。
+         *
+         * 第192轮：976 → 968 —— Dock 总高从 104 改成 112
+         * （和系统导航预留带一样高），顶边相应上移 8px。
          */
-        const val DOCK_TOP_Y = 976
+        const val DOCK_TOP_Y = 968
 
         /** 右缘竖滑的接管阈值。 */
         private const val EDGE_SLOP = 40f
@@ -1076,7 +1079,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
         }
         content.addView(statusBar, Ui.frame(Design.W.toInt(), Design.H.toInt()))
 
-        // 底部一体化控制栏：铺满屏宽×104，距底 8
+        // 底部一体化控制栏：铺满屏宽×112，贴底（底边距 0）
         dock = DockBarView(context).apply {
             // 单击回首页（dockHome「单击返回首页」）
             // 第五十六轮：**先把盖在上面的浮层收掉** —— 抽屉开着的时候点 home，
@@ -1661,7 +1664,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
 
     /**
      * 底部导航栏：有两套承载（06-F01/F02/F03）——
-     * 普通模式直接放设计版 Dock（第九十四轮起铺满整屏宽 1920×104，距底 8）；
+     * 普通模式直接放设计版 Dock（第九十四轮起铺满整屏宽 1920×112，贴底）；
      * 增强导航栏模式把同一个 Dock 塞进贴底子窗的 pill（FitStrip 缩放），或换成槽位条（NavSlotBarView）。
      */
     private fun buildBottomBar() {
@@ -1721,7 +1724,8 @@ class LauncherView(context: Context) : FrameLayout(context) {
                 dock,
                 // 第九十四轮：Dock 铺满整屏宽（以前 1872、左右各留 24，
                 // 全局 Dock 窗口里会和底色的不透明条对不齐，其它应用里看就是两条缝）。
-                FrameLayout.LayoutParams(Design.W.toInt(), 104, Gravity.BOTTOM).apply {
+                // 第192轮：高 104 → 112（和系统导航预留带一致），底边距仍为 0（贴底）。
+                FrameLayout.LayoutParams(Design.W.toInt(), 112, Gravity.BOTTOM).apply {
                     bottomMargin = DOCK_BOTTOM_MARGIN
                 },
             )
@@ -3481,7 +3485,7 @@ private fun showCam() {
         } else {
             com.cardesk.launcher.ui.pages.NavPage.NAV_CONTENT_TOP
         }
-        // 高度跟着顶部一起算：底部对齐 Dock 上沿（1080 − 104 = 976，第183轮起贴底无底边距）。
+        // 高度跟着顶部一起算：底部对齐 Dock 上沿（1080 − 112 = 968，第192轮 Dock 高 112 贴底）。
         val navHeight = DOCK_TOP_Y - navTop
         (navPage.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
             if (lp.topMargin != navTop || lp.height != navHeight) {

@@ -6517,3 +6517,135 @@ API 28 模拟器，`tools/capture_page_transition.sh` 逐帧抓，
 - **重复的活是最容易漏掉的**。
   抽屉页构造时 `reload()` 一次、打开时又 `reload()` 一次 ——
   同一份「查全部应用 + 逐个读图标」白干两遍，模拟器上 95ms。
+
+---
+
+## 第192轮：Dock 按 112 走（对齐系统导航预留带）+ 图标整体放大
+
+### 一、起因
+
+上一轮（第191轮）查「别的 App 知不知道底栏高度」时发现一处**几何对不齐**：
+
+| 东西 | 高度 | 顶边 |
+|---|---|---|
+| 系统导航预留带（RRO 覆盖 `navigation_bar_height` = 112dp） | **112** | 968 |
+| CarDesk 的 Dock（第183轮起贴底、去掉 8px 底边距） | **104** | 976 |
+
+系统给所有 App 让出了 112px，CarDesk 的 Dock 却只画 104 ——
+中间那 **8px** 就是「系统留了位、却没人画」的缝。
+
+而且 `DockBottomProbe.reservedAreaEffective` 的判据是
+`实测导航栏高 >= 104 - 4`，112 照样过关 → **诊断不报错，几何却已经错位 8px**。
+
+用户拍板：**按 112 来**，并顺带把图标放大一点。
+
+### 二、为什么选 112 而不是把 RRO 改成 104
+
+- 预留带 112 是**系统**层面的事实（RRO 覆盖的是 framework-res），
+  改成 104 要动 `insets/res/values*/dimens.xml` 四套 qualifier 的四个键
+  再重打覆盖包；
+- Dock 112 只需要改自己的几个常量，且**贴底**（第183轮用户要求）不受影响；
+- 112 = Dock 104 + 底边距 8，正是第八十七轮设计板上的原始数值。
+
+所以：**Dock 本体做到 112 贴底**，预留带与 Dock 严丝合缝。
+
+### 三、改了什么
+
+#### 3.1 高度（三个数字必须相等）
+
+链路上有三个独立的数字决定「预留带和 Dock 对不对得上」：
+
+| 数字 | 位置 | 改前 | 改后 |
+|---|---|---|---|
+| 预留带高 | `NavInsets.HEIGHT_DP`（= RRO 的 dimen） | 112 | **不动** |
+| Dock 占多高 | `DockBottomProbe.DESIGN_BAR_HEIGHT` | 104 | **112** |
+| Dock 画多高 | `DockBarView.DOCK_HEIGHT`（新提取的常量） | 104（写死） | **112** |
+| 桌面 Dock 顶边 | `LauncherView.DOCK_TOP_Y` | 976 | **968** |
+| 全局 Dock 窗口 | `GlobalDockService.DESIGN_DOCK_HEIGHT` | 104 | **= DESIGN_BAR_HEIGHT** |
+
+`DESIGN_DOCK_HEIGHT` 改成**派生**于 `DESIGN_BAR_HEIGHT` ——
+全局 Dock 的设计层有多高、Dock 本体就画多高，不等的话底边会露出一条
+宿主的不透明底（就是那条缝）。
+
+#### 3.2 图标整体放大（跟 104 → 112 同一比例，约 +8%）
+
+| 元素 | 改前 | 改后 |
+|---|---|---|
+| 导航键槽 `DockLayout.KEY_SLOT` | 60 | **64** |
+| 键底板圆角 | 20 | **22** |
+| home 房子图标 `HOME_ICON_UNIT` | 13 | **15** |
+| 应用宫格 | 7×7 @ 步进 11 | **8×8 @ 步进 12** |
+| 分屏图标 | ±14 高 | **±16 高** |
+| 360 徽标 | ±24×±15，字 22 | **±26×±16，字 24** |
+| 快捷应用格 `DockLayout.QUICK_TILE` | 76 | **82** |
+| 媒体卡高 `DockMediaLayout.CARD_H` | 88 | **96** |
+| 媒体封面 `COVER_SIZE` | 60 | **64** |
+| 播放键 `PLAY_BTN` | 44 | **48** |
+| 上下曲 `SKIP_BTN` | 40 | **44** |
+| 空调图标槽 `CLIMATE_SLOT` | 48 | **52** |
+| 风扇占位 `FAN_W` / 高 | 100 / 70 | **106 / 76** |
+
+**间隙一律不动**（`KEY_GAP` / `QUICK_GAP` / `SECTION_GAP` / `CLIMATE_ICON_GAP`）——
+横向总宽是定死的 1920，图标放大挤出来的那几十像素**只能由中间的媒体卡让出来**。
+（媒体卡歌名区从 236px 收到 220px，仍能放下歌名，不至于挤没。）
+
+### 四、判据
+
+新增 `DockHeightAlignmentTest`（**8 项**）——专门钉住本轮的核心不变量：
+
+- `NavInsets.HEIGHT_DP == 112`；
+- `DockBottomProbe.dockBarHeightPx(1920) == NavInsets.HEIGHT_DP`
+  （Dock 占的高度 == 预留带高）；
+- `DockBottomProbe.EXPECTED_NAV_BAR_PX == NavInsets.HEIGHT_DP`（诊断判据同源）；
+- `DockBarView.DOCK_HEIGHT == DockBottomProbe.DESIGN_BAR_HEIGHT`（画多高 == 占多高）；
+- `LauncherView.DOCK_TOP_Y == 1080 − DockBarView.DOCK_HEIGHT`（贴底）；
+- 全局 Dock 窗口顶边 == 桌面 Dock 顶边（两个 Dock 一样大，切过去不跳）；
+- 图标放大后媒体卡仍放得下「封面 + 歌名 + 三键」，且不压到导航键；
+- 放大的图标在 112 高的 Dock 里放得下（不顶出去）。
+
+同步更新的既有断言：`DockBottomProbeTest`（6 处）、
+`DockMediaLayoutTest`（2 处）、`PipDockInsetTest`（948 → 940）、
+`DockLayoutTest`（Dock 宽 1872 → 1920、簇宽 +22）。
+
+### 五、实测（API 28 模拟器，1920×1080 @160dpi）
+
+**对齐验证（`dumpsys window windows`）**：
+
+```
+系统导航栏 NavigationBar      : Requested w=1920 h=112   mFrame=[0,968][1920,1080]
+CarDesk 全局 Dock 窗口        : Requested w=1920 h=112   mFrame=[0,968][1920,1080]
+```
+
+两个 frame **完全重合** —— 预留带与 Dock 严丝合缝，8px 缝消失。
+窗口配置里的 `mAppBounds=Rect(0, 0 - 1920, 968)` 说明别的 App 的可用区
+正好停在 968，**它们确实知道底栏有 112px**。
+
+**叠在别的 App 上**：打开系统设置（白底），内容底边停在 968，
+CarDesk Dock 从 968 一路铺到 1080，中间无空隙。
+
+**桌面实拍**：Dock 顶边 968、底边 1080；导航页内容底边 940
+（= 968 − `NAV_BOTTOM_GAP` 28），内容从来没有被挡过。
+
+- 单测：**2283 → 2291 项全绿**（新增 `DockHeightAlignmentTest` 8 项），0 失败。
+
+### 六、顺带订正一条过期结论
+
+`NavInsets` 的类注释一直写着（第八十七轮在 Android 10 / test-keys 上测的）：
+
+> 「`cmd overlay list` 显示 `[x]`，但导航栏恒为 `1920 x 56`」
+
+**在 API 28 模拟器上这条不成立** —— 实测导航栏就是 112px，RRO **真的生效**了。
+这条结论误导了后面好几轮（「预留区通没通只是推断」），
+本轮把注释改成实测值，并写明「预留区通没通现在用
+`DockBottomProbe.systemNavBarHeightPx` 直接读，不再靠推断」。
+
+### 七、教训
+
+- **「系统让出来的空间」和「自己画的东西」必须用同一个数**。
+  这一条 8px 的缝不是画错了，是**两个地方各写各的数**（RRO 写 112、Dock 写 104），
+  而两者之间没有任何断言把它们钉在一起 —— 诊断判据还因为容差 4px 而「看不出问题」。
+  凡是「系统给一块、我们画一块」的地方，都要有测试把两个数**相等**这件事锁住。
+- **放大图标时先看横向预算是谁的**。
+  Dock 宽 1920 是死的，图标放大必然从别处挤出来 —— 这次挤的是媒体卡。
+  所以每放大一个常量，都得重算「四段还排得下吗」，
+  顺手加一条「媒体卡宽度仍 ≥ 下限、歌名区仍 > 0」的断言，比肉眼看靠谱。

@@ -24,15 +24,23 @@ package com.cardesk.launcher.core
  */
 object DockMediaLayout {
 
-    /** 媒体卡高度（设计 px）。 */
-    const val CARD_H = 88f
+    /**
+     * 媒体卡高度（设计 px）。
+     *
+     * 第192轮：88 → 96 —— Dock 总高 104 → 112，媒体卡按同一比例放大。
+     */
+    const val CARD_H = 96f
 
     /** 媒体卡左右内边距（`paddingStart/End = 14px`）。 */
     const val PAD_L = 14f
     const val PAD_R = 14f
 
-    /** 封面边长（= 60px）。 */
-    const val COVER_SIZE = 60f
+    /**
+     * 封面边长（= 60px）。
+     *
+     * 第192轮：60 → 64（跟 Dock 高 104 → 112 同一比例放大）。
+     */
+    const val COVER_SIZE = 64f
 
     /** 封面与文本区之间的间隙（`layout_marginStart = 16px`）。 */
     const val COVER_GAP = 16f
@@ -46,11 +54,17 @@ object DockMediaLayout {
      * 原来 60×60 圆（容器）
      * 但在 88px 高的卡里视觉权重太重，和旁边的小三角**不协调**（用户反馈）。
      * 缩到 44 之后三个键的视觉重量才接近。
+     *
+     * 第192轮：44 → 48（跟 Dock 高 104 → 112 同一比例放大）。
      */
-    const val PLAY_BTN = 44f
+    const val PLAY_BTN = 48f
 
-    /** 上一首 / 下一首按钮的边长。 */
-    const val SKIP_BTN = 40f
+    /**
+     * 上一首 / 下一首按钮的边长。
+     *
+     * 第192轮：40 → 44（跟 Dock 高 104 → 112 同一比例放大）。
+     */
+    const val SKIP_BTN = 44f
 
     /** 三个键之间的间隙。 */
     const val KEY_GAP = 8f

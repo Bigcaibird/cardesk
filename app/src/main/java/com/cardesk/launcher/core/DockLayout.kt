@@ -40,8 +40,12 @@ object DockLayout {
 
     /**
      * 导航键的槽宽（设计板 `.tile` 是 60×60 圆角 20）。
+     *
+     * 第192轮：Dock 总高 104 → 112（对齐系统导航预留带），图标按同一比例放大
+     * —— 60 → 64。间隙（[KEY_GAP]）**不动**：横向总宽是定死的，
+     * 图标放大挤出来的那几像素只能由中间的媒体卡让出来。
      */
-    const val KEY_SLOT = 60f
+    const val KEY_SLOT = 64f
 
     /** 导航键之间的间隙（设计板 22 + 60 + 14 的步进）。 */
     const val KEY_GAP = 14f
@@ -62,8 +66,12 @@ object DockLayout {
      */
     const val SECTION_GAP = 10f
 
-    /** 快捷应用槽位的边长（设计 px）。 */
-    const val QUICK_TILE = 76f
+    /**
+     * 快捷应用槽位的边长（设计 px）。
+     *
+     * 第192轮：76 → 82（跟 Dock 高 104 → 112 同一比例放大）。
+     */
+    const val QUICK_TILE = 82f
 
     /** 快捷应用槽位之间的间隙（设计 px）。 */
     const val QUICK_GAP = 12f

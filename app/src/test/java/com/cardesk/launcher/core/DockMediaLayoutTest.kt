@@ -19,16 +19,18 @@ class DockMediaLayoutTest {
     @Test
     fun keys_mediaCardWidth() {
         val k = DockMediaLayout.keys(cardW)
-        assertEquals(342f, k.prevLeft, eps)
-        assertEquals(390f, k.playLeft, eps)
-        assertEquals(442f, k.nextLeft, eps)
+        // 第192轮：封面 60→64、播放 44→48、上下曲 40→44，
+        // 三个键整体往左挪（键更宽了）。
+        assertEquals(330f, k.prevLeft, eps)
+        assertEquals(382f, k.playLeft, eps)
+        assertEquals(438f, k.nextLeft, eps)
     }
 
     @Test
     fun keys_textArea() {
         val k = DockMediaLayout.keys(cardW)
-        assertEquals(90f, k.textLeft, eps)
-        assertEquals(236f, k.textWidth, eps)
+        assertEquals(94f, k.textLeft, eps)
+        assertEquals(220f, k.textWidth, eps)
     }
 
     /** 顺序必须是「上一首 → 播放 → 下一首」。 */

@@ -22,17 +22,17 @@ class DockLayoutTest {
 
     private val eps = 1e-3f
 
-    /** Dock 视图的实际宽度（`LauncherView` 里 1872 宽，左右各留 24）。 */
-    private val dockW = 1872f
+    /** Dock 视图的实际宽度（第九十四轮起铺满整屏宽 1920）。 */
+    private val dockW = 1920f
 
     /**
      * 空调簇的**实测**占位宽。
      *
      * 真机上 A/C · AUTO 两段是按字体量的：28px 粗体下 "AUTO" 约 76px、
      * 28 "A/C" 约 47px，各加 28 留白 → 104 + 75。
-     * 第五十四轮簇尺寸没变，还是 967。
+     * 第192轮：空调簇的图标槽 48 → 52、风扇 100 → 106，簇宽跟着涨。
      */
-    private val clusterW = 192f + 32f + 16f + 104f + 75f + 224f * 2 + 100f
+    private val clusterW = 192f + 32f + 16f + 104f + 75f + 224f * 2 + 100f + 22f
 
     @Test
     fun fourSectionsAreInOrder() {
