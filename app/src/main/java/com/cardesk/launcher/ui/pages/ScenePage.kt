@@ -3596,15 +3596,15 @@ class ScenePage(context: Context) : View(context) {
         /** 第178轮：01 的俯视横置图区 356×246，水平居中、比原 3/4 区略偏上。 */
         const val CAR_STATUS_CAR_X = 16f
         /** 第181轮选型 A：俯视车模整体下移量（设计 px，卡内坐标）。 */
-        const val CAR_TOP_SHIFT_Y = 10f
+        const val CAR_TOP_SHIFT_Y = 6f
 
         /** 第181轮选型 A：俯视车模相对原图区的缩放（92%，保持宽高比）。 */
-        const val CAR_TOP_SCALE = 0.92f
+        const val CAR_TOP_SCALE = 0.97f
 
         /** 第182轮：竖放车模图区（设计 px）——宽 246、高 300，水平居中。 */
-        const val CAR_TOP_BOX_W = 246f
-        const val CAR_TOP_BOX_H = 300f
-        const val CAR_TOP_BOX_TOP = 34f
+        const val CAR_TOP_BOX_W = 250f
+        const val CAR_TOP_BOX_H = 312f
+        const val CAR_TOP_BOX_TOP = 30f
 
         /** 旧 3/4 视角（03/05 legacy）仍用 356×246 的横区起点。 */
         const val CAR_STATUS_CAR_TOP = 34f
