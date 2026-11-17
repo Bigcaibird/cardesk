@@ -96,7 +96,20 @@ class DockBarView(context: Context) : View(context) {
     var onApps: (() -> Unit)? = null
     var onSplit: (() -> Unit)? = null
     var on360: (() -> Unit)? = null
-    var onMediaTap: (() -> Unit)? = null
+    /**
+     * 媒体卡**封面 / 歌名区**被点（第一九七轮：拉起对应音乐 App）。
+     *
+     * 与 [onPlay] / [onMediaNext] / [onMediaPrev] 互斥 ——
+     * 三个键在媒体卡**内部**，命中时优先匹配它们。
+     *
+     * ## 为什么不是「进我们自己的音乐页」
+     *
+     * 第一九七轮之前这里跳的是**第二页音乐卡**（`onMediaTap`）。
+     * 用户要的是「点这块 → 打开**正在使用的那个**音乐 App」，
+     * 所以语义换成了「拉起 App」，跳转自己的音乐页改由长按 / 其它入口承担。
+     */
+    var onMediaOpenApp: (() -> Unit)? = null
+
     var onPlay: (() -> Unit)? = null
     var onPower: (() -> Unit)? = null
     var onTemp: ((zone: Int, delta: Int) -> Unit)? = null
@@ -1153,7 +1166,17 @@ private fun tempItem(canvas: Canvas, right: Float, passenger: Boolean): Float {
                     swipeDir = 0
                     swipeOffset = 0f
                     swipeFraction = 0f
-                } else if (key == "home" || key == "split" || key == "media" || key.startsWith("quick")) {
+                }
+                // 长按调度。
+                //
+                // 第197轮修掉一个**既有 bug**：媒体卡（`key == "media"`）被上面的
+                // `if` 先匹配走了，这里的 `else if` 里那句 `key == "media"` 是**死代码**
+                // —— 媒体卡的长按（开媒体浮窗）**从来没生效过**。
+                //
+                // 以前无所谓：点媒体卡是「进我们自己的音乐页」，长按失效只是少个浮窗；
+                // 第197轮点击改成「拉起音乐 App」之后，长按就成了**唯一的替代入口**
+                // （想看自己桌面的音乐卡，只能长按），不能是坏的。
+                if (key == "home" || key == "split" || key == "media" || key.startsWith("quick")) {
                     scheduleLongPress(key)
                 }
                 return true
@@ -1238,7 +1261,10 @@ private fun tempItem(canvas: Canvas, right: Float, passenger: Boolean): Float {
                             performClick()
                             return true
                         }
-                        // 点在播放键上 → 播放/暂停；点在卡片其它位置 → 进音乐页
+                        // 点在播放键上 → 播放/暂停；点在封面 / 歌名区 → 拉起对应音乐 App（第一九七轮）
+                        //
+                        // `longPressFired` 判据：长按媒体卡会开媒体浮窗，
+                        // 抬手时**不能再**当成点击去拉起 App —— 否则「长按」会同时做两件事。
                         if (hit["play"]?.contains(x, y) == true) {
                             Logx.event(
                                 LogTags.DOCK,
@@ -1249,7 +1275,7 @@ private fun tempItem(canvas: Canvas, right: Float, passenger: Boolean): Float {
                                 "title" to mediaTitle,
                             )
                             onPlay?.invoke()
-                        } else {
+                        } else if (!longPressFired) {
                             Logx.event(
                                 LogTags.DOCK,
                                 "Dock 按键点击",
@@ -1257,7 +1283,11 @@ private fun tempItem(canvas: Canvas, right: Float, passenger: Boolean): Float {
                                 "label" to keyLabel("media"),
                                 "title" to mediaTitle,
                             )
-                            onMediaTap?.invoke()
+                            // 第一九七轮：这里**不再**跳我们自己的音乐页，
+                            // 改成「拉起当前正在使用的音乐 App」。
+                            // 上下曲 / 播放三个键在上面各自先判过了，
+                            // 走到这里的只可能是封面 / 歌名区。
+                            onMediaOpenApp?.invoke()
                         }
                         resetSwipe()
                         performClick()

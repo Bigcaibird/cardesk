@@ -1012,7 +1012,7 @@ class MainActivity : Activity() {
         /** 回桌面并打开 360 环影（`on360`）。 */
         const val ACTION_CAMERA360 = "camera360"
 
-        /** 回桌面并打开媒体页（`onMediaTap` / `onMediaLongPress`）。 */
+        /** 回桌面并打开媒体页（Dock 媒体卡**长按** `onMediaLongPress`）。 */
         const val ACTION_MEDIA = "media"
 
         /** 回桌面并打开最近任务（Dock 主页键长按 / 导航栏「最近任务」槽）。 */

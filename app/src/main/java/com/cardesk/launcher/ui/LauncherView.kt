@@ -1114,7 +1114,12 @@ class LauncherView(context: Context) : FrameLayout(context) {
             onMediaNext = { MusicController.get().next(); refresh() }
             onMediaPrev = { MusicController.get().previous(); refresh() }
             on360 = { showCam() }
-            onMediaTap = { showPage(PAGE_NAV) }
+            // 第197轮：点媒体卡的封面 / 歌名区 → 拉起**当前正在使用的**音乐 App。
+            //
+            // 原来这里是 `onMediaTap = { showPage(PAGE_NAV) }`（跳我们自己的第二页音乐卡），
+            // 用户要的是「打开那个正在出声的 App」，所以语义换成了拉起 App。
+            // 想回自己的音乐卡可以长按（媒体浮窗）或从页面指示器进第二页。
+            onMediaOpenApp = { openCurrentMusicApp() }
             // 媒体卡长按 → 打开**媒体浮窗**（设计板 s13-float 的 460×250 小播放器）
             onMediaLongPress = { openMediaFloat() }
             onPlay = { MusicController.get().playPause(); refresh() }
@@ -2763,6 +2768,26 @@ private fun showCam() {
         ) ?: return false
         Logx.event(LogTags.FLOAT, "打开媒体浮窗", "track" to (track?.title ?: ""))
         return box != null
+    }
+
+    /**
+     * 拉起**当前正在使用的**音乐 App（第197轮）。
+     *
+     * 入口：Dock 媒体卡的**封面 / 歌名区**点击（上下曲 / 播放三个键不走这里）。
+     *
+     * 「正在使用」= **此刻正在出声的那个 App**（`MusicController.track?.pkg`），
+     * 不是用户上次在设置里选的默认来源 —— 用户点这块的意图是
+     * 「回到我正在听的那个 App」。
+     *
+     * 拉不起来时给一句提示，别让用户以为「点了没反应」。
+     */
+    private fun openCurrentMusicApp() {
+        val track = MusicController.get().track
+        val action = com.cardesk.launcher.core.media.DockMediaLaunch.openCurrentApp(
+            context = context,
+            trackPkg = track?.pkg,
+        )
+        com.cardesk.launcher.core.media.DockMediaLaunch.messageFor(action)?.let { toast(it) }
     }
 
     fun showFloat(pkg: String, name: String? = null): Boolean {

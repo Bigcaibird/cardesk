@@ -7492,3 +7492,147 @@ API 28 的 `PlaybackState` 默认值是 **NONE（0）** →
 | 提交 | 代码 `e7a084a`；出包 `6e072a0` |
 | GitHub Release | [`v1.0.1174`](https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1174) —— **已发布**，附件为 4270 的 APK（3 525 335 B，远端 digest 与本地 SHA-256 一致） |
 | R2 上传 | **未做** —— 环境里没有 `R2_AK` / `R2_SK`（凭据只从环境变量读；与第132/133/136/190/191/192/193轮一致） |
+
+---
+
+## 第197轮：Dock 媒体卡点「封面 / 歌名」区 → 拉起正在使用的音乐 App
+
+### 一、用户提的需求
+
+> dock栏音乐播放控件新增一个功能，点击该控件除播放按钮外的区域时，打开对应正在使用的音乐app
+> 应该是说除了上下曲切换和播放按钮外的区域
+
+即：**Dock 媒体卡上，除了「上一首 / 播放暂停 / 下一首」三个键以外的那块**
+（封面 + 歌名 / 歌手），点它就打开**当前正在使用的**那个音乐 App。
+
+### 二、先把「点这块原来干什么」查清楚
+
+改动前，媒体卡的点击分发是这样的（`DockBarView.onTouchEvent`）：
+
+| 点在哪里 | 原来做什么 |
+|---|---|
+| 播放键 | 播放 / 暂停 |
+| 上一首 / 下一首键 | 切歌 |
+| **封面 + 歌名区** | **跳到我们自己的第二页音乐卡**（`showPage(PAGE_NAV)`） |
+| 媒体卡左右滑动 | 切歌 |
+
+→ 用户要的是**拉起外部 App**，这会**覆盖**掉「跳我们自己的音乐页」。
+
+经确认，本轮按**覆盖**处理（用户明确选了「改为拉起音乐 App（覆盖原行为）」）。
+
+### 三、「正在使用的音乐 App」怎么判定
+
+用**当前会话的包名**（`MusicController.track.pkg`）—— 也就是**此刻正在出声的那个 App**。
+
+**不用**用户设置的默认来源（`prefs.musicSource`），理由是：
+
+- 默认来源是**用户上次选的**，而实际在播的可能是另一个 App
+  （用户在 QQ 音乐里放歌、但默认来源还停在网易云）；
+- 「正在使用」问的是**当下**，答案只存在于**会话**里。
+
+**不用**会话的 `sourceId`，理由是：
+
+- `sourceId` 是**我们自己的分类标签**（`MediaSources` 映射出来的）；
+- 「通用音乐」这个 id（`MediaSources.GENERIC_ID`）**不对应任何 App** ——
+  拿它去拉起 App 必然落空；
+- **包名**才是能直接喂给 `PackageManager` 的东西。
+
+### 四、改动清单
+
+| 文件 | 改动 |
+|---|---|
+| `core/media/DockMediaLaunch.kt`（新） | 纯逻辑层：`resolve()`（会话包名 → 该做什么）、`messageFor()`（提示文案）、`openCurrentApp()`（Android 侧拉起） |
+| `ui/shell/DockBarView.kt` | 媒体卡非三键区点击 → `onMediaOpenApp`（**取代** `onMediaTap`）；**修掉媒体卡长按从未生效的既有 bug** |
+| `ui/LauncherView.kt` | 接 `onMediaOpenApp` → `openCurrentMusicApp()` |
+| `core/dock/GlobalDockService.kt` | 同上（全局 Dock 浮在别的 App 之上，直接拉起音乐 App 更合用） |
+| `MainActivity.kt` | `ACTION_MEDIA` 注释更新（现在只有长按用） |
+| `app/src/test/.../DockMediaLaunchTest.kt`（新） | **13 例**（判定 / 兜底 / 文案） |
+
+### 五、顺带修掉的一个既有 bug（媒体卡长按从来没生效过）
+
+`DockBarView.onTouchEvent` 的 ACTION_DOWN 里：
+
+```kotlin
+if (key == "media") {
+    swipeTracking = true
+    ...
+} else if (key == "home" || key == "split" || key == "media" || key.startsWith("quick")) {
+    scheduleLongPress(key)
+}
+```
+
+`key == "media"` 被**第一个** `if` 先匹配走了，
+所以 `else if` 里那句 `key == "media"` 是**死代码** ——
+`scheduleLongPress()` 对媒体卡**永远不会被调用**。
+
+→ **媒体卡的长按（开媒体浮窗）从来没生效过**（从首次公开 `22d5b75` 起就这样）。
+
+以前无所谓：点媒体卡是「进我们自己的音乐页」，长按失效只是少个浮窗入口。
+第197轮点击改成「拉起音乐 App」之后，**长按成了唯一的替代入口**
+（想看自己桌面的音乐卡只能长按），不能是坏的。
+
+**改法**：把 `scheduleLongPress` 从 `else if` 里提出来，单独一个 `if`，
+让「滑动跟踪」与「长按调度」两条逻辑**互不排斥**。
+
+同时补一个保护：长按触发后抬手时**不能**再当成点击去拉起 App
+（否则「长按」会同时做两件事：开浮窗 + 拉起 App）。
+
+### 六、验证结果
+
+| 项 | 结果 |
+|---|---|
+| 单测 | **2366 全绿**（0 失败 0 错误 0 跳过；新增 13 例） |
+| 构建 | `:app:assembleSystem -PcardeskPackage=com.ecarx.cardesk` ✅ |
+| 模拟器端到端 | **QQ 音乐 / 网易云 / 汽水三家拉起全通**，三键互斥正常，长按不误触发 |
+| 实测报告 | [`emu-verify/REPORT-r197.md`](emu-verify/REPORT-r197.md) |
+
+**点歌名区 → 拉起 QQ 音乐**（会话归属 `com.tencent.qqmusiccar`）：
+
+```
+[EVT] Dock 按键点击 key=media label=媒体卡 title=赤伶
+[EVT] Dock 媒体卡：拉起当前音乐 App pkg=com.tencent.qqmusiccar
+→ mResumedActivity: com.tencent.qqmusiccar/.app.activity.AppStarterActivity
+```
+
+**换成网易云后再点 → 拉起网易云**（证明拉的是「正在使用」那个，而不是固定某个）：
+
+```
+[EVT] Dock 按键点击 key=media label=媒体卡 title=明知故犯
+[EVT] Dock 媒体卡：拉起当前音乐 App pkg=com.netease.cloudmusic.iot
+→ mResumedActivity: com.netease.cloudmusic.iot/com.netease.cloudmusic.activity.CloudMusicRNActivity
+```
+
+**换成汽水后再点 → 拉起汽水**：
+
+```
+[EVT] Dock 按键点击 key=media label=媒体卡 title=荒
+[EVT] Dock 媒体卡：拉起当前音乐 App pkg=com.luna.music.car
+→ mResumedActivity: com.luna.music.car/.app.framework.ui.MainActivity
+```
+
+**三键互斥**（都只做自己的事，**没有**触发拉起，前台仍是桌面）：
+
+```
+点播放键   → [EVT] Dock 按键点击 key=play      label=播放键
+点下一首   → [EVT] Dock 按键点击 key=mediaNext  label=下一首
+点上一首   → [EVT] Dock 按键点击 key=mediaPrev  label=上一首
+```
+
+**长按（修复后）**：
+
+```
+[EVT] Dock 按键长按 key=media label=媒体卡
+（无「Dock 按键点击」→ 没有误拉起 App；前台仍是桌面）
+```
+
+### 七、已知限制
+
+1. **「跳我们自己的第二页音乐卡」这个入口没了**（本轮按用户要求覆盖）。
+   替代路径：Dock 媒体卡**长按**（媒体浮窗）、页面指示器进第二页、
+   首页的「音乐」入口、导航栏媒体槽位。
+2. **无会话时给提示**「当前没有正在使用的音乐 App」——
+   但实测中这个状态**几乎不会出现**：桌面的「启动后自动播放」会把默认源拉起来，
+   会话随即建立。
+3. **拉不起的 App**（没装 / 没有启动入口）给提示「该音乐应用无法打开」。
+4. 模拟器是 API 28；真车 API 29 的 `ISessionController` 签名不同 ——
+   本轮不涉及会话回调，**不受影响**。

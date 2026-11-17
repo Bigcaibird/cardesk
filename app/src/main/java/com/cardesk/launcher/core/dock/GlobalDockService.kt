@@ -30,6 +30,7 @@ import com.cardesk.launcher.core.OemDockPolicy
 import com.cardesk.launcher.core.Prefs
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
+import com.cardesk.launcher.core.media.DockMediaLaunch
 import com.cardesk.launcher.core.media.LyricTimeline
 import com.cardesk.launcher.core.media.MusicController
 import com.cardesk.launcher.core.media.TrackInfo
@@ -789,7 +790,18 @@ class GlobalDockService : Service() {
         bar.onSplit = { toLauncher(MainActivity.ACTION_SPLIT) }
         bar.onSplitLongPress = { toLauncher(MainActivity.ACTION_SPLIT_LONG) }
         bar.on360 = { toLauncher(MainActivity.ACTION_CAMERA360) }
-        bar.onMediaTap = { toLauncher(MainActivity.ACTION_MEDIA) }
+        // 第197轮：点媒体卡的封面 / 歌名区 → 直接拉起**当前正在使用的**音乐 App。
+        //
+        // 全局 Dock 浮在别的 App 之上，这时拉起音乐 App 正是用户想要的
+        // （「回到我正在听的那个 App」），不用先把桌面拉回前台。
+        bar.onMediaOpenApp = {
+            val track = MusicController.get().track
+            val action = com.cardesk.launcher.core.media.DockMediaLaunch.openCurrentApp(
+                context = this,
+                trackPkg = track?.pkg,
+            )
+            com.cardesk.launcher.core.media.DockMediaLaunch.messageFor(action)?.let { toast(it) }
+        }
         bar.onMediaLongPress = { toLauncher(MainActivity.ACTION_MEDIA) }
 
         bar.onMediaNext = {
