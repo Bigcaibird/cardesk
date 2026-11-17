@@ -509,11 +509,29 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
      *
      * 决定收藏 / 播放模式这两个按钮**显不显示** ——
      * 不支持的播放器**直接隐藏**，而不是亮一个「点了没反应」的按钮
-     * （汽水音乐车机版就没这两条通道）。
+     * （汽水音乐车机版就没有切播放模式的对外通道）。
      */
     var musicPackage: String? = null
         set(value) {
             field = value
+            applyActionVisibility()
+        }
+
+    /**
+     * 当前会话的**运行时探测**结果（第一九六轮）。
+     *
+     * 能力表里没有的包（没逆向过的音乐 App）靠它决定亮不亮按钮 ——
+     * 会话发了**心形评分** → 亮收藏；会话**暴露了**播放模式 → 亮播放模式。
+     *
+     * 判定在 [MediaActions.capsOf] 里做（纯逻辑，可单测）。
+     */
+    var actionProbe: MediaActions.Probe? = null
+        set(value) {
+            field = value
+            // 这里**不做**「值没变就跳过」的短路 ——
+            // 换了播放器但探测结果恰好相同时（两个 App 都发心形评分），
+            // 短路会让按钮显隐跟着上一个播放器走。
+            // `applyActionVisibility()` 只是设两个 visibility，代价可以忽略。
             applyActionVisibility()
         }
 
@@ -1272,8 +1290,12 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         // 收藏用心形，播放模式用 repeat / repeat_one / shuffle 标准符号。
         val favBtn = ImageView(context).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
-            // 内容区 28×28（外框 48×56 留出左右 10 / 上下 14）
-            setPadding(10, 14, 10, 14)
+            // 内容区 40×40（外框 48×56 留出左右 4 / 上下 8）
+            //
+            // 第 196 轮**放大**：原来是 28×28（padding 10/14），
+            // 实体心形在车机屏上偏小、看着不够醒目 → 内容区放到 40×40。
+            // 外框尺寸不变（48×56）→ 点击热区不变，版式也不动。
+            setPadding(4, 8, 4, 8)
             isClickable = true
             contentDescription = "收藏"
             setOnClickListener {
@@ -1320,18 +1342,20 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
     }
 
     /**
-     * 收藏 / 播放模式这两个按钮**显不显示**（第一九五轮）。
+     * 收藏 / 播放模式这两个按钮**显不显示**（第一九五轮 → 第一九六轮）。
      *
-     * 只认**能力表里有的包**（[MediaActions.supportsFavorite] /
-     * [MediaActions.supportsPlayMode]）——
-     * 表里没有的包一律隐藏（不猜：猜错了会亮一个点了没反应的按钮）。
+     * 判据是 [MediaActions.capsOf]：
+     *
+     * - **已知包**（QQ / 网易云 / 汽水）→ 查能力表；
+     * - **未知包**（没逆向过的音乐 App）→ 看运行时探测（[actionProbe]）：
+     *   会话发了**心形评分** → 亮收藏；会话**暴露了**播放模式 → 亮播放模式；
+     * - 探不到 → **都不亮**（不猜：猜错了会亮一个点了没反应的按钮）。
      */
     private fun applyActionVisibility() {
         val pkg = musicPackage
-        favoriteBtn?.visibility =
-            if (MediaActions.supportsFavorite(pkg)) View.VISIBLE else View.GONE
-        playModeBtn?.visibility =
-            if (MediaActions.supportsPlayMode(pkg)) View.VISIBLE else View.GONE
+        val caps = MediaActions.capsOf(pkg, actionProbe)
+        favoriteBtn?.visibility = if (caps.favorite) View.VISIBLE else View.GONE
+        playModeBtn?.visibility = if (caps.playMode) View.VISIBLE else View.GONE
     }
 
     /**

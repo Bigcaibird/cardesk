@@ -3666,9 +3666,11 @@ private fun showCam() {
         navPage.durationText = formatTime(track?.durationMs ?: 0L)
         // —— 第195轮：收藏按钮 / 播放模式按钮 ——
         //
-        // `musicPackage` 决定这两个按钮**显不显示**：
+        // `musicPackage` + `actionProbe` 一起决定这两个按钮**显不显示**：
+        // 已知包查能力表，未知包看运行时探测（会话发了心形评分 / 暴露了播放模式）。
         // 播放器没有这两条通道时直接隐藏，不亮一个「点了没反应」的按钮。
         navPage.musicPackage = track?.pkg
+        navPage.actionProbe = MusicController.get().actionProbe
         navPage.favoriteState = MusicController.get().favoriteState
         navPage.playModeState = MusicController.get().playModeState
         dock.bind(state)

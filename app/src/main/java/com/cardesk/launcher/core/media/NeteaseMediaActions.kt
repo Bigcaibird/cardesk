@@ -1,13 +1,10 @@
 package com.cardesk.launcher.core.media
 
 import android.content.Context
-import android.media.MediaMetadata
-import android.media.Rating
 import android.media.session.MediaController
 import android.os.Bundle
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
-import java.lang.reflect.Method
 
 /**
  * 网易云车机版（`com.netease.cloudmusic.iot`）的**收藏 / 播放模式**通道（第一九五轮）。
@@ -115,6 +112,12 @@ import java.lang.reflect.Method
  * 而接口 `ISessionController` 上声明的是 2 个。
  *
  * → 两种都找，**优先用参数少的那个**（少传隐藏参数更稳）。
+ *
+ * ## 第一九六轮：代理层抽到公共文件
+ *
+ * 这套「找代理 → 找方法 → 按签名拼参数」的逻辑**不是网易云专有的** ——
+ * 通用兜底通道（[StandardMediaActions]）也要用同一套
+ * → 抽到 [SessionProxy] 里，本文件只留网易云自己的动作名与编码。
  */
 object NeteaseMediaActions {
 
@@ -132,168 +135,6 @@ object NeteaseMediaActions {
 
     /** extra：播放模式编码（1 / 2 / 3）。 */
     const val EXTRA_PLAY_MODE = "play_mode"
-
-    /** framework 内部会话控制接口的全名。 */
-    private const val ISESSION_CONTROLLER = "android.media.session.ISessionController"
-
-    /**
-     * `MediaController.sendCustomAction(String, Bundle)`。
-     *
-     * **大部分设备上没有**（API 28 实测没有；API 29+ 是 deprecated 但还在）。
-     * 留着是为了兼容新版本 —— 有它就用它（公开 API 最稳）。
-     */
-    private val sendCustomActionMethod: Method? by lazy {
-        runCatching {
-            MediaController::class.java.getMethod(
-                "sendCustomAction",
-                String::class.java,
-                Bundle::class.java,
-            )
-        }.getOrNull()
-    }
-
-    /**
-     * 拿控制器背后的**会话控制代理**（隐藏 API）。
-     *
-     * 返回值是 `ISessionController$Stub$Proxy`（AIDL 代理），
-     * 它的方法 `sendCustomAction` / `setRating` 就是网易云会话回调的入口。
-     */
-    private fun controllerProxyOf(controller: MediaController): Any? {
-        // 路 1：**MediaSession.Token.mBinder** —— 它本身就是代理
-        //
-        // 设备实测（API 28）：这个字段的值直接就是
-        // `android.media.session.ISessionController$Stub$Proxy`。
-        val tokenBinder = runCatching {
-            val token = controller.sessionToken
-            token.javaClass.getDeclaredField("mBinder")
-                .apply { isAccessible = true }.get(token)
-        }.getOrNull()
-        if (tokenBinder != null) return tokenBinder
-        // 路 2：MediaController.mSessionBinder（同一个代理的另一个入口）
-        return runCatching {
-            MediaController::class.java.getDeclaredField("mSessionBinder")
-                .apply { isAccessible = true }.get(controller)
-        }.getOrNull()
-    }
-
-    /**
-     * 在代理上找同名方法，**优先参数少的那个**。
-     *
-     * AIDL 代理类的方法带 2 个隐藏参数，接口上声明的没有 →
-     * 少传隐藏参数更稳（那个 `token` 传错了可能直接抛）。
-     *
-     * @param imc 会话控制代理
-     * @param name 方法名
-     * @return 找到的方法；找不到返回 null
-     */
-    private fun findMethod(imc: Any, name: String): Method? {
-        val fromInterface = runCatching {
-            Class.forName(ISESSION_CONTROLLER).methods.filter { it.name == name }
-        }.getOrDefault(emptyList())
-        val fromProxy = runCatching {
-            imc.javaClass.methods.filter { it.name == name }
-        }.getOrDefault(emptyList())
-        return (fromInterface + fromProxy)
-            .distinctBy { it.parameterTypes.size }
-            .minByOrNull { it.parameterTypes.size }
-    }
-
-    /**
-     * 按方法签名拼调用参数。
-     *
-     * ## 为什么不能写死参数个数
-     *
-     * `ISessionController` 的签名在 Android 版本之间**不一样**，
-     * 设备实测（API 28 的这台）长这样：
-     *
-     * ```java
-     * void sendCustomAction(String callingPackage, ISessionControllerCallback callback,
-     *                        String action, Bundle extras);
-     * ```
-     *
-     * —— 前面多了一个「**调用方包名**」和一个「回调」，
-     * 这是 Android 10 引入的 `callingPackage` 语义（AOSP 9 的标准签名是
-     * `sendCustomAction(String action, Bundle extras)`）。
-     *
-     * framework 拿 `callingPackage` 做**权限检查** → 必须传**真实的调用方包名**，
-     * 传错会被服务端拒绝。
-     *
-     * → 所以按**参数类型**定位 `action` / `extras` 的位置，
-     * 其余参数：第一个 `String` 填调用方包名，别的填 null。
-     */
-    private fun callArgs(
-        method: Method,
-        callingPackage: String,
-        action: String,
-        extras: Bundle?,
-    ): Array<Any?> {
-        val types = method.parameterTypes
-        val args = arrayOfNulls<Any?>(types.size)
-        // extras = 最后一个 Bundle
-        val extrasIdx = types.indexOfLast { it == Bundle::class.java }.let { if (it < 0) types.size - 1 else it }
-        // action = extras 前面最近的 String
-        var actionIdx = -1
-        for (i in extrasIdx - 1 downTo 0) {
-            if (types[i] == String::class.java) {
-                actionIdx = i
-                break
-            }
-        }
-        if (actionIdx < 0) actionIdx = if (extrasIdx > 0) extrasIdx - 1 else 0
-        args[actionIdx] = action
-        args[extrasIdx] = extras
-        // 其余参数：String → 调用方包名；其它（回调等）→ null
-        for (i in types.indices) {
-            if (i == actionIdx || i == extrasIdx) continue
-            args[i] = if (types[i] == String::class.java) callingPackage else null
-        }
-        return args
-    }
-
-    /**
-     * 下发一个**自定义动作**。
-     *
-     * @param context 上下文（取**真实的调用方包名**用 ——
-     *   framework 拿它做权限检查，传错会被服务端拒）
-     * @param controller 当前会话的控制器
-     * @param action 动作名
-     * @param extras 附加参数（可空）
-     * @return 是否真的发出去了
-     */
-    private fun sendCustomAction(
-        context: Context,
-        controller: MediaController,
-        action: String,
-        extras: Bundle?,
-    ): Boolean {
-        val pkg = context.packageName
-        // 路 1：公开的 `MediaController.sendCustomAction`（API 29+ 还在）
-        sendCustomActionMethod?.let { m ->
-            val err = runCatching { m.invoke(controller, action, extras) }.exceptionOrNull()
-            if (err == null) return true
-            Logx.w(LogTags.MEDIA, "网易云自定义动作下发失败（直连）", err, "action" to action)
-        }
-        // 路 2：会话控制代理上的 `sendCustomAction`
-        val imc = controllerProxyOf(controller)
-        if (imc == null) {
-            Logx.i(LogTags.MEDIA, "网易云自定义动作下发失败：拿不到会话控制代理", "action" to action)
-            return false
-        }
-        val m = findMethod(imc, "sendCustomAction")
-        if (m == null) {
-            Logx.i(LogTags.MEDIA, "网易云自定义动作下发失败：代理上没有 sendCustomAction", "action" to action)
-            return false
-        }
-        val err = runCatching { m.invoke(imc, *callArgs(m, pkg, action, extras)) }.exceptionOrNull()
-        if (err != null) {
-            Logx.i(
-                LogTags.MEDIA, "网易云自定义动作下发失败：调用出错",
-                "action" to action, "参数个数" to m.parameterTypes.size,
-                "异常" to err.javaClass.name, "消息" to (err.message ?: ""),
-            )
-        }
-        return err == null
-    }
 
     /**
      * 收藏 / 取消收藏当前歌曲。
@@ -314,7 +155,7 @@ object NeteaseMediaActions {
             return false
         }
         val extras = Bundle().apply { putBoolean(EXTRA_IS_STAR, favorited) }
-        return sendCustomAction(context, c, ACTION_STAR, extras)
+        return SessionProxy.sendCustomAction(context, c, ACTION_STAR, extras)
     }
 
     /**
@@ -331,7 +172,7 @@ object NeteaseMediaActions {
         val c = controller ?: return false
         val code = MediaActions.neteasePlayModeCode(mode)
         val extras = Bundle().apply { putInt(EXTRA_PLAY_MODE, code) }
-        return sendCustomAction(context, c, ACTION_PLAY_MODE, extras)
+        return SessionProxy.sendCustomAction(context, c, ACTION_PLAY_MODE, extras)
     }
 
     /**
@@ -347,21 +188,6 @@ object NeteaseMediaActions {
      */
     fun requestPlayMode(context: Context, controller: MediaController?): Boolean {
         val c = controller ?: return false
-        return sendCustomAction(context, c, ACTION_GET_PLAY_MODE, null)
-    }
-
-    /**
-     * 从会话元数据里读**收藏态**（纯逻辑，可单测）。
-     *
-     * 网易云把收藏态放在 `METADATA_KEY_USER_RATING` 的**心形评分**里。
-     *
-     * @param metadata 当前会话的元数据（null = 没有会话）
-     * @return true = 已收藏；false = 未收藏；**null = 不知道**
-     *   （没有这个评分项，或者评分类型不是心形）
-     */
-    fun favoriteHeart(metadata: MediaMetadata?): Boolean? {
-        val rating = metadata?.getRating(MediaMetadata.METADATA_KEY_USER_RATING) ?: return null
-        if (rating.ratingStyle != Rating.RATING_HEART) return null
-        return rating.hasHeart()
+        return SessionProxy.sendCustomAction(context, c, ACTION_GET_PLAY_MODE, null)
     }
 }

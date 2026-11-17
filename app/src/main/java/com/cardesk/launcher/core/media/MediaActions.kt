@@ -17,9 +17,11 @@ package com.cardesk.launcher.core.media
  * |---|---|---|---|
  * | QQ 音乐车机版 | ✅ | ✅ | 第三方 URI 协议（`qqmusiccar://?action=20&m0=…`） |
  * | 网易云车机版 | ✅ | ✅ | **标准 MediaSession**（`sendCustomAction` / `setRating`） |
- * | 汽水音乐车机版 | ❌ | ❌ | 没找到对外通道 |
+ * | 汽水音乐车机版 | ✅ | ❌ | **标准 MediaSession**（`setRating` → 心形评分） |
+ * | 其它播放器 | 探测 | 探测 | **通用兜底**：标准 MediaSession 通道 + 运行时探测 |
  *
- * → 所以桌面这一侧不能写死某一家，要**按包名分发**。
+ * → 所以桌面这一侧不能写死某一家，要**按包名分发**（已知包走专用通道，
+ * 未知包走通用兜底）。
  *
  * ## 网易云为什么最后走的是「标准 API」而不是私有 JSK
  *
@@ -175,6 +177,121 @@ object MediaActions {
         }
     }
 
+    // ---------------------------------------------------------------- 运行时探测
+
+    /**
+     * **运行时探测**到的会话事实（第一九六轮）。
+     *
+     * ## 为什么要探测
+     *
+     * 能力表只覆盖**逆向过**的三个播放器。
+     * 桌面上还有一堆别的音乐 App（爱趣听、酷我、汽水…），
+     * 它们各有各的私有协议，桌面不可能一家一家逆 →
+     * 只能靠**标准 MediaSession 通道**兜底（见 [StandardMediaActions]）。
+     *
+     * 但**不能无脑乱发**：亮一个「点了没反应」的按钮比没有更糟。
+     * → 所以先看这个会话**自己发布的事实**，再决定亮不亮。
+     *
+     * | 能力 | 判据 |
+     * |---|---|
+     * | 收藏 | 会话 metadata 里**有**心形评分（`METADATA_KEY_USER_RATING`）|
+     * | 播放模式 | 会话 `PlaybackState` 的 `repeatMode` / `shuffleMode` **被设置过** |
+     *
+     * @param favoriteHeart metadata 里心形评分读出来的值；
+     *   **null = 没有心形评分项**（→ 不支持标准收藏）
+     * @param repeatMode `PlaybackState.getRepeatMode()`（[RepeatMode] 口径）
+     * @param shuffleMode `PlaybackState.getShuffleMode()`（[ShuffleMode] 口径）
+     */
+    data class Probe(
+        val favoriteHeart: Boolean?,
+        val repeatMode: Int = RepeatMode.NONE,
+        val shuffleMode: Int = ShuffleMode.NONE,
+    ) {
+        companion object {
+            /** 什么事实都没探到（没有会话 / 没有元数据）。 */
+            val EMPTY = Probe(favoriteHeart = null)
+        }
+    }
+
+    /**
+     * `PlaybackState` 的**重复模式**取值（与 Android framework 同口径）。
+     *
+     * ## 为什么要自己定义一份
+     *
+     * `PlaybackState.REPEAT_MODE_UNSET` 是 **API 29** 才加的，
+     * 而本工程跑在 **API 28** 的车机上 →
+     * 直接引用 framework 常量在低版本上拿不到「未设置」这个态。
+     *
+     * → 自己定义一份（值与 framework 完全一致），纯 Kotlin、可单测。
+     */
+    object RepeatMode {
+        /** 不重复（播完一遍就停）。 */
+        const val NONE = 0
+
+        /** 单曲循环。 */
+        const val ONE = 1
+
+        /** 列表循环（顺序播放）。 */
+        const val ALL = 2
+
+        /** 未设置（API 29+ 才有这个值；低版本用 [NONE]）。 */
+        const val UNSET = -1
+    }
+
+    /**
+     * `PlaybackState` 的**随机模式**取值（与 Android framework 同口径）。
+     */
+    object ShuffleMode {
+        /** 不随机。 */
+        const val NONE = 0
+
+        /** 随机播放。 */
+        const val ALL = 1
+
+        /** 未设置（API 29+ 才有这个值；低版本用 [NONE]）。 */
+        const val UNSET = -1
+    }
+
+    /**
+     * 这个会话**有没有暴露**播放模式（能力探测用，纯逻辑，可单测）。
+     *
+     * ## 判据
+     *
+     * 「设置过」= `repeatMode` 或 `shuffleMode` **不是 NONE**。
+     *
+     * ## 为什么不用 `!= UNSET` 判定
+     *
+     * `REPEAT_MODE_UNSET`（-1）是 API 29 才有的，
+     * API 28 的 framework 里 `PlaybackState` 的默认值是 **NONE（0）** →
+     * 用 `!= UNSET` 判的话，API 28 上**每个会话都会「暴露」播放模式** →
+     * 按钮到处乱亮。
+     *
+     * → 统一按「**大于 0**」判定：只有 ONE / ALL / SHUFFLE_ALL 才算数。
+     *
+     * @param repeatMode `PlaybackState.getRepeatMode()`
+     * @param shuffleMode `PlaybackState.getShuffleMode()`
+     */
+    fun exposesPlayMode(repeatMode: Int, shuffleMode: Int): Boolean =
+        repeatMode > RepeatMode.NONE || shuffleMode > ShuffleMode.NONE
+
+    /**
+     * 从会话的 `PlaybackState` 模式字段读**播放模式**（纯逻辑，可单测）。
+     *
+     * - `shuffleMode == ALL` → **随机播放**（随机优先于重复）；
+     * - `repeatMode == ONE` → **单曲循环**；
+     * - `repeatMode == ALL` → **顺序播放**；
+     * - 其余 → **不知道**（null）。
+     *
+     * @param repeatMode `PlaybackState.getRepeatMode()`
+     * @param shuffleMode `PlaybackState.getShuffleMode()`
+     */
+    fun playModeFromState(repeatMode: Int, shuffleMode: Int): PlayMode? = when {
+        shuffleMode == ShuffleMode.ALL -> PlayMode.SHUFFLE
+        repeatMode == RepeatMode.ONE -> PlayMode.REPEAT_ONE
+        repeatMode == RepeatMode.ALL -> PlayMode.REPEAT_ALL
+        else -> null
+    }
+
     /**
      * 各播放器的动作能力表（**按包名**）。
      *
@@ -183,10 +300,9 @@ object MediaActions {
      * 同一个来源 id 可能对应多个包（酷我有 clone 变体），
      * 而**能力是跟着包走的**（哪个包实现、哪个包没实现，差别在 App 本身）。
      *
-     * ## 只填**实测过**的
+     * ## 表里是「**有专用通道**」的包
      *
-     * 汽水两项都不支持（`SodaMediaSource` 里记着它的 browse 树是空的，
-     * 全包也没找到收藏/播放模式的对外通道）→ 不填。
+     * 表里没有的包 → 走 [capsOf] 的**运行时探测**（通用兜底）。
      */
     private val CAPS: Map<String, Caps> = mapOf(
         // QQ 音乐车机版：第三方 URI 协议（`qqmusiccar://?action=20&m0=…`）。
@@ -195,24 +311,61 @@ object MediaActions {
         // `onSetRating`（心形评分 → 收藏）与 `onCustomAction`
         // （`"play_mode_action"` → 播放模式）。详见本文件的 KDoc。
         MediaButtonTransport.NETEASE_PACKAGE to Caps(favorite = true, playMode = true),
+        // 汽水音乐车机版（第一九六轮）：**收藏走标准评分通道**。
+        //
+        // 逆向结论（`com.luna.player.impl.remotecontrol.CoreRemoteControlListener`）：
+        //
+        // ```java
+        // public void onSetRating(RatingCompat ratingCompat) {
+        //     if (ratingCompat == null) { super.onSetRating(ratingCompat); }
+        //     else { handleCollectOrUnCollectCommand(ratingCompat.hasHeart()); }   // ← 收藏
+        // }
+        // ```
+        //
+        // → 桌面下发**标准心形评分**它就真的收藏。
+        // 实测它的会话 `rating type=1`（心形评分在），收藏态也读得到。
+        //
+        // 播放模式：它只在**进程内**的指令中心里
+        // （`LunaCommandKeys.SWITCH_PLAY_MODE` → `SwitchPlayModeCommand`，
+        // 由 BYD 的**语音**通道触发），第三方接不上；
+        // 会话实测 `custom actions=[]`、`PlaybackState` 也没有模式字段
+        // → **按钮隐藏**。
+        SodaMediaSource.PACKAGE to Caps(favorite = true, playMode = false),
     )
 
     /**
      * 这个包支持哪些动作。
      *
-     * 表里没有的包 → [Caps.NONE]（**不猜**：猜错了会下发到不存在的通道上）。
+     * ## 两级判定
+     *
+     * 1. **能力表里有的包** → 直接查表（专用通道，逆向验证过的）；
+     * 2. **表里没有的包** → 看 [probe]（运行时探测，通用兜底）：
+     *    - 会话发了**心形评分** → 说明它用标准收藏语义 → 亮收藏按钮；
+     *    - 会话**暴露了**播放模式字段 → 说明它用标准模式语义 → 亮播放模式按钮；
+     *    - 探测不到 → **什么都不亮**（不猜：猜错了会亮一个点了没反应的按钮）。
+     *
+     * @param packageName 播放器包名
+     * @param probe 运行时探测到的事实（null = 没探到 → 兜底一律不支持）
      */
-    fun capsOf(packageName: String?): Caps {
+    fun capsOf(packageName: String?, probe: Probe? = null): Caps {
         val pkg = packageName?.trim().orEmpty()
         if (pkg.isEmpty()) return Caps.NONE
-        return CAPS[pkg] ?: Caps.NONE
+        CAPS[pkg]?.let { return it }
+        // —— 表里没有 → 运行时探测（通用兜底）
+        if (probe == null) return Caps.NONE
+        return Caps(
+            favorite = probe.favoriteHeart != null,
+            playMode = exposesPlayMode(probe.repeatMode, probe.shuffleMode),
+        )
     }
 
     /** 这个包支不支持收藏。 */
-    fun supportsFavorite(packageName: String?): Boolean = capsOf(packageName).favorite
+    fun supportsFavorite(packageName: String?, probe: Probe? = null): Boolean =
+        capsOf(packageName, probe).favorite
 
     /** 这个包支不支持切播放模式。 */
-    fun supportsPlayMode(packageName: String?): Boolean = capsOf(packageName).playMode
+    fun supportsPlayMode(packageName: String?, probe: Probe? = null): Boolean =
+        capsOf(packageName, probe).playMode
 
     // ---------------------------------------------------------------- 播放模式循环
 
@@ -334,5 +487,119 @@ object MediaActions {
         NeteasePlayMode.SHUFFLE -> PlayMode.SHUFFLE
         NeteasePlayMode.REPEAT_ONE -> PlayMode.REPEAT_ONE
         else -> null
+    }
+
+    // ---------------------------------------------------------------- 收藏结果
+
+    /**
+     * 播放器回报的「收藏指令执行结果」码（第一九六轮）。
+     *
+     * ## 出处
+     *
+     * 网易云处理完 `star_action` 会回一条同名 session event，
+     * bundle 里是 `code` + `message`（`yc/s0.java`）：
+     *
+     * ```java
+     * if (areEqual(Boolean.valueOf(isStar), vc.g.f24419a.D())) {
+     *     bundle.putInt("code", -2);
+     *     bundle.putString("message", isStar ? "已经是收藏状态了" : "已经是未收藏状态了");
+     *     mediaSession.sendSessionEvent(action, bundle);
+     *     return new IoTMediaResult(6, "", "");
+     * }
+     * ...
+     * bundle2.putInt("code", 0);
+     * bundle2.putString("message", "操作成功");
+     * mediaSession.sendSessionEvent(action, bundle2);
+     * ```
+     */
+    object FavoriteResult {
+        /** 操作成功（收藏 / 取消收藏生效）。 */
+        const val OK = 0
+
+        /** 状态**本来就是**这样（幂等空操作，没有真正改）。 */
+        const val ALREADY = -2
+
+        /** 失败。 */
+        const val FAILED = -1
+    }
+
+    /**
+     * 播放器的收藏结果 → **校正后**的收藏态（纯逻辑，可单测）。
+     *
+     * ## 为什么 0 和 -2 都算「成功」
+     *
+     * `-2`（已经是该状态）虽然**没有真的改**，
+     * 但它明确告诉了桌面「**当前状态就是你要的那个**」→
+     * 桌面据此把状态校正过来，界面才不会一直停在旧状态。
+     *
+     * @param code 播放器回报的结果码
+     * @param target 桌面**请求**的目标状态（true = 收藏）
+     * @return 校正后的收藏态；**null = 失败了**，调用方要回滚
+     */
+    fun favoriteStateFromResult(code: Int, target: Boolean): FavoriteState? = when (code) {
+        FavoriteResult.OK, FavoriteResult.ALREADY ->
+            if (target) FavoriteState.FAVORITED else FavoriteState.NOT_FAVORITED
+        else -> null
+    }
+
+    // ---------------------------------------------------------------- 通用编码
+
+    /**
+     * **通用**播放模式编码（顺序=1 / 单曲=2 / 随机=3）。
+     *
+     * ## 这套编码是谁定的
+     *
+     * `sendCustomAction` **没有**官方约定的参数格式，
+     * 但桌面需要一套自己的口径发给「走标准通道」的播放器 →
+     * 这里定一套**自定的通用编码**。
+     *
+     * 注意它和 [NeteasePlayMode] **不是**同一个编号
+     * （网易云是 1=顺序 / 2=随机 / 3=单曲）→ 别混用。
+     */
+    object GenericPlayMode {
+        /** 顺序播放（列表循环）。 */
+        const val REPEAT_ALL = 1
+
+        /** 单曲循环。 */
+        const val REPEAT_ONE = 2
+
+        /** 随机播放。 */
+        const val SHUFFLE = 3
+    }
+
+    /**
+     * **通用**播放模式编码（纯逻辑，可单测）。
+     *
+     * | 模式 | 通用编码 |
+     * |---|---|
+     * | 顺序播放 | 1 |
+     * | 单曲循环 | 2 |
+     * | 随机播放 | 3 |
+     */
+    fun genericPlayModeCode(mode: PlayMode): Int = when (mode) {
+        PlayMode.REPEAT_ALL -> GenericPlayMode.REPEAT_ALL
+        PlayMode.REPEAT_ONE -> GenericPlayMode.REPEAT_ONE
+        PlayMode.SHUFFLE -> GenericPlayMode.SHUFFLE
+    }
+
+    /**
+     * 模式 → Android 标准**重复模式**（`PlaybackState.REPEAT_MODE_*`，纯逻辑，可单测）。
+     *
+     * 顺序 → ALL(2)，单曲 → ONE(1)，随机 → NONE(0)（随机靠 shuffle 字段表达）。
+     */
+    fun androidRepeatMode(mode: PlayMode): Int = when (mode) {
+        PlayMode.REPEAT_ALL -> RepeatMode.ALL
+        PlayMode.REPEAT_ONE -> RepeatMode.ONE
+        PlayMode.SHUFFLE -> RepeatMode.NONE
+    }
+
+    /**
+     * 模式 → Android 标准**随机模式**（`PlaybackState.SHUFFLE_MODE_*`，纯逻辑，可单测）。
+     *
+     * 随机 → ALL(1)，其余 → NONE(0)。
+     */
+    fun androidShuffleMode(mode: PlayMode): Int = when (mode) {
+        PlayMode.SHUFFLE -> ShuffleMode.ALL
+        else -> ShuffleMode.NONE
     }
 }

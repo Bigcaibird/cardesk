@@ -30,7 +30,17 @@ import org.junit.Test
  *
  * ### 汽水音乐车机版（`com.luna.music.car`）
  *
- * browse 树为空、全包找不到收藏/播放模式的对外通道 → **两项都不支持**。
+ * 第一九五轮结论「两项都不支持」，**第一九六轮推翻**：
+ *
+ * - 收藏：**标准评分通道**（`CoreRemoteControlListener.onSetRating`
+ *   → `handleCollectOrUnCollectCommand(rating.hasHeart())`）；
+ * - 播放模式：只在**进程内**指令中心（`LunaCommandKeys.SWITCH_PLAY_MODE`），
+ *   由 BYD 语音通道触发，第三方接不上 → **不支持**。
+ *
+ * ### 未适配的音乐 App（通用兜底）
+ *
+ * 靠**运行时探测**（[MediaActions.Probe]）决定亮不亮按钮：
+ * 会话发了**心形评分** → 支持收藏；会话**暴露了**播放模式 → 支持播放模式。
  *
  * 纯 Kotlin，不碰 Android —— 直接 JVM 单测。
  */
@@ -53,12 +63,14 @@ class MediaActionsTest {
     }
 
     @Test
-    fun `汽水音乐两项都不支持`() {
-        val caps = MediaActions.capsOf("com.luna.music.car")
-        assertFalse(caps.favorite)
+    fun `汽水音乐支持收藏但不支持播放模式`() {
+        // 第一九六轮：汽水的收藏走**标准评分通道**（onSetRating → 收藏），
+        // 播放模式没有对外通道 → 按钮隐藏。
+        val caps = MediaActions.capsOf(SodaMediaSource.PACKAGE)
+        assertTrue(caps.favorite)
         assertFalse(caps.playMode)
-        assertFalse(MediaActions.supportsFavorite("com.luna.music.car"))
-        assertFalse(MediaActions.supportsPlayMode("com.luna.music.car"))
+        assertTrue(MediaActions.supportsFavorite(SodaMediaSource.PACKAGE))
+        assertFalse(MediaActions.supportsPlayMode(SodaMediaSource.PACKAGE))
     }
 
     @Test
@@ -76,6 +88,154 @@ class MediaActionsTest {
         assertFalse(MediaActions.supportsFavorite("   "))
         assertFalse(MediaActions.supportsPlayMode("com.example.player"))
         assertEquals(MediaActions.Caps.NONE, MediaActions.capsOf("com.example.player"))
+    }
+
+    // ---------------------------------------------------- 通用兜底（运行时探测）
+
+    @Test
+    fun `未适配的App探测到心形评分就支持收藏`() {
+        // 会话发了心形评分 → 说明它用标准收藏语义 → 亮收藏按钮
+        val probe = MediaActions.Probe(favoriteHeart = false)
+        val caps = MediaActions.capsOf("com.example.player", probe)
+        assertTrue(caps.favorite)
+        assertFalse(caps.playMode)
+    }
+
+    @Test
+    fun `未适配的App没发心形评分就不支持收藏`() {
+        // 没有心形评分项 → 不猜 → 不亮收藏按钮
+        val probe = MediaActions.Probe(favoriteHeart = null)
+        assertFalse(MediaActions.capsOf("com.example.player", probe).favorite)
+    }
+
+    @Test
+    fun `未适配的App暴露了播放模式就支持播放模式`() {
+        val probe = MediaActions.Probe(
+            favoriteHeart = null,
+            repeatMode = MediaActions.RepeatMode.ALL,
+            shuffleMode = MediaActions.ShuffleMode.NONE,
+        )
+        val caps = MediaActions.capsOf("com.example.player", probe)
+        assertFalse(caps.favorite)
+        assertTrue(caps.playMode)
+    }
+
+    @Test
+    fun `未适配的App没探测结果就什么都不支持`() {
+        // 没有会话 → 探不到 → 两个按钮都不亮
+        val caps = MediaActions.capsOf("com.example.player", null)
+        assertEquals(MediaActions.Caps.NONE, caps)
+        assertFalse(MediaActions.supportsFavorite("com.example.player"))
+        assertFalse(MediaActions.supportsPlayMode("com.example.player"))
+    }
+
+    @Test
+    fun `已知包不受探测结果影响`() {
+        // 网易云 / 汽水在能力表里 → 探测结果说什么都不改它们的结论
+        val probe = MediaActions.Probe(favoriteHeart = null)
+        assertTrue(MediaActions.capsOf(MediaButtonTransport.NETEASE_PACKAGE, probe).favorite)
+        assertTrue(MediaActions.capsOf(MediaButtonTransport.NETEASE_PACKAGE, probe).playMode)
+        // 汽水：收藏仍然支持，播放模式仍然不支持（探测到模式字段也不给开）
+        assertTrue(MediaActions.capsOf(SodaMediaSource.PACKAGE, probe).favorite)
+        assertFalse(MediaActions.capsOf(SodaMediaSource.PACKAGE, probe).playMode)
+    }
+
+    // ---------------------------------------------------- 播放模式字段（标准口径）
+
+    @Test
+    fun `暴露播放模式的判据是大于NONE`() {
+        // API 28 的 PlaybackState 默认值是 NONE(0)（UNSET(-1) 是 API 29 才有）
+        // → 必须按「大于 0」判，否则每个会话都会「暴露」播放模式
+        assertFalse(MediaActions.exposesPlayMode(MediaActions.RepeatMode.NONE, MediaActions.ShuffleMode.NONE))
+        assertFalse(MediaActions.exposesPlayMode(MediaActions.RepeatMode.UNSET, MediaActions.ShuffleMode.UNSET))
+        assertTrue(MediaActions.exposesPlayMode(MediaActions.RepeatMode.ALL, MediaActions.ShuffleMode.NONE))
+        assertTrue(MediaActions.exposesPlayMode(MediaActions.RepeatMode.ONE, MediaActions.ShuffleMode.NONE))
+        assertTrue(MediaActions.exposesPlayMode(MediaActions.RepeatMode.NONE, MediaActions.ShuffleMode.ALL))
+    }
+
+    @Test
+    fun `从播放状态字段读播放模式`() {
+        assertEquals(
+            MediaActions.PlayMode.SHUFFLE,
+            MediaActions.playModeFromState(MediaActions.RepeatMode.NONE, MediaActions.ShuffleMode.ALL),
+        )
+        assertEquals(
+            MediaActions.PlayMode.REPEAT_ONE,
+            MediaActions.playModeFromState(MediaActions.RepeatMode.ONE, MediaActions.ShuffleMode.NONE),
+        )
+        assertEquals(
+            MediaActions.PlayMode.REPEAT_ALL,
+            MediaActions.playModeFromState(MediaActions.RepeatMode.ALL, MediaActions.ShuffleMode.NONE),
+        )
+        // 随机优先于重复
+        assertEquals(
+            MediaActions.PlayMode.SHUFFLE,
+            MediaActions.playModeFromState(MediaActions.RepeatMode.ALL, MediaActions.ShuffleMode.ALL),
+        )
+        // 没设置 → 不知道
+        assertNull(MediaActions.playModeFromState(MediaActions.RepeatMode.NONE, MediaActions.ShuffleMode.NONE))
+        assertNull(MediaActions.playModeFromState(MediaActions.RepeatMode.UNSET, MediaActions.ShuffleMode.UNSET))
+    }
+
+    @Test
+    fun `通用播放模式编码跟网易云那套不是一回事`() {
+        // 通用：1=顺序 / 2=单曲 / 3=随机
+        assertEquals(1, MediaActions.genericPlayModeCode(MediaActions.PlayMode.REPEAT_ALL))
+        assertEquals(2, MediaActions.genericPlayModeCode(MediaActions.PlayMode.REPEAT_ONE))
+        assertEquals(3, MediaActions.genericPlayModeCode(MediaActions.PlayMode.SHUFFLE))
+        // 网易云：1=顺序 / 2=随机 / 3=单曲 → 同一个模式的编码不一样
+        assertEquals(2, MediaActions.neteasePlayModeCode(MediaActions.PlayMode.SHUFFLE))
+        assertEquals(3, MediaActions.neteasePlayModeCode(MediaActions.PlayMode.REPEAT_ONE))
+    }
+
+    @Test
+    fun `通用下发时给的两套参数值一致`() {
+        // play_mode（通用编码）与 repeat_mode / shuffle_mode（Android 标准值）
+        // 必须指向同一个模式 —— 两套一起发，认哪套的播放器都能听懂。
+        val mode = MediaActions.PlayMode.SHUFFLE
+        assertEquals(MediaActions.RepeatMode.NONE, MediaActions.androidRepeatMode(mode))
+        assertEquals(MediaActions.ShuffleMode.ALL, MediaActions.androidShuffleMode(mode))
+        val all = MediaActions.PlayMode.REPEAT_ALL
+        assertEquals(MediaActions.RepeatMode.ALL, MediaActions.androidRepeatMode(all))
+        assertEquals(MediaActions.ShuffleMode.NONE, MediaActions.androidShuffleMode(all))
+        val one = MediaActions.PlayMode.REPEAT_ONE
+        assertEquals(MediaActions.RepeatMode.ONE, MediaActions.androidRepeatMode(one))
+        assertEquals(MediaActions.ShuffleMode.NONE, MediaActions.androidShuffleMode(one))
+    }
+
+    // ---------------------------------------------------- 收藏结果回报
+
+    @Test
+    fun `收藏成功按目标态校正`() {
+        // 出处：网易云 yc/s0.java → session event code=0 "操作成功"
+        assertEquals(
+            MediaActions.FavoriteState.FAVORITED,
+            MediaActions.favoriteStateFromResult(MediaActions.FavoriteResult.OK, target = true),
+        )
+        assertEquals(
+            MediaActions.FavoriteState.NOT_FAVORITED,
+            MediaActions.favoriteStateFromResult(MediaActions.FavoriteResult.OK, target = false),
+        )
+    }
+
+    @Test
+    fun `已经是该状态也按目标态校正`() {
+        // code=-2 "已经是收藏状态了" —— 虽然没真改，
+        // 但它明确说了「当前状态就是你要的那个」→ 界面要跟上
+        assertEquals(
+            MediaActions.FavoriteState.FAVORITED,
+            MediaActions.favoriteStateFromResult(MediaActions.FavoriteResult.ALREADY, target = true),
+        )
+        assertEquals(
+            MediaActions.FavoriteState.NOT_FAVORITED,
+            MediaActions.favoriteStateFromResult(MediaActions.FavoriteResult.ALREADY, target = false),
+        )
+    }
+
+    @Test
+    fun `收藏失败返回null让上层回滚`() {
+        assertNull(MediaActions.favoriteStateFromResult(MediaActions.FavoriteResult.FAILED, target = true))
+        assertNull(MediaActions.favoriteStateFromResult(-99, target = true))
     }
 
     // ------------------------------------------------------------ 收藏态

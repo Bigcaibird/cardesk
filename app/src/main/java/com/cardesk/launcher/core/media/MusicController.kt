@@ -302,20 +302,72 @@ class MusicController private constructor() {
     }
 
     /**
-     * 从**当前会话的 metadata** 里读收藏态（网易云专用，第一九五轮）。
+     * 当前会话的**运行时探测**结果（第一九六轮）。
      *
-     * 网易云把收藏态放在心形评分里，播放器收藏 / 取消收藏后都会重发 metadata，
-     * 所以这里直接读当前控制器的那份。
+     * ## 干什么用
+     *
+     * 能力表（[MediaActions.capsOf]）只覆盖逆向过的三个播放器；
+     * 桌面上还有一堆别的音乐 App → 靠**标准 MediaSession 通道**兜底。
+     *
+     * 但不能无脑乱发 → 先看这个会话**自己发布的事实**：
+     *
+     * - metadata 里**有**心形评分 → 它用标准收藏语义 → 可以亮收藏按钮；
+     * - `PlaybackState` **暴露了**模式字段 → 它用标准模式语义 → 可以亮播放模式按钮。
+     *
+     * @return 探测结果；**null = 没有会话**（探不到 → 兜底一律不支持）
+     */
+    val actionProbe: MediaActions.Probe?
+        get() {
+            val c = MusicSessionTracker.get().boundController() ?: return null
+            // 只认**当前曲目**那个包的会话 —— 别的 App 的会话探出来的事实
+            // 跟当前播放器没关系（会话是全局的，当前绑定的未必是当前在播的）。
+            val cur = track?.pkg
+            if (cur != null && c.packageName != cur) return null
+            val metadata = runCatching { c.metadata }.getOrNull()
+            val state = runCatching { c.playbackState }.getOrNull()
+            return MediaActions.Probe(
+                favoriteHeart = StandardMediaActions.favoriteHeart(metadata),
+                repeatMode = StandardMediaActions.repeatModeOf(state),
+                shuffleMode = StandardMediaActions.shuffleModeOf(state),
+            )
+        }
+
+    /**
+     * 当前播放器**实际支持**哪些动作（能力表 + 运行时探测）。
+     *
+     * 这是界面决定「按钮亮不亮」的唯一依据。
+     */
+    val actionCaps: MediaActions.Caps
+        get() = MediaActions.capsOf(track?.pkg, actionProbe)
+
+    /**
+     * 从**当前会话的 metadata** 里读收藏态（第一九五轮 → 第一九六轮通用化）。
+     *
+     * 走标准通道的播放器（网易云 / 汽水 / 其它）都把收藏态放在**心形评分**里，
+     * 收藏 / 取消收藏后都会重发 metadata → 这里直接读当前控制器的那份。
      */
     private fun readFavoriteFromSession() {
-        if (track?.pkg != MediaButtonTransport.NETEASE_PACKAGE) return
         val c = MusicSessionTracker.get().boundController() ?: return
-        val heart = NeteaseMediaActions.favoriteHeart(runCatching { c.metadata }.getOrNull()) ?: return
+        // 同上：只认当前曲目那个包的会话
+        val cur = track?.pkg
+        if (cur != null && c.packageName != cur) return
+        val heart = StandardMediaActions.favoriteHeart(runCatching { c.metadata }.getOrNull()) ?: return
         setFavoriteState(
             if (heart) MediaActions.FavoriteState.FAVORITED
             else MediaActions.FavoriteState.NOT_FAVORITED,
         )
     }
+
+    /**
+     * 下一次收藏指令的**目标状态**（true = 收藏）。
+     *
+     * 播放器回报结果时用它来校正状态
+     * （见 [trackerActionListener] 的 [MusicSessionTracker.ActionStateListener.onFavoriteResult]）。
+     */
+    private var lastFavoriteTarget: Boolean? = null
+
+    /** 下发收藏指令**之前**的状态（失败要回滚到它）。 */
+    private var favoriteStateBeforeSend: MediaActions.FavoriteState? = null
 
     /**
      * **收藏 / 取消收藏**当前歌曲（第一九五轮）。
@@ -336,16 +388,20 @@ class MusicController private constructor() {
     fun toggleFavorite(): Boolean {
         val ctx = context ?: return false
         val pkg = track?.pkg
-        if (!MediaActions.supportsFavorite(pkg)) {
+        val caps = actionCaps
+        if (!caps.favorite) {
             Logx.i(LogTags.MEDIA, "收藏：当前播放器不支持", "pkg" to (pkg ?: ""))
             return false
         }
         val target = !favoriteState.isFavorited
+        lastFavoriteTarget = target
+        favoriteStateBeforeSend = favoriteState
         val ok = MediaActionsDispatcher.sendFavorite(
             context = ctx,
             controller = MusicSessionTracker.get().boundController(),
             packageName = pkg,
             favorited = target,
+            caps = caps,
         )
         if (ok) {
             // **不立即乐观更新** —— 等播放器的权威回报（QQ 的 `update_fav` 广播 /
@@ -368,7 +424,8 @@ class MusicController private constructor() {
     fun cyclePlayMode(): Boolean {
         val ctx = context ?: return false
         val pkg = track?.pkg
-        if (!MediaActions.supportsPlayMode(pkg)) {
+        val caps = actionCaps
+        if (!caps.playMode) {
             Logx.i(LogTags.MEDIA, "播放模式：当前播放器不支持", "pkg" to (pkg ?: ""))
             return false
         }
@@ -378,6 +435,7 @@ class MusicController private constructor() {
             controller = MusicSessionTracker.get().boundController(),
             packageName = pkg,
             mode = next,
+            caps = caps,
         )
         if (ok) {
             setPlayModeState(MediaActions.PlayModeState(next))
@@ -708,33 +766,70 @@ class MusicController private constructor() {
     }
 
     /**
-     * 会话侧的**收藏态 / 播放模式**监听（第一九五轮）。
+     * 会话侧的**收藏态 / 播放模式**监听（第一九五轮 → 第一九六轮通用化）。
      *
      * ## 这条通道是谁
      *
-     * [MusicSessionTracker] 从**会话元数据**里读网易云的心形评分（= 收藏态），
+     * [MusicSessionTracker] 从**会话元数据**里读**心形评分**（= 收藏态），
      * 从**会话事件**里读网易云答回来的播放模式。
      *
-     * ## 为什么只有网易云走这里
+     * ## 收藏态为什么不再只认网易云（第一九六轮）
      *
-     * QQ 音乐车机版**不发布可用会话**，它的收藏态走**广播**
-     * （`key_is_fav`，见 [handleQqLyricBroadcast]）。
+     * 汽水（`com.luna.music.car`）也把收藏态放在**心形评分**里
+     * （逆向：`CoreRemoteControlListener.onSetRating` → `handleCollectOrUnCollectCommand`），
+     * 而且它收藏完会重发 metadata → **同一套读法**就能拿到。
+     *
+     * ## 但要分清「是谁的收藏态」
+     *
+     * 别的 App 的会话事件也会走到这里 →
+     * 只有**当前曲目那个包**的状态才认（`pkg` 对不上就丢）。
      */
     private val trackerActionListener = object : MusicSessionTracker.ActionStateListener {
-        override fun onActionStateChanged(favoriteHeart: Boolean?, playModeCode: Int?) {
+        override fun onActionStateChanged(favoriteHeart: Boolean?, playModeCode: Int?, pkg: String?) {
             // 只认**当前**播放器的会话 —— 别的 App 的会话事件也会走到这里。
-            val pkg = track?.pkg
-            if (pkg != MediaButtonTransport.NETEASE_PACKAGE) return
-            if (favoriteHeart != null) {
+            val cur = track?.pkg
+            // 收藏态：**标准通道**通用（网易云 / 汽水 / 其它未适配的播放器）
+            if (favoriteHeart != null && pkg != null && pkg == cur) {
                 setFavoriteState(
                     if (favoriteHeart) MediaActions.FavoriteState.FAVORITED
                     else MediaActions.FavoriteState.NOT_FAVORITED,
                 )
             }
-            if (playModeCode != null) {
+            // 播放模式编码是**网易云口径**（1/2/3），只有网易云会回
+            if (playModeCode != null && pkg == MediaButtonTransport.NETEASE_PACKAGE) {
                 val mode = MediaActions.playModeFromNeteaseCode(playModeCode)
                 if (mode != null) setPlayModeState(MediaActions.PlayModeState(mode))
             }
+        }
+
+        /**
+         * 播放器回报了「收藏指令的结果」（第一九六轮）。
+         *
+         * ## 为什么要校正
+         *
+         * 网易云进程内缓存的收藏态，和它发出来的 metadata **可能不一致**
+         * （缓存 true、metadata false）→ 桌面按 metadata 判「未收藏」，
+         * 再发一次收藏指令，网易云回「已经是收藏状态了」→ **什么都不会变**，
+         * 界面却停在「未收藏」。
+         *
+         * → 听到回报就**校正**（`0` 成功 / `-2` 本来就是这样 → 都按目标态；
+         * 其它 → 失败，**回滚**到下发前的状态）。
+         */
+        override fun onFavoriteResult(code: Int, message: String, pkg: String?) {
+            if (pkg != null && pkg != track?.pkg) return
+            val target = lastFavoriteTarget ?: return
+            val corrected = MediaActions.favoriteStateFromResult(code, target)
+            if (corrected != null) {
+                setFavoriteState(corrected)
+                return
+            }
+            // 失败 → 回到下发前的状态（别让界面停在「以为收藏了」）
+            cancelPendingFavorite()
+            favoriteStateBeforeSend?.let { setFavoriteState(it) }
+            Logx.i(
+                LogTags.MEDIA, "收藏指令失败，已回滚",
+                "code" to code, "message" to message, "pkg" to (pkg ?: ""),
+            )
         }
     }
 

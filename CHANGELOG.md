@@ -7217,3 +7217,262 @@ void sendCustomAction(String callingPackage, ISessionControllerCallback callback
    实测回报在几十毫秒内到达。
 5. 模拟器是 API 28；真车 API 29 的 `ISessionController` 签名不同
    （没有 `callingPackage`）→ 代码按**参数类型**自适应，不用改。
+
+---
+
+## 第196轮：适配汽水音乐 + 未适配 App 的通用兜底（收藏爱心再放大）
+
+### 一、用户提的需求
+
+> 收藏图标可以再放大一点；目前只适配了 qq 和网易云吗？
+> 再适配一下汽水，并且针对未适配的音乐 App 增加一个通用的兜底方案。
+
+先回答那个问题：**是的，第195轮之前只适配了 QQ 音乐和网易云**，
+汽水音乐车机版（`com.luna.music.car`）当时判为「两项都不支持」——
+**这个结论本轮被推翻了**。
+
+本轮范围：**收藏图标放大** + **适配汽水** + **通用兜底**。
+
+---
+
+### 二、汽水的重新逆向（第195轮的结论是错的）
+
+第195轮说「汽水的 browse 树为空、全包找不到收藏/播放模式的对外通道」，
+本轮重新翻了一遍反编译产物
+（`.work/soda/out/sources/`，13418 个 java），找到了两处关键代码。
+
+#### 2.1 收藏：走**标准评分通道**（找到了）
+
+`com/luna/player/impl/remotecontrol/CoreRemoteControlListener.java`：
+
+```java
+public void onSetRating(RatingCompat ratingCompat) {
+    if (ratingCompat == null) { super.onSetRating(ratingCompat); }
+    else { handleCollectOrUnCollectCommand(ratingCompat.hasHeart()); }   // ← 真收藏
+}
+```
+
+→ 汽水实现了**标准 MediaSession 的评分回调**，
+桌面下发**心形评分**它就真的收藏。
+
+而且汽水把收藏态放在 **metadata 的心形评分**里
+（实测 `dumpsys media_session` 显示 `rating type=1`）→
+桌面**读得回来**。
+
+#### 2.2 播放模式：确认**没有**第三方可用的通道（结论不变）
+
+汽水的播放模式只在**进程内**的指令中心：
+
+| 位置 | 内容 |
+|---|---|
+| `com/luna/biz/command/LunaCommandKeys.java` | `SWITCH_PLAY_MODE` / `QUERY_PLAY_MODE` / `MANAGE_FAVORITE` |
+| `com/luna/biz/command/impl/command/player/mode/SwitchPlayModeCommand.java` | 真正切模式的命令 |
+| `com/luna/music/car/adaption/platform/BYDMediaListenerImpl.java` | 由 **BYD 语音**通道触发 |
+
+而它的会话回调基类 `RemoteControlListener.onCustomAction` **只打日志**（空实现）。
+
+模拟器实测汽水的会话：
+
+```
+rating type=1
+PlaybackState {state=3, position=29288, actions=950, custom actions=[], ...}   ← 无 repeatMode/shuffleMode
+metadata:size=7, description=一见如故, 许嵩, 安泊猜想
+```
+
+→ **收藏 ✅ / 播放模式 ❌**（按钮隐藏）。
+
+---
+
+### 三、通用兜底：标准 MediaSession 通道 + 运行时探测
+
+桌面上还有一堆别的音乐 App（爱趣听、酷我…），
+一家一家逆向不现实 → 只能靠 **Android 官方定义的标准会话入口**兜底：
+
+| 动作 | 标准入口 | 播放器的回调 |
+|---|---|---|
+| 收藏 | `setRating(心形评分)` | `MediaSession.Callback.onSetRating` |
+| 播放模式 | `sendCustomAction(动作名, 参数)` | `MediaSession.Callback.onCustomAction` |
+
+**但不是无脑乱发** —— 能不能亮按钮由**运行时探测**决定
+（亮一个「点了没反应」的按钮比没有更糟）：
+
+| 能力 | 判据 |
+|---|---|
+| 收藏 | 会话 metadata 里**有**心形评分（`METADATA_KEY_USER_RATING`）→ 它用标准收藏语义 |
+| 播放模式 | 会话 `PlaybackState` 的 `repeatMode` / `shuffleMode` **被设置过** → 它用标准模式语义 |
+
+探测不到 → **两个按钮都不亮**。
+
+#### 3.1 判定从「查表」变成「查表 + 探测」两级
+
+`MediaActions.capsOf(packageName, probe)`：
+
+1. **能力表里有的包**（QQ / 网易云 / 汽水）→ 直接查表（专用通道，逆向验证过的）；
+2. **表里没有的包** → 看 `probe`：
+   - 有心形评分 → 亮收藏；
+   - 暴露了播放模式字段 → 亮播放模式；
+   - 探不到 → 什么都不亮。
+
+#### 3.2 一个坑：`REPEAT_MODE_UNSET` 是 API 29 才有的
+
+「设置过播放模式」本来想用 `!= REPEAT_MODE_UNSET` 判，
+但 **`REPEAT_MODE_UNSET`（-1）是 API 29 才加的**，
+API 28 的 `PlaybackState` 默认值是 **NONE（0）** →
+用 `!= UNSET` 判的话，**API 28 上每个会话都会「暴露」播放模式** →
+按钮到处乱亮。
+
+→ 统一按「**大于 0**」判定（只有 ONE / ALL / SHUFFLE_ALL 才算数），
+并在 `MediaActions` 里自己定义一份 `RepeatMode` / `ShuffleMode` 常量
+（值与 framework 完全一致，纯 Kotlin、可单测）。
+
+#### 3.3 播放模式的下发参数：两套表达一起给
+
+`sendCustomAction` 没有官方约定的参数格式 → 同时给两套：
+
+- `play_mode`：**通用编码**（顺序=1 / 单曲=2 / 随机=3）；
+- `repeat_mode` / `shuffle_mode`：**Android 标准值**
+  （`PlaybackState.REPEAT_MODE_*` / `SHUFFLE_MODE_*`）——
+  认这套的播放器直接能用。
+
+注意通用编码和**网易云那套不是同一个编号**
+（网易云是 1=顺序 / 2=随机 / 3=单曲）→ 别混用。
+
+---
+
+### 四、顺手发现并修掉的两个问题
+
+#### 4.1 隐藏 API 代理层抽成公共文件
+
+第195轮把「找会话控制代理 → 找方法 → 按签名拼参数」这套逻辑
+写在 `NeteaseMediaActions` 私有方法里。
+但它**不是网易云专有的** —— 通用兜底也要用同一套
+→ 抽成 `core/media/SessionProxy.kt`，两个执行层共用。
+
+顺带补了一个坑：**评分入口的名字随 Android 版本变**
+（有的版本叫 `rate(...)`，有的叫 `setRating(...)`）
+→ 两个都找，取「参数里能塞进一个评分」的那个里参数最少的。
+
+#### 4.2 网易云收藏态：接住播放器回报的结果
+
+排障时发现：网易云**进程内缓存的收藏态**和它发出来的 metadata
+**可能不一致**（缓存 true、metadata false）→ 桌面按 metadata 判「未收藏」，
+再发一次收藏指令，网易云回「已经是收藏状态了」→ **什么都不会变**，
+界面却停在「未收藏」。
+
+网易云处理完 `star_action` 会回一条**同名 session event**
+（`yc/s0.java`）：
+
+| code | message | 含义 |
+|---|---|---|
+| 0 | 操作成功 | 收藏 / 取消收藏**生效** |
+| -2 | 已经是收藏状态了 / 已经是未收藏状态了 | 状态**本来就是**这样（幂等空操作）|
+| -1 | （App 里的失败文案） | **失败** |
+
+→ 桌面现在**接住这条回报**：
+`0` / `-2` 都按请求的目标态校正，其它（失败）**回滚**到下发前的状态
+（别让界面停在「以为收藏了」）。
+
+判定逻辑放在 `MediaActions.favoriteStateFromResult()`（纯逻辑，可单测）。
+
+---
+
+### 五、收藏图标放大
+
+第195轮把收藏从文字符号 `♡` 换成了矢量心形（Canvas 几何自绘），
+但 28×28 的内容区在车机屏上**偏小、不够醒目**。
+
+| | 内容区 | 外框 |
+|---|---|---|
+| 第195轮 | 28×28（padding 10/14）| 48×56 |
+| **第196轮** | **40×40**（padding 4/8）| 48×56（不变）|
+
+外框尺寸不变 → **点击热区不变、版式不动**，只是心形本身放大了约 43%。
+
+---
+
+### 六、改动清单
+
+| 文件 | 改动 |
+|---|---|
+| `core/media/MediaActions.kt` | 加 `Probe`（运行时探测）、`RepeatMode`/`ShuffleMode`/`GenericPlayMode` 常量、`favoriteStateFromResult()`；`capsOf(pkg, probe)` 两级判定；能力表加汽水条目 |
+| `core/media/StandardMediaActions.kt`（新） | **通用兜底层**：标准心形评分下发、标准自定义动作下发、收藏态读取、播放模式字段读取（反射） |
+| `core/media/SessionProxy.kt`（新） | **隐藏 API 代理层**：拿代理、按签名拼参数、发自定义动作 / 评分 |
+| `core/media/NeteaseMediaActions.kt` | 代理逻辑改为复用 `SessionProxy`；收藏态读取下沉到 `StandardMediaActions` |
+| `core/media/MediaActionsDispatcher.kt` | 三层分发：QQ 专用 / 网易云专用 / **标准兜底**；入参改为带 `Caps` |
+| `core/media/MusicSessionTracker.kt` | 收藏态读取**通用化**（心形评分）；新增收藏结果 session event 通道；回调带包名 |
+| `core/media/MusicController.kt` | 新增 `actionProbe` / `actionCaps`；收藏态读取通用化；收藏结果校正 / 失败回滚 |
+| `ui/pages/NavPage.kt` | 按钮显隐改用 `capsOf(pkg, probe)`；收藏心形 28×28 → **40×40** |
+| `ui/LauncherView.kt` | 推送 `actionProbe` |
+| `app/src/test/.../MediaActionsTest.kt` | 16 例 → **28 例**（加探测判定 / 模式字段 / 通用编码 / 收藏结果） |
+
+---
+
+### 七、验证结果
+
+| 项 | 结果 |
+|---|---|
+| 单测 | **2353 全绿**（0 失败 0 错误 0 跳过） |
+| 新增单测 | +12 例（`MediaActionsTest` 16 → 28） |
+| 构建 | `:app:assembleSystem -PcardeskPackage=com.ecarx.cardesk` → 包名 `com.ecarx.cardesk` |
+| 模拟器端到端 | **汽水收藏**、**通用兜底**、网易云收藏 / 取消收藏 / 播放模式、QQ 收藏 / 播放模式，**全部实测通过** |
+| 实测报告 | [`emu-verify/REPORT-r196.md`](emu-verify/REPORT-r196.md) |
+
+**汽水（收藏，标准兜底通道）**：
+
+```
+[EVT] 导航页音乐卡收藏按钮 title=荒 favorited=false
+评分下发成功 方法=rate 参数个数=3 心形=true
+[EVT] 下发收藏指令 pkg=com.luna.music.car favorited=true 通道=标准兜底 ok=true
+收藏态变化 favorited=true pkg=com.luna.music.car
+[EVT] 收藏态变化 old=false new=true 乐观=false      ← 汽水重发 metadata 带来的权威回报
+```
+
+**通用兜底（把汽水从能力表里摘掉，模拟「未适配的 App」）**：
+
+```
+[EVT] 下发收藏指令 pkg=com.luna.music.car favorited=false 通道=标准兜底 ok=true
+评分下发成功 方法=rate 参数个数=3 心形=false
+收藏态变化 favorited=false pkg=com.luna.music.car
+```
+
+→ **表里没有的包，靠运行时探测照样认出来、照样能收藏**；
+同时它的**播放模式按钮仍然是隐藏的**（没暴露模式字段 → 探不到 → 不亮）。
+
+**网易云（收藏 + 取消收藏 + 播放模式）**：
+
+```
+[EVT] 下发收藏指令 pkg=com.netease.cloudmusic.iot favorited=true 通道=网易云 ok=true
+收到网易云收藏结果 pkg=com.netease.cloudmusic.iot code=0 message=操作成功
+[EVT] 收藏态变化 old=false new=true 乐观=false      ← 播放器的权威回报，不是乐观更新
+自定义动作下发成功 action=play_mode_action 参数个数=4
+[EVT] 下发播放模式指令 pkg=com.netease.cloudmusic.iot mode=SHUFFLE 通道=网易云 ok=true
+播放模式变化 code=2 pkg=com.netease.cloudmusic.iot
+```
+
+**QQ 音乐（回归）**：
+
+```
+[EVT] 下发收藏指令 pkg=com.tencent.qqmusiccar favorited=true 通道=QQ协议 ok=true
+采纳 QQ 广播 method=update_fav module=play boundPkg=com.tencent.qqmusiccar
+[EVT] 下发播放模式指令 pkg=com.tencent.qqmusiccar mode=REPEAT_ALL 通道=QQ协议 ok=true
+采纳 QQ 广播 method=update_play_mode module=play boundPkg=com.tencent.qqmusiccar
+```
+
+---
+
+### 八、已知限制
+
+1. **通用兜底的播放模式是「自定约定」**：
+   `com.cardesk.action.SET_PLAY_MODE` 这个动作名**没有行业标准**，
+   只对实现了 `onCustomAction` 且认这个约定的播放器有效。
+   收藏走标准 `setRating` 才是**真正通用**的那条。
+2. **通用兜底的收藏探测依赖「会话发布心形评分」**：
+   播放器实现了 `onSetRating` 但**不在 metadata 里发心形评分**的话，
+   桌面探不到 → 收藏按钮不亮（宁可不亮，也不亮一个点了没反应的）。
+3. **汽水的播放模式仍然隐藏**（进程内指令中心 + 语音通道，第三方接不上）。
+4. **QQ 音乐的收藏是 toggle**：状态未知时的第一次点击**可能与用户预期相反**。
+5. **QQ 音乐不回报播放模式** → 桌面本地跟踪自己下发的最后一次。
+6. **网易云的收藏态有两个来源**（metadata 心形评分 + `star_action` 的结果事件），
+   两者不一致时以**结果事件**为准（见 4.2）。
+7. 模拟器是 API 28；真车 API 29 的 `ISessionController` 签名不同
+   （没有 `callingPackage`）→ 代码按**参数类型**自适应，不用改。
