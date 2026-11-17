@@ -70,6 +70,14 @@ class FloatBubbleView(context: Context) : FrameLayout(context) {
                 alpha = if (box.bubbleInteractive) 1f else 0.45f
                 isEnabled = box.bubbleInteractive
                 isClickable = box.bubbleInteractive
+                // 按压反馈：点一下还原、长按关闭之前都是「毫无反应」的一颗气泡，
+                // 手指按下去没有任何确认。
+                //
+                // 用 [Motion.press]（不吞事件）—— 它的监听器返回 false，
+                // 所以点击与长按照常触发，两套手势互不干扰；
+                // 气泡不可点时（alpha 0.45、非首页）也不会缩，
+                // 因为 [Motion.press] 会先看 [View.isEnabled]。
+                pressFeedback()
                 setOnClickListener {
                     if (box.bubbleInteractive) {
                         // 排障场景：「最小化的浮窗点气泡恢复不了」——还原落盘。

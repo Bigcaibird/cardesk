@@ -17,6 +17,8 @@ import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.ui.ChipButton
 import com.cardesk.launcher.ui.Ui
+import com.cardesk.launcher.ui.anim.Motion
+import com.cardesk.launcher.ui.anim.MotionSpec
 import com.cardesk.launcher.vehicle.TireOrder
 import com.cardesk.launcher.vehicle.VehicleInfo
 
@@ -30,6 +32,14 @@ class VehiclePage(context: Context, private val pal: Palette) : FrameLayout(cont
     private val tireValues = arrayOfNulls<TextView>(4)
     private val carView: TopCarView
     private val doorLabels = ArrayList<TextView>()
+
+    /**
+     * 每个车门标签**当前显示中**的颜色。
+     *
+     * `TextView` 没法反查自己现在的文字色，所以自己记一份 ——
+     * 渐变要从「现在显示的颜色」出发，中途再切状态才接得上。
+     */
+    private val doorColors = IntArray(4)
     private val sourceLabel: TextView
 
     init {
@@ -104,6 +114,8 @@ class VehiclePage(context: Context, private val pal: Palette) : FrameLayout(cont
             rowView.addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
             val v = Ui.text(context, "已关闭", 24f, pal.ok, bold = true)
             doorLabels.add(v)
+            // 初始显示色（= 文字色）记下来：后面渐变要从这里出发。
+            doorColors[doorLabels.size - 1] = pal.ok
             rowView.addView(v)
             states.addView(rowView, Ui.linear(-1, 52))
         }
@@ -143,11 +155,12 @@ class VehiclePage(context: Context, private val pal: Palette) : FrameLayout(cont
             "source" to info.source,
             "rangeKm" to info.rangeKm,
         )
-        rangeValue.text = if (info.rangeKm >= 0) "${info.rangeKm} km" else "--"
+        setValue(rangeValue, if (info.rangeKm >= 0) "${info.rangeKm} km" else "--")
         for (i in tireValues.indices) {
             val t = info.tires.getOrNull(i) ?: Float.NaN
             // 第三十七轮：单位是 kPa（真车 TPMS 报 240/227/237/235），按整数显示。
-            tireValues[i]?.text = if (t.isNaN()) "--" else String.format(java.util.Locale.US, "%d", Math.round(t))
+            val v = tireValues[i] ?: continue
+            setValue(v, if (t.isNaN()) "--" else String.format(java.util.Locale.US, "%d", Math.round(t)))
         }
         sourceLabel.text = "数据来源：${info.source}"
         // 车门：优先用四门明细；**整组明细都没有**时才退回整体状态（UI 只有二态）。
@@ -164,15 +177,45 @@ class VehiclePage(context: Context, private val pal: Palette) : FrameLayout(cont
                 false -> "已打开"
                 null -> "--"
             }
-            v.setTextColor(
-                when (closed) {
-                    true -> pal.ok
-                    false -> pal.warn
-                    null -> pal.textFaint
-                },
-            )
+            val target = when (closed) {
+                true -> pal.ok
+                false -> pal.warn
+                null -> pal.textFaint
+            }
+            fadeDoorColor(i, v, target)
         }
         carView.invalidate()
+    }
+
+    /**
+     * 车门状态的颜色**渐变**过去，而不是硬切。
+     *
+     * 「已关闭 → 已打开」是绿变橙 —— 硬切的话余光只会觉得「颜色闪了一下」，
+     * 渐变才能让人看清「这扇门的状态变了」。
+     */
+    private fun fadeDoorColor(index: Int, label: TextView, target: Int) {
+        val from = doorColors.getOrElse(index) { target }
+        if (from == target) return
+        Motion.animateProgress(label) { t ->
+            val c = MotionSpec.lerpColor(from, target, t)
+            label.setTextColor(c)
+            if (index in doorColors.indices) doorColors[index] = c
+        }
+        // 颜色之外再补一下位移：车门状态是**安全**信息，值得更明显一点。
+        Motion.nudge(label)
+    }
+
+    /**
+     * 数值变化时「顶一下」（[Motion.nudge]）。
+     *
+     * 续航 / 胎压是驾驶员会盯着看的数字 —— 变了要能立刻被注意到。
+     * 只在文本**真的变了**时才顶：车控是定时刷新的，
+     * 不比较的话每轮都在顶，数字会一直抖。
+     */
+    private fun setValue(view: TextView, text: String) {
+        if (view.text?.toString() == text) return
+        view.text = text
+        Motion.nudge(view)
     }
 
     /** 俯视车模，纯绘制。 */

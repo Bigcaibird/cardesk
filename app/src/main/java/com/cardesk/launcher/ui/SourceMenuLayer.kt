@@ -14,6 +14,8 @@ import com.cardesk.launcher.core.Palette
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.core.media.MediaSources
+import com.cardesk.launcher.ui.anim.Motion
+import com.cardesk.launcher.ui.anim.MotionSpec
 
 /**
  * 媒体来源切换菜单。
@@ -58,10 +60,25 @@ class SourceMenuLayer(context: Context, private val pal: Palette) : FrameLayout(
     private var anchorView: View? = null
     private var opened = false
 
+    /**
+     * 进场动画待启动。
+     *
+     * 面板是**按锚点定位**的（[placePanel]），动画必须等摆好位置再开始 ——
+     * 否则会看到面板先从屏幕左上角闪一下再滑到位。
+     */
+    private var enterPending = false
+
     init {
         // 遮罩： musicSourceScrim 是透明 View，靠 click 事件收起菜单。
         scrim.setBackgroundColor(0x00000000)
         scrim.isClickable = true
+        // 遮罩的按压反馈：点空白处收起菜单的这一次点击，
+        // 用的是和其它控件同一套按压节奏（60ms 按下 / 90ms 回弹）。
+        //
+        // 遮罩本身是**全透明**的，所以缩放看不出来 ——
+        // 看得见的是「面板淡出退场」（见 [hide]）。
+        // 这里仍然装上，是为了让「点空白收起」这一步也有明确的按压时刻。
+        Motion.press(scrim)
         scrim.setOnClickListener { hide() }
         addView(scrim, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
@@ -92,6 +109,9 @@ class SourceMenuLayer(context: Context, private val pal: Palette) : FrameLayout(
             item.setCompoundDrawablesWithIntrinsicBounds(dot(source.brandColor), null, null, null)
             item.compoundDrawablePadding = 12
             item.isClickable = true
+            // 来源行按压反馈：以前 27 行点下去是「啪」地直接切走，
+            // 手指没有任何「按到了」的确认，容易连点两行。
+            pressFeedback()
             item.setOnClickListener {
                 // 排障场景：「来源菜单点了某一项没切过去」——选中项落盘。
                 Logx.event(
@@ -141,9 +161,15 @@ class SourceMenuLayer(context: Context, private val pal: Palette) : FrameLayout(
 
     private fun show() {
         opened = true
+        enterPending = true
         panel.visibility = View.INVISIBLE
         visibility = View.VISIBLE
         requestLayout()
+        // 布局跑完再摆一次位置并起进场动画 ——
+        // 面板是按锚点算出来的（[placePanel]），位置没定下来之前动画没有意义。
+        post {
+            if (opened) placePanel()
+        }
         // 排障场景：「来源菜单没弹出来 / 弹的位置不对」——打开落盘（含锚点）。
         Logx.event(
             LogTags.MEDIA,
@@ -157,8 +183,39 @@ class SourceMenuLayer(context: Context, private val pal: Palette) : FrameLayout(
     fun hide() {
         if (!opened) return
         opened = false
-        visibility = View.GONE
-        panel.visibility = View.VISIBLE
+        // 退场：先播动画，**动画结束后**才摘层。
+        //
+        // 以前是 `visibility = GONE` 一步到位 —— 菜单「啪」地就没了，
+        // 眼睛还没跟上，手指已经落回屏幕上了。
+        // 现在按全 App 对话框那一套退场节奏来（下滑 + 淡出）。
+        //
+        // 这里用 ViewPropertyAnimator 而不是 [Motion.exitSheet]：
+        // 退场的这 240ms 里用户可能马上又点开菜单，那时 [Motion.enterSheet]
+        // 会 `animate().cancel()` 掉这一段 —— 两套动画抢同一个属性会抖。
+        panel.animate().cancel()
+        // 清掉上一次可能留下的 end action ——
+        // `view.animate()` 每次拿到的都是同一个实例，回调会一直留在上面，
+        // 下次**进场**动画结束时又会被触发一次（会把面板的入场结果直接改掉）。
+        panel.animate().withEndAction(null)
+        panel.animate()
+            .alpha(0f)
+            .scaleX(MotionSpec.SHEET_ENTER_SCALE)
+            .scaleY(MotionSpec.SHEET_ENTER_SCALE)
+            .translationY(MotionSpec.SHEET_SLIDE_PX)
+            .setDuration(MotionSpec.SHEET_EXIT_DURATION)
+            .setInterpolator(Motion.EMPHASIS)
+            .withEndAction {
+                // 这一段跑完就不再挂回调（否则会绕回无限循环）。
+                panel.animate().withEndAction(null)
+                visibility = View.GONE
+                panel.visibility = View.VISIBLE
+                // 复位：下次打开是从「起点」进场，而不是从残留位置滑。
+                panel.alpha = 1f
+                panel.scaleX = 1f
+                panel.scaleY = 1f
+                panel.translationY = 0f
+            }
+            .start()
         // 排障场景：「来源菜单关不掉」——关闭落盘。
         Logx.event(LogTags.MEDIA, "媒体来源菜单关闭")
         onToggle?.invoke(false)
@@ -186,6 +243,12 @@ class SourceMenuLayer(context: Context, private val pal: Palette) : FrameLayout(
         panel.x = x
         panel.y = y
         panel.visibility = View.VISIBLE
+        // 位置定了才起进场动画（上滑 + 淡入 + 轻微放大）——
+        // 否则会看到面板先在左上角闪一下再滑到位。
+        if (enterPending) {
+            enterPending = false
+            Motion.enterSheet(panel, null)
+        }
     }
 
     /** 把锚点换算成本层（设计坐标）的矩形。 */

@@ -21,6 +21,8 @@ import com.cardesk.launcher.core.Palettes
 import com.cardesk.launcher.core.Skin
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
+import com.cardesk.launcher.ui.anim.Motion
+import com.cardesk.launcher.ui.anim.MotionSpec
 import com.cardesk.launcher.vehicle.HvacState
 import kotlin.math.abs
 
@@ -33,7 +35,8 @@ import kotlin.math.abs
  * 与对齐的细节
  * - 温度固定一位小数、缺省 23.5
  * - 播放键底色是近白实心圆 `#eef3fa`
- * - 按键按下缩放到 0.95（90ms）、抬起回 1.0（140ms）
+ * - 按键按下缩放到 0.96（60ms）、抬起回 1.0（90ms）—— 与全 App 共用 `MotionSpec`
+ *   （以前这里是 Dock 私有的 0.95 / 90ms / 140ms，和别处的按压手感对不上）
  * - 媒体卡左右滑动切歌：位移 ≥8px 且横向分量 > 纵向 ×1.5 才触发
  * - 主页键长按 = 原车多任务；分屏键长按 = 切换单画/双画
  */
@@ -145,8 +148,33 @@ class DockBarView(context: Context) : View(context) {
     var onMediaPrev: (() -> Unit)? = null
 
     fun bind(state: HvacState?) {
+        val prev = hvac
         hvac = state
+        // 数值变化的脉冲：只在**真的变了**的时候给信号。
+        //
+        // 第一次绑定（prev == null）是「初始状态」而不是「变化」，不脉冲；
+        // state == null（车端没数据）同理 —— 否则整排数字会莫名其妙地抖一下。
+        if (prev != null && state != null) {
+            if (prev.fanLevel != state.fanLevel) fanPulse.fire()
+            if (shownTemp(prev, passenger = false) != shownTemp(state, passenger = false)) {
+                tempDriverPulse.fire()
+            }
+            if (shownTemp(prev, passenger = true) != shownTemp(state, passenger = true)) {
+                tempPassengerPulse.fire()
+            }
+        }
         invalidate()
+    }
+
+    /**
+     * 温度的**显示值**。
+     *
+     * ≤0 按 23.5 处理（与 [formatTemp] 同一个口径）——
+     * 否则车端还没回数据时（0 / 缺省）会被误判成「温度变了」而乱脉冲。
+     */
+    private fun shownTemp(state: HvacState, passenger: Boolean): Float {
+        val raw = if (passenger) state.tempPassenger else state.tempDriver
+        return if (raw <= 0f) 23.5f else raw
     }
 
     fun bindMedia(
@@ -241,6 +269,14 @@ class DockBarView(context: Context) : View(context) {
     private var pressScale = 1f
     private var pressAnimator: ValueAnimator? = null
 
+    // —— 数值变化脉冲（风量 / 主驾温度 / 副驾温度）——
+    //
+    // 温度和风量都是**自绘**的：值一变只能硬切，数字「啪」地跳过去，
+    // 余光根本注意不到「这里变了」。这里给变化的那一处补一个短暂的放大脉冲。
+    private val fanPulse = ValuePulse()
+    private val tempDriverPulse = ValuePulse()
+    private val tempPassengerPulse = ValuePulse()
+
     // —— 媒体卡滑动切歌——
     private val main = Handler(Looper.getMainLooper())
     private var swipeTracking = false
@@ -268,6 +304,10 @@ class DockBarView(context: Context) : View(context) {
 
     override fun onDetachedFromWindow() {
         live.removeAll { it.get() == null || it.get() === this }
+        // 视图离开窗口了，脉冲动画就别再空转着重绘。
+        fanPulse.cancel()
+        tempDriverPulse.cancel()
+        tempPassengerPulse.cancel()
         super.onDetachedFromWindow()
     }
 
@@ -369,36 +409,40 @@ class DockBarView(context: Context) : View(context) {
         for (i in 0 until DockQuickApps.SLOTS) {
             val left = DockLayout.quickSlotLeft(sections, i)
             val app = quickApps.getOrNull(i)
-            if (app == null || app.pkg.isEmpty()) {
-                // 空槽位：圆角方框 + 加号
-                r.set(left, cy - tile / 2f, left + tile, cy + tile / 2f)
-                canvas.drawRoundRect(r, 18f, 18f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = Skin.surfaceSoft
-                })
-                canvas.drawRoundRect(r, 18f, 18f, stroke.apply {
-                    color = Skin.NAV_STROKE
-                    strokeWidth = 1.4f
-                })
-                stroke.color = Skin.TEXT_DIM
-                stroke.strokeWidth = 2.6f
-                stroke.strokeCap = Paint.Cap.ROUND
-                canvas.drawLine(left + tile / 2f - 9f, cy, left + tile / 2f + 9f, cy, stroke)
-                canvas.drawLine(left + tile / 2f, cy - 9f, left + tile / 2f, cy + 9f, stroke)
-            } else {
-                val icon = app.icon
-                if (icon != null) {
-                    drawAppIcon(canvas, icon, left + tile / 2f, cy, tile - 6f)
-                } else {
-                    // 取不到图标 → 首字占位（与应用选择器同一套兜底）
+            val cx = left + tile / 2f
+            // 快捷应用槽以前按下去毫无反应，现在跟别的键一样有按压反馈。
+            withPress(canvas, "quick$i", cx, cy) {
+                if (app == null || app.pkg.isEmpty()) {
+                    // 空槽位：圆角方框 + 加号
                     r.set(left, cy - tile / 2f, left + tile, cy + tile / 2f)
                     canvas.drawRoundRect(r, 18f, 18f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
                         color = Skin.surfaceSoft
                     })
-                    text.textAlign = Paint.Align.CENTER
-                    text.textSize = 26f
-                    text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-                    text.color = Skin.TEXT_SOFT
-                    canvas.drawText(app.label.take(1), left + tile / 2f, cy + 9f, text)
+                    canvas.drawRoundRect(r, 18f, 18f, stroke.apply {
+                        color = Skin.NAV_STROKE
+                        strokeWidth = 1.4f
+                    })
+                    stroke.color = Skin.TEXT_DIM
+                    stroke.strokeWidth = 2.6f
+                    stroke.strokeCap = Paint.Cap.ROUND
+                    canvas.drawLine(cx - 9f, cy, cx + 9f, cy, stroke)
+                    canvas.drawLine(cx, cy - 9f, cx, cy + 9f, stroke)
+                } else {
+                    val icon = app.icon
+                    if (icon != null) {
+                        drawAppIcon(canvas, icon, cx, cy, tile - 6f)
+                    } else {
+                        // 取不到图标 → 首字占位（与应用选择器同一套兜底）
+                        r.set(left, cy - tile / 2f, left + tile, cy + tile / 2f)
+                        canvas.drawRoundRect(r, 18f, 18f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                            color = Skin.surfaceSoft
+                        })
+                        text.textAlign = Paint.Align.CENTER
+                        text.textSize = 26f
+                        text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                        text.color = Skin.TEXT_SOFT
+                        canvas.drawText(app.label.take(1), cx, cy + 9f, text)
+                    }
                 }
             }
             hit["quick$i"] = RectF(left, cy - tile / 2f, left + tile, cy + tile / 2f)
@@ -487,8 +531,13 @@ class DockBarView(context: Context) : View(context) {
         cur -= CLIMATE_ICON_GAP
         cur = tempItem(canvas, cur, passenger = true)
         cur -= FAN_W
-        drawFan(canvas, cur, (h - 76f) / 2f, FAN_W, 76f)
-        hit["fan"] = RectF(cur, (h - 76f) / 2f, cur + FAN_W, (h - 76f) / 2f + 76f)
+        val fanTop = (h - 76f) / 2f
+        // 风量键以前是「按了没反应」的一档（没有按压反馈）——
+        // 现在跟别的键一样按下去会轻轻一沉。
+        withPress(canvas, "fan", cur + FAN_W / 2f, fanTop + 38f) {
+            drawFan(canvas, cur, fanTop, FAN_W, 76f)
+        }
+        hit["fan"] = RectF(cur, fanTop, cur + FAN_W, fanTop + 76f)
         cur = tempItem(canvas, cur, passenger = false)
         // 第五十三轮修重叠：[drawPower] 是**左锚点**画的（占 [left, left + slot]），
         // 原来这里只减了 16 的间隙就把左边界传进去 —— 64 宽的槽有 48 压在主驾温度上，
@@ -500,7 +549,12 @@ class DockBarView(context: Context) : View(context) {
         return powerLeft
     }
 
-    /** 按下时把该按键缩放到 0.95，抬起回 1.0。 */
+    /**
+     * 按下时把该按键缩放到 [MotionSpec.PRESS_SCALE]，抬起回 1.0。
+     *
+     * 只缩**这一个键**（围绕它自己的中心），不是缩整条 Dock ——
+     * 整条一起缩的话，视觉上像是整排控件在动，看不出是「按到了哪个」。
+     */
     private fun withPress(canvas: Canvas, key: String, cx: Float, cy: Float, block: () -> Unit) {
         val s = if (pressedKey == key) pressScale else 1f
         canvas.save()
@@ -601,7 +655,19 @@ class DockBarView(context: Context) : View(context) {
         hit["360"] = RectF(x, cy - 48f, x + slot, cy + 48f)
     }
 
+    /**
+     * 媒体卡。
+     *
+     * 整块（封面 / 歌名区）都是点击热区，所以按压反馈作用在**整张卡**上，
+     * 围绕卡片自己的中心缩放 —— 视觉重心在卡片身上，而不是某个小图标。
+     */
     private fun drawMedia(canvas: Canvas, left: Float, top: Float, w: Float, h: Float) {
+        withPress(canvas, "media", left + w / 2f, top + h / 2f) {
+            drawMediaCard(canvas, left, top, w, h)
+        }
+    }
+
+    private fun drawMediaCard(canvas: Canvas, left: Float, top: Float, w: Float, h: Float) {
         r.set(left, top, left + w, top + h)
         // #12ffffff、圆角 28
         canvas.drawRoundRect(r, 28f, 28f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Skin.GLASS_FILL })
@@ -798,6 +864,12 @@ private fun tempItem(canvas: Canvas, right: Float, passenger: Boolean): Float {
         val startX = cx - groupW / 2f
 
         // 数字
+        //
+        // 温度是**自绘**的：值一变只能硬切，数字「啪」地跳过去，余光根本注意不到。
+        // 变化时给这个数字补一个短暂的放大脉冲（比例 / 时长见 [MotionSpec.STATE_BUMP]）。
+        val pulse = if (passenger) tempPassengerPulse.scale else tempDriverPulse.scale
+        canvas.save()
+        if (pulse != 1f) canvas.scale(pulse, pulse, cx, height / 2f)
         text.textSize = numSize * scale
         text.color = Skin.TEXT
         canvas.drawText(shown, startX, height / 2f + 12f * scale, text)
@@ -805,6 +877,7 @@ private fun tempItem(canvas: Canvas, right: Float, passenger: Boolean): Float {
         text.textSize = degSize * scale
         text.color = Skin.TEXT_SOFT
         canvas.drawText("°", startX + numW, height / 2f + 2f * scale, text)
+        canvas.restore()
         // 主驾 / 副驾
         text.textSize = 13f
         text.color = Skin.TEXT_DIM
@@ -813,11 +886,19 @@ private fun tempItem(canvas: Canvas, right: Float, passenger: Boolean): Float {
 
         // —— 两个加减按钮（画在数字之后：万一有重叠，按钮在上层）——
         // 第五十三轮：按钮槽 52 → 48，所以字形中心从 +26 改成 +24（真正居中）。
-        plusMinus(canvas, minusLeft + 24f, height / 2f, plus = false)
-        plusMinus(canvas, plusLeft + 24f, height / 2f, plus = true)
-        hit[if (passenger) "tempP-" else "temp-"] =
+        //
+        // 加减键以前是「按了没反应」的一档（没有按压反馈），现在补上。
+        val minusKey = if (passenger) "tempP-" else "temp-"
+        val plusKey = if (passenger) "tempP+" else "temp+"
+        withPress(canvas, minusKey, minusLeft + 24f, height / 2f) {
+            plusMinus(canvas, minusLeft + 24f, height / 2f, plus = false)
+        }
+        withPress(canvas, plusKey, plusLeft + 24f, height / 2f) {
+            plusMinus(canvas, plusLeft + 24f, height / 2f, plus = true)
+        }
+        hit[minusKey] =
             RectF(minusLeft, height / 2f - 44f, minusRight, height / 2f + 44f)
-        hit[if (passenger) "tempP+" else "temp+"] =
+        hit[plusKey] =
             RectF(plusLeft, height / 2f - 44f, plusRight, height / 2f + 44f)
 
         // 整块占位 = 48 + 8 + 112 + 8 + 48 = 224 = [TEMP_ITEM_W]，
@@ -856,11 +937,16 @@ private fun tempItem(canvas: Canvas, right: Float, passenger: Boolean): Float {
         val total = 7 * segW + 6 * gap
         var sx = cx - total / 2f
         val sy = top + h - 19f
+        // 风量档位变了 → 7 段短暂放大一下（「这里变了」要被看见）。
+        val pulse = fanPulse.scale
+        canvas.save()
+        if (pulse != 1f) canvas.scale(pulse, pulse, cx, sy + 7.5f)
         for (i in 0 until 7) {
             fill.color = if (i < level) Skin.ACCENT_LIGHT else Skin.surfaceStrong
             canvas.drawRoundRect(RectF(sx, sy, sx + segW, sy + 15f), 3f, 3f, fill)
             sx += segW + gap
         }
+        canvas.restore()
         if (auto) {
             text.color = Skin.ACCENT_LIGHT
             text.textSize = 13f
@@ -1011,6 +1097,8 @@ private fun tempItem(canvas: Canvas, right: Float, passenger: Boolean): Float {
         Logx.d(LogTags.DOCK, "Dock 按压动画开始", "key" to (key ?: ""), "label" to keyLabel(key ?: ""))
         pressAnimator = ValueAnimator.ofFloat(pressScale, PRESS_DOWN_SCALE).apply {
             duration = PRESS_DOWN_MS
+            // 按下用标准减速：起步快、尾巴长 —— 手指还没抬起来就已经看到缩放了。
+            interpolator = Motion.STANDARD
             addUpdateListener { pressScale = it.animatedValue as Float; invalidate() }
         }.also { it.start() }
     }
@@ -1021,8 +1109,48 @@ private fun tempItem(canvas: Canvas, right: Float, passenger: Boolean): Float {
         Logx.d(LogTags.DOCK, "Dock 按压动画结束")
         pressAnimator = ValueAnimator.ofFloat(pressScale, 1f).apply {
             duration = PRESS_UP_MS
+            // 松手带回弹：略微冲过 1 再回来，按键才「活」。
+            interpolator = Motion.REBOUND
             addUpdateListener { pressScale = it.animatedValue as Float; invalidate() }
         }.also { it.start() }
+    }
+
+    /**
+     * 数值脉冲：数值变了就短暂「鼓一下」。
+     *
+     * 温度 / 风量都是**自绘**的，改完只能硬切 —— 数字「啪」地跳过去，
+     * 余光根本注意不到「这里变了」。这里在值变化时让它放大一下再回来
+     * （1 → [MotionSpec.STATE_BUMP] → 1），让「这里变了」这件事被看见。
+     *
+     * 比例与时长直接复用 [MotionSpec.STATE_BUMP]：数值变化和状态切换在车机上
+     * 都是同一类「要确认一下」的事，不另起一套数字，全 App 的手感才是一套。
+     */
+    private inner class ValuePulse {
+        /** 当前缩放（1 = 原样）。 */
+        var scale = 1f
+            private set
+
+        private var animator: ValueAnimator? = null
+
+        /** 触发一次脉冲。 */
+        fun fire() {
+            animator?.cancel()
+            animator = ValueAnimator.ofFloat(1f, MotionSpec.STATE_BUMP, 1f).apply {
+                duration = MotionSpec.STATE_BUMP_DURATION
+                interpolator = Motion.STANDARD
+                addUpdateListener {
+                    scale = it.animatedValue as Float
+                    invalidate()
+                }
+            }.also { it.start() }
+        }
+
+        /** 视图离开窗口时停掉动画，避免空转重绘。 */
+        fun cancel() {
+            animator?.cancel()
+            animator = null
+            scale = 1f
+        }
     }
 
     /**
@@ -1509,14 +1637,19 @@ private fun tempItem(canvas: Canvas, right: Float, passenger: Boolean): Float {
          */
         const val TEMP_ITEM_W = TEMP_MINUS_W + TEMP_ZONE_W + TEMP_PLUS_W + TEMP_GAP * 2
 
-        /** 按下缩放到 0.95。 */
-        const val PRESS_DOWN_SCALE = 0.95f
+        /**
+         * 按下缩放到 0.96。
+         *
+         * 以前这里是 Dock 私有的 0.95，和 App 里其它按压反馈（0.96）对不上 ——
+         * 现在直接指向 [MotionSpec.PRESS_SCALE]，全 App 只有一套按压手感。
+         */
+        const val PRESS_DOWN_SCALE = MotionSpec.PRESS_SCALE
 
-        /** 按下动画 90ms。 */
-        const val PRESS_DOWN_MS = 90L
+        /** 按下动画 60ms（手指还没抬起来就已经看到缩放了）。 */
+        const val PRESS_DOWN_MS = MotionSpec.PRESS_DOWN_DURATION
 
-        /** 抬起回 1.0，动画 140ms。 */
-        const val PRESS_UP_MS = 140L
+        /** 抬起回 1.0，动画 90ms（留一点「弹回去」的余韵）。 */
+        const val PRESS_UP_MS = MotionSpec.PRESS_UP_DURATION
 
         /** 系统长按超时（用 `setOnLongClickListener`，默认 500ms）。 */
         const val LONG_PRESS_MS = 500L

@@ -4,8 +4,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
+import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
+import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
@@ -19,6 +21,8 @@ import com.cardesk.launcher.core.Shape
 import com.cardesk.launcher.core.Skin
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
+import com.cardesk.launcher.ui.anim.Motion
+import com.cardesk.launcher.ui.anim.MotionSpec
 import com.cardesk.launcher.ui.widget.OverlayBackdrop
 
 /**
@@ -72,6 +76,19 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
 
     /** 遮罩（动画用）。 */
     private var scrimView: View? = null
+
+    /**
+     * 分段项外观表（按视图索引）。
+     *
+     * ## 声明位置不能挪到下面
+     *
+     * Kotlin 的属性初始化按**声明顺序**执行 ——
+     * 声明在 [init] **之后**的属性，到 [init] 跑的时候还是 `null`。
+     * 而 [segment] 是在 [init] 里调用的（构造分段控件），
+     * 所以这张表**必须**声明在 [init] 之前，
+     * 否则第一次构造就 `NullPointerException`。
+     */
+    private val segmentStyles = HashMap<TextView, SegmentStyle>()
 
     /** 打开动画：面板上滑 + 遮罩淡入（一族）。 */
     fun playOpen() {
@@ -130,6 +147,9 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
             miniMode = miniOn
             paintSegment(full, !miniOn)
             paintSegment(mini, miniOn)
+            // 刚被选中的那一项「鼓一下」——
+            // 启动方式的切换没有声音也没有飞行动效，不给个形变用户会以为没生效。
+            Motion.bump(if (miniOn) mini else full)
             // 排障场景：「小窗/全屏切换没生效」——启动方式切换落盘。
             Logx.event(
                 LogTags.DRAWER,
@@ -203,6 +223,14 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
         Ui.text(context, text, 20f, if (active) Skin.ACCENT_INK else Skin.TEXT_SOFT).apply {
             gravity = Gravity.CENTER
             setPadding(22, 9, 22, 9)
+            // 底色**始终是同一个 drawable** —— 渐变时只改它的填充色。
+            // 换来换去 drawable 是没法插值的（只能硬切）。
+            val fill = Skin.solid(if (active) Skin.ACCENT else Color.TRANSPARENT, Shape.PILL)
+            background = fill
+            segmentStyles[this] = SegmentStyle(fill).apply {
+                textColor = if (active) Skin.ACCENT_INK else Skin.TEXT_SOFT
+                fillColor = if (active) Skin.ACCENT else Color.TRANSPARENT
+            }
             paintSegment(this, active)
         }
 
@@ -210,11 +238,37 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
      * 分段项两态（设计板 `s03-apps` 的 `.seg span`）：
      * - 选中：**强调色实底 + 强调色上的字 + 加粗**；
      * - 未选中：透明底 + 次级文字（`--textDim`）。
+     *
+     * 颜色**渐变**过去而不是硬切：切换启动方式时，
+     * 强调色实底是从透明里「淡入」的，用户才看得出这一项被选中了。
      */
     private fun paintSegment(seg: TextView, active: Boolean) {
-        seg.setTextColor(if (active) Skin.ACCENT_INK else Skin.TEXT_SOFT)
         seg.typeface = Typeface.create(Typeface.DEFAULT, if (active) Typeface.BOLD else Typeface.NORMAL)
-        seg.background = if (active) Skin.solid(Skin.ACCENT, Shape.PILL) else null
+        val style = segmentStyles[seg] ?: return
+        val targetText = if (active) Skin.ACCENT_INK else Skin.TEXT_SOFT
+        val targetFill = if (active) Skin.ACCENT else Color.TRANSPARENT
+        val fromText = style.textColor
+        val fromFill = style.fillColor
+        if (fromText == targetText && fromFill == targetFill) return
+        Motion.animateProgress(seg) { t ->
+            val tc = MotionSpec.lerpColor(fromText, targetText, t)
+            val fc = MotionSpec.lerpColor(fromFill, targetFill, t)
+            seg.setTextColor(tc)
+            style.fill.setColor(fc)
+            style.textColor = tc
+            style.fillColor = fc
+        }
+    }
+
+    /**
+     * 分段项当前**显示中**的两态颜色。
+     *
+     * [TextView] 反查不到自己的文字色，背景 drawable 也一样 ——
+     * 渐变必须从「现在显示的色」出发，中途再切状态才接得上。
+     */
+    private class SegmentStyle(val fill: GradientDrawable) {
+        var textColor: Int = 0
+        var fillColor: Int = 0
     }
 
     /** FrameLayout 绝对定位（相对面板左上角）。 */
@@ -262,7 +316,7 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
             "costMs" to (System.currentTimeMillis() - startMs),
             "ordered" to prefs.appOrder.size,
         )
-        for (info in sorted) {
+        for ((index, info) in sorted.withIndex()) {
             val display = displayLabel(info, pm)
             val enabled = isEnabled(info)
             // 第152轮：格子 = 图标列（点按启动 / **长按弹菜单**）。
@@ -285,6 +339,9 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
                 // 反而更不平衡。居中之后每列的图标中心间距正好等于格宽 300。
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
                 isClickable = true
+                // 格子是**大目标**，按 [MotionSpec.PRESS_SCALE_ROW] 轻轻一沉 ——
+                // 整块缩 4% 会让一整排图标跟着晃。
+                Motion.press(this, MotionSpec.PRESS_SCALE_ROW)
                 setOnClickListener {
                     if (enabled) {
                         openApp(info, display)
@@ -342,6 +399,9 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
                 width = CELL_W
                 height = CELL_H
             })
+            // 网格是整块重建的 —— 逐项淡入上移，
+            // 用户看得出「这是一批新出现的图标」，而不是整页闪一下。
+            Motion.revealStagger(body, index)
         }
     }
 

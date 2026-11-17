@@ -18,6 +18,8 @@ import com.cardesk.launcher.core.Skin
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.ui.Ui
+import com.cardesk.launcher.ui.anim.Motion
+import com.cardesk.launcher.ui.anim.MotionSpec
 import com.cardesk.launcher.ui.pressFeedback
 import com.cardesk.launcher.ui.shell.NavSlotBarView
 import com.cardesk.launcher.ui.widget.OverlayBackdrop
@@ -48,6 +50,14 @@ abstract class DialogSheet(
     /** 面板本体（设计板 `.card`）。 */
     protected val sheet: FrameLayout
 
+    /**
+     * 背景板（`.bgwash` + `.scrim`）。
+     *
+     * 之前是个局部 `val`，取不出来 —— 统一进出场动画需要同时动
+     * 「面板」和「背景板」，所以提成字段。
+     */
+    protected val backdrop: OverlayBackdrop
+
     /** 面板坐标系：(0,0) = 面板左上角。 */
     protected val body: FrameLayout
 
@@ -55,13 +65,16 @@ abstract class DialogSheet(
     protected val panelWidth: Int = width
     protected val panelHeight: Int = height
 
+    /** 正在退场（连点两下「关闭」只退场一次）。 */
+    private var dismissing = false
+
     init {
         // 排障场景：对话框「没弹出来 / 弹了两次」—— 开合都留一条
         Logx.event(LogTags.SETTING, "打开对话框", "dialog" to panelTitle, "type" to this.javaClass.simpleName)
         isClickable = true
         // 第五十轮：浮层背景板 = `.bgwash` + `.scrim`（**不透明**），与设计板 s06~s12 一致 ——
         // 遮罩下面是干净的背景，不会把桌面卡片从后面透出来。
-        val backdrop = OverlayBackdrop(context).apply {
+        backdrop = OverlayBackdrop(context).apply {
             palette = pal
             withScrim = true
         }
@@ -104,11 +117,38 @@ abstract class DialogSheet(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        // 进场：面板上滑 + 淡入 + 轻微放大，背景板淡入。
+        // 之前所有对话框都是「啪」一下弹出来的 —— 没有过程，
+        // 用户会以为界面卡了一下才出现。
+        Motion.enterSheet(sheet, backdrop)
         val clearance = dockClearancePx()
         if (clearance <= 0) return
         val lp = layoutParams as? FrameLayout.LayoutParams ?: return
         lp.bottomMargin = clearance
         layoutParams = lp
+    }
+
+    /**
+     * 关闭：先播退场动画，**动画结束后**才真正把这一层摘掉。
+     *
+     * 之前宿主是直接 `content.removeView(dialog)` —— 同步摘掉，
+     * 任何退场动画都没机会播（视图已经不在树上了）。
+     *
+     * ## 谁负责播动画
+     *
+     * **宿主负责**。宿主调一次 [dismissAnimated]，弹窗自己不要再播一遍 ——
+     * 两边都播的话，第二遍会在第一遍的「复位」之后重新淡出，
+     * 看起来像是**闪了一下又消失**。
+     *
+     * @param onRemoved 退场动画结束后的收尾（宿主在这里摘层）
+     */
+    fun dismissAnimated(onRemoved: () -> Unit) {
+        // 连点两下「关闭」只退场一次。
+        if (dismissing) return
+        dismissing = true
+        // resetOnEnd = false：这一层马上就要被摘掉了，
+        // 复位会让面板先「闪回可见」再被摘掉。
+        Motion.exitSheet(sheet, backdrop, resetOnEnd = false) { onRemoved() }
     }
 
     override fun onDetachedFromWindow() {
@@ -275,21 +315,45 @@ abstract class DialogSheet(
  * 不用 `widget` 包的 ToggleSwitch（那是 76×44），这里按设计稿尺寸自绘
  * 关闭态 = surfaceStrong 轨 + 1px 描边，开关态 = accent 轨 + accent 描边，
  * 圆点 38（关闭态用 surface 色，开启态用纯白）。
+ *
+ * ## 动效
+ *
+ * 圆点从一头滑到另一头（[MotionSpec.KNOB_DURATION] = 200ms），
+ * 不是「啪」地瞬移过去 —— 瞬移的话用户会以为是两张不同的图，
+ * 滑过去才知道「这是个开关」。
  */
 internal class FlatSwitch(context: Context) : View(context) {
 
     var on: Boolean = false
         set(value) {
+            if (field == value) return
             field = value
-            invalidate()
+            animateKnob(value)
         }
 
     var accent: Int = Skin.ACCENT
+
+    /** 圆点当前的横坐标（动画中间态也用它）。 */
+    private var knobCx = OFF_CX
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
     init {
         isClickable = true
+        // 按下也要有反馈，否则「点开关」和「点普通文字」手感一样。
+        Motion.press(this, MotionSpec.PRESS_SCALE_ICON)
+    }
+
+    /**
+     * 圆点滑到新位置。
+     */
+    private fun animateKnob(target: Boolean) {
+        val from = knobCx
+        val to = if (target) ON_CX else OFF_CX
+        Motion.animateProgress(this, MotionSpec.KNOB_DURATION) { t ->
+            knobCx = from + (to - from) * t
+            invalidate()
+        }
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -313,8 +377,7 @@ internal class FlatSwitch(context: Context) : View(context) {
         paint.style = Paint.Style.FILL
         paint.color = if (on) 0xFFFFFFFF.toInt() else Skin.surface
         val knob = KNOB.toFloat()
-        val cx = if (on) 40f + knob / 2f else 4f + knob / 2f
-        canvas.drawCircle(cx, 4f + knob / 2f, knob / 2f, paint)
+        canvas.drawCircle(knobCx, 4f + knob / 2f, knob / 2f, paint)
     }
 
     companion object {
@@ -322,6 +385,12 @@ internal class FlatSwitch(context: Context) : View(context) {
         const val SWITCH_W = 84
         const val SWITCH_H = 48
         private const val KNOB = 38f
+
+        /** 关闭态圆点圆心。 */
+        private const val OFF_CX = 4f + KNOB / 2f
+
+        /** 开启态圆点圆心。 */
+        private const val ON_CX = 40f + KNOB / 2f
     }
 }
 

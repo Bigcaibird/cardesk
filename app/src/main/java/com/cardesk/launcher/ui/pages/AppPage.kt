@@ -17,6 +17,8 @@ import com.cardesk.launcher.core.Palette
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.ui.Ui
+import com.cardesk.launcher.ui.anim.Motion
+import com.cardesk.launcher.ui.anim.MotionSpec
 
 /**
  * 应用页：列出可启动的第三方/系统应用，点击直接启动。
@@ -71,12 +73,15 @@ class AppPage(context: Context, private val pal: Palette) : FrameLayout(context)
         }
         hint.text = "共 ${infos.size} 个应用"
 
-        for (info in infos) {
+        for ((index, info) in infos.withIndex()) {
             val cell = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
                 isClickable = true
                 background = Ui.round(pal.surface, 26f, 1f, pal.stroke)
+                // 单元格是**大目标**（272×190），按 [MotionSpec.PRESS_SCALE_ROW] 轻轻一沉即可 ——
+                // 用整块的缩放幅度会让一整排格子跟着晃。
+                Motion.press(this, MotionSpec.PRESS_SCALE_ROW)
                 setOnClickListener { launch(info) }
                 setOnLongClickListener {
                     // 排障场景：「应用页长按看不到包名」——包名落盘。
@@ -114,6 +119,9 @@ class AppPage(context: Context, private val pal: Palette) : FrameLayout(context)
                     setMargins(8, 8, 8, 8)
                 },
             )
+            // 网格是**整块重建**的 —— 逐项淡入上移，
+            // 用户能看出「这是一批新出现的图标」，而不是整页闪一下。
+            Motion.revealStagger(cell, index)
         }
     }
 

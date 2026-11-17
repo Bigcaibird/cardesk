@@ -18,6 +18,7 @@ import com.cardesk.launcher.core.Shape
 import com.cardesk.launcher.core.Skin
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
+import com.cardesk.launcher.ui.anim.Motion
 import com.cardesk.launcher.ui.widget.OverlayBackdrop
 
 /**
@@ -143,7 +144,13 @@ class RecentTasksPage(
         hint.visibility = if (apps.isEmpty()) View.VISIBLE else View.GONE
         hint.text = "暂无最近任务"
         clear.visibility = if (apps.isEmpty()) View.GONE else View.VISIBLE
-        for (app in apps) grid.addView(card(app))
+        for ((index, app) in apps.withIndex()) {
+            val cell = card(app)
+            grid.addView(cell)
+            // 网格是整块重建的 —— 逐项淡入上移，
+            // 用户看得出「这是一批新出现的任务」，而不是整页闪一下。
+            Motion.revealStagger(cell, index)
+        }
         Logx.i(LogTags.RECENT, "最近任务列表加载", "count" to apps.size)
     }
 

@@ -1,5 +1,6 @@
 package com.cardesk.launcher.ui.shell
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.LinearGradient
@@ -16,6 +17,8 @@ import com.cardesk.launcher.core.Skin
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.ui.WeatherGlyphs
+import com.cardesk.launcher.ui.anim.Motion
+import com.cardesk.launcher.ui.anim.MotionSpec
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -235,6 +238,18 @@ class ShellStatusBar(context: Context) : View(context) {
         LinearGradient(0f, 0f, AVATAR, AVATAR, intArrayOf(Skin.ACCENT_LIGHT, 0xFF2B4FD8.toInt()), null, Shader.TileMode.CLAMP)
     }
 
+    // —— 按压反馈 ——
+    //
+    // 状态栏是**整块自绘**的，没有一个 View 能单独缩放，
+    // 所以按压反馈只能自己画：记住按下了哪一块，动画一个缩放值，
+    // 画那一块时围绕它自己的中心缩放（和 Dock 的做法一致）。
+    //
+    // 只给**能点的两块**加：设置齿轮（avatar）与驾驶模式胶囊（assist）。
+    // 位置 / 天气胶囊目前不可点（没有命中区），不给它们加 —— 加了也没有入口。
+    private var pressedRegion: String? = null
+    private var pressScale = 1f
+    private var pressAnimator: ValueAnimator? = null
+
     init {
         isClickable = true
     }
@@ -258,49 +273,54 @@ class ShellStatusBar(context: Context) : View(context) {
         // 头像在状态行里**垂直居中**（设计板那行是 flex align-items:center）
         val avatarTop = top + (rowH - AVATAR) / 2f
         avatarRect.set(EDGE, avatarTop, EDGE + AVATAR, avatarTop + AVATAR)
-        val avatarPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Skin.ACCENT }
-        canvas.drawRoundRect(avatarRect, AVATAR_RADIUS, AVATAR_RADIUS, avatarPaint)
-        // 第123轮：原来这里画的是字母「C」（CarDesk 首字母），
-        // 用户要求「把左上角的 C 字设置入口改成一个设置图标」——
-        // 这个位置本来就是**设置入口**（点击 `onAvatar` 打开设置页），
-        // 字母 C 看不出来是干什么的，齿轮才一眼认得出。
-        //
-        // 底板（强调色方块）保留不变：它是这个入口的「按钮」外形，
-        // 点击命中区（avatarRect）也一点没变。
-        val gearPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Skin.ACCENT_INK
-            style = Paint.Style.FILL
+        // 按压反馈只作用在**这一小块**（围绕它自己的中心）——
+        // 状态栏其它内容不跟着动，才看得出「按的是齿轮」。
+        withPress(canvas, "avatar", avatarRect.centerX(), avatarRect.centerY()) {
+            val avatarPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Skin.ACCENT }
+            canvas.drawRoundRect(avatarRect, AVATAR_RADIUS, AVATAR_RADIUS, avatarPaint)
+            // 第123轮：原来这里画的是字母「C」（CarDesk 首字母），
+            // 用户要求「把左上角的 C 字设置入口改成一个设置图标」——
+            // 这个位置本来就是**设置入口**（点击 `onAvatar` 打开设置页），
+            // 字母 C 看不出来是干什么的，齿轮才一眼认得出。
+            //
+            // 底板（强调色方块）保留不变：它是这个入口的「按钮」外形，
+            // 点击命中区（avatarRect）也一点没变。
+            val gearPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Skin.ACCENT_INK
+                style = Paint.Style.FILL
+            }
+            canvas.drawPath(
+                gearPath(avatarRect.centerX(), avatarRect.centerY()),
+                gearPaint,
+            )
         }
-        canvas.drawPath(
-            gearPath(avatarRect.centerX(), avatarRect.centerY()),
-            gearPaint,
-        )
 
         // 状态胶囊（第五十一轮按设计板 对齐：文字 20px `var(--text)`、
         // 间距 18、胶囊内边距 22/12/22、指示点 12px 强调色实心圆
         val chipX = EDGE + AVATAR + CHIP_GAP
-        textPaint.let {
-            it.textSize = CHIP_TEXT_SIZE
-            it.color = Skin.TEXT
-            val w = it.measureText(assistText)
-            assistRect.set(
-                chipX, top + (rowH - CHIP_H) / 2f,
-                chipX + CHIP_PAD_L + CHIP_DOT + CHIP_PAD_M + w + CHIP_PAD_R,
-                top + (rowH - CHIP_H) / 2f + CHIP_H,
-            )
-            canvas.drawRoundRect(assistRect, CHIP_RADIUS, CHIP_RADIUS, chipPaint)
-            canvas.drawRoundRect(assistRect, CHIP_RADIUS, CHIP_RADIUS, chipStroke)
-        }
+        textPaint.textSize = CHIP_TEXT_SIZE
+        textPaint.color = Skin.TEXT
+        val chipTextW = textPaint.measureText(assistText)
+        assistRect.set(
+            chipX, top + (rowH - CHIP_H) / 2f,
+            chipX + CHIP_PAD_L + CHIP_DOT + CHIP_PAD_M + chipTextW + CHIP_PAD_R,
+            top + (rowH - CHIP_H) / 2f + CHIP_H,
+        )
         val dotCx = assistRect.left + CHIP_PAD_L + CHIP_DOT / 2f
         val dotCy = assistRect.centerY()
         // 设计板：直径 12 的强调色实心圆（「光晕 + 内芯」双圈是旧版视觉）。
-        canvas.drawCircle(dotCx, dotCy, CHIP_DOT / 2f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Skin.ACCENT })
-        canvas.drawText(
-            assistText,
-            dotCx + CHIP_DOT / 2f + CHIP_PAD_M,
-            dotCy + CHIP_TEXT_SIZE / 3f,
-            textPaint,
-        )
+        // 胶囊（底板 + 指示点 + 文案）作为一个整体缩放，按压的落点才明确。
+        withPress(canvas, "assist", assistRect.centerX(), assistRect.centerY()) {
+            canvas.drawRoundRect(assistRect, CHIP_RADIUS, CHIP_RADIUS, chipPaint)
+            canvas.drawRoundRect(assistRect, CHIP_RADIUS, CHIP_RADIUS, chipStroke)
+            canvas.drawCircle(dotCx, dotCy, CHIP_DOT / 2f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Skin.ACCENT })
+            canvas.drawText(
+                assistText,
+                dotCx + CHIP_DOT / 2f + CHIP_PAD_M,
+                dotCy + CHIP_TEXT_SIZE / 3f,
+                textPaint,
+            )
+        }
 
         // 右侧图标行（从右往左排）
         val end = width - EDGE
@@ -655,6 +675,13 @@ class ShellStatusBar(context: Context) : View(context) {
             MotionEvent.ACTION_DOWN -> {
                 // 只有命中头像/胶囊才消费事件，其余位置放行给下层页面
                 downHit = avatarRect.contains(event.x, event.y) || assistRect.contains(event.x, event.y)
+                // 按下哪一块就缩哪一块（命中判定与点击完全一致，不改行为）。
+                // 没命中就**不启动**动画 —— 这一层本来就不消费事件。
+                if (downHit) {
+                    startPress(
+                        if (avatarRect.contains(event.x, event.y)) "avatar" else "assist",
+                    )
+                }
                 return downHit
             }
             MotionEvent.ACTION_UP -> {
@@ -670,14 +697,54 @@ class ShellStatusBar(context: Context) : View(context) {
                     }
                 }
                 downHit = false
+                endPress()
                 return true
             }
             MotionEvent.ACTION_CANCEL -> {
                 downHit = false
+                endPress()
                 return false
             }
         }
         return downHit
+    }
+
+    // --------------------------------------------------------------- 按压反馈
+
+    /**
+     * 按下时把该区域缩放到 [MotionSpec.PRESS_SCALE]，抬起回 1.0。
+     *
+     * 只缩**被按的那一块**（围绕它自己的中心）——
+     * 状态栏其余内容不跟着动，才看得出按的是齿轮还是驾驶模式。
+     */
+    private fun withPress(canvas: Canvas, region: String, cx: Float, cy: Float, block: () -> Unit) {
+        val s = if (pressedRegion == region) pressScale else 1f
+        canvas.save()
+        if (s != 1f) canvas.scale(s, s, cx, cy)
+        block()
+        canvas.restore()
+    }
+
+    private fun startPress(region: String?) {
+        pressedRegion = region
+        pressAnimator?.cancel()
+        pressAnimator = ValueAnimator.ofFloat(pressScale, MotionSpec.PRESS_SCALE).apply {
+            duration = MotionSpec.PRESS_DOWN_DURATION
+            // 按下用标准减速：起步快、尾巴长 —— 手指还没抬起来就看到缩放了。
+            interpolator = Motion.STANDARD
+            addUpdateListener { pressScale = it.animatedValue as Float; invalidate() }
+        }.also { it.start() }
+    }
+
+    private fun endPress() {
+        pressedRegion = null
+        pressAnimator?.cancel()
+        pressAnimator = ValueAnimator.ofFloat(pressScale, 1f).apply {
+            duration = MotionSpec.PRESS_UP_DURATION
+            // 松手带回弹：略微冲过 1 再回来，按键才「活」。
+            interpolator = Motion.REBOUND
+            addUpdateListener { pressScale = it.animatedValue as Float; invalidate() }
+        }.also { it.start() }
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {

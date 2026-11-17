@@ -32,6 +32,7 @@ import com.cardesk.launcher.core.dock.GlobalDockService
 import com.cardesk.launcher.core.media.LyricTimeline
 import com.cardesk.launcher.core.media.MusicController
 import com.cardesk.launcher.core.media.TrackInfo
+import com.cardesk.launcher.ui.dialogs.DialogSheet
 import com.cardesk.launcher.ui.pages.NavPage
 import com.cardesk.launcher.ui.pages.ScenePage
 import com.cardesk.launcher.ui.pip.NavSplitPlacement
@@ -216,6 +217,18 @@ class LauncherView(context: Context) : FrameLayout(context) {
     private var taskList: com.cardesk.launcher.ui.dialogs.TaskListDialog? = null
     private var taskEditor: com.cardesk.launcher.ui.dialogs.TaskEditorDialog? = null
     private var overlayDialog: View? = null
+
+    /**
+     * **正在播退场动画**的浮层。
+     *
+     * 退场动画这段时间里，这一层还挂在树上（动画播完才摘），
+     * 所以这期间它有可能被**再次要求关闭** ——
+     * 用户连点两下「关闭」、或者「关闭」和返回键同时来。
+     *
+     * 同一层只能退场一次、也只能摘一次，
+     * 这里用集合把重复的摘层请求挡掉。
+     */
+    private val closingOverlays = mutableSetOf<View>()
 
     /**
      * 启动分段打点（第191轮）。
@@ -930,6 +943,9 @@ class LauncherView(context: Context) : FrameLayout(context) {
         navSlotDialog = null
         taskList = null
         taskEditor = null
+        // 退场中的浮层也被这一轮摘掉了 —— 登记一并清空，
+        // 不然这些视图就再也摘不掉第二次了。
+        closingOverlays.clear()
 
         // 页面层（满屏，含状态栏/底栏区域，activity_main 的各个 canvas）
         pageHost = FrameLayout(context)
@@ -1870,9 +1886,12 @@ class LauncherView(context: Context) : FrameLayout(context) {
             refresh()
         }
         dialog.onClose = {
-            content.removeView(dialog)
-            navSlotDialog = null
-            if (prefs.enhancedNav && prefs.navStyle == EnhancedNavBarView.MODE_SLOTS) build()
+            // 走 [removeAnimated]：它不是 [DialogSheet]（自带外壳），所以今天还是同步摘层；
+            // 等它也提供退场动画了，宿主这边不用再改。
+            removeAnimated(dialog) {
+                if (navSlotDialog === dialog) navSlotDialog = null
+                if (prefs.enhancedNav && prefs.navStyle == EnhancedNavBarView.MODE_SLOTS) build()
+            }
         }
         navSlotDialog = dialog
         content.addView(dialog, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
@@ -2470,15 +2489,58 @@ private fun showCam() {
     VehicleController.schedule360View(view, prefs.camera360DelayMs)
 }
 
+    /**
+     * 打开一个浮层弹窗（替换掉上一个）。
+     *
+     * 替换是**直接摘掉**上一个，不播退场动画 ——
+     * 「换一个弹窗」不是「关掉一个弹窗」，播退场反而像是在关用户没关的东西。
+     */
     private fun showOverlayDialog(dialog: View) {
-        overlayDialog?.let { content.removeView(it) }
+        overlayDialog?.let {
+            // 上一层可能正在退场（动画还没跑完）——
+            // 直接摘掉，并把它的退场登记销掉，免得后面的摘层请求被误判成「重复」。
+            closingOverlays.remove(it)
+            content.removeView(it)
+        }
         overlayDialog = dialog
         content.addView(dialog, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
+    /**
+     * 关闭浮层弹窗。
+     *
+     * 现在是**先播退场动画、动画结束才摘层**（见 [removeAnimated]）——
+     * 之前是同步 `removeView`，视图当场从树上消失，
+     * 任何退场动画都没机会播（用户只看到「啪」地没了）。
+     */
     private fun closeOverlayDialog(dialog: View) {
-        content.removeView(dialog)
-        if (overlayDialog === dialog) overlayDialog = null
+        removeAnimated(dialog) {
+            if (overlayDialog === dialog) overlayDialog = null
+        }
+    }
+
+    /**
+     * 摘掉一层浮层。
+     *
+     * - [DialogSheet] 的浮层：先播退场动画，**动画结束后**才摘层；
+     * - 自带外壳的浮层（不是 [DialogSheet]）：保持原来的同步摘除。
+     *
+     * 重复请求（连点两下关闭、关闭 + 返回键）会被 [closingOverlays] 挡掉，
+     * 同一层只会退场一次、摘一次。
+     */
+    private fun removeAnimated(view: View, onRemoved: () -> Unit = {}) {
+        val sheet = view as? DialogSheet
+        if (sheet == null) {
+            content.removeView(view)
+            onRemoved()
+            return
+        }
+        if (!closingOverlays.add(view)) return
+        sheet.dismissAnimated {
+            closingOverlays.remove(view)
+            content.removeView(view)
+            onRemoved()
+        }
     }
 
     // --------------------------------------------------------------- 车门未关弹窗（第136轮）
@@ -2721,10 +2783,14 @@ private fun showCam() {
      *
      * 这个选择器**不走** [showOverlayDialog]（那个函数会摘掉上一个弹窗），
      * 所以要单独记一份，返回键也优先收它。
+     *
+     * 摘层走 [removeAnimated]：退场动画播完才摘，
+     * 和其它对话框一个节奏（直接摘的话退场动画看不见）。
      */
     private fun closeQuickAppPicker(picker: View) {
-        content.removeView(picker)
-        if (quickAppPicker === picker) quickAppPicker = null
+        removeAnimated(picker) {
+            if (quickAppPicker === picker) quickAppPicker = null
+        }
     }
 
     /** 主题色选择（dialog_color_picker 等价物）。 */
@@ -2993,8 +3059,10 @@ private fun showCam() {
         val dialog = com.cardesk.launcher.ui.dialogs.TaskListDialog(context, pal, prefs)
         dialog.onEdit = { task -> showTaskEditor(task) }
         dialog.onClose = {
-            content.removeView(dialog)
-            taskList = null
+            // 走动画摘层：退场播完才真的移除
+            removeAnimated(dialog) {
+                if (taskList === dialog) taskList = null
+            }
         }
         taskList = dialog
         content.addView(dialog, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
@@ -3004,13 +3072,16 @@ private fun showCam() {
         if (taskEditor != null) return
         val dialog = com.cardesk.launcher.ui.dialogs.TaskEditorDialog(context, pal, prefs, task)
         dialog.onSaved = {
-            content.removeView(dialog)
-            taskEditor = null
-            taskList?.reload()
+            // 保存完也要退场动画：直接摘掉的话「保存」这个动作是看不见的
+            removeAnimated(dialog) {
+                if (taskEditor === dialog) taskEditor = null
+                taskList?.reload()
+            }
         }
         dialog.onClose = {
-            content.removeView(dialog)
-            taskEditor = null
+            removeAnimated(dialog) {
+                if (taskEditor === dialog) taskEditor = null
+            }
         }
         taskEditor = dialog
         content.addView(dialog, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
@@ -4002,30 +4073,27 @@ private fun showCam() {
             exitPipFullscreen()
             return true
         }
-        taskEditor?.let {
-            content.removeView(it)
-            taskEditor = null
+        // 下面这些浮层都走 [removeAnimated]：退场动画播完才摘层，
+        // 否则返回键是「啪」地消失，和点「关闭」的手感对不上。
+        taskEditor?.let { dialog ->
+            removeAnimated(dialog) { if (taskEditor === dialog) taskEditor = null }
             return true
         }
-        taskList?.let {
-            content.removeView(it)
-            taskList = null
+        taskList?.let { dialog ->
+            removeAnimated(dialog) { if (taskList === dialog) taskList = null }
             return true
         }
         // 第五十四轮：叠在配置面板上的应用选择器要先收
-        quickAppPicker?.let {
-            content.removeView(it)
-            quickAppPicker = null
+        quickAppPicker?.let { dialog ->
+            removeAnimated(dialog) { if (quickAppPicker === dialog) quickAppPicker = null }
             return true
         }
-        overlayDialog?.let {
-            content.removeView(it)
-            overlayDialog = null
+        overlayDialog?.let { dialog ->
+            removeAnimated(dialog) { if (overlayDialog === dialog) overlayDialog = null }
             return true
         }
-        navSlotDialog?.let {
-            content.removeView(it)
-            navSlotDialog = null
+        navSlotDialog?.let { dialog ->
+            removeAnimated(dialog) { if (navSlotDialog === dialog) navSlotDialog = null }
             return true
         }
         if (settings != null) {

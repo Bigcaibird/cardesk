@@ -18,6 +18,7 @@ import com.cardesk.launcher.core.Palette
 import com.cardesk.launcher.core.Shape
 import com.cardesk.launcher.core.Skin
 import com.cardesk.launcher.ui.Ui
+import com.cardesk.launcher.ui.anim.Motion
 import com.cardesk.launcher.ui.pressFeedback
 import com.cardesk.launcher.ui.widget.CarTopStatusView
 import com.cardesk.launcher.ui.widget.WrapRow
@@ -153,12 +154,22 @@ class DoorAlertDialog(
                 background = Ui.round(Skin.surfaceSoft, Shape.PILL, 1f, pal.carStateWarn)
                 setPadding(30, 14, 30, 14)
                 pressFeedback()
+                // 胶囊是**状态**（这一处还开着），不是可点的操作 ——
+                // 但它有按压反馈，就得给松手之后一个交代：
+                // 鼓一下 = 「收到了，这一处确实还开着」。
+                // 不改变任何业务状态，只是让按压有回音。
+                setOnClickListener { chipView -> Motion.bump(chipView) }
             }
             // 宽度用 wrap_content（自然宽度）：胶囊不会被压扁，放不下就换行。
             row.addView(chip, ViewGroup.MarginLayoutParams(-2, CHIP_H))
         }
 
-        detail.text = detailText(openItems)
+        // 说明文字是**读数**：开着的东西变了才变。
+        // 直接换字的话余光抓不到（「刚才说 3 处，现在说 4 处」得盯着看），
+        // 顶一下让变化被看见。
+        val nextDetail = detailText(openItems)
+        if (detail.text != nextDetail) Motion.nudge(detail)
+        detail.text = nextDetail
         relayout()
     }
 

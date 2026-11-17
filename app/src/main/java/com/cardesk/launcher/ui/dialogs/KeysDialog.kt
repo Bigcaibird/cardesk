@@ -12,6 +12,7 @@ import com.cardesk.launcher.core.Skin
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.ui.Ui
+import com.cardesk.launcher.ui.anim.Motion
 
 /**
  * 按键增强设置， +
@@ -57,6 +58,15 @@ class KeysDialog(
     ) + if (dimNaviCastSupported) listOf(Prefs.ACTION_DIM_NAVI_CAST_TOGGLE to "切换导航投屏") else emptyList()
 
     private val rows = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+
+    /**
+     * 本次重建要不要给键位卡片做**错峰入场**。
+     *
+     * 只有「启用按键增强」总开关被切换时才需要 ——
+     * [render] 每次点动作/模式胶囊都会重建整个列表，
+     * 无条件错峰的话每点一下全列卡片都重新淡入一次，屏幕上一片卡片在闪。
+     */
+    private var staggerSlots = false
 
     init {
         // 「让位」由 DialogSheet 统一处理在**遮罩容器**上
@@ -131,6 +141,9 @@ class KeysDialog(
                     "to" to on,
                 )
                 onChanged?.invoke()
+                // 总开关一开，下面会冒出一整列键位卡片 ——
+                // 让它们依次冒出来，比一整列「啪」地出现更有层次。
+                staggerSlots = true
                 render()
             }
         }
@@ -145,7 +158,7 @@ class KeysDialog(
         onAction: (Int) -> Unit,
         mode: Int,
         onMode: (Int) -> Unit,
-    ) {
+    ): View {
         val card = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             background = Ui.round(Skin.surfaceSoft, 20f, 1f, Skin.NAV_STROKE)
@@ -199,6 +212,7 @@ class KeysDialog(
             )
         }
         rows.addView(card, Ui.linear(-1, -2, 0f, 0, 16))
+        return card
     }
 
     /** 动作值 → 中文名（日志用，认不出来就回显原值）。 */
@@ -294,24 +308,32 @@ class KeysDialog(
             Ui.text(context, "语音助手 / * 键", 20f, pal.textFaint),
             Ui.linear(-1, 32, 0f, 0, 4),
         )
-        keySlot("单击", prefs.voiceClickAction, { prefs.voiceClickAction = it }, prefs.voiceClickMode) {
+        val cards = mutableListOf<View>()
+        cards += keySlot("单击", prefs.voiceClickAction, { prefs.voiceClickAction = it }, prefs.voiceClickMode) {
             prefs.voiceClickMode = it
         }
-        keySlot("双击", prefs.voiceDoubleAction, { prefs.voiceDoubleAction = it }, prefs.voiceDoubleMode) {
+        cards += keySlot("双击", prefs.voiceDoubleAction, { prefs.voiceDoubleAction = it }, prefs.voiceDoubleMode) {
             prefs.voiceDoubleMode = it
         }
-        keySlot("长按", prefs.voiceLongAction, { prefs.voiceLongAction = it }, prefs.voiceLongMode) {
+        cards += keySlot("长按", prefs.voiceLongAction, { prefs.voiceLongAction = it }, prefs.voiceLongMode) {
             prefs.voiceLongMode = it
         }
         rows.addView(
             Ui.text(context, "媒体按键（长按）", 20f, pal.textFaint),
             Ui.linear(-1, 32, 0f, 0, 4),
         )
-        keySlot("上一曲", prefs.mediaPrevLongAction, { prefs.mediaPrevLongAction = it }, prefs.mediaPrevLongMode) {
+        cards += keySlot("上一曲", prefs.mediaPrevLongAction, { prefs.mediaPrevLongAction = it }, prefs.mediaPrevLongMode) {
             prefs.mediaPrevLongMode = it
         }
-        keySlot("下一曲", prefs.mediaNextLongAction, { prefs.mediaNextLongAction = it }, prefs.mediaNextLongMode) {
+        cards += keySlot("下一曲", prefs.mediaNextLongAction, { prefs.mediaNextLongAction = it }, prefs.mediaNextLongMode) {
             prefs.mediaNextLongMode = it
+        }
+        // 错峰入场：**只有总开关切换时**才做（见 [staggerSlots]）。
+        // 其余情况（点动作/模式胶囊）会重建整个列表，
+        // 那时候再错峰就是每点一下全列卡片重新淡入一次。
+        if (staggerSlots) {
+            staggerSlots = false
+            cards.forEachIndexed { index, card -> Motion.revealStagger(card, index) }
         }
     }
 

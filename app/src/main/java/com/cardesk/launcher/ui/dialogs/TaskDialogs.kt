@@ -12,6 +12,7 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.TextView
 import com.cardesk.launcher.core.Palette
 import com.cardesk.launcher.core.Prefs
 import com.cardesk.launcher.core.ScheduledTask
@@ -22,6 +23,8 @@ import com.cardesk.launcher.core.TaskScheduler
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.ui.Ui
+import com.cardesk.launcher.ui.anim.Motion
+import com.cardesk.launcher.ui.anim.MotionSpec
 import com.cardesk.launcher.ui.pressFeedback
 
 /**
@@ -45,6 +48,13 @@ class TaskListDialog(
         orientation = LinearLayout.VERTICAL
         layoutParams = FrameLayout.LayoutParams(ROW_W, FrameLayout.LayoutParams.WRAP_CONTENT)
     }
+
+    /**
+     * 当前的任务行（重建时刷新）。
+     *
+     * 留着是为了弹窗打开时给它们**错峰入场**（见 [onAttachedToWindow]）。
+     */
+    private val rowViews = mutableListOf<View>()
 
     init {
         // 标题（设计板 s06：(40,34) 38px bold）
@@ -80,6 +90,7 @@ class TaskListDialog(
     fun reload() {
         val tasks = ScheduledTasks.load(prefs)
         listBox.removeAllViews()
+        rowViews.clear()
         // 排障场景：任务列表为空 / 数量对不上 —— 记下实际加载了几条
         Logx.i(LogTags.TASK, "任务列表加载", "count" to tasks.size)
         if (tasks.isEmpty()) {
@@ -91,8 +102,26 @@ class TaskListDialog(
             return
         }
         tasks.forEachIndexed { index, task ->
-            listBox.addView(row(index, task), Ui.linear(-1, ROW_H, 0f, 0, 16))
+            val row = row(index, task)
+            rowViews += row
+            listBox.addView(row, Ui.linear(-1, ROW_H, 0f, 0, 16))
         }
+    }
+
+    /**
+     * 弹窗挂到窗口上：任务行**错峰入场**。
+     *
+     * 列表是弹窗打开之后才看见的 —— 跟面板一起「啪」地出现太平，
+     * 逐行淡入 + 微微上移更像「一列任务铺开」。
+     *
+     * ## 为什么必须放在 attach 之后
+     *
+     * 未挂到窗口上的视图上动画不会跑，
+     * alpha 会停在 0 —— 整列任务就永远看不见了。
+     */
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        rowViews.forEachIndexed { index, view -> Motion.revealStagger(view, index) }
     }
 
     private fun row(index: Int, task: ScheduledTask): View {
@@ -102,6 +131,10 @@ class TaskListDialog(
             // 设计板 s06 任务行：surfaceSoft 底 + 1px 描边 + 圆角 20
             background = Ui.round(Skin.surfaceSoft, 20f, 1f, Skin.NAV_STROKE)
             setPadding(24, 0, 24, 0)
+            // 整行可点（点行进编辑器）—— 之前整行点下去和点普通文字没区别，
+            // 用户会以为没点到。行很大，用行专用的缩放比例：轻轻一沉就够。
+            isClickable = true
+            pressFeedback(MotionSpec.PRESS_SCALE_ROW)
         }
         // 名称 26px bold
         row.addView(
@@ -246,6 +279,18 @@ class TaskEditorDialog(
 
     private var appBox: LinearLayout? = null
 
+    /**
+     * 延时秒数的**读数**（变了要顶一下）。
+     *
+     * 每次 [render] 都会重建这一行，所以这里存的是**当前这一版**的视图 ——
+     * 改完秒数之后顶一下的，正是刚加进去的那一行。
+     *
+     * 不能做成「建一次一直复用」：视图只能有一个父节点，
+     * 旧行被 [render] 丢掉之后它的父节点还在，
+     * 再把它塞进新行会直接抛「already has a parent」。
+     */
+    private lateinit var delayLabel: TextView
+
     init {
         render()
     }
@@ -373,22 +418,23 @@ class TaskEditorDialog(
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        delayRow.addView(
-            Ui.text(context, "等 $delay 秒再打开（0=立即）", 21f, pal.textDim),
-            LinearLayout.LayoutParams(0, -2, 1f),
-        )
+        delayLabel = Ui.text(context, "等 $delay 秒再打开（0=立即）", 21f, pal.textDim)
+        delayRow.addView(delayLabel, LinearLayout.LayoutParams(0, -2, 1f))
         val minus = chip("−5s", sizePx = 20f) {
             val from = delay
             delay = (delay - 5).coerceAtLeast(0)
             // 排障场景：延迟秒数调了没生效 —— 记下调整前后
             Logx.d(LogTags.TASK, "任务延迟调整", "from" to from, "to" to delay)
             render()
+            // 秒数变了 —— 读数顶一下，让「动了」被看见
+            Motion.nudge(delayLabel)
         }
         val plus = chip("+5s", sizePx = 20f) {
             val from = delay
             delay = (delay + 5).coerceAtMost(ScheduledTasks.DELAY_MAX)
             Logx.d(LogTags.TASK, "任务延迟调整", "from" to from, "to" to delay)
             render()
+            Motion.nudge(delayLabel)
         }
         delayRow.addView(minus, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = 10 })
         delayRow.addView(plus, LinearLayout.LayoutParams(-2, -2))

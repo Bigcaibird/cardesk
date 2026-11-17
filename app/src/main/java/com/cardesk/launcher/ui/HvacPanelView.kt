@@ -11,6 +11,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.cardesk.launcher.core.Palette
 import com.cardesk.launcher.core.Skin
+import com.cardesk.launcher.ui.anim.Motion
 import com.cardesk.launcher.ui.widget.FanStepsView
 import com.cardesk.launcher.ui.widget.SeatLevelView
 import com.cardesk.launcher.ui.widget.TempDialView
@@ -29,6 +30,23 @@ import com.cardesk.launcher.vehicle.VehicleController
 class HvacPanelView(context: Context, private val pal: Palette) : FrameLayout(context) {
 
     var onDismiss: (() -> Unit)? = null
+
+    /**
+     * 面板卡片（浮层内容）。
+     *
+     * 本视图自己就是**遮罩**（背景 = [Skin.SCRIM]），卡片是它里面的子视图 ——
+     * 进场 / 退场动画分别作用在两者上（遮罩淡入淡出，卡片上滑下滑）。
+     */
+    private val card: LinearLayout
+
+    /** 遮罩（就是本视图自己）—— 供宿主需要时自行取用。 */
+    val scrim: View get() = this
+
+    /** 面板卡片 —— 供宿主需要时自行取用。 */
+    val sheet: View get() = card
+
+    /** 正在退场（防止定时器和点击同时触发两遍动画）。 */
+    private var dismissing = false
 
     private val title: TextView
     private val subtitle: TextView
@@ -66,6 +84,7 @@ class HvacPanelView(context: Context, private val pal: Palette) : FrameLayout(co
             setPadding(40, 28, 40, 24)
             isClickable = true
         }
+        this.card = card
         addView(card, Ui.frame(1640, 856, Gravity.CENTER))
 
         // ---- 标题行 ----
@@ -209,10 +228,44 @@ class HvacPanelView(context: Context, private val pal: Palette) : FrameLayout(co
         return Quad(dial, heat, vent, column)
     }
 
+    /**
+     * 关闭：先播退场动画，**动画结束**才隐藏并回调 [onDismiss]。
+     *
+     * ## 为什么要有退场动画
+     *
+     * 以前是 `visibility = GONE` —— 面板「啪」地没了。
+     * 空调面板是**大面积**浮层，突然消失会让人以为程序崩了；
+     * 退场动画给一个「收到，正在收起」的信号。
+     *
+     * ## 宿主需要做什么
+     *
+     * **什么都不用改**：动画结束后本类自己 `visibility = GONE` + 回调 [onDismiss]，
+     * 宿主照旧在 [onDismiss] 里 `removeView` 就行 ——
+     * 动画期间视图还挂在窗口上，所以退场是看得见的。
+     */
     fun dismiss() {
         handler.removeCallbacks(dismissTimer)
-        visibility = View.GONE
-        onDismiss?.invoke()
+        // 定时器 + 点击可能同时触发；退场只播一遍。
+        if (dismissing) return
+        dismissing = true
+        Motion.exitSheet(card, this) {
+            // 复位：万一宿主把这个实例再挂回去，进场动画才有干净的起点。
+            alpha = 1f
+            visibility = View.GONE
+            dismissing = false
+            onDismiss?.invoke()
+        }
+    }
+
+    /**
+     * 进场：遮罩淡入 + 卡片上滑淡入。
+     *
+     * 挂在 [onAttachedToWindow] 上，宿主 `addView` 之后自动就有 ——
+     * 这个面板以前是**啪**地出现的（没有任何进出过渡）。
+     */
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        Motion.enterSheet(card, this)
     }
 
     /** 打开时启动 8 秒无操作自动关闭；每次交互重置。 */

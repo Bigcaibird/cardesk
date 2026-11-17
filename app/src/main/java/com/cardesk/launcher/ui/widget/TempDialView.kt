@@ -1,5 +1,6 @@
 package com.cardesk.launcher.ui.widget
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -9,6 +10,8 @@ import android.view.MotionEvent
 import android.view.View
 import com.cardesk.launcher.core.Palette
 import com.cardesk.launcher.core.Palettes
+import com.cardesk.launcher.ui.anim.Motion
+import com.cardesk.launcher.ui.anim.MotionSpec
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.min
@@ -52,8 +55,12 @@ class TempDialView(context: Context) : View(context) {
         set(value) {
             // setTemp:258-261 —— 拖动中不回读覆盖，避免手势被打断
             if (dragging) return
+            if (field == value) return
             field = value
-            invalidate()
+            // 数值变了 → 圆环和数字**渐变**过去。
+            // 之前是直接改数字 + invalidate：圆环「啪」地跳一下、数字也「啪」地跳一下，
+            // 看不出是渐变过去的，像是换了一张图。
+            animateTemperature(value)
         }
 
     var caption: String = "主驾"
@@ -110,6 +117,84 @@ class TempDialView(context: Context) : View(context) {
     /** 是否正在拖动表盘。 */
     private var dragging = false
 
+    /**
+     * **画出来**的温度（动画中间态）。
+     *
+     * 真值还是 [temperature]（它是对外的唯一入口）；
+     * 这里存的是「此刻该画多少度」—— 温度变化时它从旧值渐变到新值，
+     * 圆环弧长和中间的数字都跟着它走。
+     */
+    private var displayTemp = 23.5f
+
+    /**
+     * 温度渐变的「凭证」。
+     *
+     * 温度可能来得比动画快（连续按 ±、车机回读）——
+     * 上一段动画的帧如果还在写 [displayTemp]，两段动画会互相打架（画面会抖）。
+     * 这里用一枚 token 认领「当前这一段」：后来的 token 作废旧帧。
+     */
+    private var tempToken: Any? = null
+
+    /**
+     * 温度渐变到新值。
+     *
+     * 用 [Motion.animateValue]：每帧回调中间值，画出来就行。
+     */
+    private fun animateTemperature(target: Float) {
+        val from = displayTemp
+        val token = Any()
+        tempToken = token
+        Motion.animateValue(from, target) { v ->
+            if (tempToken !== token) return@animateValue
+            displayTemp = v
+            invalidate()
+        }
+    }
+
+    /**
+     * 当前被按住的 ± 键（`"minus"` / `"plus"`）。
+     *
+     * ± 键是**画在这个视图里**的（不是子 View），
+     * 所以没法用 [Motion.press] —— 只能在画的时候自己缩放。
+     * 做法和 Dock 的自绘按键一样：记下按的是哪个键，
+     * 画的时候以**键自己的圆心**为中心缩放。
+     */
+    private var pressedButton: String? = null
+
+    /** 按下缩放的当前值（动画中间态）。 */
+    private var pressScale = 1f
+
+    /** 按下 / 松手的缩放动画。 */
+    private var pressAnimator: ValueAnimator? = null
+
+    /** 按住某个 ± 键：缩小一点。 */
+    private fun startPress(key: String) {
+        pressedButton = key
+        pressAnimator?.cancel()
+        pressAnimator = ValueAnimator.ofFloat(pressScale, MotionSpec.PRESS_SCALE).apply {
+            duration = MotionSpec.PRESS_DOWN_DURATION
+            interpolator = Motion.STANDARD
+            addUpdateListener {
+                pressScale = it.animatedValue as Float
+                invalidate()
+            }
+        }.also { it.start() }
+    }
+
+    /** 松手：弹回原大。 */
+    private fun endPress() {
+        pressedButton = null
+        pressAnimator?.cancel()
+        pressAnimator = ValueAnimator.ofFloat(pressScale, 1f).apply {
+            duration = MotionSpec.PRESS_UP_DURATION
+            interpolator = Motion.REBOUND
+            addUpdateListener {
+                pressScale = it.animatedValue as Float
+                invalidate()
+            }
+        }.also { it.start() }
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val w = width.toFloat()
@@ -131,7 +216,7 @@ class TempDialView(context: Context) : View(context) {
         //
         // 78.3% 对应的温度是 **23.5 / 30**（16℃ 起、30℃ 满格），
         // 所以比例口径是 `temperature / 30`，不是 `(t − 16) / 16`。
-        val frac = (temperature / ARC_TEMP_SPAN).coerceIn(0f, 1f)
+        val frac = (displayTemp / ARC_TEMP_SPAN).coerceIn(0f, 1f)
         if (frac > 0.005f) {
             arc.color = palette.accent
             canvas.drawArc(arcRect, RING_START_ANGLE, 360f * frac, false, arc)
@@ -140,7 +225,7 @@ class TempDialView(context: Context) : View(context) {
         // —— 温度数值（设计板：满色 text，不随关机变暗）——
         textPaint.color = palette.text
         textPaint.textSize = TEMP_TEXT_SIZE
-        canvas.drawText(format(temperature), cx, cy + TEMP_TEXT_SIZE * 0.34f, textPaint)
+        canvas.drawText(format(displayTemp), cx, cy + TEMP_TEXT_SIZE * 0.34f, textPaint)
 
         // —— caption（环上方）——
         textPaint.color = if (dimmed) palette.textFaint else palette.textDim
@@ -151,22 +236,35 @@ class TempDialView(context: Context) : View(context) {
         buttonCy = BUTTON_TOP + BUTTON_SIZE / 2f
         minusCx = cx - (BUTTON_SIZE + BUTTON_GAP) / 2f
         plusCx = cx + (BUTTON_SIZE + BUTTON_GAP) / 2f
+        drawButton(canvas, "minus", minusCx, buttonCy, "−")
+        drawButton(canvas, "plus", plusCx, buttonCy, "+")
+    }
+
+    /**
+     * 画一个 ± 键。
+     *
+     * 按住的那个键以**自己的圆心**为中心缩小（和 Dock 自绘按键一个做法）——
+     * 缩放围绕圆心才不会看着「往边上歪」。
+     */
+    private fun drawButton(canvas: Canvas, key: String, cx: Float, cy: Float, glyph: String) {
+        val s = if (pressedButton == key) pressScale else 1f
+        canvas.save()
+        if (s != 1f) canvas.scale(s, s, cx, cy)
+
         buttonPaint.style = Paint.Style.FILL
         buttonPaint.color = palette.surfaceSoft
         val rr = BUTTON_RADIUS
-        canvas.drawRoundRect(minusCx - BUTTON_SIZE / 2f, BUTTON_TOP, minusCx + BUTTON_SIZE / 2f, BUTTON_TOP + BUTTON_SIZE, rr, rr, buttonPaint)
-        canvas.drawRoundRect(plusCx - BUTTON_SIZE / 2f, BUTTON_TOP, plusCx + BUTTON_SIZE / 2f, BUTTON_TOP + BUTTON_SIZE, rr, rr, buttonPaint)
+        canvas.drawRoundRect(cx - BUTTON_SIZE / 2f, BUTTON_TOP, cx + BUTTON_SIZE / 2f, BUTTON_TOP + BUTTON_SIZE, rr, rr, buttonPaint)
         buttonPaint.style = Paint.Style.STROKE
         buttonPaint.strokeWidth = 1f
         buttonPaint.color = palette.stroke
-        canvas.drawRoundRect(minusCx - BUTTON_SIZE / 2f, BUTTON_TOP, minusCx + BUTTON_SIZE / 2f, BUTTON_TOP + BUTTON_SIZE, rr, rr, buttonPaint)
-        canvas.drawRoundRect(plusCx - BUTTON_SIZE / 2f, BUTTON_TOP, plusCx + BUTTON_SIZE / 2f, BUTTON_TOP + BUTTON_SIZE, rr, rr, buttonPaint)
+        canvas.drawRoundRect(cx - BUTTON_SIZE / 2f, BUTTON_TOP, cx + BUTTON_SIZE / 2f, BUTTON_TOP + BUTTON_SIZE, rr, rr, buttonPaint)
         buttonPaint.style = Paint.Style.FILL
 
         buttonText.color = palette.text
         buttonText.textSize = BUTTON_TEXT_SIZE
-        canvas.drawText("−", minusCx, buttonCy + BUTTON_TEXT_SIZE * 0.36f, buttonText)
-        canvas.drawText("+", plusCx, buttonCy + BUTTON_TEXT_SIZE * 0.36f, buttonText)
+        canvas.drawText(glyph, cx, cy + BUTTON_TEXT_SIZE * 0.36f, buttonText)
+        canvas.restore()
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -177,7 +275,11 @@ class TempDialView(context: Context) : View(context) {
                 val y = event.y
                 // onTouchEvent:203-217 —— 落在 ± 键上立刻步进，否则进入拖动
                 if (onButton(x, y)) {
-                    onDelta?.invoke(if (x < width / 2f) -STEP else STEP)
+                    val minus = x < width / 2f
+                    // 按下反馈 + 步进同时发生：手指还没抬起来就已经看到键缩了一下，
+                    // 这才像「按到了」。
+                    startPress(if (minus) "minus" else "plus")
+                    onDelta?.invoke(if (minus) -STEP else STEP)
                     return true
                 }
                 dragging = true
@@ -190,6 +292,7 @@ class TempDialView(context: Context) : View(context) {
                 return true
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (pressedButton != null) endPress()
                 if (dragging) {
                     onTemp?.invoke(temperature)
                     dragging = false

@@ -8,6 +8,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.provider.Settings
 import android.view.Gravity
@@ -23,6 +24,7 @@ import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import java.io.File
+import java.util.WeakHashMap
 import com.cardesk.launcher.core.AdbDebug
 import com.cardesk.launcher.core.AdbDiagnostics
 import com.cardesk.launcher.core.AdbOutcome
@@ -43,6 +45,8 @@ import com.cardesk.launcher.core.log.LogLevel
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.core.update.AppUpdate
+import com.cardesk.launcher.ui.anim.Motion
+import com.cardesk.launcher.ui.anim.MotionSpec
 import com.cardesk.launcher.ui.widget.CardStylePreviewView
 import com.cardesk.launcher.ui.widget.OverlayBackdrop
 import com.cardesk.launcher.ui.widget.QrCodeView
@@ -290,6 +294,49 @@ class SettingsOverlay(
     /** 左栏条目（key → 视图），用于选中态刷新。 */
     private val navRows = LinkedHashMap<String, TextView>()
 
+    /**
+     * 左栏条目**当前显示**的颜色（颜色渐变的起点）。
+     *
+     * ## 为什么记「显示出来的颜色」而不是「选中 / 未选中」
+     *
+     * 颜色要**渐变**过去，动画就必须从屏幕上真实的颜色出发。
+     * 记状态的话，动画起点永远是两个固定值 ——
+     * 中途被打断（连续点两页）就会跳回起点，看着像「闪了一下」。
+     *
+     * @param text 字色
+     * @param fill 底色
+     * @param stroke 描边色
+     */
+    private class NavRowPaint(var text: Int, var fill: Int, var stroke: Int)
+
+    /** 左栏条目当前显示的颜色（key = 导航 key）。 */
+    private val navRowPaints = LinkedHashMap<String, NavRowPaint>()
+
+    /**
+     * 分段项当前显示的颜色（颜色渐变的起点）。
+     *
+     * 理由同 [NavRowPaint]：记「显示出来的颜色」，动画才接得上。
+     *
+     * @param text 字色
+     * @param fill 底色（选中 = 强调色实底，未选中 = 透明）
+     */
+    private class SegmentPaint(var text: Int, var fill: Int)
+
+    /** 分段项当前显示的颜色。 */
+    private val segmentPaints = WeakHashMap<TextView, SegmentPaint>()
+
+    /**
+     * 卡片选项的单选圆点（key = 卡片标题）。
+     *
+     * 选中之后这一页会**整页重建**（[select]），
+     * 重建之前播的动画会被连着视图一起摘掉 —— 根本看不见。
+     * 所以圆点先登记在这里，重建完再补那一下「鼓一下」。
+     */
+    private val cardRadios = LinkedHashMap<String, TextView>()
+
+    /** 待「鼓一下」的卡片圆点（卡片标题）。 */
+    private var pendingRadioBump: String? = null
+
     // ---------------------------------------------------------- ADB 调试页（第五十五轮）
 
     /** ADB 页最近一次操作的结论（切走再切回来还在）。 */
@@ -413,6 +460,9 @@ class SettingsOverlay(
         val activate = Ui.text(context, "开源与声明", 16f, pal.accent, bold = true).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(12, 0, 0, 0)
+            // 按压反馈：这个入口在左栏最底部、字号最小，
+            // 不给反馈的话手指落下去完全不知道点没点中。
+            Motion.press(this)
             setOnClickListener { select("about") }
         }
         bottomRow.addView(activate, LinearLayout.LayoutParams(-2, -1))
@@ -431,6 +481,9 @@ class SettingsOverlay(
         val close = Ui.text(context, "关闭", 24f, pal.textDim).apply {
             gravity = Gravity.CENTER
             background = Ui.round(Skin.CHIP_FILL, com.cardesk.launcher.core.Shape.PILL, 1f, Skin.CHIP_STROKE)
+            // 按压反馈：关闭是这一页唯一的「退出」动作，
+            // 按下去要有回应 —— 否则用户会以为车机没反应。
+            Motion.press(this)
             setOnClickListener { onClose?.invoke() }
         }
         right.addView(close, FrameLayout.LayoutParams(150, 66, Gravity.TOP or Gravity.END).also {
@@ -497,10 +550,17 @@ class SettingsOverlay(
                 val row = Ui.text(context, item.label, 20f, pal.textDim).apply {
                     gravity = Gravity.CENTER_VERTICAL
                     setPadding(12, 0, 12, 0)
+                    // 背景**始终存在**（未选中时是透明底 + 透明描边，画出来等于没有）：
+                    // 选中态要渐变过去，就需要一个能改颜色的 drawable 可改。
+                    background = Ui.round(TRANSPARENT, 10f, 1f, TRANSPARENT)
+                    // 按压反馈：整行可点，用「行」的缩放幅度（整行缩 4% 太晃）。
+                    Motion.press(this, MotionSpec.PRESS_SCALE_ROW)
                     setOnClickListener { select(item.key) }
                 }
                 navList.addView(row, abs(TREE_ITEM_X, y - TREE_TOP, TREE_ITEM_W, TREE_ITEM_H))
                 navRows[item.key] = row
+                // 初始一律按「未选中」记账 —— 下面的 select() 会把它渐变到真正的选中态。
+                navRowPaints[item.key] = NavRowPaint(pal.textDim, TRANSPARENT, TRANSPARENT)
                 y += TREE_ITEM_STEP
             }
             y += TREE_GROUP_END
@@ -529,13 +589,7 @@ class SettingsOverlay(
     private fun select(key: String) {
         selectedKey = key
         for ((k, row) in navRows) {
-            val active = k == key
-            row.setTextColor(if (active) pal.accent else pal.textDim)
-            row.background = if (active) {
-                Ui.round(pal.accentSoft, 10f, 1f, pal.accent)
-            } else {
-                null
-            }
+            paintNavRow(k, row, k == key)
         }
         // 「启动后」只属于「启动切换」页
         bootCaption.visibility = if (key == "boot") View.VISIBLE else View.GONE
@@ -557,6 +611,9 @@ class SettingsOverlay(
         pageTeardown?.invoke()
         pageTeardown = null
         body.removeAllViews()
+        // 卡片圆点跟着这一页一起换（新页会重新登记）——
+        // 不清的话会拿着上一页的旧视图去「鼓」。
+        cardRadios.clear()
         bodyScroll.scrollTo(0, 0)
         // 离开 ADB 页就把结果回调摘掉：后台操作回来时不该再去刷新已经不存在的视图
         if (key != "adb") adbOnResult = null
@@ -594,6 +651,71 @@ class SettingsOverlay(
             "logs" -> pageLogs()
             "ambient" -> pageAmbient()
             "about" -> pageAbout()
+        }
+        // 这一页建好了：补上刚才那次「圆点鼓一下」。
+        //
+        // 必须在**重建之后**才补 —— 重建之前播的动画会跟着旧视图一起被摘掉，
+        // 用户根本看不见（这是整页重建带来的坑，见 [pendingRadioBump]）。
+        pendingRadioBump?.let { title ->
+            pendingRadioBump = null
+            cardRadios[title]?.let { Motion.bump(it) }
+        }
+    }
+
+    /**
+     * 左栏条目的选中态：**颜色渐变**到目标值。
+     *
+     * ## 为什么改成渐变
+     *
+     * 之前是硬切（字色、软底、描边一瞬间换掉）。
+     * 左栏在车机屏最左边，驾驶员只是**瞥一眼** ——
+     * 硬切很容易漏看「现在在哪一页」，尤其切页时眼睛还在正文上。
+     * 现在三个颜色都从**当前显示的颜色**渐变过去，
+     * 选中位置的变化才真的被看见。
+     *
+     * @param active 这一条是不是当前页
+     */
+    private fun paintNavRow(key: String, row: TextView, active: Boolean) {
+        val targetText = if (active) pal.accent else pal.textDim
+        val targetFill = if (active) pal.accentSoft else TRANSPARENT
+        val targetStroke = if (active) pal.accent else TRANSPARENT
+        val bg = row.background as? GradientDrawable
+        if (bg == null) {
+            // 兜底：背景不是我们建的那个 drawable（正常不会发生），退回硬切。
+            row.setTextColor(targetText)
+            row.background = if (active) {
+                Ui.round(pal.accentSoft, 10f, 1f, pal.accent)
+            } else {
+                null
+            }
+            return
+        }
+        val state = navRowPaints[key]
+            ?: NavRowPaint(targetText, targetFill, targetStroke).also { navRowPaints[key] = it }
+        val fromText = state.text
+        val fromFill = state.fill
+        val fromStroke = state.stroke
+        if (fromText == targetText && fromFill == targetFill && fromStroke == targetStroke) {
+            // 已经是这个状态了：直接落位。
+            // 每次改完设置都会 select(selectedKey) 重建页面，
+            // 不做这一步的话每次重建都要空跑一遍动画。
+            row.setTextColor(targetText)
+            bg.setColor(targetFill)
+            bg.setStroke(1, targetStroke)
+            return
+        }
+        Motion.animateProgress(row, MotionSpec.STATE_BUMP_DURATION) { t ->
+            // 每帧把「当前显示的颜色」写回状态里 ——
+            // 中途被下一次选中打断时，动画要从**真正显示着的颜色**接着走。
+            val text = MotionSpec.lerpColor(fromText, targetText, t)
+            val fill = MotionSpec.lerpColor(fromFill, targetFill, t)
+            val stroke = MotionSpec.lerpColor(fromStroke, targetStroke, t)
+            state.text = text
+            state.fill = fill
+            state.stroke = stroke
+            row.setTextColor(text)
+            bg.setColor(fill)
+            bg.setStroke(1, stroke)
         }
     }
 
@@ -703,14 +825,16 @@ class SettingsOverlay(
     }
 
     private fun switchRow(label: String, initial: Boolean, subtitle: String? = null, onChange: (Boolean) -> Unit) {
-        val toggle = BoardSwitch(context).apply {
-            tint = pal.accent
-            checked = initial
-            setOnClickListener {
-                toggle()
-                onChange(checked)
-                onApply?.invoke()
-            }
+        val toggle = BoardSwitch(context)
+        toggle.tint = pal.accent
+        toggle.checked = initial
+        toggle.setOnClickListener {
+            toggle.toggle()
+            // 状态变了要**看得见**：开关自己的圆点会滑过去，
+            // 这里再补一下形变确认 —— 余光里也能察觉「这一下真的生效了」。
+            Motion.bump(toggle)
+            onChange(toggle.checked)
+            onApply?.invoke()
         }
         row(toggle, label, subtitle)
     }
@@ -810,13 +934,22 @@ class SettingsOverlay(
         val views = ArrayList<TextView>()
         options.forEachIndexed { index, text ->
             val padX = if (compact) 16 else 22
-            val item = Ui.text(context, text, 20f, pal.textDim).apply {
+            val item = Ui.text(context, text, 20f, pal.textDim)
+            item.apply {
                 gravity = Gravity.CENTER
                 setPadding(padX, 9, padX, 9)
-                setOnClickListener {
-                    views.forEachIndexed { i, v -> paintSegment(v, i == index) }
-                    onPick(index)
-                }
+                // 背景**始终存在**（未选中时是透明底，画出来等于没有）：
+                // 选中态要渐变过去，就需要一个能改颜色的 drawable 可改。
+                background = Ui.round(TRANSPARENT, com.cardesk.launcher.core.Shape.PILL)
+                // 按压反馈：分段项是「互斥选择」，按下去必须知道点中的是哪一格。
+                Motion.press(this)
+            }
+            item.setOnClickListener {
+                views.forEachIndexed { i, v -> paintSegment(v, i == index) }
+                // 刚被选中的那一项「鼓一下」——
+                // 颜色渐变之外再给一次形变，选中就一定看得见。
+                Motion.bump(item)
+                onPick(index)
             }
             views.add(item)
             seg.addView(
@@ -824,7 +957,8 @@ class SettingsOverlay(
                 LinearLayout.LayoutParams(-2, -2).also { if (index > 0) it.leftMargin = if (compact) 4 else 6 },
             )
         }
-        views.forEachIndexed { i, v -> paintSegment(v, i == selectedIndex) }
+        // 初始态**直接落位**（不播动画）：这一页刚建出来，没有「旧颜色」可从。
+        views.forEachIndexed { i, v -> paintSegment(v, i == selectedIndex, animate = false) }
         return seg
     }
 
@@ -832,14 +966,52 @@ class SettingsOverlay(
      * 分段项两态（设计板 `.seg span`）：
      * - 选中：**强调色实底 + 强调色上的字 + 加粗**；
      * - 未选中：透明底 + 次级文字。
+     *
+     * ## 为什么改成渐变
+     *
+     * 分段控件是**互斥选择**：一次只亮一个，点完必须立刻知道「现在选的是谁」。
+     * 之前是硬切（字色、底色一瞬间换掉）—— 驾驶员只是瞥一眼，很容易漏看。
+     * 现在字色和底色都从**当前显示的颜色**渐变过去，
+     * 加上被选中项的「鼓一下」，选择就一定看得见。
+     *
+     * @param animate false = 直接落位（首次绘制用，没有旧颜色可从）
      */
-    private fun paintSegment(seg: TextView, active: Boolean) {
-        seg.setTextColor(if (active) pal.accentInk else pal.textDim)
+    private fun paintSegment(seg: TextView, active: Boolean, animate: Boolean = true) {
+        val targetText = if (active) pal.accentInk else pal.textDim
+        val targetFill = if (active) pal.accent else TRANSPARENT
+        // 字重是**排版属性**，没法插值 —— 选中立刻加粗。
         seg.typeface = Typeface.create(Typeface.DEFAULT, if (active) Typeface.BOLD else Typeface.NORMAL)
-        seg.background = if (active) {
-            Ui.round(pal.accent, com.cardesk.launcher.core.Shape.PILL)
-        } else {
-            null
+        val state = segmentPaints[seg] ?: SegmentPaint(targetText, targetFill).also { segmentPaints[seg] = it }
+        val bg = seg.background as? GradientDrawable
+        if (bg == null) {
+            // 兜底：背景不是我们建的那个 drawable（正常不会发生），退回硬切。
+            state.text = targetText
+            state.fill = targetFill
+            seg.setTextColor(targetText)
+            seg.background = if (active) {
+                Ui.round(pal.accent, com.cardesk.launcher.core.Shape.PILL)
+            } else {
+                null
+            }
+            return
+        }
+        val fromText = state.text
+        val fromFill = state.fill
+        if (!animate || (fromText == targetText && fromFill == targetFill)) {
+            state.text = targetText
+            state.fill = targetFill
+            seg.setTextColor(targetText)
+            bg.setColor(targetFill)
+            return
+        }
+        Motion.animateProgress(seg, MotionSpec.STATE_BUMP_DURATION) { t ->
+            // 每帧写回「当前显示的颜色」—— 被打断时才能从真正的画面接着走。
+            val text = MotionSpec.lerpColor(fromText, targetText, t)
+            val fill = MotionSpec.lerpColor(fromFill, targetFill, t)
+            state.text = text
+            state.fill = fill
+            seg.setTextColor(text)
+            bg.setColor(fill)
         }
     }
 
@@ -849,6 +1021,8 @@ class SettingsOverlay(
             gravity = Gravity.CENTER
             setPadding(28, 16, 28, 16)
             background = Ui.round(Skin.GLASS_FILL, com.cardesk.launcher.core.Shape.PILL, 1f, Skin.CHIP_STROKE)
+            // 按压反馈：值胶囊是这一行**唯一**能点的地方，按下去要有回应。
+            Motion.press(this)
             setOnClickListener { onClick() }
         }
         row(value, label)
@@ -954,6 +1128,8 @@ class SettingsOverlay(
                 // 第151轮：打标记，测试才能从视图树里把「展开后的选项」挑出来。
                 tag = DROPDOWN_OPTION_MARK
                 isClickable = true
+                // 按压反馈：选项是展开列表里唯一能点的东西。
+                Motion.press(this, MotionSpec.PRESS_SCALE_ROW)
             }
             optionViews.add(item)
             panel.addView(item, LinearLayout.LayoutParams(-1, 56))
@@ -966,7 +1142,16 @@ class SettingsOverlay(
         fun toggle() {
             expanded = !expanded
             panel.visibility = if (expanded) View.VISIBLE else View.GONE
-            chevron.rotation = if (expanded) 180f else 0f
+            // 箭头转 180° —— **带着过程转**，不是一瞬间翻过去。
+            //
+            // 箭头是「这一列能不能展开」的唯一提示：
+            // 一瞬间翻面的话，余光里只看到两个形状的切换，
+            // 转过去才知道「它会动」。
+            chevron.animate()
+                .rotation(if (expanded) 180f else 0f)
+                .setDuration(MotionSpec.KNOB_DURATION)
+                .setInterpolator(Motion.STANDARD)
+                .start()
             if (expanded) {
                 // 展开后把选项带进可视区 ——
                 // 这一行可能在正文底部，展开的列表整个落在屏幕外的话，
@@ -981,7 +1166,11 @@ class SettingsOverlay(
         }
 
         holder.isClickable = true
+        // 按压反馈：这一行（标题 / 值）都能点，整行用「行」的缩放幅度。
+        Motion.press(holder, MotionSpec.PRESS_SCALE_ROW)
         holder.setOnClickListener { toggle() }
+        // 值盒自己也是可点的入口 —— 它比整行小，用标准幅度更清楚。
+        Motion.press(valueBox)
         valueBox.setOnClickListener { toggle() }
 
         optionViews.forEachIndexed { index, item ->
@@ -1087,6 +1276,20 @@ class SettingsOverlay(
         val readout = Ui.text(context, format?.invoke(value) ?: "$value$unit", 22f, pal.text).apply {
             gravity = Gravity.CENTER_VERTICAL or Gravity.END
         }
+        /**
+         * 读数「顶一下」。
+         *
+         * 拖动时数值是**连续**跳的 —— 每一跳都顶一下的话读数会一直抖，
+         * 看着像坏了。所以上一次没顶完就不再顶：
+         * 顶一次，歇一个 [MotionSpec.VALUE_DURATION]。
+         */
+        var nudging = false
+        fun nudgeReadout() {
+            if (nudging) return
+            nudging = true
+            Motion.nudge(readout)
+            readout.postDelayed({ nudging = false }, MotionSpec.VALUE_DURATION)
+        }
         holder.addView(caption, FrameLayout.LayoutParams(260, -1).also { it.leftMargin = 18 })
         val bar = SeekBar(context).apply {
             this.max = ((max - min) / step).coerceAtLeast(0)
@@ -1096,7 +1299,13 @@ class SettingsOverlay(
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                     val v = progress * step + min
-                    readout.text = format?.invoke(v) ?: "$v$unit"
+                    val text = format?.invoke(v) ?: "$v$unit"
+                    if (readout.text.toString() != text) {
+                        readout.text = text
+                        // 数值跳了要「顶一下」——
+                        // 光换字在余光里抓不住，位移一下才知道「这里变了」。
+                        nudgeReadout()
+                    }
                     if (fromUser) {
                         onChange(v)
                         onApply?.invoke()
@@ -1169,6 +1378,8 @@ class SettingsOverlay(
                 if (primary || danger) 0f else 1f,
                 Skin.CHIP_STROKE,
             )
+            // 按压反馈：按钮是这一页里最常点的东西，必须有。
+            Motion.press(this)
             setOnClickListener { onClick() }
         }
         body.addView(tv, LinearLayout.LayoutParams(-2, 64).also {
@@ -1211,6 +1422,8 @@ class SettingsOverlay(
                 if (primary) 0f else 1f,
                 Skin.CHIP_STROKE,
             )
+            // 按压反馈：跟 [actionButton] 同一套手感。
+            Motion.press(this)
             setOnClickListener { onClick() }
         }
         parent.addView(tv, LinearLayout.LayoutParams(-2, 64))
@@ -1431,6 +1644,8 @@ class SettingsOverlay(
             Ui.text(context, "+ 添加", 18f, pal.accent).apply {
                 gravity = Gravity.CENTER
                 setPadding(16, 10, 16, 10)
+                // 按压反馈：这是个纯文字的小入口，最需要提示「点到了」。
+                Motion.press(this, MotionSpec.PRESS_SCALE_ICON)
                 setOnClickListener {
                     // 排障场景：计划任务面板没打开 —— 记下这次点击
                     Logx.event(LogTags.TASK, "从设置页打开计划任务面板")
@@ -1452,6 +1667,9 @@ class SettingsOverlay(
                     gravity = Gravity.CENTER
                     setPadding(16, 10, 16, 10)
                     background = Ui.round(Skin.CHIP_FILL, 12f)
+                    // 按压反馈：「删除」是破坏性操作，
+                    // 按下去必须先有回应，别让用户以为没点着。
+                    Motion.press(this, MotionSpec.PRESS_SCALE_ICON)
                     setOnClickListener {
                         val list = ScheduledTasks.load(prefs)
                         list.removeAll { it.id == task.id }
@@ -1561,6 +1779,13 @@ class SettingsOverlay(
 
     /**
      * 一张「卡片选项」：标题 + 副标题，选中时高亮。
+     *
+     * ## 动效
+     *
+     * - 整张卡片按下有反馈（整行可点，用「行」的缩放幅度）；
+     * - 选中的那一项，单选圆点会「鼓一下」——
+     *   但这一页随后会**整页重建**（见 [pendingRadioBump]），
+     *   所以圆点要先登记、重建完再补那一下。
      */
     private fun cardChoice(title: String, subtitle: String, selected: Boolean, onPick: () -> Unit) {
         val holder = LinearLayout(context).apply {
@@ -1573,7 +1798,13 @@ class SettingsOverlay(
                 if (selected) pal.accent else Skin.CHIP_STROKE,
             )
             setPadding(24, 14, 24, 14)
+            // 按压反馈：整张卡片就是一个按钮。
+            Motion.press(this, MotionSpec.PRESS_SCALE_ROW)
             setOnClickListener {
+                // 选中变化要「看得见」：圆点鼓一下。
+                // 但下面 onPick 改完偏好就会 select() 整页重建 ——
+                // 重建前的动画会被连着旧视图一起摘掉，所以先记下来。
+                pendingRadioBump = title
                 onPick()
                 onApply?.invoke()
                 select(selectedKey)
@@ -1592,12 +1823,12 @@ class SettingsOverlay(
             LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 4 },
         )
         holder.addView(textBox, LinearLayout.LayoutParams(0, -2, 1f))
-        holder.addView(
-            Ui.text(context, if (selected) "●" else "○", 22f, if (selected) pal.accent else pal.textFaint).apply {
-                gravity = Gravity.CENTER
-            },
-            LinearLayout.LayoutParams(48, -2),
-        )
+        val radio = Ui.text(context, if (selected) "●" else "○", 22f, if (selected) pal.accent else pal.textFaint).apply {
+            gravity = Gravity.CENTER
+        }
+        // 登记圆点：重建之后才知道该给哪一个「鼓一下」。
+        cardRadios[title] = radio
+        holder.addView(radio, LinearLayout.LayoutParams(48, -2))
         body.addView(holder, LinearLayout.LayoutParams(-1, 80).also { it.bottomMargin = 8; it.topMargin = 6 })
     }
 
@@ -1607,6 +1838,8 @@ class SettingsOverlay(
             gravity = Gravity.CENTER
             setPadding(24, 12, 24, 12)
             background = Ui.round(Skin.GLASS_FILL, 20f, 1f, Skin.CHIP_STROKE)
+            // 按压反馈：值胶囊是这一行唯一能点的地方。
+            Motion.press(this)
             setOnClickListener { showTimePicker(label, minutes, onChange) }
         }
         row(value, label)
@@ -1620,7 +1853,6 @@ class SettingsOverlay(
             // 第五十一轮：遮罩跟随主题，不再写死 60% 黑。
             setBackgroundColor(Skin.SCRIM)
             isClickable = true
-            setOnClickListener { (overlay.parent as? ViewGroup)?.removeView(overlay) }
         }
         overlay.addView(scrim, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         val sheet = LinearLayout(context).apply {
@@ -1629,6 +1861,18 @@ class SettingsOverlay(
             setPadding(28, 24, 28, 28)
         }
         overlay.addView(sheet, LayoutParams(520, -2, Gravity.CENTER))
+
+        /**
+         * 关掉时间选择器：**先播退场动画，播完再摘层**。
+         *
+         * 直接 `removeView` 的话退场动画根本没机会播 ——
+         * 视图已经不在树上了，画面是「啪」一下消失。
+         */
+        fun dismissPicker() {
+            Motion.exitSheet(sheet, scrim) { (overlay.parent as? ViewGroup)?.removeView(overlay) }
+        }
+
+        scrim.setOnClickListener { dismissPicker() }
         sheet.addView(Ui.text(context, title, 26f, pal.text, bold = true), LinearLayout.LayoutParams(-1, 44))
         // 第150轮：去掉了原来那句「24 小时制 · 点按箭头调整」的说明文字 ——
         // 滚轮本身的样式已经说明了一切。腾出来的间距补在滚轮上面，别让标题和滚轮贴死。
@@ -1663,10 +1907,12 @@ class SettingsOverlay(
             Ui.text(context, "取消", 20f, pal.textDim).apply {
                 gravity = Gravity.CENTER
                 background = Ui.round(Skin.CHIP_FILL, 22f, 1f, Skin.CHIP_STROKE)
+                // 按压反馈：两个按钮是这一层里唯一能点的东西。
+                Motion.press(this)
                 setOnClickListener {
                     // 排障场景：时间选择器被取消 —— 记下没改
                     Logx.event(LogTags.SETTING, "取消时间选择器", "title" to title)
-                    (overlay.parent as? ViewGroup)?.removeView(overlay)
+                    dismissPicker()
                 }
             },
             LinearLayout.LayoutParams(0, 60, 1f).also { it.rightMargin = 12 },
@@ -1675,6 +1921,8 @@ class SettingsOverlay(
             Ui.text(context, "确认", 20f, pal.accentInk, bold = true).apply {
                 gravity = Gravity.CENTER
                 background = Ui.round(pal.accent, 22f)
+                // 按压反馈：同「取消」。
+                Motion.press(this)
                 setOnClickListener {
                     val picked = DayNight.minuteOfDay(hourPicker.value, minutePicker.value)
                     val from = minutes
@@ -1694,7 +1942,7 @@ class SettingsOverlay(
                         "to" to picked,
                         "text" to DayNight.formatMinute(picked),
                     )
-                    (overlay.parent as? ViewGroup)?.removeView(overlay)
+                    dismissPicker()
                     onApply?.invoke()
                     select(selectedKey)
                 }
@@ -1810,7 +2058,11 @@ class SettingsOverlay(
                 val index = r * 3 + c
                 val spec = com.cardesk.launcher.core.Wallpapers.spec(index)
                 val cell = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-                val thumb = WallpaperThumbView(context, spec, pal.night, pal.accent)
+                val thumb = WallpaperThumbView(context, spec, pal.night, pal.accent).apply {
+                    // 按压反馈：缩略图是这一页唯一能点的入口，
+                    // 按下去要缩一下才看得出点的是哪一张。
+                    Motion.press(this, MotionSpec.PRESS_SCALE_ICON)
+                }
                 val label = Ui.text(context, spec.name, 20f, pal.textDim).apply {
                     gravity = Gravity.CENTER
                 }
@@ -2749,6 +3001,8 @@ class SettingsOverlay(
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 isClickable = true
+                // 按压反馈：整行可选，用「行」的缩放幅度。
+                Motion.press(this, MotionSpec.PRESS_SCALE_ROW)
             }
             line.addView(
                 Ui.text(
@@ -3642,14 +3896,36 @@ class SettingsOverlay(
             else -> "$bytes B"
         }
 
-        fun dismissDialog() {
-            openDialog?.let { removeView(it) }
+        /**
+         * 关掉下载弹窗。
+         *
+         * ## 为什么要分「带动画」和「立刻摘」
+         *
+         * 弹窗继承 [com.cardesk.launcher.ui.dialogs.DialogSheet]，
+         * 退场（下滑 + 淡出）由它自己播 —— 播完再把这一层摘掉，
+         * 否则视图已经不在树上了，动画根本看不见。
+         *
+         * 但**换页**和**打开另一个弹窗**时不能等：
+         * 旧的还挂在树上，新的又要加进来，两层会叠在一起。
+         * 那两种情况立刻摘。
+         *
+         * @param animate true = 播退场动画后再摘层
+         */
+        fun dismissDialog(animate: Boolean = true) {
+            val dialog = openDialog ?: return
             openDialog = null
+            val sheet = dialog as? com.cardesk.launcher.ui.dialogs.DialogSheet
+            if (animate && sheet != null) {
+                sheet.dismissAnimated { removeView(dialog) }
+            } else {
+                removeView(dialog)
+            }
         }
 
         /** 打开下载进度弹窗（弹窗自己负责下载、安装和结果提示）。 */
         fun openDownload(entry: ApkEntry) {
-            dismissDialog()
+            // 换弹窗：旧的立刻摘（不能跟新的叠在一起）。
+            dismissDialog(animate = false)
             val dialog = com.cardesk.launcher.ui.dialogs.CloudDownloadDialog(
                 context, pal, entry,
                 onInstalled = {
@@ -3736,7 +4012,8 @@ class SettingsOverlay(
 
         pageTeardown = {
             alive = false
-            dismissDialog()
+            // 离开这一页：弹窗立刻摘（它不属于正文，再留 240ms 只会挡住新页面）。
+            dismissDialog(animate = false)
         }
         refresh()
     }
@@ -4459,6 +4736,15 @@ class SettingsOverlay(
         /** 左栏底部 VIN 行高（设计 px）。 */
         const val VIN_ROW_H = 28
 
+        /**
+         * 「没有底色」的透明色。
+         *
+         * 未选中的分段项 / 导航条目**看起来**是「没有背景」，
+         * 但颜色要渐变就得有一个能改颜色的 drawable 可改 ——
+         * 所以背景**始终存在**，未选中时画成透明（等于没有）。
+         */
+        private const val TRANSPARENT = 0x00000000
+
         /** 右栏一行内容高（设计 px）—— 行底分割线在 +92，下一行行顶 +130。 */
         const val ROW_H = 92
 
@@ -4495,6 +4781,14 @@ class SettingsOverlay(
  *
  * 共享的 `ToggleSwitch` 是 76×44，这里按设计板单独画一个
  * 交互不变（点一下切换）。
+ *
+ * ## 动效
+ *
+ * 圆点从一头滑到另一头（[MotionSpec.KNOB_DURATION] = 200ms），
+ * 不是「啪」地瞬移过去 —— 瞬移的话用户会以为是两张不同的图，
+ * 滑过去才知道「这是个开关」。
+ * 按下时也有反馈（[MotionSpec.PRESS_SCALE_ICON]），
+ * 否则「点开关」和「点普通文字」手感一样。
  */
 private class BoardSwitch(context: Context) : View(context) {
 
@@ -4504,12 +4798,34 @@ private class BoardSwitch(context: Context) : View(context) {
     /** 是否开启。 */
     var checked: Boolean = false
         set(value) {
+            if (field == value) return
             field = value
-            invalidate()
+            // 还没挂到窗口上时是**初始状态**，不是「切换」——
+            // 那时候播动画就成了「打开设置页时开关自己滑了一下」。
+            if (isAttachedToWindow) {
+                animateKnob(value)
+            } else {
+                knobCx = if (value) ON_CX else OFF_CX
+                invalidate()
+            }
         }
+
+    /**
+     * 圆点当前的横坐标（动画中间态也用它）。
+     *
+     * 之前是在 [onDraw] 里按 [checked] 现算的 ——
+     * 那样圆点只能瞬移，看不出它滑过去。记成字段才能画动画中间态。
+     */
+    private var knobCx = OFF_CX
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rect = RectF()
+
+    init {
+        isClickable = true
+        // 按下也要有反馈，否则「点开关」和「点普通文字」手感一样。
+        Motion.press(this, MotionSpec.PRESS_SCALE_ICON)
+    }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         setMeasuredDimension(SW, SH)
@@ -4518,6 +4834,21 @@ private class BoardSwitch(context: Context) : View(context) {
     /** 切换开关。 */
     fun toggle() {
         checked = !checked
+    }
+
+    /**
+     * 圆点滑到新位置。
+     *
+     * 和对话框里的 [com.cardesk.launcher.ui.dialogs.FlatSwitch] 同一套做法：
+     * [Motion.animateProgress] 每帧给一个 0→1 的进度，圆点位置在两端之间插值。
+     */
+    private fun animateKnob(target: Boolean) {
+        val from = knobCx
+        val to = if (target) ON_CX else OFF_CX
+        Motion.animateProgress(this, MotionSpec.KNOB_DURATION) { t ->
+            knobCx = from + (to - from) * t
+            invalidate()
+        }
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -4537,8 +4868,7 @@ private class BoardSwitch(context: Context) : View(context) {
         // —— 圆点（关：left 4；开：left 40）——
         paint.style = Paint.Style.FILL
         paint.color = if (checked) 0xFFFFFFFF.toInt() else Skin.surface
-        val cx = if (checked) 40f + KNOB / 2f else 4f + KNOB / 2f
-        canvas.drawCircle(cx, h / 2f, KNOB / 2f, paint)
+        canvas.drawCircle(knobCx, h / 2f, KNOB / 2f, paint)
     }
 
     companion object {
@@ -4550,6 +4880,12 @@ private class BoardSwitch(context: Context) : View(context) {
 
         /** 圆点直径（设计 px）。 */
         const val KNOB = 38f
+
+        /** 关闭态圆点圆心（设计 px）。 */
+        private const val OFF_CX = 4f + KNOB / 2f
+
+        /** 开启态圆点圆心（设计 px）。 */
+        private const val ON_CX = 40f + KNOB / 2f
     }
 }
 

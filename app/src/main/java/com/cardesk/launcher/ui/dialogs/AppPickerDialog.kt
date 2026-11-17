@@ -21,6 +21,7 @@ import com.cardesk.launcher.core.Skin
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.ui.Ui
+import com.cardesk.launcher.ui.anim.Motion
 import com.cardesk.launcher.ui.pressFeedback
 
 /**
@@ -176,6 +177,10 @@ class AppPickerDialog(
                 Ui.text(context, "取消", 20f, pal.textDim).apply {
                     gravity = Gravity.CENTER
                     isClickable = true
+                    // 「取消」是纯文字按钮，没有胶囊底板 ——
+                    // 不给它按压反馈的话，它和「随便一行说明文字」按下去完全一样，
+                    // 用户会怀疑自己没点到。
+                    pressFeedback()
                     setOnClickListener { onClose?.invoke() }
                 },
                 LinearLayout.LayoutParams(-2, -2),
@@ -210,6 +215,18 @@ class AppPickerDialog(
         }
     }
 
+    /**
+     * 重建网格。
+     *
+     * ## 为什么这里**不做**错峰入场
+     *
+     * 搜索框每敲一个字都会重建整个网格 ——
+     * 如果给单元格加错峰入场，每敲一个字所有格子就重新淡入一次，
+     * 屏幕上一片格子在闪，比不做还难看。
+     *
+     * 单元格自己的按压反馈（[pressFeedback]）不受影响：
+     * 它跟着这一次「按下去」走，不是跟着重建走。
+     */
     private fun render() {
         grid.removeAllViews()
         val visible = if (query.isBlank()) {
@@ -231,11 +248,22 @@ class AppPickerDialog(
         }
         if (multiSelect) {
             // lambda$openDesignDockAppPicker$25：全选时按钮写「清空」，否则写「全选」
-            toggleAll.text = if (selected.size >= allApps.size) "清空" else "全选"
-            counter.text = "已选择 ${selected.size}/${allApps.size}"
+            val label = if (selected.size >= allApps.size) "清空" else "全选"
+            // 「全选 ↔ 清空」是按钮语义变了，文字直接换掉的话用户会以为点错了 ——
+            // 顶一下告诉眼睛「这里换了个说法」。
+            if (toggleAll.text != label) Motion.nudge(toggleAll)
+            toggleAll.text = label
+            // 计数是**数值读数**：勾了几个直接跳数字的话，
+            // 余光根本抓不到「变了」。顶一下让变化被看见。
+            val count = "已选择 ${selected.size}/${allApps.size}"
+            if (counter.text != count) Motion.nudge(counter)
+            counter.text = count
         } else {
             toggleAll.visibility = View.GONE
-            counter.text = "已选择 ${selected.size}/${allApps.size}"
+            // 单选模式：计数同样顶一下（选中的应用换了，数字也就变了）
+            val count = "已选择 ${selected.size}/${allApps.size}"
+            if (counter.text != count) Motion.nudge(counter)
+            counter.text = count
         }
     }
 

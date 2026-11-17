@@ -1,6 +1,7 @@
 package com.cardesk.launcher.ui
 
 import android.content.Context
+import android.graphics.drawable.GradientDrawable
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
@@ -127,6 +128,8 @@ class ClimatePage(context: Context, private val pal: Palette) : FrameLayout(cont
         val closeBtn = Ui.text(context, "关闭", 24f, Skin.TEXT_SOFT).apply {
             gravity = Gravity.CENTER
             background = Ui.round(Skin.CHIP_FILL, Shape.PILL, 1f, Skin.CHIP_STROKE)
+            isClickable = true
+            pressFeedback()
             setOnClickListener { onClose?.invoke() }
         }
         card.addView(closeBtn, abs(PANEL_W - CLOSE_RIGHT - CLOSE_W, CLOSE_Y, CLOSE_W, CLOSE_H))
@@ -345,24 +348,21 @@ class ClimatePage(context: Context, private val pal: Palette) : FrameLayout(cont
         fanBars.auto = s.fanAuto
         powerStateText.text = if (s.power) "运行中" else "已关机"
 
-        chips["power"]?.bind("电源", s.power)
-        chips["ac"]?.bind("A/C", s.ac)
-        chips["auto"]?.bind("AUTO", s.auto)
-        chips["sync"]?.bind("温度同步", s.tempSynced)
+        chips["power"]?.let { applyChip(it, "电源", s.power) }
+        chips["ac"]?.let { applyChip(it, "A/C", s.ac) }
+        chips["auto"]?.let { applyChip(it, "AUTO", s.auto) }
+        chips["sync"]?.let { applyChip(it, "温度同步", s.tempSynced) }
         // —— 只有内循环才高亮
-        chips["circ"]?.bind(if (s.circulation == 0) "内循环" else "外循环", s.circulation == 0)
+        chips["circ"]?.let { applyChip(it, if (s.circulation == 0) "内循环" else "外循环", s.circulation == 0) }
         chips["defF"]?.let { bindChip(it, "前除霜", s.defrostFront) }
         chips["defR"]?.let { bindChip(it, "后除霜", s.defrostRear) }
 
         // —— 吹风按 face=1 / leg=2 / window=4 三位掩码显示
         val blowing = HvacCodec.blowingMask(s.blowing)
         for (mask in 1..7) {
-            chips["mode$mask"]?.bind(
-                MODE_LABELS[mask] ?: "",
-                blowing == mask,
-            )
+            chips["mode$mask"]?.let { applyChip(it, MODE_LABELS[mask] ?: "", blowing == mask) }
         }
-        chips["maxFan"]?.bind("MAX", s.fanLevel >= HvacIds.FAN_MAX)
+        chips["maxFan"]?.let { applyChip(it, "MAX", s.fanLevel >= HvacIds.FAN_MAX) }
 
         cabin.palette = pal
         cabin.setFlow(blowing and 1 != 0, blowing and 2 != 0, blowing and 4 != 0)
@@ -379,17 +379,40 @@ class ClimatePage(context: Context, private val pal: Palette) : FrameLayout(cont
      * chip 重新绑定 + 套用设计板 `.chip` 样式。
      *
      * [ChipButton] 自带的圆角是 22（给 156×68 的组合按钮用），chip 要的是胶囊 999，
-     * 所以绑定之后按设计板重刷一次外观（软底 + 1px 描边 / 强调色软底 + 强调色描边）。
+     * 所以这里把**它自己的那个 drawable** 改成胶囊圆角 ——
+     * 而不是另换一个 background。
+     * 换了 background 的话，[ChipButton.setActive] 内部的颜色渐变
+     * 改的就不是真正显示的那个 drawable，动画等于白做。
+     *
+     * 颜色数值与原来**完全一致**（`Skin.ACCENT` = `pal.accent`、
+     * `Skin.ACCENT_SOFT` = `pal.accentSoft`、`Skin.NAV_STROKE` = `pal.stroke`），
+     * 变的只是从硬切改成渐变。
      */
     private fun bindChip(chip: ChipButton, text: String, active: Boolean) {
-        chip.bind(text, active)
-        chip.setTextColor(if (active) Skin.ACCENT else Skin.TEXT_SOFT)
-        chip.background = Ui.round(
-            if (active) Skin.ACCENT_SOFT else Skin.surfaceSoft,
-            Shape.PILL,
-            1f,
-            if (active) Skin.ACCENT else Skin.NAV_STROKE,
-        )
+        (chip.background as? GradientDrawable)?.cornerRadius = Shape.PILL
+        applyChip(chip, text, active)
+    }
+
+    /**
+     * chip 状态刷新：**颜色渐变**过去 + 状态确认。
+     *
+     * ## 为什么用 [ChipButton.setActive] 而不是 `bind()`
+     *
+     * `bind()` 是「首次绑定」的语义 —— 它把颜色**硬切**到目标值；
+     * `setActive()` 只在状态**真的变了**的时候把颜色渐变过去，
+     * 并附带一次「鼓一下」，正好符合「状态切换要给二次确认」的动效口径。
+     *
+     * ## 文案变了为什么要用**旧状态**去 bind
+     *
+     * `bind()` 会顺手把颜色刷成它那个 `active` 参数对应的颜色。
+     * 如果这里直接 `bind(text, active)`，刚要渐变过去的颜色会被**硬切**回终点，
+     * 动画就废了；所以先用**旧状态**绑（颜色不变、只是文案变了），
+     * 再交给 `setActive()` 去渐变。
+     */
+    private fun applyChip(chip: ChipButton?, text: String, active: Boolean) {
+        if (chip == null) return
+        if (chip.text?.toString() != text) chip.bind(text, chip.active)
+        chip.setActive(active)
     }
 
     companion object {

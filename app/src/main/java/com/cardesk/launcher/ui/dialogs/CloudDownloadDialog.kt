@@ -14,6 +14,7 @@ import com.cardesk.launcher.core.apkstore.ApkStore
 import com.cardesk.launcher.core.net.TransferFormat
 import com.cardesk.launcher.core.update.AppUpdate
 import com.cardesk.launcher.ui.Ui
+import com.cardesk.launcher.ui.anim.Motion
 import java.io.File
 
 /**
@@ -60,6 +61,9 @@ class CloudDownloadDialog(
     private var retryBtn: TextView? = null
     private var busy = false
 
+    /** 正在退场（防止连点两下「关闭」播两次动画、回调两次宿主）。 */
+    private var closing = false
+
     /** 是否还在下载/安装（测试用）。 */
     val isRunning: Boolean get() = busy
 
@@ -86,9 +90,40 @@ class CloudDownloadDialog(
         content.addView(section("结果"), Ui.linear(-1, 30))
         content.addView(resultText, Ui.linear(-1, 64, 0f, 0, 4))
         content.addView(footer, Ui.linear(-1, 66, 0f, 0, 10))
-        footer.addView(chip("关闭", padH = 26, padV = 14) { onClose?.invoke() }, Ui.linear(-2, 66))
+        footer.addView(chip("关闭", padH = 26, padV = 14) { requestClose() }, Ui.linear(-2, 66))
 
         main.post { startDownload() }
+    }
+
+    /**
+     * 关闭：交给宿主去播退场动画。
+     *
+     * ## 为什么弹窗自己不播
+     *
+     * 退场动画由**宿主**统一负责（[DialogSheet.dismissAnimated]）——
+     * 宿主会在动画结束后才摘层。
+     *
+     * 两边都播的话：弹窗先自己淡出一次（结束时会把面板复位成可见），
+     * 宿主再淡出一次 —— 中间会**闪一下又消失**。
+     * 所以这里只负责「请求关闭」，动画交给宿主。
+     */
+    private fun requestClose() {
+        // 连点两下「关闭」只关闭一次
+        if (closing) return
+        closing = true
+        onClose?.invoke()
+    }
+
+    /**
+     * 写百分比读数。
+     *
+     * 百分比是**数值读数**：数字直接跳过去的话，余光根本抓不到「又下了一点」——
+     * 顶一下（[Motion.nudge]）让变化被看见，下载进行中的感觉才出来。
+     */
+    private fun setPercent(text: String) {
+        if (percentText.text == text) return
+        Motion.nudge(percentText)
+        percentText.text = text
     }
 
     /** 重新开始一轮下载（首次打开也会走这里）。 */
@@ -97,7 +132,7 @@ class CloudDownloadDialog(
         busy = true
         retryBtn?.let { footer.removeView(it) }
         retryBtn = null
-        percentText.text = "0%"
+        setPercent("0%")
         bar.progress = 0
         speedText.text = "速度：—"
         bytesText.text = ""
@@ -119,7 +154,7 @@ class CloudDownloadDialog(
                 return@Thread
             }
             main.post {
-                percentText.text = "100%"
+                setPercent("100%")
                 bar.progress = 100
                 statusText.text = "下载完成，正在安装…"
                 bytesText.text = if (entry.size > 0) {
@@ -137,7 +172,7 @@ class CloudDownloadDialog(
 
     private fun onPercent(p: Int) {
         if (!busy) return
-        percentText.text = TransferFormat.percent(p)
+        setPercent(TransferFormat.percent(p))
         bar.progress = p.coerceIn(0, 100)
     }
 
@@ -167,7 +202,7 @@ class CloudDownloadDialog(
             AppUpdate.InstallResult.Silent -> {
                 statusText.text = "安装完成"
                 resultText.text = "已提交静默安装，装完重启车机生效。"
-                percentText.text = "100%"
+                setPercent("100%")
                 bar.progress = 100
                 onInstalled?.invoke()
                 Toast.makeText(context, "${entry.name}：已提交静默安装", Toast.LENGTH_LONG).show()
@@ -175,7 +210,7 @@ class CloudDownloadDialog(
             is AppUpdate.InstallResult.Installer -> {
                 statusText.text = "已转交系统安装器"
                 resultText.text = "安装包：${result.location}\n在弹出的安装界面确认即可。"
-                percentText.text = "100%"
+                setPercent("100%")
                 bar.progress = 100
                 onInstalled?.invoke()
                 Toast.makeText(context, "${entry.name}：请在系统安装界面确认", Toast.LENGTH_LONG).show()

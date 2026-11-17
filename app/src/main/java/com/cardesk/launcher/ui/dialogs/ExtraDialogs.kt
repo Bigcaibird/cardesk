@@ -2,6 +2,7 @@ package com.cardesk.launcher.ui.dialogs
 
 import android.content.Context
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.text.Editable
 import android.text.TextWatcher
 import android.util.TypedValue
@@ -24,7 +25,10 @@ import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.core.update.AppUpdate
 import com.cardesk.launcher.core.update.R2Release
 import com.cardesk.launcher.ui.Ui
+import com.cardesk.launcher.ui.anim.Motion
+import com.cardesk.launcher.ui.anim.MotionSpec
 import com.cardesk.launcher.ui.pressFeedback
+import kotlin.math.roundToInt
 
 /**
  * 主题色选择：预设色块 + 色相滑杆 + 预览。
@@ -68,6 +72,21 @@ class ColorPickerDialog(
     private val swatch = View(context)
     private val hueLabel = Ui.text(context, "", 19f, pal.textDim)
 
+    /** 预览色块当前显示的颜色（动画中间态也是这个值）。 */
+    private var swatchColor = initial
+
+    /** 8 个预设色（设计板 s09 的低饱和一档）。 */
+    private val presets = listOf(
+        0xFF2FBFAF.toInt(), 0xFF4E7FB8.toInt(), 0xFFC9913F.toInt(), 0xFFC9585F.toInt(),
+        0xFF8075B8.toInt(), 0xFF5A9968.toInt(), 0xFF9A6FA8.toInt(), 0xFF6E7885.toInt(),
+    )
+
+    /** 预设色块（视图）—— 用来做选中态动画。 */
+    private val presetDots = mutableListOf<View>()
+
+    /** 每个色块当前的描边宽度（描边渐变动画的起点）。 */
+    private val presetStrokeWidth = FloatArray(presets.size)
+
     init {
         // 标题（设计板 s09：(40,34) 38px bold）
         addTitle(title, 38f, 40, 34)
@@ -92,7 +111,7 @@ class ColorPickerDialog(
                     "from" to String.format("#%06X", from and 0xFFFFFF),
                     "to" to String.format("#%06X", Skin.ACCENT and 0xFFFFFF),
                 )
-                refresh()
+                refreshWithNudge()
             },
             LinearLayout.LayoutParams(-2, -2).apply { rightMargin = 12 },
         )
@@ -142,7 +161,12 @@ class ColorPickerDialog(
                 }
 
                 override fun onStartTrackingTouch(bar: SeekBar?) = Unit
-                override fun onStopTrackingTouch(bar: SeekBar?) = Unit
+
+                override fun onStopTrackingTouch(bar: SeekBar?) {
+                    // 拖动过程中色相一直在变，每变一次就顶一下的话标签会一直抖；
+                    // 拖完（松手）再顶一下，告诉用户「停在这了」。
+                    Motion.nudge(hueLabel)
+                }
             })
         }
         hueRow.addView(seek, LinearLayout.LayoutParams(520, 44))
@@ -153,14 +177,14 @@ class ColorPickerDialog(
         // 8 个预设色块：150×150 圆角 28，left = 60 + c*190、top = 150 + r*190，选中项 4px accent 描边
         // 第五十一轮：色值改成设计板 的 8 个预设（低饱和一档），
         // 之前用的是自拟的高饱和版，与设计板逐格对不上。
-        val presets = listOf(
-            0xFF2FBFAF.toInt(), 0xFF4E7FB8.toInt(), 0xFFC9913F.toInt(), 0xFFC9585F.toInt(),
-            0xFF8075B8.toInt(), 0xFF5A9968.toInt(), 0xFF9A6FA8.toInt(), 0xFF6E7885.toInt(),
-        )
         presets.forEachIndexed { index, color ->
+            val selected = isPresetSelected(index)
             val dot = View(context).apply {
-                background = Ui.round(color, 28f, if (index == 0) 4f else 0f, if (index == 0) pal.accent else 0)
-                setOnClickListener {
+                background = Ui.round(color, PRESET_RADIUS, if (selected) PRESET_STROKE_PX else 0f, if (selected) pal.accent else 0)
+                presetStrokeWidth[index] = if (selected) PRESET_STROKE_PX else 0f
+                // 色块是能点的（点了就换主题色）—— 按压反馈不能少
+                pressFeedback()
+                setOnClickListener { dotView ->
                     val from = picked
                     picked = color
                     // 排障场景：主题色选了没变 —— 记下选中的色值
@@ -170,9 +194,14 @@ class ColorPickerDialog(
                         "from" to String.format("#%06X", from and 0xFFFFFF),
                         "to" to String.format("#%06X", color and 0xFFFFFF),
                     )
-                    refresh()
+                    // 选中的那一颗「鼓一下」：点下去之后要有一个明确的回音，
+                    // 用户才知道「这一颗被我选中了」。
+                    Motion.bump(dotView)
+                    refreshPresetBorders()
+                    refreshWithNudge()
                 }
             }
+            presetDots += dot
             val row = index / 4
             val col = index % 4
             place(dot, 60 + col * 190, 150 + row * 190, PRESET_SIZE, PRESET_SIZE)
@@ -208,12 +237,99 @@ class ColorPickerDialog(
     }
 
     private fun refresh(skipHex: Boolean = false) {
-        swatch.background = Ui.round(picked, 12f, 1f, Skin.NAV_STROKE)
+        // 预览色块的颜色**渐变**过去 —— 直接换色是瞬间的，
+        // 用户只会觉得「闪了一下」，看不出是「换了一个颜色」。
+        animateSwatch(picked)
         hueLabel.text = "色相 ${hue.toInt()}° · 饱和度 ${(sat * 100).toInt()}%"
     }
+
+    /**
+     * 刷新预览，并让读数顶一下。
+     *
+     * 「读数变了」是要被看见的 —— 数字直接换掉的话，
+     * 余光根本抓不到「色相从 218 变成 240 了」。
+     */
+    private fun refreshWithNudge() {
+        refresh()
+        Motion.nudge(hueLabel)
+    }
+
+    /**
+     * 预览色块渐变到目标颜色。
+     *
+     * 用 [Motion.animateProgress] + [MotionSpec.lerpColor]：
+     * 每一帧把当前显示色插值到目标色，**就地改** drawable 的颜色
+     * （换整个 drawable 会连圆角一起换掉，色块会「变形」一下）。
+     */
+    private fun animateSwatch(target: Int) {
+        val from = swatchColor
+        if (from == target) {
+            // 颜色没变：把底色补上（第一次刷新时还没有 drawable）
+            applySwatchColor(from)
+            return
+        }
+        Motion.animateProgress(swatch, MotionSpec.STATE_BUMP_DURATION) { t ->
+            swatchColor = MotionSpec.lerpColor(from, target, t)
+            applySwatchColor(swatchColor)
+        }
+    }
+
+    /** 把预览色块涂成指定颜色。 */
+    private fun applySwatchColor(color: Int) {
+        val drawable = swatch.background as? GradientDrawable
+        if (drawable == null) {
+            swatch.background = Ui.round(color, SWATCH_RADIUS, 1f, Skin.NAV_STROKE)
+            return
+        }
+        drawable.setColor(color)
+    }
+
+    /**
+     * 预设色块的选中描边。
+     *
+     * **选中规则是既有逻辑**（永远是第一个色块），
+     * 这里**不改**它 —— 改了就是改行为。
+     * 这里只负责把「描边变了」这件事**做成动画**：
+     * 颜色瞬变在余光里抓不住，渐变过去才看得出「选中态换了」。
+     */
+    private fun refreshPresetBorders() {
+        presetDots.forEachIndexed { index, dot ->
+            val selected = isPresetSelected(index)
+            val target = if (selected) PRESET_STROKE_PX else 0f
+            val from = presetStrokeWidth[index]
+            if (from == target) return@forEachIndexed
+            val fromColor = if (from > 0f) pal.accent else 0
+            val toColor = if (selected) pal.accent else 0
+            Motion.animateProgress(
+                dot,
+                MotionSpec.STATE_BUMP_DURATION,
+                onEnd = {
+                    val drawable = dot.background as? GradientDrawable
+                    drawable?.setStroke(target.toInt(), if (selected) pal.accent else 0)
+                    presetStrokeWidth[index] = target
+                },
+            ) { t ->
+                val width = (from + (target - from) * t).roundToInt()
+                val drawable = dot.background as? GradientDrawable
+                drawable?.setStroke(width, MotionSpec.lerpColor(fromColor, toColor, t))
+            }
+        }
+    }
+
+    /** 预设色块的选中规则（既有逻辑：第一个色块带强调色描边）。 */
+    private fun isPresetSelected(index: Int): Boolean = index == 0
 }
 
 private const val PRESET_SIZE = 150
+
+/** 预设色块圆角（设计 px）。 */
+private const val PRESET_RADIUS = 28f
+
+/** 预设色块选中时的描边宽度（设计 px）。 */
+private const val PRESET_STROKE_PX = 4f
+
+/** 预览色块圆角（设计 px）。 */
+private const val SWATCH_RADIUS = 12f
 
 /**
  * 颜色 → HSV。
@@ -302,9 +418,21 @@ class UpdateDialog(
     private fun line(text: String): TextView =
         Ui.text(context, text, 19f, pal.textFaint).apply { setLineSpacing(6f, 1f) }
 
+    /**
+     * 写状态行：换文案 + 顶一下。
+     *
+     * 状态行是这个面板上唯一的**读数**（「检查中 / 下载中 / 已完成」）。
+     * 文字直接换掉的话，用户只会觉得「界面闪了一下」；
+     * 顶一下才读得出「状态变了」。
+     */
+    private fun setStatus(text: String) {
+        if (status.text != text) Motion.nudge(status)
+        status.text = text
+    }
+
     /** 手动触发检查。 */
     private fun check() {
-        status.text = "状态：检查中…"
+        setStatus("状态：检查中…")
         detail.text = ""
         bar.progress = 0
         bar.visibility = View.GONE
@@ -321,13 +449,13 @@ class UpdateDialog(
     private fun onChecked(result: AppUpdate.CheckResult) {
         when (result) {
             is AppUpdate.CheckResult.UpToDate -> {
-                status.text = "状态：已是最新版本（${result.current}）"
+                setStatus("状态：已是最新版本（${result.current}）")
                 detail.text = "线上最新：${result.latestVersion}\n${AppUpdate.MANIFEST_URL}"
             }
             is AppUpdate.CheckResult.Available -> {
                 val r = result.release
                 val asset = r.apk
-                status.text = "状态：发现新版本 ${r.version}"
+                setStatus("状态：发现新版本 ${r.version}")
                 val notes = r.notes.trim().take(600)
                 detail.text = buildString {
                     append(r.name.ifBlank { r.tag.ifBlank { r.version } })
@@ -343,14 +471,14 @@ class UpdateDialog(
                 footer.addView(btn, Ui.linear(-2, 62, 0f, 12))
             }
             is AppUpdate.CheckResult.Failed -> {
-                status.text = "状态：检查失败"
+                setStatus("状态：检查失败")
                 detail.text = "${result.reason}\n\n检查更新需要车机能访问 ${AppUpdate.R2_HOST}。"
             }
         }
     }
 
     private fun download(release: R2Release) {
-        status.text = "状态：下载中…"
+        setStatus("状态：下载中…")
         bar.visibility = View.VISIBLE
         bar.progress = 0
         downloadBtn?.let { footer.removeView(it) }
@@ -361,12 +489,12 @@ class UpdateDialog(
             }
             if (file == null) {
                 handler.post {
-                    status.text = "状态：下载失败"
+                    setStatus("状态：下载失败")
                     detail.text = "没下下来，请检查车机网络后重试。"
                 }
                 return@Thread
             }
-            handler.post { status.text = "状态：下载完成，正在安装…" }
+            handler.post { setStatus("状态：下载完成，正在安装…") }
             val result = AppUpdate.install(context, file)
             handler.post { onInstalled(result) }
         }.start()
@@ -375,15 +503,15 @@ class UpdateDialog(
     private fun onInstalled(result: AppUpdate.InstallResult) {
         when (result) {
             AppUpdate.InstallResult.Silent -> {
-                status.text = "状态：已提交静默安装"
+                setStatus("状态：已提交静默安装")
                 detail.text = "装完重启车机生效。"
             }
             is AppUpdate.InstallResult.Installer -> {
-                status.text = "状态：已转交系统安装器"
+                setStatus("状态：已转交系统安装器")
                 detail.text = "安装包：${result.location}\n在弹出的安装界面确认即可。"
             }
             is AppUpdate.InstallResult.Fail -> {
-                status.text = "状态：安装未完成"
+                setStatus("状态：安装未完成")
                 detail.text = result.reason
             }
         }

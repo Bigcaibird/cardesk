@@ -16,7 +16,7 @@ import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.ui.ChipButton
 import com.cardesk.launcher.ui.Ui
-import com.cardesk.launcher.ui.pressFeedback
+import com.cardesk.launcher.ui.anim.Motion
 import com.cardesk.launcher.vehicle.HvacIds
 import com.cardesk.launcher.vehicle.HvacState
 import com.cardesk.launcher.vehicle.VehicleController
@@ -208,7 +208,6 @@ class HomePage(context: Context, private val pal: Palette) : FrameLayout(context
                 Logx.event(LogTags.SCENE, "首页打开空调面板点击")
                 onOpenHvac?.invoke()
             }
-            pressFeedback()
         }
         hvac.addView(openHvac, Ui.linear(-1, 72))
         cardsRow.addView(hvac, Ui.linear(562, 748))
@@ -230,7 +229,6 @@ class HomePage(context: Context, private val pal: Palette) : FrameLayout(context
                 Logx.event(LogTags.SCENE, "首页打开 360 点击")
                 onOpen360?.invoke()
             }
-            pressFeedback()
         }
         avm.addView(open360, Ui.linear(-1, 72))
         cardsRow.addView(avm, Ui.linear(562, 748))
@@ -256,7 +254,7 @@ class HomePage(context: Context, private val pal: Palette) : FrameLayout(context
         subtitle.text = "欢迎回来 · $source"
 
         gearChip.bind("${info.gear} 挡", info.gear == "P")
-        rangeValue.text = if (info.rangeKm >= 0) info.rangeKm.toString() else "--"
+        setValue(rangeValue, if (info.rangeKm >= 0) info.rangeKm.toString() else "--")
         ambientValue.text = fmtTemp(info.ambientTemp)
         speedValue.text = "${info.speedKmh} km/h"
         odometerValue.text = if (info.odometerKm >= 0) "${info.odometerKm} km" else "--"
@@ -286,10 +284,10 @@ class HomePage(context: Context, private val pal: Palette) : FrameLayout(context
         }
 
         powerChip.setActive(s.power)
-        tempDriver.text = String.format("%.1f°", s.tempDriver)
-        tempPassenger.text = String.format("%.1f°", s.tempPassenger)
+        setValue(tempDriver, String.format("%.1f°", s.tempDriver))
+        setValue(tempPassenger, String.format("%.1f°", s.tempPassenger))
         val mode = HvacIds.BLOW_LABELS.getOrNull(s.blowing) ?: "--"
-        fanLabel.text = if (s.fanAuto) "风量 自动 · $mode" else "风量 ${s.fanLevel} 档 · $mode"
+        setValue(fanLabel, if (s.fanAuto) "风量 自动 · $mode" else "风量 ${s.fanLevel} 档 · $mode")
         acChip.setActive(s.ac)
         autoChip.setActive(s.auto)
         circChip.bind(
@@ -301,6 +299,22 @@ class HomePage(context: Context, private val pal: Palette) : FrameLayout(context
             s.circulation == 0,
         )
         defrostChip.setActive(s.defrostFront)
+    }
+
+    /**
+     * 数值变化时「顶一下」（[Motion.nudge]）。
+     *
+     * 车机上是**瞥一眼**读数的地方 —— 温度 / 风量这种数字改完，
+     * 光靠数字本身变了，余光很容易漏掉；补一个轻微的位移，
+     * 眼睛才会跟过去确认「这里确实变了」。
+     *
+     * 只在**文本真的变了**的时候才顶：[bind] 是定时刷新的，
+     * 不比较的话每轮刷新都在顶，数字会一直抖。
+     */
+    private fun setValue(view: TextView, text: String) {
+        if (view.text?.toString() == text) return
+        view.text = text
+        Motion.nudge(view)
     }
 
     private fun fmtTemp(t: Float): String =

@@ -17,6 +17,8 @@ import com.cardesk.launcher.core.Skin
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.ui.Ui
+import com.cardesk.launcher.ui.anim.Motion
+import com.cardesk.launcher.ui.anim.MotionSpec
 import com.cardesk.launcher.ui.pressFeedback
 import kotlin.math.roundToInt
 
@@ -292,9 +294,29 @@ class FloatWindowLayer(
         for (other in windows) {
             // 媒体浮窗同时只能有一个，不需要「选中框」来区分（设计板 `s13-float` 也没有），
             // 否则整张卡会多一圈强调色描边。
-            other.view.foreground =
-                if (other === box && other.packageName != MEDIA_FLOAT_KEY) activeFrame() else null
+            val frame = if (other === box && other.packageName != MEDIA_FLOAT_KEY) activeFrame() else null
+            other.view.foreground = frame
+            // 聚焦框**淡入**而不是啪地出现：焦点从一扇窗换到另一扇窗时，
+            // 框要是瞬间出现，看起来就只是「多画了一圈线」，看不出焦点换过。
+            frame?.let { fadeIn(it) }
         }
+        // 聚焦的那一扇窗「鼓一下」—— 余光扫过去也知道焦点现在在哪儿。
+        Motion.bump(box.view)
+    }
+
+    /**
+     * 聚焦框淡入。
+     *
+     * 时长取遮罩淡入那一档（[MotionSpec.SHEET_SCRIM_DURATION]）：
+     * 够被眼睛捕捉到，又不至于让人等。
+     */
+    private fun fadeIn(frame: Drawable) {
+        frame.alpha = 0
+        ValueAnimator.ofInt(0, 255).apply {
+            duration = MotionSpec.SHEET_SCRIM_DURATION
+            interpolator = Motion.STANDARD
+            addUpdateListener { frame.alpha = it.animatedValue as Int }
+        }.start()
     }
 
     /** 窗口高亮边框。 */
@@ -351,7 +373,10 @@ class FloatWindowLayer(
         val fromW = lp.width
         val fromH = lp.height
         ValueAnimator.ofFloat(0f, 1f).apply {
+            // 220ms 是这个浮窗从「小窗」到「全屏」的历史节奏，
+            // 不在全局动效规格里，就地保留；曲线换成全 App 统一的 [Motion.STANDARD]。
             duration = 220L
+            interpolator = Motion.STANDARD
             addUpdateListener { anim ->
                 val t = anim.animatedValue as Float
                 lp.leftMargin = (fromX + (x - fromX) * t).roundToInt()
@@ -423,6 +448,9 @@ class FloatWindowLayer(
         val close = Ui.text(context, "✕", 24f, pal.textFaint).apply {
             gravity = Gravity.CENTER
             background = Ui.round(pal.surfaceSoft, 999f)
+            // 按压反馈：与 App 浮窗标题栏的「✕」保持一致
+            // （以前只有 App 浮窗有，媒体浮窗这个点下去是「没反应」的一下）。
+            pressFeedback()
         }
         root.addView(
             close,
@@ -515,6 +543,10 @@ class FloatWindowLayer(
             background = Ui.round(Skin.surface, com.cardesk.launcher.core.Shape.CARD, 1f, Skin.NAV_STROKE)
             isClickable = true
             clipToOutline = true
+            // 按压反馈：点根视图是「全屏化 / 还原」，是这个窗口上最重的操作，
+            // 以前按下完全没有反馈，误触两次就全屏了。
+            // 按压反馈不吞事件（监听器返回 false），所以点击照常触发。
+            pressFeedback()
         }
 
         val embeddedView = tryEmbedActivity(pkg)
@@ -674,8 +706,13 @@ class FloatWindowLayer(
         var originY = 0
         var originW = 0
         var originH = 0
-        header.setOnTouchListener { _, ev ->
-            val lp = root.layoutParams as? LayoutParams ?: return@setOnTouchListener false
+        // 标题栏是**拖动把手**，按下去要有「抓起来了」的感觉。
+        //
+        // 这里必须用 [Motion.attachPress] 而不是 [Motion.press]：
+        // `View.setOnTouchListener` 是**覆盖式**的，直接调 press 会把下面的拖动监听器顶掉，
+        // 浮窗就拖不动了。attachPress 把拖动逻辑当参数接进来，两套一起跑。
+        Motion.attachPress(header, dragHandler@{ _, ev ->
+            val lp = root.layoutParams as? LayoutParams ?: return@dragHandler false
             val box = windows.firstOrNull { it.view === root }
             when (ev.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -735,7 +772,7 @@ class FloatWindowLayer(
                 }
                 else -> true
             }
-        }
+        })
         var downX = 0f
         var downY = 0f
         var startW = 0

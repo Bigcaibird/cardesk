@@ -23,6 +23,8 @@ import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.core.media.LyricWindow
 import com.cardesk.launcher.core.media.MediaActions
 import com.cardesk.launcher.ui.Ui
+import com.cardesk.launcher.ui.anim.Motion
+import com.cardesk.launcher.ui.anim.MotionSpec
 import com.cardesk.launcher.ui.pip.NavSplitPlacement
 import com.cardesk.launcher.ui.pip.PipDividerView
 import com.cardesk.launcher.ui.pip.PipRatio
@@ -283,6 +285,12 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
      */
     private fun syncCoverBackdropState() {
         coverBackdrop.coverEnabled = coverBackdropEnabled
+        // 封面背景是**自绘背景层**，开关它没有渐变可言；
+        // 至少给点它的那个封面图「鼓一下」——
+        // 不然卡片只是悄悄换了个底色，用户会以为点空了。
+        if (::albumArtView.isInitialized && albumArtView.isAttachedToWindow) {
+            Motion.bump(albumArtView)
+        }
     }
 
     /**
@@ -498,8 +506,14 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
     /** 播放键图标。 */
     var playing: Boolean = false
         set(v) {
+            val changed = field != v
             field = v
-            if (::playGlyph.isInitialized) playGlyph.text = if (v) "❚❚" else "▶"
+            if (::playGlyph.isInitialized) {
+                playGlyph.text = if (v) "❚❚" else "▶"
+                // ▶ / ❚❚ 换脸是「开始 / 暂停」**唯一**的信号 ——
+                // 补一个鼓一下，确认这一下真的生效了。
+                if (changed) Motion.bump(playGlyph)
+            }
         }
 
     // ------------------------------------------- 收藏 / 播放模式（第一九五轮）
@@ -547,6 +561,9 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
             if (field == value) return
             field = value
             applyFavoriteState()
+            // 三态之间任意一跳（空心 ↔ 实心、不知道 → 已知）都要有信号：
+            // 鼓一下，让用户确认「收藏状态真的变了」。
+            favoriteBtn?.let { if (it.isAttachedToWindow) Motion.bump(it) }
         }
 
     /**
@@ -560,6 +577,9 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
             if (field == value) return
             field = value
             applyPlayModeState()
+            // 播放模式符号换了（顺序 → 单曲 → 随机）→ 鼓一下，
+            // 否则只是图标悄悄变了一下，余光根本抓不到。
+            playModeBtn?.let { if (it.isAttachedToWindow) Motion.bump(it) }
         }
 
     /** 收藏按钮被点了（宿主去下发「收藏 / 取消收藏」）。 */
@@ -577,9 +597,22 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
      */
     val sourceAnchor: View? get() = sourceRowView
 
-    /** 来源菜单展开时把箭头转 180°（rotation 动画）。 */
+    /**
+     * 来源菜单展开时把箭头转 180°（**动画**转，不是硬切）。
+     *
+     * 箭头是「菜单开没开」唯一的常驻信号 ——
+     * 硬切的话余光只会觉得「有个东西闪了一下」，转过去才看得出是翻页。
+     */
     fun setSourceMenuOpen(open: Boolean) {
-        sourceChevron?.rotation = if (open) 180f else 0f
+        val chev = sourceChevron ?: return
+        val target = if (open) 180f else 0f
+        if (chev.rotation == target) return
+        chev.animate().cancel()
+        chev.animate()
+            .rotation(target)
+            .setDuration(MotionSpec.SHEET_ENTER_DURATION)
+            .setInterpolator(Motion.EMPHASIS)
+            .start()
     }
 
     var onPlayToggle: (() -> Unit)? = null
@@ -1011,12 +1044,15 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
                 true
             }
             // setupDotGestures 的触摸拦截：手势期间不让父层（翻页）抢走事件
-            setOnTouchListener { v, event ->
+            //
+            // 用 [Motion.attachPress] 把按压反馈**并进**这个监听器 ——
+            // `setOnTouchListener` 是覆盖式的，直接再装一个会把拦截逻辑顶掉。
+            Motion.attachPress(this, { v, event ->
                 if (event.actionMasked == MotionEvent.ACTION_DOWN) {
                     v.parent?.requestDisallowInterceptTouchEvent(true)
                 }
                 false
-            }
+            }, MotionSpec.PRESS_SCALE_ICON)
         }.also { group ->
             for (i in 0 until 3) {
                 group.addView(
@@ -1141,6 +1177,8 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
             LinearLayout.LayoutParams(0, -2, 1f).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL },
         )
         sourceRow.isClickable = true
+        // 来源行是一整行可点的区域 —— 按行级幅度轻轻一沉。
+        Motion.press(sourceRow, MotionSpec.PRESS_SCALE_ROW)
         sourceRow.setOnClickListener {
             // 排障场景：「导航页音乐卡来源行点了没弹菜单」。
             Logx.event(LogTags.NAV_UI, "导航页音乐卡来源行点击", "source" to sourceLabel)
@@ -1160,6 +1198,9 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
             // 这是用户拿到这个功能的主入口 —— 音乐卡上就这一张图，
             // 点它就能开关，比去设置页里找开关顺手得多。
             contentDescription = "歌曲图片，点击切换封面背景"
+            // 封面图是**图片**类按钮 —— 用图标档的按压幅度，
+            // 让「这是一张可以点的图」更明确。
+            Motion.press(this, MotionSpec.PRESS_SCALE_ICON)
             setOnClickListener { toggleCoverBackdrop() }
         }
         albumArtView = art
@@ -1258,6 +1299,7 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         val playBtn = Ui.text(context, "▶", 48f, cardPal.text, bold = true).apply {
             gravity = Gravity.CENTER
             isClickable = true
+            Motion.press(this, MotionSpec.PRESS_SCALE_ICON)
             setOnClickListener {
                 Logx.event(
                     LogTags.NAV_UI,
@@ -1298,6 +1340,7 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
             setPadding(4, 8, 4, 8)
             isClickable = true
             contentDescription = "收藏"
+            Motion.press(this, MotionSpec.PRESS_SCALE_ICON)
             setOnClickListener {
                 Logx.event(
                     LogTags.NAV_UI,
@@ -1317,6 +1360,7 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
             setPadding(12, 14, 12, 14)
             isClickable = true
             contentDescription = "播放模式"
+            Motion.press(this, MotionSpec.PRESS_SCALE_ICON)
             setOnClickListener {
                 Logx.event(
                     LogTags.NAV_UI,
@@ -1421,6 +1465,9 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
     private fun iconButton(glyph: String, size: Int): TextView = Ui.text(context, glyph, size * 0.7f, cardPal.text).apply {
         gravity = Gravity.CENTER
         isClickable = true
+        // 图标类小按钮 —— 按 [MotionSpec.PRESS_SCALE_ICON] 缩，
+        // 小按钮按 0.96 几乎看不出来。
+        Motion.press(this, MotionSpec.PRESS_SCALE_ICON)
     }
 
     // ------------------------------------------------------------- 分隔条 / 切页按钮
@@ -1472,6 +1519,8 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         val split = FrameLayout(context).apply {
             background = Skin.glass(18f)
             isClickable = true
+            // 小玻璃按钮 —— 图标档按压幅度。
+            Motion.press(this, MotionSpec.PRESS_SCALE_ICON)
             setOnClickListener {
                 // 排障场景：「左侧 chevron 按钮点了没反应」。
                 Logx.event(LogTags.NAV_UI, "导航页分屏按钮点击", "dual" to dualPip, "ratio" to pipRatio)
@@ -1581,7 +1630,17 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
     override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
         super.onLayout(changed, l, t, r, b)
         placePipDivider()
-        refreshProgress()
+        // 布局刚跑完才知道进度条有多宽 —— 这里**直接定宽，不播动画**。
+        //
+        // ## 为什么布局里不能播动画
+        //
+        // 动画帧里改 `layoutParams.width` 需要重新布局才能生效，
+        // 而「布局 → 播动画 → 动画帧 → 改宽度 → 重新布局」会绕成死循环：
+        // Choreographer 每一帧都会排一次遍历，每次遍历都进一次布局，
+        // 每次布局都重起一段动画 —— 永远停不下来。
+        //
+        // 所以：**布局里只定宽**，动画交给 [refreshProgress]（不在布局里调用）。
+        applyProgressWidth()
     }
 
     /** 分隔条压在地图卡与右槽之间（:2277-2332）。 */
@@ -1619,17 +1678,55 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         }
     }
 
+    /**
+     * 进度条填充的**当前宽度**（px）。
+     *
+     * 进度是每秒刷新一次的，硬切宽度的话进度条是「一格一格跳」的；
+     * 记一份当前显示的宽度，变化时从它开始**滑**过去，看起来才像在走。
+     */
+    private var progressWidth = 0f
+
     /** 刷新进度条填充宽度（0..1）。 */
     fun refreshProgress() {
         if (!::progressFill.isInitialized) return
         val host = progressHost
         val usable = host.width
         if (usable <= 0) return
-        val lp = progressFill.layoutParams
-        if (lp != null) {
-            lp.width = (usable * progress).toInt().coerceAtLeast(0)
-            progressFill.layoutParams = lp
+        val target = (usable * progress).toInt().coerceAtLeast(0).toFloat()
+        val from = progressWidth
+        if (from == target) return
+        // 用 `animateProgress`（按视图记）—— 同一个进度条上再起一段动画时，
+        // 上一个会被取消，两个动画抢同一个宽度会抖。
+        Motion.animateProgress(host, MotionSpec.VALUE_DURATION) { t ->
+            progressWidth = from + (target - from) * t
+            applyProgressWidth(progressWidth, request = true)
         }
+    }
+
+    /**
+     * 把进度条填充宽度设成 [px]。
+     *
+     * @param request true = 主动请求一次布局，让新的宽度**立刻**生效。
+     *
+     * ## 为什么这里要显式 `requestLayout()`
+     *
+     * 宽度是写在 `layoutParams` 上的，**布局时**才被读走。
+     * 而 `View.setLayoutParams` 传的是**同一个对象**时会直接返回
+     * （`if (params == mLayoutParams) return;`），不会触发重新布局。
+     *
+     * 所以只改 `lp.width` 是不够的 —— 得再叫一次 `requestLayout()`，
+     * 让下一轮布局把新宽度读走。
+     *
+     * 但**不能在布局过程中调**（见 [onLayout] 的说明），
+     * 所以布局里那次是 `request = false`：那一轮布局本来就会读走宽度。
+     */
+    private fun applyProgressWidth(px: Float = progressWidth, request: Boolean = false) {
+        val lp = progressFill.layoutParams ?: return
+        val w = px.toInt()
+        if (lp.width == w) return
+        lp.width = w
+        progressFill.layoutParams = lp
+        if (request) progressFill.requestLayout()
     }
 
 

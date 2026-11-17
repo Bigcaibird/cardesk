@@ -13,6 +13,7 @@ import com.cardesk.launcher.core.Skin
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.ui.Ui
+import com.cardesk.launcher.ui.anim.Motion
 import com.cardesk.launcher.ui.pressFeedback
 
 /**
@@ -51,6 +52,14 @@ class DockQuickAppsDialog(
 
     /** 槽位行（重建时复用）。 */
     private val rows: MutableList<FrameLayout> = mutableListOf()
+
+    /**
+     * 上一轮的槽位内容。
+     *
+     * 用来判断**哪一行**的槽位变了 —— 只有变了的那一行才重新入场，
+     * 整面板一起闪一下反而看不出是哪里改了。
+     */
+    private var lastSlots: List<String> = emptyList()
 
     /** 底部「清空全部」胶囊（属性必须在 [init] 之前初始化，否则首帧渲染会拿到 null）。 */
     private val clearAllButton: TextView = chip("清空全部", onClick = { clearAll() })
@@ -112,7 +121,16 @@ class DockQuickAppsDialog(
             val row = buildRow(i, focus)
             rows.add(row)
             place(row, 40, 160 + i * 104, panelWidth - 80, 88)
+            // 这一格的内容变了 → 让**这一行**重新入场一下，
+            // 用户才知道是这一格换了应用，而不是整个面板闪了一下。
+            //
+            // 只在已经挂到窗口上时播：未 attach 的视图上动画不会跑，
+            // alpha 会停在 0，那一行就永远看不见了。
+            if (isAttachedToWindow && lastSlots.getOrNull(i) != slots.getOrNull(i)) {
+                Motion.revealStagger(row, i)
+            }
         }
+        lastSlots = slots
         // 底部「清空全部」
         body.removeView(clearAllButton)
         place(

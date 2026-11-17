@@ -16,6 +16,7 @@ import com.cardesk.launcher.core.Shape
 import com.cardesk.launcher.core.Skin
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
+import com.cardesk.launcher.ui.anim.Motion
 import com.cardesk.launcher.ui.dialogs.IconView
 import com.cardesk.launcher.ui.shell.NavSlotBarView
 import com.cardesk.launcher.ui.widget.OverlayBackdrop
@@ -53,6 +54,22 @@ class NavSlotDialog(
     private lateinit var counter: TextView
     private var picking = false
 
+    /**
+     * 遮罩与面板。
+     *
+     * 留着是为了进场 / 退场动画（这两个 View 是**自绘 + 自带底板**的，
+     * 动画要作用在它们身上，局部变量拿不到）。
+     */
+    private lateinit var scrim: OverlayBackdrop
+    private lateinit var sheet: FrameLayout
+
+    /**
+     * 是否已经在退场。
+     *
+     * 防止「完成」被连点两次时播两遍退场动画（第二遍会把已经摘掉的层再摘一次）。
+     */
+    private var closing = false
+
     init {
         build()
     }
@@ -60,7 +77,7 @@ class NavSlotDialog(
     private fun build() {
         // 排障场景：槽位面板打开时带了几个槽位
         Logx.event(LogTags.SETTING, "打开槽位管理面板", "count" to slots.size)
-        val scrim = OverlayBackdrop(context).apply {
+        scrim = OverlayBackdrop(context).apply {
             // 第五十轮：背景板 = `.bgwash` + `.scrim`（不透明），与设计板 s12 一致。
             palette = this@NavSlotDialog.pal
             withScrim = true
@@ -70,7 +87,7 @@ class NavSlotDialog(
         addView(scrim, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
         // 设计板 s12：880×760 摆在 (520,150)
-        val sheet = FrameLayout(context).apply {
+        sheet = FrameLayout(context).apply {
             // 第四十九轮「浮屿」：纯扁平面 + 1px 描边。
             // 第五十一轮修正：设计板 `.card` 用的是 `--surface`，之前误用 `--surfaceStrong`。
             background = Skin.flat(Shape.CARD)
@@ -94,6 +111,7 @@ class NavSlotDialog(
         // 「添加」= 右上角 accent 纯文字（right=36 top=36，22px）
         val add = Ui.text(context, "添加", 22f, pal.accent, bold = true).apply {
             gravity = Gravity.CENTER
+            pressFeedback()
             setOnClickListener { showCatalog() }
         }
         sheet.addView(
@@ -107,6 +125,7 @@ class NavSlotDialog(
         val done = Ui.text(context, "完成", 24f, pal.accent, bold = true).apply {
             gravity = Gravity.CENTER
             background = Ui.round(Skin.surfaceSoft, Shape.PILL, 1f, Skin.NAV_STROKE)
+            pressFeedback()
             setOnClickListener { close() }
         }
         sheet.addView(
@@ -199,6 +218,10 @@ class NavSlotDialog(
      */
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        // 进场：面板上滑 + 淡入 + 轻微放大，遮罩淡入。
+        // 以前这个面板是「啪」一下弹出来的 —— 没有过程，
+        // 用户会以为界面卡了一下才出现（与其它对话框的手感也不一致）。
+        Motion.enterSheet(sheet, scrim)
         val clearance = dockClearancePx()
         if (clearance <= 0) return
         val lp = layoutParams as? FrameLayout.LayoutParams ?: return
@@ -210,6 +233,9 @@ class NavSlotDialog(
         Ui.text(context, label, 18f, if (primary) pal.accent else pal.text, bold = true).apply {
             gravity = Gravity.CENTER
             background = Ui.round(Skin.surfaceSoft, Shape.PILL, 1f, Skin.NAV_STROKE)
+            // 按压反馈：底部四个按钮以前按下毫无反馈，
+            // 「+ 应用」「恢复默认」这类容易连点的按钮更需要这一下确认。
+            pressFeedback()
             setOnClickListener { onClick() }
         }
 
@@ -249,6 +275,9 @@ class NavSlotDialog(
                     gravity = Gravity.CENTER
                     background = Ui.round(pal.accentSoft, 10f)
                     setPadding(10, 0, 10, 0)
+                    // 按压反馈：切换「主画 / 副画 / 全屏」是个「看不出结果」的循环，
+                    // 按压反馈让这一步有确认感。
+                    pressFeedback()
                     setOnClickListener { cycleLaunchMode(index) }
                 },
                 LinearLayout.LayoutParams(84, 44).also { it.rightMargin = 6 },
@@ -260,6 +289,9 @@ class NavSlotDialog(
         val trash = IconView(context, IconView.Glyph.TRASH, 22f).apply {
             iconColor = pal.textFaint
             isClickable = true
+            // 按压反馈：垃圾桶是「会真的删掉一格」的操作，
+            // 按下去要看得见 —— 免得误触之后还不知道自己删了什么。
+            pressFeedback()
             setOnClickListener {
                 val removed = slots.getOrNull(index)
                 slots.removeAt(index)
@@ -330,6 +362,9 @@ class NavSlotDialog(
         Ui.text(context, label, 16f, pal.textDim).apply {
             gravity = Gravity.CENTER
             background = Ui.round(Skin.surfaceSoft, 12f)
+            // 按压反馈：「↑ / ↓」是连点最多的两个按钮，
+            // 没有反馈时很容易连按三四下把槽位推过头。
+            pressFeedback()
             setOnClickListener { onClick() }
         }
 
@@ -433,6 +468,9 @@ class NavSlotDialog(
                         maxLines = 1
                         ellipsize = android.text.TextUtils.TruncateAt.END
                         setPadding(8, 0, 8, 0)
+                        // 按压反馈：选择面板里的每一格都可能被连点，
+                        // 有了按压反馈才知道自己点到了哪一格。
+                        pressFeedback()
                         setOnClickListener { addSlot(NavSlots.createSlotForAction(id, label)) }
                     },
                     LinearLayout.LayoutParams(0, 52, 1f).also { it.rightMargin = 8; it.topMargin = 6 },
@@ -452,6 +490,7 @@ class NavSlotDialog(
                 Ui.text(context, label, 15f, pal.text).apply {
                     gravity = Gravity.CENTER
                     background = Ui.round(pal.accentSoft, 12f)
+                    pressFeedback()
                     setOnClickListener { addSlot(slot) }
                 },
                 LinearLayout.LayoutParams(0, 52, 1f).also { it.rightMargin = 8; it.topMargin = 6 },
@@ -481,6 +520,7 @@ class NavSlotDialog(
                             maxLines = 1
                             ellipsize = android.text.TextUtils.TruncateAt.END
                             setPadding(8, 0, 8, 0)
+                            pressFeedback()
                             setOnClickListener { addSlot(NavSlot.createApp(pkg, label)) }
                         },
                         LinearLayout.LayoutParams(0, 52, 1f).also { it.rightMargin = 8; it.topMargin = 6 },
@@ -499,10 +539,16 @@ class NavSlotDialog(
     }
 
     private fun close() {
+        if (closing) return
+        closing = true
         picking = false
         // 排障场景：面板关闭时还剩几个槽位（没点「完成」保存的话会丢弃）
         Logx.event(LogTags.SETTING, "关闭槽位管理面板", "count" to slots.size)
-        onClose?.invoke()
+        // 退场：面板下滑 + 淡出，**动画结束后**才通知宿主摘层。
+        //
+        // 以前是直接 `onClose?.invoke()` —— 宿主同步 `removeView`，
+        // 对话框「啪」一下就没了，什么过程都看不见。
+        Motion.exitSheet(sheet, scrim) { onClose?.invoke() }
     }
 
     companion object {

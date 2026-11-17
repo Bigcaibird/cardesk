@@ -2,6 +2,7 @@ package com.cardesk.launcher.ui.pages
 
 import android.content.Context
 import android.content.Intent
+import android.animation.ValueAnimator
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.LinearGradient
@@ -42,6 +43,8 @@ import com.cardesk.launcher.core.nav.DesktopGuide
 import com.cardesk.launcher.core.nav.LaneShape
 import com.cardesk.launcher.core.nav.LaneShapes
 import com.cardesk.launcher.core.nav.NavGuideText
+import com.cardesk.launcher.ui.anim.Motion
+import com.cardesk.launcher.ui.anim.MotionSpec
 import com.cardesk.launcher.ui.widget.BackgroundView
 import com.cardesk.launcher.vehicle.HvacState
 import com.cardesk.launcher.vehicle.TireOrder
@@ -397,7 +400,29 @@ class ScenePage(context: Context) : View(context) {
 
     private var info: VehicleInfo? = null
     private var state: HvacState? = null
+
+    /**
+     * 当前壁纸序号。
+     *
+     * 换壁纸时圆点的颜色要**渐变**过去（见 [animateWallpaperDots]），
+     * 所以这里换成带 setter 的属性 —— 只在**真的换了**时才播动画。
+     */
     private var wallpaperIndex = 0
+        set(v) {
+            if (field == v) return
+            field = v
+            animateWallpaperDots(v)
+        }
+
+    /**
+     * 壁纸圆点**当前显示中**的颜色。
+     *
+     * 圆点是自绘的，没有 View 可以反查颜色 —— 自己记一份，
+     * 渐变才从「现在显示的色」出发，而不是每次都从半透明重新开始。
+     */
+    private val wallpaperDotColors = IntArray(WALLPAPER_NAMES.size) { i ->
+        if (i == 0) 0xFFFFFFFF.toInt() else 0x73FFFFFF
+    }
 
     /**
      * 车窗的**本地乐观状态**（里车窗图标是「点击关窗」的入口
@@ -1015,6 +1040,8 @@ class ScenePage(context: Context) : View(context) {
         val h = bottomTop - y + 42f + pad
 
         val r = RectF(x, y, x + w, y + h)
+        // 整张引导卡按下时轻微缩小（场景页是自绘的，没有子 View 能挂按压反馈）。
+        val navPressed = beginPress(canvas, "nav", r)
         canvas.drawRoundRect(r, GLASS_RADIUS, GLASS_RADIUS, Paint(fill).apply { color = Skin.GLASS_STRONG_FILL })
         canvas.drawRoundRect(r, GLASS_RADIUS, GLASS_RADIUS, Paint(stroke).apply {
             color = Skin.GLASS_STROKE
@@ -1130,6 +1157,7 @@ class ScenePage(context: Context) : View(context) {
         }
 
         hits["nav"] = r
+        if (navPressed) canvas.restore()
     }
 
     /**
@@ -1163,6 +1191,8 @@ class ScenePage(context: Context) : View(context) {
         val h = bottom - y + pad
 
         val r = RectF(x, y, x + w, y + h)
+        // 巡航卡同样是整卡可点 —— 按下时轻微缩小。
+        val navPressed = beginPress(canvas, "nav", r)
         canvas.drawRoundRect(r, GLASS_RADIUS, GLASS_RADIUS, Paint(fill).apply { color = Skin.GLASS_STRONG_FILL })
         canvas.drawRoundRect(r, GLASS_RADIUS, GLASS_RADIUS, Paint(stroke).apply {
             color = Skin.GLASS_STROKE
@@ -1237,6 +1267,7 @@ class ScenePage(context: Context) : View(context) {
         }
         text.textAlign = Paint.Align.LEFT
         hits["nav"] = r
+        if (navPressed) canvas.restore()
     }
 
     /** 巡航方向码 → 车道箭头图形（识别不出返回 null，不画方向箭头）。 */
@@ -1868,6 +1899,13 @@ class ScenePage(context: Context) : View(context) {
             } else {
                 rect
             }
+            // 被拖起来的卡片微微放大 —— 看起来是「被拎起来了」而不是「自己在滑」。
+            val lifting = id == dragId && dragLift > 0f
+            if (lifting) {
+                canvas.save()
+                val s = 1f + (MotionSpec.STATE_BUMP - 1f) * dragLift
+                canvas.scale(s, s, drawRect.centerX(), drawRect.centerY())
+            }
             when (id) {
                 com.cardesk.launcher.core.CardLayout.QUICK -> drawQuick(canvas, drawRect)
                 com.cardesk.launcher.core.CardLayout.MUSIC -> drawMusicCard(canvas, drawRect)
@@ -1878,6 +1916,7 @@ class ScenePage(context: Context) : View(context) {
                 com.cardesk.launcher.core.CardLayout.TRIP_CARD -> drawTripCard(canvas, drawRect)
                 com.cardesk.launcher.core.CardLayout.STATUS -> drawStatusBottomCard(canvas, drawRect)
             }
+            if (lifting) canvas.restore()
         }
     }
 
@@ -1912,23 +1951,27 @@ class ScenePage(context: Context) : View(context) {
             val iconTop = rect.top + QUICK_CONTENT_TOP
             val app = apps[i]
             // 图标底板：68×68 圆角 18 的 surfaceSoft 方块（设计板 `.appicon`）
-            canvas.drawRoundRect(
-                RectF(slotLeft, iconTop, slotLeft + QUICK_SLOT_W, iconTop + QUICK_SLOT_W),
-                18f, 18f,
-                Paint(fill).apply { color = Skin.surfaceSoft },
-            )
-            if (app.icon != null) {
-                drawIcon(canvas, app.icon, cx, iconTop + QUICK_SLOT_W / 2f, QUICK_GLYPH)
-            } else {
-                fill.color = Skin.TEXT_SOFT
-                canvas.drawCircle(cx, iconTop + QUICK_SLOT_W / 2f, 13f, fill)
-            }
-            text.textAlign = Paint.Align.CENTER
-            text.typeface = Typeface.DEFAULT
-            text.textSize = 17f
-            text.color = Skin.TEXT_SOFT
-            canvas.drawText(clipLabel(app.label, QUICK_SLOT_W + 16f), cx, iconTop + QUICK_SLOT_W + 8f + 13f, text)
+            // 命中区**先登记再画**（`hits` 每帧开头是清空的）。
             hits["quick$i"] = RectF(slotLeft, rect.top, slotLeft + QUICK_SLOT_W, rect.bottom)
+            // 按下时这一格（含名称）缩一点。
+            withPress(canvas, "quick$i") {
+                canvas.drawRoundRect(
+                    RectF(slotLeft, iconTop, slotLeft + QUICK_SLOT_W, iconTop + QUICK_SLOT_W),
+                    18f, 18f,
+                    Paint(fill).apply { color = Skin.surfaceSoft },
+                )
+                if (app.icon != null) {
+                    drawIcon(canvas, app.icon, cx, iconTop + QUICK_SLOT_W / 2f, QUICK_GLYPH)
+                } else {
+                    fill.color = Skin.TEXT_SOFT
+                    canvas.drawCircle(cx, iconTop + QUICK_SLOT_W / 2f, 13f, fill)
+                }
+                text.textAlign = Paint.Align.CENTER
+                text.typeface = Typeface.DEFAULT
+                text.textSize = 17f
+                text.color = Skin.TEXT_SOFT
+                canvas.drawText(clipLabel(app.label, QUICK_SLOT_W + 16f), cx, iconTop + QUICK_SLOT_W + 8f + 13f, text)
+            }
         }
     }
 
@@ -1951,53 +1994,57 @@ class ScenePage(context: Context) : View(context) {
             val cx = slotLeft + QUICK_SLOT_W / 2f
             val iconCy = rect.top + QUICK_CONTENT_TOP + QUICK_SLOT_W / 2f
             fill.color = Skin.TEXT
-            when (i) {
-                0 -> { // 车
-                    stroke.color = Skin.TEXT
-                    stroke.strokeWidth = 2.6f
-                    val carR = RectF(cx - 20f, iconCy - 13f, cx + 20f, iconCy + 15f)
-                    canvas.drawRoundRect(carR, 10f, 10f, stroke)
-                    canvas.drawCircle(cx - 13f, iconCy + 17f, 4f, fill)
-                    canvas.drawCircle(cx + 13f, iconCy + 17f, 4f, fill)
-                }
-                1 -> { // 导航箭头
-                    val path = Path().apply {
-                        moveTo(cx, iconCy - 20f)
-                        lineTo(cx + 16f, iconCy + 18f)
-                        lineTo(cx, iconCy + 10f)
-                        lineTo(cx - 16f, iconCy + 18f)
-                        close()
-                    }
-                    canvas.drawPath(path, fill)
-                }
-                2 -> { // 电话
-                    stroke.color = Skin.TEXT
-                    stroke.strokeWidth = 3f
-                    val path = Path().apply {
-                        moveTo(cx - 16f, iconCy - 16f)
-                        lineTo(cx - 6f, iconCy - 6f)
-                        lineTo(cx - 12f, iconCy + 2f)
-                        quadTo(cx + 2f, iconCy + 16f, cx + 14f, iconCy + 10f)
-                        lineTo(cx + 18f, iconCy - 2f)
-                        lineTo(cx + 6f, iconCy - 6f)
-                    }
-                    canvas.drawPath(path, stroke)
-                }
-                else -> { // 4 格
-                    for (row in 0..1) for (col in 0..1) {
-                        canvas.drawRoundRect(
-                            RectF(cx - 16f + col * 18f, iconCy - 16f + row * 18f, cx - 2f + col * 18f, iconCy - 2f + row * 18f),
-                            4f, 4f, fill,
-                        )
-                    }
-                }
-            }
-            text.textAlign = Paint.Align.CENTER
-            text.typeface = Typeface.DEFAULT
-            text.textSize = 16f
-            text.color = Skin.TEXT_SOFT
-            canvas.drawText(labels[i], cx, rect.top + cardH - 22f, text)
+            // 命中区**先登记再画**（`hits` 每帧开头是清空的）。
             hits["quick$i"] = RectF(slotLeft, rect.top, slotLeft + QUICK_SLOT_W, rect.bottom)
+            // 兜底入口同样有按压反馈 —— 按下时这一格缩一点。
+            withPress(canvas, "quick$i") {
+                when (i) {
+                    0 -> { // 车
+                        stroke.color = Skin.TEXT
+                        stroke.strokeWidth = 2.6f
+                        val carR = RectF(cx - 20f, iconCy - 13f, cx + 20f, iconCy + 15f)
+                        canvas.drawRoundRect(carR, 10f, 10f, stroke)
+                        canvas.drawCircle(cx - 13f, iconCy + 17f, 4f, fill)
+                        canvas.drawCircle(cx + 13f, iconCy + 17f, 4f, fill)
+                    }
+                    1 -> { // 导航箭头
+                        val path = Path().apply {
+                            moveTo(cx, iconCy - 20f)
+                            lineTo(cx + 16f, iconCy + 18f)
+                            lineTo(cx, iconCy + 10f)
+                            lineTo(cx - 16f, iconCy + 18f)
+                            close()
+                        }
+                        canvas.drawPath(path, fill)
+                    }
+                    2 -> { // 电话
+                        stroke.color = Skin.TEXT
+                        stroke.strokeWidth = 3f
+                        val path = Path().apply {
+                            moveTo(cx - 16f, iconCy - 16f)
+                            lineTo(cx - 6f, iconCy - 6f)
+                            lineTo(cx - 12f, iconCy + 2f)
+                            quadTo(cx + 2f, iconCy + 16f, cx + 14f, iconCy + 10f)
+                            lineTo(cx + 18f, iconCy - 2f)
+                            lineTo(cx + 6f, iconCy - 6f)
+                        }
+                        canvas.drawPath(path, stroke)
+                    }
+                    else -> { // 4 格
+                        for (row in 0..1) for (col in 0..1) {
+                            canvas.drawRoundRect(
+                                RectF(cx - 16f + col * 18f, iconCy - 16f + row * 18f, cx - 2f + col * 18f, iconCy - 2f + row * 18f),
+                                4f, 4f, fill,
+                            )
+                        }
+                    }
+                }
+                text.textAlign = Paint.Align.CENTER
+                text.typeface = Typeface.DEFAULT
+                text.textSize = 16f
+                text.color = Skin.TEXT_SOFT
+                canvas.drawText(labels[i], cx, rect.top + cardH - 22f, text)
+            }
         }
     }
 
@@ -2082,33 +2129,44 @@ class ScenePage(context: Context) : View(context) {
         stroke.strokeWidth = 1.6f
         val chx = x + 34f * k + srcNameW + 6f * k
         val chy = srcY + 12f
-        canvas.drawLine(chx, chy, chx + 5f, chy + 5f, stroke)
-        canvas.drawLine(chx + 5f, chy + 5f, chx + 10f * k, chy, stroke)
         // 来源行可点（sceneSource 的独立点击区）
+        //
+        // 命中区**先登记再画** —— [withPress] 要靠它算缩放中心，
+        // 而 `hits` 每帧开头是清空的。
         hits["source"] = RectF(x + 14f * k, srcY, chx + 14f * k, srcY + 30f)
+        // 下拉箭头是「这里能展开来源菜单」的入口 —— 按下时它自己缩一点。
+        withPress(canvas, "source") {
+            canvas.drawLine(chx, chy, chx + 5f, chy + 5f, stroke)
+            canvas.drawLine(chx + 5f, chy + 5f, chx + 10f * k, chy, stroke)
+        }
 
         // ② 封面 68×68 圆角 18（设计板 `.appicon`）
         val coverSize = 68f * k
         val cover = RectF(x + 18f * k, top + 42f, x + 18f * k + coverSize, top + 42f + coverSize)
         val art = mediaArtwork
-        if (art != null) {
-            val path = Path().apply { addRoundRect(cover, 18f, 18f, Path.Direction.CW) }
-            canvas.save()
-            canvas.clipPath(path)
-            canvas.drawBitmap(art, null, cover, Paint(Paint.FILTER_BITMAP_FLAG))
-            canvas.restore()
-        } else {
-            // 第五十一轮：设计板 s01 的通用音乐卡封面是**纯色 `--surfaceSoft` 圆角块**，
-            // 之前画的是「强调色 → surfaceStrong」的渐变，日间模式下和设计板差一截。
-            canvas.drawRoundRect(cover, 18f, 18f, Paint(fill).apply {
-                color = Skin.surfaceSoft
-            })
+        // 封面是「打开音乐页」的入口 —— 按下时整块缩一点。
+        // 命中区**先登记再画**（`hits` 每帧开头是清空的）。
+        hits["musicCover"] = cover
+        withPress(canvas, "musicCover") {
+            if (art != null) {
+                val path = Path().apply { addRoundRect(cover, 18f, 18f, Path.Direction.CW) }
+                canvas.save()
+                canvas.clipPath(path)
+                canvas.drawBitmap(art, null, cover, Paint(Paint.FILTER_BITMAP_FLAG))
+                canvas.restore()
+            } else {
+                // 第五十一轮：设计板 s01 的通用音乐卡封面是**纯色 `--surfaceSoft` 圆角块**，
+                // 之前画的是「强调色 → surfaceStrong」的渐变，日间模式下和设计板差一截。
+                canvas.drawRoundRect(cover, 18f, 18f, Paint(fill).apply {
+                    color = Skin.surfaceSoft
+                })
+            }
+            stroke.color = Skin.ACCENT
+            stroke.strokeWidth = 3f
+            canvas.drawLine(cover.centerX() + 4f, cover.centerY() - 14f, cover.centerX() + 4f, cover.centerY() + 6f, stroke)
+            canvas.drawCircle(cover.centerX() - 2f, cover.centerY() + 11f, 5.5f, stroke)
+            canvas.drawLine(cover.centerX() + 4f, cover.centerY() - 14f, cover.centerX() + 13f, cover.centerY() - 10f, stroke)
         }
-        stroke.color = Skin.ACCENT
-        stroke.strokeWidth = 3f
-        canvas.drawLine(cover.centerX() + 4f, cover.centerY() - 14f, cover.centerX() + 4f, cover.centerY() + 6f, stroke)
-        canvas.drawCircle(cover.centerX() - 2f, cover.centerY() + 11f, 5.5f, stroke)
-        canvas.drawLine(cover.centerX() + 4f, cover.centerY() - 14f, cover.centerX() + 13f, cover.centerY() - 10f, stroke)
 
         // ③ 文本列（封面右边距 14 → x = 18 + 68 + 14 = 100）
         val tx = cover.right + 14f * k
@@ -2133,23 +2191,25 @@ class ScenePage(context: Context) : View(context) {
         val by = top + h / 2f
         // 进度环在播放按钮**之下**（里 是 sceneMusicPlay 的前一个兄弟节点）。
         drawMusicRing(canvas, bx, by, k)
-        canvas.drawCircle(bx, by, 28f * k, Paint(fill).apply { color = Skin.surfaceStrong })
-        fill.color = Skin.TEXT
-        if (mediaPlaying) {
-            canvas.drawRoundRect(RectF(bx - 9f * k, by - 9f * k, bx - 3f * k, by + 9f * k), 2f, 2f, fill)
-            canvas.drawRoundRect(RectF(bx + 3f * k, by - 9f * k, bx + 9f * k, by + 9f * k), 2f, 2f, fill)
-        } else {
-            val tri = Path().apply {
-                moveTo(bx - 6f * k, by - 10f * k)
-                lineTo(bx + 10f * k, by)
-                lineTo(bx - 6f * k, by + 10f * k)
-                close()
-            }
-            canvas.drawPath(tri, fill)
-        }
+        // 命中区**先登记再画**（`hits` 每帧开头是清空的，[withPress] 要靠它算缩放中心）。
         hits["play"] = RectF(bx - 28f * k, by - 28f * k, bx + 28f * k, by + 28f * k)
-        // 封面可点：打开音乐页
-        hits["musicCover"] = cover
+        // 播放键：按下时整块（含进度环外的圆底）缩一点。
+        withPress(canvas, "play") {
+            canvas.drawCircle(bx, by, 28f * k, Paint(fill).apply { color = Skin.surfaceStrong })
+            fill.color = Skin.TEXT
+            if (mediaPlaying) {
+                canvas.drawRoundRect(RectF(bx - 9f * k, by - 9f * k, bx - 3f * k, by + 9f * k), 2f, 2f, fill)
+                canvas.drawRoundRect(RectF(bx + 3f * k, by - 9f * k, bx + 9f * k, by + 9f * k), 2f, 2f, fill)
+            } else {
+                val tri = Path().apply {
+                    moveTo(bx - 6f * k, by - 10f * k)
+                    lineTo(bx + 10f * k, by)
+                    lineTo(bx - 6f * k, by + 10f * k)
+                    close()
+                }
+                canvas.drawPath(tri, fill)
+            }
+        }
     }
 
     /**
@@ -2267,49 +2327,58 @@ class ScenePage(context: Context) : View(context) {
         val s = state
         val seatTop = top + 34f * k
         val seatH = (cardH - 34f * k - 8f).coerceAtLeast(50f)
-        seat(
-            canvas, x + pad, seatTop, seatW, seatH,
-            "主驾加热", s?.seatHeatDriver ?: 0, Skin.WARN, k,
-        )
-        seat(
-            canvas, x + pad + seatW + gap, seatTop, seatW, seatH,
-            "主驾通风", s?.seatVentDriver ?: 0, Skin.ACCENT_LIGHT, k,
-        )
+        // 命中区**先登记再画**（`hits` 每帧开头是清空的，[withPress] 要靠它算缩放中心）。
+        hits["seatHeat"] = RectF(x + pad, seatTop, x + pad + seatW, seatTop + seatH)
+        hits["seatVent"] = RectF(x + pad + seatW + gap, seatTop, x + pad + seatW * 2f + gap, seatTop + seatH)
+        // 座椅加热 / 通风：按下时各自缩一点。
+        withPress(canvas, "seatHeat") {
+            seat(
+                canvas, x + pad, seatTop, seatW, seatH,
+                "主驾加热", s?.seatHeatDriver ?: 0, Skin.WARN, k,
+            )
+        }
+        withPress(canvas, "seatVent") {
+            seat(
+                canvas, x + pad + seatW + gap, seatTop, seatW, seatH,
+                "主驾通风", s?.seatVentDriver ?: 0, Skin.ACCENT_LIGHT, k,
+            )
+        }
         // MAX 风量：`HvacController.isPower() && getFanSpeed() >= 7`
         val mx = x + pad + (seatW + gap) * 2f
         val mxR = RectF(mx, seatTop, mx + seatW, seatTop + seatH)
         val maxOn = s?.power == true && (s.fanLevel ?: 0) >= 7
-        canvas.drawRoundRect(mxR, 18f * k, 18f * k, Paint(fill).apply { color = Skin.surfaceSoft })
-        val mxColor = if (maxOn) Skin.ACCENT else Skin.TEXT_SOFT
-        stroke.color = mxColor
-        stroke.strokeWidth = (3f * k).coerceAtLeast(1.5f)
-        val fcx = mxR.centerX()
-        val fcy = seatTop + SEAT_CONTENT_TOP * k + 15f * k
-        canvas.drawCircle(fcx, fcy, 4f * k, Paint(fill).apply { color = mxColor })
-        for (i in 0..2) {
-            val a = Math.toRadians((i * 120).toDouble())
-            canvas.drawCircle(
-                fcx + (Math.cos(a) * 15f * k).toFloat(),
-                fcy + (Math.sin(a) * 15f * k).toFloat(),
-                10f * k, stroke,
+        hits["maxFan"] = mxR
+        // MAX 风挡：按下时整块缩一点。
+        withPress(canvas, "maxFan") {
+            canvas.drawRoundRect(mxR, 18f * k, 18f * k, Paint(fill).apply { color = Skin.surfaceSoft })
+            val mxColor = if (maxOn) Skin.ACCENT else Skin.TEXT_SOFT
+            stroke.color = mxColor
+            stroke.strokeWidth = (3f * k).coerceAtLeast(1.5f)
+            val fcx = mxR.centerX()
+            val fcy = seatTop + SEAT_CONTENT_TOP * k + 15f * k
+            canvas.drawCircle(fcx, fcy, 4f * k, Paint(fill).apply { color = mxColor })
+            for (i in 0..2) {
+                val a = Math.toRadians((i * 120).toDouble())
+                canvas.drawCircle(
+                    fcx + (Math.cos(a) * 15f * k).toFloat(),
+                    fcy + (Math.sin(a) * 15f * k).toFloat(),
+                    10f * k, stroke,
+                )
+            }
+            text.textAlign = Paint.Align.CENTER
+            text.typeface = Typeface.DEFAULT
+            text.textSize = (15f * k).coerceAtLeast(10f)
+            text.color = mxColor
+            val fanLabelY = seatTop + SEAT_CONTENT_TOP * k + 30f * k + 4f * k + 15f * k
+            canvas.drawText(fitText("最大风挡", seatW - 8f * k), mxR.centerX(), fanLabelY, text)
+            // 进度条（22×4）
+            fill.color = if (maxOn) Skin.ACCENT else Skin.surfaceStrong
+            val maxBarY = fanLabelY + 6f * k
+            canvas.drawRoundRect(
+                RectF(mxR.centerX() - 11f * k, maxBarY, mxR.centerX() + 11f * k, maxBarY + 4f * k),
+                2f * k, 2f * k, fill,
             )
         }
-        text.textAlign = Paint.Align.CENTER
-        text.typeface = Typeface.DEFAULT
-        text.textSize = (15f * k).coerceAtLeast(10f)
-        text.color = mxColor
-        val fanLabelY = seatTop + SEAT_CONTENT_TOP * k + 30f * k + 4f * k + 15f * k
-        canvas.drawText(fitText("最大风挡", seatW - 8f * k), mxR.centerX(), fanLabelY, text)
-        // 进度条（22×4）
-        fill.color = if (maxOn) Skin.ACCENT else Skin.surfaceStrong
-        val maxBarY = fanLabelY + 6f * k
-        canvas.drawRoundRect(
-            RectF(mxR.centerX() - 11f * k, maxBarY, mxR.centerX() + 11f * k, maxBarY + 4f * k),
-            2f * k, 2f * k, fill,
-        )
-        hits["seatHeat"] = RectF(x + pad, seatTop, x + pad + seatW, seatTop + seatH)
-        hits["seatVent"] = RectF(x + pad + seatW + gap, seatTop, x + pad + seatW * 2f + gap, seatTop + seatH)
-        hits["maxFan"] = mxR
     }
 
     /** 座椅位：图标 + 文案 + 3 段进度；[k] 是卡片宽度不足时的等比缩放。 */
@@ -2639,8 +2708,10 @@ class ScenePage(context: Context) : View(context) {
             rightEnd - CAR_STATUS_CARD_RIGHT_INSET,
             CAR_STATUS_CARD_TOP + CAR_STATUS_CARD_H,
         )
-        card(canvas, r)
         // 整卡可点：点开「车辆状态」面板。
+        // 整卡按下时轻微缩小（场景页是自绘的，没有子 View 能挂按压反馈）。
+        val cardPressed = beginPress(canvas, CAR_STATUS_CARD_HIT_KEY, r)
+        card(canvas, r)
         hits[CAR_STATUS_CARD_HIT_KEY] = RectF(r)
 
         // —— 标题 + 详情入口（整卡可点，详情只是可发现性）——
@@ -2708,6 +2779,7 @@ class ScenePage(context: Context) : View(context) {
         // —— 胎压：四个小胶囊贴到各自的轮子旁（锚点来自资产）——
         lastCarImageRect = RectF(imageRect)
         drawTirePills(canvas, r, i, imageRect, closedRefBounds(context, assetDirOrNull(), imageRect), topDown, context)
+        if (cardPressed) canvas.restore()
     }
 
     /**
@@ -3089,20 +3161,152 @@ class ScenePage(context: Context) : View(context) {
         val dotGap = 10f
         var dx = cx - (9 * 30f + 8 * dotGap) / 2f
         for (i in 0 until 9) {
-            val on = i == wallpaperIndex
-            fill.color = if (on) 0xFFFFFFFF.toInt() else 0x73FFFFFF
-            canvas.drawRoundRect(RectF(dx, cy + 28f, dx + 30f, cy + 38f), 5f, 5f, fill)
+            // 颜色取「当前显示中」的值 —— 换选时是**渐变**过去的（见 animateWallpaperDots）。
+            fill.color = wallpaperDotColors.getOrElse(i) { 0x73FFFFFF }
+            // 命中区**先登记再画**（`hits` 每帧开头是清空的）。
             hits["wp$i"] = RectF(dx, cy + 20f, dx + 30f, cy + 46f)
+            // 按下时圆点自己缩一点。
+            withPress(canvas, "wp$i") {
+                canvas.drawRoundRect(RectF(dx, cy + 28f, dx + 30f, cy + 38f), 5f, 5f, fill)
+            }
             dx += 30f + dotGap
         }
     }
 
     // ---------------------------------------------------------------- 交互
 
+    // -------------------------------------------------------------- 按压反馈
+    //
+    // 场景页是**一张画布**画完所有东西的 —— 没有子 View 可以挂按压反馈
+    // （`Motion.press` 是给 View 用的）。
+    // 所以这里照 `ui/shell/DockBarView.kt` 的做法：
+    // 自己记「现在按着哪一块」，画的时候把**那一块**缩小，其余照常。
+
+    /** 现在按着的命中区（null = 没按着）。 */
+    private var pressedHit: String? = null
+
+    /** 按压的缩放（1 = 没缩）。 */
+    private var pressScale = 1f
+
+    /** 按压动画（同一时刻只会有一个）。 */
+    private var pressAnimator: ValueAnimator? = null
+
+    /**
+     * 按下时命中的块（没有就 null）。
+     *
+     * 判定顺序必须和 [handleTap] **完全一致** ——
+     * 按下的那块要**就是会被点到**的那块，否则会出现「按 A 缩 B」的错位。
+     */
+    private fun pressKeyAt(x: Float, y: Float): String? {
+        for (key in PRESS_HIT_KEYS) {
+            val r = hits[key] ?: continue
+            if (r.contains(x, y)) return key
+        }
+        return null
+    }
+
+    /** 按下：把按着的那块缩下去。 */
+    private fun startPress(key: String?) {
+        pressedHit = key
+        pressAnimator?.cancel()
+        if (key == null) return
+        pressAnimator = ValueAnimator.ofFloat(pressScale, MotionSpec.PRESS_SCALE).apply {
+            duration = MotionSpec.PRESS_DOWN_DURATION
+            addUpdateListener {
+                pressScale = it.animatedValue as Float
+                invalidate()
+            }
+        }.also { it.start() }
+    }
+
+    /** 松手：弹回原位。 */
+    private fun endPress() {
+        pressedHit = null
+        pressAnimator?.cancel()
+        pressAnimator = ValueAnimator.ofFloat(pressScale, 1f).apply {
+            duration = MotionSpec.PRESS_UP_DURATION
+            addUpdateListener {
+                pressScale = it.animatedValue as Float
+                invalidate()
+            }
+        }.also { it.start() }
+    }
+
+    /**
+     * 画一块**会响应按压**的内容。
+     *
+     * 中心点取命中区的中心 —— 命中区由各绘制函数**先登记再画**
+     * （`hits` 每帧开头是清空的，画的时候得先有值）。
+     */
+    private fun withPress(canvas: Canvas, key: String, block: () -> Unit) {
+        val r = hits[key]
+        if (pressedHit != key || r == null || pressScale == 1f) {
+            block()
+            return
+        }
+        canvas.save()
+        canvas.scale(pressScale, pressScale, r.centerX(), r.centerY())
+        block()
+        canvas.restore()
+    }
+
+    /**
+     * 把按压缩放**套到画布上**，返回 true 表示结束时需要 `canvas.restore()`。
+     *
+     * 整张卡那种上百行的内容用它 —— 把上百行包进 lambda 容易改错，
+     * 而这里只要在开头套一次、结尾还原一次。
+     */
+    private fun beginPress(canvas: Canvas, key: String, r: RectF): Boolean {
+        if (pressedHit != key || pressScale == 1f) return false
+        canvas.save()
+        canvas.scale(pressScale, pressScale, r.centerX(), r.centerY())
+        return true
+    }
+
+    /**
+     * 壁纸圆点换选：颜色**渐变**过去。
+     *
+     * 圆点只有 30×10，颜色一换就是「啪」地跳一下 ——
+     * 渐变过去才看得出选中了哪一个。
+     */
+    private fun animateWallpaperDots(selected: Int) {
+        val from = wallpaperDotColors.copyOf()
+        Motion.animateProgress(this, MotionSpec.STATE_BUMP_DURATION) { t ->
+            for (i in wallpaperDotColors.indices) {
+                val target = if (i == selected) 0xFFFFFFFF.toInt() else 0x73FFFFFF
+                wallpaperDotColors[i] = MotionSpec.lerpColor(from.getOrElse(i) { target }, target, t)
+            }
+            invalidate()
+        }
+    }
+
     private val cardRects = LinkedHashMap<String, RectF>()
     private var dragId: String? = null
     private var dragMoved = false
     private var dragDx = 0f
+
+    /**
+     * 拖起来的卡片「抬起」的程度（0..1）。
+     *
+     * 以前卡片一被拎起来就是**原样平移**的 —— 看着像贴纸在滑，
+     * 不知道是「拿起来了」还是「自己动了」。补一点放大就清楚了。
+     */
+    private var dragLift = 0f
+
+    /** 抬起动画。 */
+    private var dragLiftAnimator: ValueAnimator? = null
+
+    /** 拖拽开始 / 结束时卡片「抬起 / 落下」的动画。 */
+    private fun animateDragLift(lifted: Boolean) {
+        dragLiftAnimator?.cancel()
+        dragLiftAnimator = ValueAnimator.ofFloat(dragLift, if (lifted) 1f else 0f).apply {
+            duration = if (lifted) MotionSpec.STATE_BUMP_DURATION else MotionSpec.PRESS_UP_DURATION
+            addUpdateListener {
+                dragLift = it.animatedValue as Float
+                invalidate()
+            }
+        }.also { it.start() }
+    }
     private var dragGrabX = 0f
     private var downX = 0f
     private var downY = 0f
@@ -3161,6 +3365,10 @@ class ScenePage(context: Context) : View(context) {
         dragMoved = false
         dragGrabX = downX
         dragDx = 0f
+        // 卡片被拎起来了 —— 放大一点，让人看出「拿起来了」。
+        animateDragLift(true)
+        // 拖拽接管了这只手 —— 按压反馈收掉，别让被按的那块一直缩着。
+        endPress()
         parent?.requestDisallowInterceptTouchEvent(true)
         // 排障场景：「底部卡片拖不动」——长按是否真的进入了拖拽态。
         Logx.event(
@@ -3191,6 +3399,8 @@ class ScenePage(context: Context) : View(context) {
                 longPressFired = false
                 dragId = null
                 dragDx = 0f
+                // 按下反馈：记住按着的是哪一块，画的时候把它缩小。
+                startPress(pressKeyAt(x, y))
                 downCardId = cardRects.entries.firstOrNull { it.value.contains(x, y) }?.key
                 if (downCardId != null) {
                     main.postDelayed(longPressRunnable, LONG_PRESS_MS)
@@ -3229,9 +3439,13 @@ class ScenePage(context: Context) : View(context) {
             }
             MotionEvent.ACTION_UP -> {
                 main.removeCallbacks(longPressRunnable)
+                // 松手：按压缩放弹回去。
+                endPress()
                 val id = dragId
                 if (id != null) {
                     dragId = null
+                    // 放下：卡片落回原位。
+                    animateDragLift(false)
                     parent?.requestDisallowInterceptTouchEvent(false)
                     // 只有真的挪动了才落盘
                     if (dragMoved) {
@@ -3260,7 +3474,9 @@ class ScenePage(context: Context) : View(context) {
             }
             MotionEvent.ACTION_CANCEL -> {
                 main.removeCallbacks(longPressRunnable)
+                endPress()
                 dragId = null
+                animateDragLift(false)
                 parent?.requestDisallowInterceptTouchEvent(false)
                 invalidate()
                 return true
@@ -4118,5 +4334,23 @@ class ScenePage(context: Context) : View(context) {
 
         /** 空调位内容顶部偏移（第五十轮：标题行之下，槽位高 104，内容 8~96）。 */
         const val SEAT_CONTENT_TOP = 8f
+
+        /**
+         * 有按压反馈的命中区（**判定顺序** = [handleTap] 的顺序，先命中的赢）。
+         *
+         * 顺序必须和点击分发完全一致 ——
+         * 按下的那块要**就是会被点到**的那块，否则会出现「按 A 缩 B」。
+         */
+        private val PRESS_HIT_KEYS: List<String> = listOf(
+            "source",
+            CAR_STATUS_CARD_HIT_KEY,
+            "play",
+            "musicCover",
+            "nav",
+            "seatHeat",
+            "seatVent",
+            "maxFan",
+        ) + (0 until QUICK_SLOTS).map { "quick$it" } +
+            (0 until WALLPAPER_NAMES.size).map { "wp$it" }
     }
 }

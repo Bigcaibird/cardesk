@@ -7652,3 +7652,204 @@ if (key == "media") {
 | 提交 | 代码 `15af527`；出包 `27f300f` |
 | GitHub Release | [`v1.0.1175`](https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1175) —— **已发布**，附件为 4271 的 APK（3 527 799 B，远端 digest 与本地 SHA-256 一致） |
 | R2 上传 | **未做** —— 环境里没有 `R2_AK` / `R2_SK`（凭据只从环境变量读；与第132/133/136/190/191/192/193轮一致） |
+
+---
+
+## 第198轮：全局动效层 —— 所有操作都有反馈
+
+### 一、用户提的需求
+
+> 优化 cardesk 的动画效果，为所有的操作都加上适当的动画
+
+### 二、先把「现在的动画到底在哪儿」查清楚
+
+全量盘了一遍交互面（页面 / 状态栏 / Dock / 浮窗 / 对话框 / 设置面板 / 抽屉），
+一共 **60 处可点元素**，其中：
+
+| 状态 | 数量 | 典型例子 |
+| --- | --- | --- |
+| 已有动画 | **18** | Dock 的 14 个键、首页 2 个按钮、页码圆点 1 个、导航槽位条 1 个 |
+| **完全没有动画** | **42** | 场景页 16 处、Dock 的风量 / 温度 ± / 快捷槽 6 处、设置面板全部、11 个对话框 |
+
+而且**已有的动画彼此对不上**：
+
+| 口径 | 数值 | 出处 |
+| --- | --- | --- |
+| 按压缩放 | `0.96` / 60ms ↓，`1.0` / 90ms ↑ | `ui/ChipButton.kt` 的 `pressFeedback()` |
+| 按压缩放 | `0.95` / 90ms ↓，`1.0` / 140ms ↑ | `ui/shell/DockBarView.kt` 私有常量 |
+
+同一个 App 里两种按压手感；两套常量都没设插值器（走默认的 `AccelerateDecelerate`）。
+
+更根本的问题是**架构**：按压反馈是散落在十几个文件里的一个顶层扩展函数，
+新增控件必须记得手动补一行 —— 忘了就是「按下去没反应」，而且没人会发现。
+
+### 三、怎么改：规格层 + 执行层
+
+沿用本仓库已有的 `OverlaySpec` / `PageTransitionSpec` 口径
+（**纯 Kotlin 数值规格 + Android 执行层**，数值可 JVM 单测），
+新建 `ui/anim/` 包：
+
+| 文件 | 职责 |
+| --- | --- |
+| `ui/anim/MotionSpec.kt`（新） | **纯 Kotlin**，只放数字与纯函数（时长 / 缩放 / 插值器控制点 / 错峰 / 颜色插值） |
+| `ui/anim/Motion.kt`（新） | 执行层：把规格喂给 `ViewPropertyAnimator` / `ObjectAnimator` / `ValueAnimator` |
+| `ui/anim/../ChipButton.kt` | `pressFeedback()` 改为转发到 `Motion.press` —— **原有十几个调用点零改动**就吃到统一手感 |
+
+规格层放纯函数是为了**能进 JVM 单测**：动效数值被改坏时构建期就能发现，
+不用上车机才知道「手感不对了」。
+
+### 四、口径（数值全在 `MotionSpec`，不散落）
+
+| 场景 | 数值 | 为什么 |
+| --- | --- | --- |
+| 按下 | 60ms → `0.96` | 手指还没抬起来就已经看到缩放了；再慢会被当成「没点到」 |
+| 松手 | 90ms → `1.0`，过冲 1.1 | 比按下慢：回弹要一点「弹」的尾巴，等长会显得被弹回 |
+| 图标按钮 | `0.90` | 小按钮按 0.96 几乎看不出来 |
+| 整行可点 | `0.985` | 行很大，缩 4% 会晃 |
+| 状态切换 | 180ms，`1.06` 鼓一下 | 空调开关这类「点错了有后果」的操作，光靠底色变化余光抓不住 |
+| 开关滑块 | 200ms 滑过去 | 瞬移的话用户会以为是两张不同的图 |
+| 数值变化 | 200ms | 温度 ±、风量 ± 不再硬跳 |
+| 列表入场 | 240ms，错峰 16ms，**上限 12 项** | 再多最后一个要等 480ms，用户会以为列表卡住 |
+| 对话框进 / 退 | 200ms / 240ms，上滑 40px | 退场比进场慢，「关」要有明确收尾；40 比浮层的 56 短（居中卡片滑太远像从屏幕外飞进来） |
+
+插值器统一成两条：**标准减速** `PathInterpolator(0.4, 0, 0.2, 1)`（Material 标准 easing）
+和**强减速** `PathInterpolator(0.2, 0.8, 0.2, 1)`（与已有浮层动画同一条）。
+Dock 原先私有的 `0.95 / 90 / 140` 全部并入 `MotionSpec` —— 现在全 App 只有一套按压手感。
+
+### 五、改动清单（35 个文件 + 3 个新文件）
+
+**核心**
+
+| 文件 | 改动 |
+| --- | --- |
+| `ui/anim/MotionSpec.kt`（新） | 纯 Kotlin 数值规格：`staggerDelayMs()` / `lerpColor()` 等纯函数 |
+| `ui/anim/Motion.kt`（新） | 执行层：`press` / `attachPress` / `bump` / `nudge` / `animateValue` / `animateProgress` / `revealStagger` / `enterSheet` / `exitSheet` |
+| `ui/ChipButton.kt` | `ChipButton` **每个实例天生有**按压反馈；`setActive()` 走「鼓一下 + 底色/字色渐变」；`pressFeedback()` 转发到 `Motion.press` |
+| `ui/dialogs/DialogSheet.kt` | `onAttachedToWindow` 进场动画；新增 `dismissAnimated()`；`FlatSwitch` 滑块改为滑动 |
+
+**设置面板**（`ui/SettingsOverlay.kt`）
+
+导航树 / 分段控件 / 下拉箭头 / 卡片单选 / 滑杆读数 / 时间选择器 / 壁纸缩略图
+全部补上按压反馈与状态渐变；`BoardSwitch` 的圆点改为滑动。
+
+**页面**（`ui/pages/`、`ui/DrawerPage.kt`、`ui/ClimatePage.kt`、`ui/HvacPanelView.kt`）
+
+- `HomePage` / `VehiclePage`：数值变化（续航 / 温度 / 风量 / 胎压）加「顶一下」，
+  车门状态色**渐变**而不是硬切；`bind()` 每秒刷新，只在**真的变了**时才动，避免数字常抖。
+- `AppPage` / `DrawerPage` / `RecentTasksPage`：应用格子按压反馈 + 列表错峰入场。
+- `NavPage`：来源箭头**旋转**动画、播放 / 收藏 / 播放模式切换时鼓一下、进度条宽度滑动。
+- `ScenePage`（4122 行、纯 Canvas）：新增**按命中区**的按压反馈系统
+  （`pressedHit` + `pressScale` + `withPress` 画布缩放，与 Dock 同一套模式），
+  覆盖 16 个命中区；壁纸圆点选中色渐变；拖拽卡片抬起时放大。
+- `HvacPanelView`：自带的进场 / 退场（宿主不用改）。
+
+**状态栏与 Dock**（`ui/shell/`）
+
+- `DockBarView`：风量 / 温度 ± / 快捷槽 / 媒体卡**补齐**按压反馈（原来按了没反应）；
+  风量与温度数值变化加脉冲；按压常量并入 `MotionSpec`。
+- `NavSlotBarView`：原先 `pressFeedback()` 装在**整条槽位条**上 ——
+  碰哪都把 1864px 宽的整条缩到 0.96；改成**逐槽位**反馈。
+- `ShellStatusBar`：设置齿轮 / 驾驶模式胶囊按压反馈。
+
+**浮窗与对话框**
+
+- `FloatWindowLayer`：焦点框淡入、窗口根视图与媒体浮窗关闭键按压反馈、
+  拖拽把手用 `Motion.attachPress` 保留原拖拽监听。
+- `SourceMenuLayer`：27 个来源项按压反馈 + 菜单进出动画（原来瞬间弹出 / 消失）。
+- `NavSlotDialog`：全部按钮 / 单元格按压反馈 + 进出动画。
+- 11 个对话框：统一继承 `DialogSheet` 的进场；退场改为**动画结束后才摘层**。
+
+**宿主接线**（`ui/LauncherView.kt`）
+
+`closeOverlayDialog` 原来**同步** `removeView` —— 视图当场从树上消失，
+任何退场动画都没机会播。改成统一漏斗 `removeAnimated()`：
+
+- `DialogSheet` → 先播退场动画，**动画结束才摘层**；
+- 非 `DialogSheet` → 保持原来的同步摘除；
+- 绕过 `showOverlayDialog` 的几条路（快捷应用选择器 / 任务列表 / 任务编辑 / 返回键）
+  也一并接上；
+- 新增 `closingOverlays` 集合挡住**重复摘层**（连点两下关闭、关闭 + 返回键）。
+
+### 六、判据
+
+| 项 | 结果 |
+| --- | --- |
+| `:app:compileSystemSources` | **BUILD SUCCESSFUL** |
+| `:app:testSystemUnitTest` | **BUILD SUCCESSFUL** —— 233 个测试类 / **2394 例**全过（基线 2366 例 + 新增 `MotionSpecTest` **28 例**） |
+| 耗时 | **48s**（基线 53s）—— 没有变慢 |
+| 改动规模 | 35 个文件 + 3 个新文件，+3133 / −592 行 |
+
+`MotionSpecTest` 覆盖：按压三档比例的相对关系、时长先后、错峰上限与负数保护、
+插值器控制点与 `OverlaySpec` 一致、颜色插值的端点 / 中点 / 越界夹取。
+
+### 七、过程中挖出来的三个真 bug
+
+这一轮加动画，顺手暴露了三个**既有代码里就埋着**的坑 ——
+它们平时不显形，是因为 App 里几乎不播动画。
+
+#### 1. `withEndAction` 会**无限循环**（最隐蔽的一个）
+
+`ViewPropertyAnimator` 是**每个 View 一个实例**（`view.animate()` 每次拿到的都是同一个），
+而 `withEndAction` 设的回调会**一直留在那个实例上**。
+
+于是「两段式动画」写成：
+
+```kotlin
+view.animate().scaleX(big).setDuration(90).withEndAction {
+    view.animate().scaleX(1f).setDuration(90).start()   // ← 第二段
+}.start()
+```
+
+第二段结束时会**再次触发**第一段留下的回调 → 回调又起第三段 → **永远停不下来**。
+
+后果不只是「动画停不下来」：每一帧都在跑 →
+Robolectric 的虚拟时钟被**无限推进** → 应用里所有定时器
+（状态栏时钟、天气刷新…）跟着疯狂触发 → 每个 tick 都写一条日志 →
+`ShadowLog` 把**每一条**日志都留在内存里（不落盘、不限量）→
+单测直接被撑爆：堆里 1170 万个 `ShadowLog$LogItem`、1.9 GB 的 `byte[]`。
+
+**改法**：两段之间、以及每次起新动画之前，都 `withEndAction(null)` 把旧回调清掉。
+
+#### 2. 布局里播动画 → 无限布局循环
+
+`NavPage.onLayout()` 里调了 `refreshProgress()`，而它会**播一段动画**，
+动画帧里又改 `layoutParams.width`。
+
+于是：**布局 → 播动画 → 动画帧改宽度 → 重新布局 → 布局 → …**
+Choreographer 每一帧都排一次遍历，每次遍历都进一次布局，每次布局都重起一段动画 ——
+同样停不下来。
+
+**改法**：**布局里只定宽，不播动画**；
+动画交给 [refreshProgress]（不在布局里调用），并且动画帧里显式 `requestLayout()`
+（`View.setLayoutParams` 传同一个对象时会直接返回，不触发布局）。
+
+#### 3. Kotlin 的属性初始化顺序
+
+`DrawerPage` 里新加的 `segmentStyles` 表声明在 `init` **之后**，
+而 `init` 里就会调 `segment()` 往这张表里写 ——
+Kotlin 按**声明顺序**初始化属性，所以那一刻它还是 `null` → `NullPointerException`，
+**抽屉根本构造不出来**（连带 20 多个抽屉相关用例全挂）。
+
+**改法**：把这张表挪到 `init` 之前，并写清楚「为什么不能挪回去」。
+
+### 八、已知限制
+
+1. **自绘控件（Canvas）没有 View 可挂** —— 场景页 / Dock / 状态栏 / 导航槽位条
+   的按压反馈是「命中区级」的画布缩放，不是 View 缩放。命中区在绘制时才注册，
+   所以**必须先登记命中矩形再绘制**，否则缩放中心取不到、动画不显示。
+2. **`TempDialView` 的温度拖拽是既有 bug，本轮未改** ——
+   `temperature` 的 setter 在 `dragging` 为真时直接返回，
+   于是 `ACTION_MOVE` 实际是空操作、`onTemp` 报的还是拖拽前的温度。
+   本轮只加了显示值的渐变，**没有碰这个语义**，值得单独修。
+3. **段落字重无法插值** —— 分段控件的「选中项加粗」仍是硬切，只有颜色和缩放做了过渡。
+4. **按压反馈与状态鼓动共用 `scaleX/scaleY`** —— 点一下就切换状态的控件，
+   松手回弹会被鼓动接管（视觉上是 0.96 → 1.06 → 1.0），刻意为之。
+5. **Dock 的风量 / 温度脉冲只在 `state != null` 且值真的变了时触发** ——
+   车端没数据时不脉冲，避免整排数字莫名其妙地抖。
+6. `Motion.exitSheet` 用的是 `ObjectAnimator`（不是 `ViewPropertyAnimator`），
+   所以 `view.animate().cancel()` 掐不掉它 —— 已在 `Motion` 里登记退场动画，
+   `enterSheet` 进场前会先掐掉，避免两个动画抢同一批属性。
+7. **`Motion` 的两个注册表用 `WeakHashMap`** —— 但 `WeakHashMap` 的**值**
+   会经由监听器间接引用**键**（动画器 → 监听器 → `onFrame` 闭包 → 视图），
+   这条链不打破的话条目永远回收不掉。所以监听器里只持**弱引用**，
+   并且视图重新挂上时会把缩放复位。
