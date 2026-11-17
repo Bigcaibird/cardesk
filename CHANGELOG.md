@@ -7476,3 +7476,19 @@ API 28 的 `PlaybackState` 默认值是 **NONE（0）** →
    两者不一致时以**结果事件**为准（见 4.2）。
 7. 模拟器是 API 28；真车 API 29 的 `ISessionController` 签名不同
    （没有 `callingPackage`）→ 代码按**参数类型**自适应，不用改。
+
+---
+
+### 九、产物
+
+| 项 | 值 |
+|---|---|
+| 包 | `dist/CarDesk-platform-ecarx-cardesk-4270.apk` |
+| 包名 / 版本 | `com.ecarx.cardesk` / 4270 / 1.0.1174-system |
+| 大小 | 3 525 335 字节 |
+| 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
+| SHA-256 | `d7465741586d52159a918865464b248f734e0b0d561849b74ec2ced8a3ce904c` |
+| 更新清单 | `dist/cardesk-latest.json`（R2 key `cardesk/CarDesk-platform-ecarx-cardesk-4270.apk`） |
+| 提交 | 代码 `e7a084a`；出包见 `git log` |
+| GitHub Release | [`v1.0.1174`](https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1174) —— **已发布**，附件为 4270 的 APK |
+| R2 上传 | **未做** —— 环境里没有 `R2_AK` / `R2_SK`（凭据只从环境变量读；与第132/133/136/190/191/192/193轮一致） |

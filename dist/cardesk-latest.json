@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1173",
-  "versionCode": 4269,
-  "tag": "v1.0.1173",
-  "name": "CarDesk 4269 / 1.0.1173-system",
-  "notes": "修复全局 Dock 在几乎所有 App 里让位 + 让位后车机自带导航栏露出来\n\n一、现象\n- 全局 Dock 在几乎所有 App 里都让位（原先只有网易云、汽水音乐会让位），回到桌面也受影响。\n- Dock 一让位，底下被它盖住的车机自带导航栏（CarNavigationBar）就露了出来。\n\n二、根因（一处策略写错，连锁四环）\n- 第 189 轮把「隐藏原车 Dock」改成全局生效时，把 hideNavigation = prefs.hideDock 误接到了**预留区路径**上。\n- 结果 CarDesk 往 policy_control 写了 immersive.navigation=*，把系统导航栏连同 112px 预留带从**所有** App 的窗口布局里摘掉。\n- 同一条策略让 WMS 给**每个** App 打上 HIDE_NAVIGATION/IMMERSIVE，而 dumpsys window policy 的 mLastSystemUiFlags 是**全局**值 —— 沉浸探测对任何前台 App 都返回 true。\n- 于是 Dock 到处让位；而 CarDesk 的 Dock 是 TYPE_NAVIGATION_BAR_PANEL(2024)，本来就盖在原车导航栏**之上**，它一隐藏，底下的原车导航栏就露出来。\n\n三、改了什么\n- 预留区路径不再写 immersive.navigation=*：闸口 GlobalDockPolicyGate 改传 hideNavigation=false，SystemNavigationPolicy.merge() 里也加了结构性兜底（navInsets=true 时一律不写）。没有预留区的 2038 悬浮窗路径保持原样（那条路径必需）。\n- 沉浸探测加一道闸：policy_control 里有通配符沉浸策略时，mLastSystemUiFlags 代表的是策略而不是某个 App 的行为 —— 判为「探测不可用」，宁可不让位，也不让所有 App 都让位。\n- 让位判定抽成纯函数 DockYieldPolicy：名单命中 → 让位；桌面在前台 → 一定不让位；探测不可用 → 不让位。\n- 让位日志区分「名单 / 桌面 / 不可用 / true / false」，排障时能一眼看出是哪条规则生效。\n\n四、实测（API 28 模拟器，同一套设置下新旧包 A/B 对照）\n- 旧包 4268：从 QQ 音乐起就一直让位，高德、设置页、甚至普通 App 全部让位（复现了用户报告的现象）。\n- 新包：桌面左右滑动不触发让位；QQ 音乐、高德、普通 App 均不让位，Dock 完整显示、导航栏不再露出；网易云、汽水音乐、真正的沉浸型 App 仍按预期让位。\n- 策略侧：policy_control 由 immersive.navigation=* 变为 null，预留带保持 112px。\n\n五、校验\n- 单测 2291 → 2308 项全绿（新增 DockYieldPolicyTest 9 项、ImmersiveDetectorTest 6 项，SystemNavigationPolicyTest 改写并补 2 项）。",
-  "publishedAt": "2026-11-17T01:13:18Z",
+  "version": "1.0.1174",
+  "versionCode": 4270,
+  "tag": "v1.0.1174",
+  "name": "CarDesk 4270 / 1.0.1174-system",
+  "notes": "音乐卡新增汽水音乐支持 + 未适配音乐 App 的通用兜底，收藏爱心图标放大\n\n一、这次更新了什么\n- 音乐卡（第二页导航页）新增「收藏」和「播放模式」两个图标按钮的能力扩展：\n  · **新增适配汽水音乐车机版**（此前只适配了 QQ 音乐和网易云）；\n  · **未适配的音乐 App 有了通用兜底**：只要它用 Android 标准媒体会话，\n    桌面就能自动认出来并给出收藏按钮；\n  · 收藏爱心图标**放大了约 43%**（内容区 28×28 → 40×40，点击热区和版式不变）。\n\n二、汽水音乐这次为什么能支持收藏\n- 重新检查了汽水车机版（com.luna.music.car）的会话回调，发现它实现了标准的\n  「评分」回调：收到心形评分就执行收藏/取消收藏。\n- 也就是说：桌面下发**标准心形评分**它就会真的收藏，收藏态也能从会话元数据读回来。\n- 汽水的「切换播放模式」仍然没有对外开放通道（只在它自己的进程内指令中心里，\n  由语音触发），所以播放模式按钮对汽水是隐藏的。\n\n三、通用兜底怎么工作\n- 兜底走的是 Android 官方定义的标准媒体会话入口：\n  收藏 = 心形评分，播放模式 = 自定义动作。\n- 但不是无脑乱发：桌面会先看这个会话自己发布的事实再决定亮不亮按钮 ——\n  · 会话发布了心形评分 → 说明它用标准收藏语义 → 亮收藏按钮；\n  · 会话暴露了重复/随机播放模式字段 → 说明它用标准模式语义 → 亮播放模式按钮；\n  · 探测不到 → 两个按钮都不亮（亮一个点了没反应的按钮比没有更糟）。\n\n四、顺带修掉的问题\n- 网易云音乐收藏后，界面偶尔停在「未收藏」：它的进程内缓存和它发出来的元数据\n  可能不一致。现在桌面会接住播放器回报的收藏结果，把状态校正过来；\n  真的失败则回滚，不会让界面停在「以为收藏了」。\n- 隐藏 API 的会话代理调用抽成了公共层，并兼容了不同 Android 版本上\n  评分入口的不同命名。\n\n五、实测（API 28 模拟器，车机真包）\n- 汽水音乐：收藏/取消收藏下发成功，收藏态由播放器回报。\n- 通用兜底：把汽水从适配表里摘掉后（等价于一个没适配过的音乐 App），\n  桌面靠探测照样认出来并能收藏；播放模式按钮仍正确隐藏。\n- 网易云音乐：收藏/取消收藏/切换播放模式全部通过。\n- QQ 音乐：收藏/播放模式回归通过。\n- 单测 2353 项全绿。",
+  "publishedAt": "2026-11-17T05:24:23Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4269.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4269.apk",
-    "size": 3488743,
-    "sha256": "3acbfbd5bf62b16ae6f17f5de50b5da0e2b35e6dc95cc2a662244dd0d2e434e7"
+    "name": "CarDesk-platform-ecarx-cardesk-4270.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4270.apk",
+    "size": 3525335,
+    "sha256": "d7465741586d52159a918865464b248f734e0b0d561849b74ec2ced8a3ce904c"
   }
 }

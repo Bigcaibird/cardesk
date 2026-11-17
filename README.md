@@ -72,6 +72,7 @@
 | 仪表歌词投射 | 投射到副屏，可选主副歌词配色 |
 | 专辑封面 / 进度条 | 实时封面与播放进度 |
 | 媒体源切换 | 默认媒体源可配置，卡片显示来源图标 |
+| 收藏 / 播放模式 | 音乐卡图标按钮：收藏走标准心形评分，未适配的 App 也能自动识别 |
 
 ### 导航
 
@@ -187,7 +188,7 @@ $GRADLE testSystemUnitTest --offline
 ### 出包
 
 ```bash
-bash tools/release.sh --notes-file tools/notes-r193.md
+bash tools/release.sh --notes-file tools/notes-r196.md
 ```
 
 `tools/release.sh` 会自动：版本号 +1 → 干净目录全量构建 + 跑单测 →
@@ -214,8 +215,8 @@ python3 tools/publish_r2.py --bucket file \
 
 | 项 | 值 |
 | --- | --- |
-| 当前版本 | `1.0.1173-system`（versionCode **4269**，第193轮） |
-| GitHub Release | [`v1.0.1173`](https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1173) —— 已发布 |
+| 当前版本 | `1.0.1174-system`（versionCode **4270**，第196轮） |
+| GitHub Release | [`v1.0.1174`](https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1174) —— 已发布 |
 | R2 上传 | **未做** —— 本机没有 `R2_AK` / `R2_SK` 凭据（凭据只从环境变量读） |
 
 各轮产物与发布记录见 [CHANGELOG.md](CHANGELOG.md)。
