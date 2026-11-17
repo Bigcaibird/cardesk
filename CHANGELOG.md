@@ -6833,8 +6833,8 @@ W/CarDesk/Dock: 沉浸探测失效：policy_control 有全局沉浸策略，mLas
 | 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
 | SHA-256 | `3acbfbd5bf62b16ae6f17f5de50b5da0e2b35e6dc95cc2a662244dd0d2e434e7` |
 | 更新清单 | `dist/cardesk-latest.json`（R2 key `cardesk/CarDesk-platform-ecarx-cardesk-4269.apk`） |
-| 提交 | 见 `git log` |
-| GitHub Release | [`v1.0.1173`](https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1173) |
+| 提交 | `4544372` |
+| GitHub Release | [`v1.0.1173`](https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1173) —— **已发布**，附件为 4269 的 APK（3 488 743 B，远端 digest 与本地 SHA-256 一致） |
 | R2 上传 | **未做** —— 环境里没有 `R2_AK` / `R2_SK`（凭据只从环境变量读；与第132/133/136/190/191/192轮一致） |
 | R2 上传 | **未做** —— 环境里没有 `R2_AK` / `R2_SK`（凭据只从环境变量读；与第132/133/136/190/191/192轮一致） |
 
