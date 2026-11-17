@@ -7489,6 +7489,6 @@ API 28 的 `PlaybackState` 默认值是 **NONE（0）** →
 | 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
 | SHA-256 | `d7465741586d52159a918865464b248f734e0b0d561849b74ec2ced8a3ce904c` |
 | 更新清单 | `dist/cardesk-latest.json`（R2 key `cardesk/CarDesk-platform-ecarx-cardesk-4270.apk`） |
-| 提交 | 代码 `e7a084a`；出包见 `git log` |
-| GitHub Release | [`v1.0.1174`](https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1174) —— **已发布**，附件为 4270 的 APK |
+| 提交 | 代码 `e7a084a`；出包 `6e072a0` |
+| GitHub Release | [`v1.0.1174`](https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1174) —— **已发布**，附件为 4270 的 APK（3 525 335 B，远端 digest 与本地 SHA-256 一致） |
 | R2 上传 | **未做** —— 环境里没有 `R2_AK` / `R2_SK`（凭据只从环境变量读；与第132/133/136/190/191/192/193轮一致） |
