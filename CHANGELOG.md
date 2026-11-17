@@ -1,6 +1,6 @@
 # CarDesk · 变更日志
 
-本文件是 CarDesk 的**逐轮开发记录**（第 1 ~ 193 轮），
+本文件是 CarDesk 的**逐轮开发记录**（第 1 ~ 194 轮），
 包含每一轮的根因分析、改法、判据与实测数据。
 
 项目本身的介绍、编译环境、支持的 Android 版本与功能清单见
@@ -6864,3 +6864,117 @@ W/CarDesk/Dock: 沉浸探测失效：policy_control 有全局沉浸策略，mLas
   「用 `immersive.navigation=*` 隐藏」当成了同一件事 ——
   但在预留区路径上，前者由 2024 面板顶替就已经实现了，后者是**多余的**，
   而且副作用极大。
+
+---
+
+## 第194轮：「启动后自动播放」改为后台起播（不再把音乐 App 拉到前台）
+
+### 一、用户提的需求
+
+> 设置里的启动自动播放，现在会把音乐app唤醒到前台再播放，
+> 可不可以做到不把音乐app唤醒到前台，在后台直接播放
+
+对应的是第149轮的 `MediaAppLauncher.launchAndPlay`：
+`getLaunchIntentForPackage` + `startActivity` → **音乐 App 被拉到前台** →
+轮询等 `MediaSession` 挂上来 → 下「播放」。
+
+### 二、结论：能做到，但只对一部分播放器能做到
+
+**关键实测规律**（模拟器 Android 9，车机真包，见 [`emu-verify/REPORT-r194.md`](emu-verify/REPORT-r194.md)）：
+
+| 通道 | App 没运行时能唤起吗 | 会拉前台吗 |
+|---|---|---|
+| **绑定 `MediaBrowserService`** | **能**（绑定会拉起它的进程） | **不会**（起的是 Service，不是 Activity） |
+| 发定向 `MEDIA_BUTTON` 广播 | **不能**（没进程 → 广播无人接） | 不会 |
+| 发定向第三方广播（QQ 音乐那套） | **不能**（同上） | 不会（但也唤不起来） |
+| `startActivity`（原实现） | 能 | **会** |
+
+→ **唯一能在后台冷启动播放器的正规通道是 `MediaBrowserService`。**
+
+各播放器的实测结果：
+
+| 播放器 | 后台通道 | 结果 | 前台 |
+|---|---|---|---|
+| **网易云车机版** | 有 `AutomotiveService`（标准 action，无权限要求） | ✅ **后台起播成功** | **桌面**（网易云没抢到） |
+| 汽水音乐车机版 | 有 `MediaBrowserPlayerService`，但 `onGetRoot()` 返回 null | ❌ 连不上 → 降级 | 汽水 |
+| QQ 音乐车机版 | **没有**（全包 grep 无 `MediaBrowserService`） | ❌ 直接拉前台 | QQ 音乐 |
+
+**功能零退化**：不支持后台起播的播放器，行为与第149轮**完全一致**（照样能播，只是仍会拉前台）。
+
+### 三、改了什么
+
+| 文件 | 作用 |
+|---|---|
+| `core/media/BackgroundPlayback.kt`（新） | **纯逻辑**：通道表 + 判定，可 JVM 单测 |
+| `core/media/BackgroundPlayerConnector.kt`（新） | **执行层**：`MediaBrowser` 连接 + 下发播放 + 失败回调 |
+| `core/media/MediaAppLauncher.kt`（改） | 接入：先后台，连不上降级前台 |
+
+流程：
+
+```
+桌面起来
+  └─ 试后台起播
+       ├─ 查该包自己的 MediaBrowserService（按 serviceInfo.packageName 筛）
+       │    └─ 没有 → 直接拉前台
+       └─ 有 → MediaBrowser.connect()
+            ├─ 连上 → transportControls.play()      ✅ 不拉前台
+            └─ 连不上 → 降级：拉前台 + 轮询会话 + 下播放（与第149轮一致）
+```
+
+### 四、踩到的三个坑（都已修，记在这里免得再犯）
+
+**坑一：类名形态判断错了。**
+`serviceInfo.name` 在 Android 9 上给的是**相对类名**
+（`com.netease.cloudmusic.service.AutomotiveService`）——它**含点号但不含包名**。
+一开始用「含不含点号」区分完整名/相对名，结果网易云的相对名被错补成
+`com.netease.cloudmusic.iot.com.netease…`（连不上），
+更糟的是把**别的 App** 的完整名也错补一遍 → **连到了系统音乐**
+（日志实测：`service=com.netease.cloudmusic.iot.com.android.music.MediaPlaybackService`）。
+
+→ 正确判据是「**是不是以目标包名开头**」，并且先用 `serviceInfo.packageName`
+把**别的包**的服务筛掉 —— 连到别人家去下指令，等于替第三方按播放。
+
+**坑二：`ComponentName(pkg, cls)` 要的是相对类名。**
+我们手里是完整类名，直接塞进去会拼成 `pkg.pkg.相对名`。
+
+**坑三：连接是异步的，不能同步判定「连上了」。**
+最初写成「发起连接即算成功」，结果汽水连不上时**既没拉前台也没播** —— 用户完全没声音。
+→ 连接器带 `onFailure` 回调，**失败时才**触发前台降级。
+
+### 五、验证
+
+| 项 | 结果 |
+|---|---|
+| 单测 | **2325 全绿**（0 失败 0 错误 0 跳过） |
+| 新增单测 | `BackgroundPlaybackTest`（13 例，纯逻辑）+ `BackgroundPlaybackLaunchTest`（4 例，执行层） |
+| 回归 | `MediaAppLauncherTest`（12）+ `MediaAppLauncherLaunchTest`（5）仍全绿 |
+| 模拟器端到端 | 网易云**后台起播成功、前台是桌面**；汽水/QQ音乐走降级、照样能播 |
+| 实测报告 | [`emu-verify/REPORT-r194.md`](emu-verify/REPORT-r194.md) |
+
+新增的 `BackgroundPlaybackLaunchTest` 锁住的核心断言是
+**「后台通道可用时，一个 Activity 都不该被启动」** —— 这正是用户要的那条性质。
+
+### 六、已知限制（只能装车验证）
+
+1. **真车上「真的在放」尚未验证**。模拟器上网易云未登录、无播放列表，
+   会话起来了但 `state=null`（播放器拒绝播放）。
+   → 装车判据：开机后桌面音乐卡有没有歌名、有没有出声，
+   **且**全程没有网易云的界面闪一下。
+2. **汽水的连接失败原因**在模拟器上是 `onGetRoot()` 返回 null；真车版本若有差异，
+   表现可能不同 —— 但**降级路径保证不影响功能**。
+3. **QQ 音乐仍是拉前台**。它没有 `MediaBrowserService`；
+   第三方 AIDL（`QQMusicApiService`）能用但依赖对方的 AIDL 契约，本轮没做。
+4. 模拟器是 API 28，真车是 API 29，`MediaBrowser` 行为一致（同一套 AOSP 实现）。
+
+### 七、教训
+
+- **「能在后台做」这件事，得先分清是哪个 API 在起作用**。
+  这次真正让冷启动播放器在后台跑起来的是 `MediaBrowserService` 的**绑定语义**
+  （绑定 Service 会拉进程，但不建窗口），而不是「广播」——
+  广播在 App 没运行时根本没人接。凭直觉猜通道会浪费很多轮。
+- **类名/包名的形态要靠实测确认，不能靠命名直觉**。
+  `serviceInfo.name` 是相对名还是完整名，系统之间不一样；
+  猜错的后果不是「连不上」，而是**连到别的 App 上乱下指令**。
+- **异步的判定不能同步地下结论**。
+  「发起连接」不等于「连上了」；连不上时必须有明确的降级出口，
+  否则功能会从「弹前台」变成「**完全没声音**」—— 那比原问题更糟。

@@ -8,7 +8,8 @@ import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 
 /**
- * 「桌面启动完成后唤起默认媒体来源 App 并让它播放」（第149轮）。
+ * 「桌面启动完成后唤起默认媒体来源 App 并让它播放」（第149轮；
+ * 第一九四轮起改为**优先后台起播**）。
  *
  * ## 为什么单独一个文件
  *
@@ -28,6 +29,15 @@ import com.cardesk.launcher.core.log.Logx
  *
  * 这里用的是 [MusicSessionTracker.setPlaying] 的「表达期望状态」语义：
  * 已经在放 → 什么都不做；不在放 → 下发一次播放。
+ *
+ * ## 第一九四轮：起播顺序改为**先后台、再前台**
+ *
+ * 原来第②步是 `startActivity` —— 音乐 App 被**拉到前台**，用户的桌面被顶掉。
+ * 现在先试 [BackgroundPlayback]：绑播放器的 `MediaBrowserService`，
+ * 播放器在后台把会话挂上来，直接下「播放」，**它一个 Activity 都不起**。
+ *
+ * 绑不上（汽水不接外部客户端、QQ 音乐没有这个服务）就**退回前台**，
+ * 行为与第一四九轮一致 —— 功能不退化。
  */
 object MediaAppLauncher {
 
@@ -87,10 +97,25 @@ object MediaAppLauncher {
     /**
      * 真正执行：起 App → 等会话 → 下播放指令。
      *
-     * ## 开关判断放在**里面**
+     * ## 和上面那段「只锁定、不拉起」的区别
      *
-     * 放在外面的话每个调用方都得自己判一遍，早晚有地方忘 ——
-     * 忘了就会变成「用户明明关了开关，开机还是弹出音乐 App」。
+     * 上面那段是**无条件**的「锁定默认源」—— 桌面起来就知道该听谁的，
+     * 但**不打扰用户**（不弹 App）。
+     *
+     * 这一段是**用户显式打开开关**后才会发生的「拉起 App + 下播放指令」——
+     * 属于「开机就直接开始听歌」的需求。
+     *
+     * 开关默认关：开机弹出一个音乐 App 挺打扰，而且默认源是「通用音乐」时
+     * 根本没有对应的 App 可拉（`MediaAppLauncher.shouldLaunch` 会挡住）。
+     *
+     * ## 起播顺序：先后台，再前台（第一九四轮）
+     *
+     * 原来只有一条路：`startActivity` 把音乐 App **拉到前台**。
+     * 现在先试[后台起播](BackgroundPlayback)——绑它的 `MediaBrowserService`，
+     * 播放器在后台把会话挂上来，直接下「播放」，**音乐 App 一个 Activity 都不起**。
+     *
+     * 绑不上（汽水不接外部客户端 / QQ 音乐压根没有这个服务）就**退回前台**，
+     * 行为与以前完全一致 —— 功能不退化，只是仍然会拉前台。
      *
      * @param autoLaunchEnabled 设置页那个开关
      * @param onStarted 已把 App 拉起来（回调里可以记日志 / 刷新界面）
@@ -121,12 +146,49 @@ object MediaAppLauncher {
             Logx.i(LogTags.MEDIA, "启动后唤起媒体 App：无可用包", "sourceId" to sourceId)
             return null
         }
+
+        // 第一步：试后台起播（不拉前台）。
+        //
+        // 连接是**异步**的（要等播放器进程起来），所以这里返回的是「是否发起了后台尝试」；
+        // 连不上时由 [BackgroundPlayerConnector] 的回调触发前台降级。
+        if (tryBackgroundPlayback(
+                context = context,
+                pkg = pkg,
+                onStarted = onStarted,
+                onFallback = { launchInForeground(context, pkg, sourceId, onStarted) },
+            )
+        ) {
+            Logx.i(
+                LogTags.MEDIA,
+                "启动后唤起媒体 App：已发起后台起播，不拉前台",
+                "pkg" to pkg,
+                "sourceId" to sourceId,
+            )
+            return pkg
+        }
+
+        // 第二步：后台通道不可用（汽水 / QQ 音乐 / 服务没注册）→ 拉前台，行为与第一四九轮一致。
+        launchInForeground(context, pkg, sourceId, onStarted)
+        return pkg
+    }
+
+    /**
+     * 降级路径：把播放器**拉到前台**，等它的会话挂上来后下「播放」。
+     *
+     * 与第一四九轮完全一样 —— 保证「后台通道不可用」时功能不退化。
+     */
+    private fun launchInForeground(
+        context: Context,
+        pkg: String,
+        sourceId: String,
+        onStarted: ((String) -> Unit)?,
+    ) {
         val intent = runCatching {
             context.packageManager.getLaunchIntentForPackage(pkg)
         }.getOrNull()
         if (intent == null) {
             Logx.w(LogTags.MEDIA, "启动后唤起媒体 App：拿不到启动 Intent", "pkg" to pkg)
-            return null
+            return
         }
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val started = runCatching {
@@ -136,11 +198,128 @@ object MediaAppLauncher {
             Logx.w(LogTags.MEDIA, "启动后唤起媒体 App：起不来", it, "pkg" to pkg)
             false
         }
-        if (!started) return null
-        Logx.i(LogTags.MEDIA, "启动后唤起媒体 App：已拉起", "pkg" to pkg, "sourceId" to sourceId)
+        if (!started) return
+        Logx.i(
+            LogTags.MEDIA,
+            "启动后唤起媒体 App：已拉起（后台通道不可用，走前台）",
+            "pkg" to pkg,
+            "sourceId" to sourceId,
+        )
         onStarted?.invoke(pkg)
         awaitSessionThenPlay(pkg)
-        return pkg
+    }
+
+    /**
+     * 试后台起播：绑播放器的 `MediaBrowserService`，拿到会话就下「播放」。
+     *
+     * ## 为什么不让这一层去查「有哪些浏览器服务」
+     *
+     * 系统里可能同时挂着系统音乐、别的播放器的浏览器服务。
+     * 我们只认**目标包自己**的那个（[BackgroundPlayback.pickBrowserService]）——
+     * 连到别人的服务上下指令等于替第三方按播放。
+     *
+     * ## 为什么失败要**降级**而不是放弃
+     *
+     * 后台起播是**优化**，不是功能前提。播放器不支持（汽水 / QQ 音乐）时，
+     * 退回前台拉起，行为与第一四九轮完全一样 —— 用户照样能听到歌。
+     *
+     * @param onStarted 成功起播后的回调
+     * @param onFallback 连不上时的降级回调（走前台拉起）
+     * @return true = 已发起后台尝试；false = 这条路根本不可用（调用方该立刻走前台）
+     */
+    private fun tryBackgroundPlayback(
+        context: Context,
+        pkg: String,
+        onStarted: ((String) -> Unit)?,
+        onFallback: () -> Unit,
+    ): Boolean {
+        val channel = BackgroundPlayback.channelOf(pkg) ?: return false
+        if (!channel.hasBrowserService) {
+            Logx.i(
+                LogTags.MEDIA,
+                "后台起播：该播放器没有浏览器服务，只能拉前台",
+                "pkg" to pkg,
+            )
+            return false
+        }
+        val serviceClass = channel.browserServiceClass ?: return false
+
+        // 运行时核对：这个服务确实注册了标准 action（清单说了算，不是我们说了算）。
+        //
+        // ## `serviceInfo.name` 的形态：实测是**相对类名**
+        //
+        // Android 9 上实测给的是 `com.netease.cloudmusic.service.AutomotiveService`
+        // —— 含点号，但**不含包名**。所以判据只能是「**是不是以目标包名开头**」，
+        // 不能用「含不含点号」。
+        //
+        // 另一个坑：`serviceInfo.packageName` 才是**这个服务属于谁**。
+        // 用它筛出目标包的服务，再把相对类名补成完整类名 ——
+        // 这样别的 App 的服务（系统音乐、汽水）根本不会进候选，
+        // 也就不会出现「把别人的服务补上目标包前缀」的脏数据。
+        val resolved = runCatching {
+            val pm = context.packageManager
+            val services = pm.queryIntentServices(
+                Intent(BackgroundPlayback.ACTION_MEDIA_BROWSER_SERVICE),
+                0,
+            )
+            val names = services.mapNotNull { info ->
+                val serviceInfo = info.serviceInfo ?: return@mapNotNull null
+                if (serviceInfo.packageName != pkg) return@mapNotNull null
+                val name = serviceInfo.name ?: return@mapNotNull null
+                if (name.isBlank()) return@mapNotNull null
+                if (name.startsWith("$pkg.")) name else "$pkg.$name"
+            }
+            // 排障：系统枚举到的浏览器服务原样落盘 —— 类名形态（完整 / 相对）
+            // 在不同系统上不一样，靠猜会连到别的 App 的服务上。
+            Logx.i(
+                LogTags.MEDIA,
+                "后台起播：系统枚举到的浏览器服务",
+                "pkg" to pkg,
+                "services" to names.joinToString(","),
+            )
+            BackgroundPlayback.pickBrowserService(names, pkg)
+        }.getOrNull()
+
+        if (resolved == null) {
+            Logx.i(
+                LogTags.MEDIA,
+                "后台起播：系统里查不到该播放器的浏览器服务，退回前台",
+                "pkg" to pkg,
+                "expected" to serviceClass,
+            )
+            return false
+        }
+
+        BackgroundPlayerConnector.connectAndPlay(
+            context = context,
+            packageName = pkg,
+            browserServiceClass = resolved,
+            onPlay = { controller ->
+                // 拿得到控制器就说明通道通了 —— 下「播放」。
+                // 幂等：已经在放就什么都不做（翻转一次很可能变成「暂停」）。
+                runCatching {
+                    val state = controller.playbackState
+                    val playing = state != null &&
+                        state.state == android.media.session.PlaybackState.STATE_PLAYING
+                    if (!playing) controller.transportControls.play()
+                }.onFailure {
+                    Logx.w(LogTags.MEDIA, "后台起播：下发播放失败", it, "pkg" to pkg)
+                }
+                onStarted?.invoke(pkg)
+            },
+            onFailure = { reason ->
+                // 连不上（汽水不接外部客户端 / 播放器没起来）→ 降级到拉前台。
+                Logx.i(
+                    LogTags.MEDIA,
+                    "后台起播：连不上，降级到拉前台",
+                    "pkg" to pkg,
+                    "reason" to reason,
+                )
+                onFallback()
+            },
+        )
+        // 连接是异步的；这里只表示「已发起」。
+        return true
     }
 
     /**
