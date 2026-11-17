@@ -6,8 +6,11 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
+import android.os.Handler
+import android.os.Looper
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import com.cardesk.launcher.core.Palette
 import com.cardesk.launcher.core.Palettes
 import com.cardesk.launcher.ui.anim.Motion
@@ -24,6 +27,7 @@ import kotlin.math.min
  * | 行为 ||
  * |---|---|
  * | 按下 ± 键 | 立刻 ±0.5℃（在 ACTION_DOWN） |
+ * | 按住 ± 键不放 | 满一个**长按超时**（系统标准，和 Dock 长按一致）后开始**连发**，每 150ms 一次 |
  * | 按住表盘拖动 | `atan2` 取角度 → 夹到 [-135°,135°] → 映射 16~32℃ → 吸附 0.5℃ |
  * | 拖动中 | 圆环和数字**跟着手指走**（直接落值，不做渐变，见 [applyDragTemperature]） |
  * | 抬手 | 回调**绝对温度** `onTemp(temp)` —— 报的是**拖出来的那个值** |
@@ -157,7 +161,12 @@ class TempDialView(context: Context) : View(context) {
     private fun applyTemperature(value: Float) {
         if (tempValue == value) return
         tempValue = value
-        animateTemperature(value)
+        // 按住 ± 键连发时，回读来得比渐变还快（150ms 一步 vs 200ms 渐变）——
+        // 渐变会被反复重定向，数值**永远落后**于真实值，看着就是「按了没反应」。
+        // 这时候换短一档的渐变（120ms < 150ms），每一步都能走完。
+        val duration =
+            if (pressedButton != null) MotionSpec.VALUE_FAST_DURATION else MotionSpec.VALUE_DURATION
+        animateTemperature(value, duration)
     }
 
     /**
@@ -193,12 +202,14 @@ class TempDialView(context: Context) : View(context) {
      * 温度渐变到新值。
      *
      * 用 [Motion.animateValue]：每帧回调中间值，画出来就行。
+     *
+     * @param duration 渐变时长 —— 连发时用短一档（见 [applyTemperature]）。
      */
-    private fun animateTemperature(target: Float) {
+    private fun animateTemperature(target: Float, duration: Long = MotionSpec.VALUE_DURATION) {
         val from = displayTemp
         val token = Any()
         tempToken = token
-        Motion.animateValue(from, target) { v ->
+        Motion.animateValue(from, target, duration) { v ->
             if (tempToken !== token) return@animateValue
             displayTemp = v
             invalidate()
@@ -247,6 +258,51 @@ class TempDialView(context: Context) : View(context) {
                 invalidate()
             }
         }.also { it.start() }
+    }
+
+    // ------------------------------------------------------------------ ± 键连发
+
+    /**
+     * 按住 ± 键的**连发**计时器。
+     *
+     * ## 为什么需要它
+     *
+     * ± 键原来只在 `ACTION_DOWN` 步进**一次** —— 按住不放就再也不动了。
+     * 想加 2℃ 就得连点 4 次，车机上这是很别扭的手感
+     * （车机自带的 HVAC 面板都是按住连发的）。
+     *
+     * 做法和 Dock 的长按一个路子：`Handler.postDelayed` 排一个**自续**的任务，
+     * 到点了步进一次、再排下一次；抬手 / 视图离开窗口时撤掉。
+     */
+    private val handler = Handler(Looper.getMainLooper())
+
+    /**
+     * 连发任务：到点了就再步进一次，然后排下一次。
+     *
+     * 自续（而不是排一串固定任务）的好处是**节奏不累积漂移** ——
+     * 每一次都从「上一次真正跑完的时刻」起算 150ms。
+     */
+    private val repeatTask = object : Runnable {
+        override fun run() {
+            val key = pressedButton ?: return   // 已经松手了 —— 别再排下一次
+            onDelta?.invoke(if (key == "minus") -STEP else STEP)
+            handler.postDelayed(this, REPEAT_INTERVAL_MS)
+        }
+    }
+
+    /**
+     * 停掉连发。
+     *
+     * 抬手、视图离开窗口都要调 —— 否则视图被摘掉之后还在后台调 [onDelta]，
+     * 宿主照样会往车机下发温度。
+     */
+    private fun stopRepeat() {
+        handler.removeCallbacks(repeatTask)
+    }
+
+    override fun onDetachedFromWindow() {
+        stopRepeat()
+        super.onDetachedFromWindow()
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -334,6 +390,11 @@ class TempDialView(context: Context) : View(context) {
                     // 这才像「按到了」。
                     startPress(if (minus) "minus" else "plus")
                     onDelta?.invoke(if (minus) -STEP else STEP)
+                    // 按住不放 → 连发。
+                    // 门槛用**系统长按超时**（和 Dock 的长按一个标准），
+                    // 用户不用学新的规矩，也不会因为手抖就连加好几度。
+                    stopRepeat()
+                    handler.postDelayed(repeatTask, ViewConfiguration.getLongPressTimeout().toLong())
                     return true
                 }
                 dragging = true
@@ -347,6 +408,8 @@ class TempDialView(context: Context) : View(context) {
                 return true
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                // 先停连发：手指已经抬起来了，不该再往下加温度。
+                stopRepeat()
                 if (pressedButton != null) endPress()
                 if (dragging) {
                     // 顺序很重要：**先把 dragging 放下，再回调**。
@@ -446,5 +509,16 @@ class TempDialView(context: Context) : View(context) {
 
         /** 单次步进 0.5℃。 */
         const val STEP = 0.5f
+
+        /**
+         * 按住 ± 键的**连发间隔**（毫秒）。
+         *
+         * 150ms：每秒约 6.7 步 = **3.3℃/s** ——
+         * 16℃ 的全量程大约 5 秒走完，既不拖沓也不会一冲到底。
+         *
+         * 这个数还决定了一件事：连发时的渐变必须**短于**它
+         * （见 [MotionSpec.VALUE_FAST_DURATION]），否则数值会一直落后。
+         */
+        const val REPEAT_INTERVAL_MS = 150L
     }
 }
