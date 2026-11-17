@@ -8086,6 +8086,6 @@ onTemp?.invoke(temperature)
 | 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
 | SHA-256 | `75c9fa6fdb4016e11cbeb15b0719552810e538fc8e05273c10091b6d9d1f5cd9` |
 | 更新清单 | `dist/cardesk-latest.json`（R2 key `cardesk/CarDesk-platform-ecarx-cardesk-4273.apk`） |
-| 提交 | 第199轮代码 `8b052f3`；第200轮代码 `a82176f`；出包见 `git log` |
-| GitHub Release | [`v1.0.1177`](https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1177) —— **已发布**，附件为 4273 的 APK |
+| 提交 | 第199轮代码 `8b052f3`；第200轮代码 `a82176f`；出包 `7f9e2ef` |
+| GitHub Release | [`v1.0.1177`](https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1177) —— **已发布**，附件为 4273 的 APK（3 575 679 B，远端 digest 与本地 SHA-256 一致） |
 | R2 上传 | **未做** —— 环境里没有 `R2_AK` / `R2_SK`（凭据只从环境变量读；与第132/133/136/190/191/192/193轮一致） |
