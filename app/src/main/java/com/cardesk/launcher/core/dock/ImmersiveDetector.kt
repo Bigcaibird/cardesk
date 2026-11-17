@@ -23,6 +23,22 @@ import com.cardesk.launcher.core.log.Logx
  *
  * 三者任一出现 → 该 App 正在隐藏导航栏 → 全局 Dock 让位。
  *
+ * ## 第193轮：全局沉浸策略会让这个探测**完全失效**
+ *
+ * `mLastSystemUiFlags` 是**全局**的一个值，不是「焦点窗口」的私有值：
+ * 只要 `policy_control` 里有**对所有包生效**的沉浸策略
+ * （`immersive.navigation=*` / `immersive.full=*`），
+ * WMS 就会给**每一个** App 打上 `HIDE_NAVIGATION`/`IMMERSIVE`，
+ * 这个值于是**永远**带那些位 —— 它反映的是**策略**，不是某个 App 的行为。
+ *
+ * 后果（2026-11-17 真车诊断包实测）：Dock 在**几乎所有** App 里让位，
+ * 因为探测对谁都说「沉浸」。
+ *
+ * 所以这里加一道闸：`policy_control` 里有通配符沉浸策略时，
+ * **不信任**这个探测 —— 返回 null（= 探测不可用），
+ * 由调用方回退到已知名单，**宁可不让位，也不让所有 App 都让位**
+ * （这正是本类注释里「绝不因为探测失败而乱让位」的由来）。
+ *
  * ## 为什么要缓存
  *
  * 一次 `dumpsys` 要新起进程 + binder dump（几十毫秒到一两百毫秒），
@@ -50,12 +66,53 @@ object ImmersiveDetector {
     @Synchronized
     fun navBarHidden(context: Context, pkg: String?, nowMs: Long = System.currentTimeMillis()): Boolean? {
         if (pkg.isNullOrBlank()) return null
+        // 第193轮：全局沉浸策略在场时，这个全局标志位反映的是策略而不是 App —— 不信任它。
+        val policy = readPolicyControl(context)
+        if (hasGlobalImmersivePolicy(policy)) {
+            Logx.w(
+                LogTags.DOCK,
+                "沉浸探测失效：policy_control 有全局沉浸策略，mLastSystemUiFlags 不代表单个 App",
+                "policy" to policy,
+            )
+            cachedPkg = pkg
+            cachedAt = nowMs
+            cachedHidden = null
+            return null
+        }
         if (pkg == cachedPkg && nowMs - cachedAt < RECHECK_MS) return cachedHidden
         val flags = readSystemUiFlags()
         cachedPkg = pkg
         cachedAt = nowMs
         cachedHidden = flags?.let { looksImmersive(it) }
         return cachedHidden
+    }
+
+    /**
+     * `policy_control` 里有没有**对所有包生效**的沉浸策略（纯函数，可单测）。
+     *
+     * 判据：某一段是 `immersive.navigation=…` 或 `immersive.full=…`，
+     * 且它的值里带**通配符 `*`**。
+     *
+     * - `immersive.navigation=*` → 全局沉浸，探测失效；
+     * - `immersive.navigation=*,-com.foo` → 除豁免包外都是全局沉浸，探测同样失效；
+     * - `immersive.navigation=com.ecarx.cardesk` → 只针对一个包，
+     *   别的 App 前台时这个标志位仍然有意义 → **不**算全局。
+     */
+    fun hasGlobalImmersivePolicy(policy: String?): Boolean {
+        if (policy.isNullOrBlank()) return false
+        return policy.split(':')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .any { segment ->
+                val eq = segment.indexOf('=')
+                if (eq <= 0) return@any false
+                val key = segment.substring(0, eq).trim()
+                if (key != "immersive.navigation" && key != "immersive.full") return@any false
+                segment.substring(eq + 1)
+                    .split(',')
+                    .map { it.trim() }
+                    .any { it == "*" }
+            }
     }
 
     /** 清缓存（服务重建 / 调试注入时用）。 */
@@ -89,5 +146,13 @@ object ImmersiveDetector {
         parseSystemUiFlags(out)
     }.onFailure {
         Logx.w(LogTags.DOCK, "读取系统 UISystemFlags 失败（回退名单判断）", it)
+    }.getOrNull()
+
+    /** 读当前 `policy_control`（读不到返回 null）。 */
+    private fun readPolicyControl(context: Context): String? = runCatching {
+        android.provider.Settings.Global.getString(
+            context.contentResolver,
+            com.cardesk.launcher.core.SystemOps.POLICY_CONTROL,
+        )
     }.getOrNull()
 }

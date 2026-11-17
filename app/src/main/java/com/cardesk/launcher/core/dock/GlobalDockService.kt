@@ -666,14 +666,20 @@ class GlobalDockService : Service() {
         val known = runCatching { OemDockPolicy.hidesGlobalDockFor(fg) }.getOrDefault(false)
         // 桌面自己会隐藏状态栏（immersive.status），mLastSystemUiFlags 里有 IMMERSIVE 位，
         // 直接探测会把"桌面"当成沉浸 App —— 桌面必须永远显示 Dock，所以桌面上只认名单。
-        val detected = when {
-            known -> true
-            homeForeground -> false
-            else -> runCatching {
-                ImmersiveDetector.navBarHidden(this, fg) ?: false
-            }.getOrDefault(false)
+        //
+        // 第193轮：判定抽成纯函数 [DockYieldPolicy]，
+        // 其中「探测不可用（null）⇒ 不让位」是**保守规则**：
+        // 宁可多盖一点，也不要到处让位、把原车导航栏露出来。
+        val probe = if (known || homeForeground) {
+            null
+        } else {
+            runCatching { ImmersiveDetector.navBarHidden(this, fg) }.getOrNull()
         }
-        val yield = known || detected
+        val yield = DockYieldPolicy.decide(
+            knownImmersive = known,
+            desktopOnScreen = homeForeground,
+            probe = probe,
+        )
         if (yield == yieldToApp) return
         yieldToApp = yield
         if (!yield) {
@@ -689,7 +695,12 @@ class GlobalDockService : Service() {
             "yield" to yield,
             "foreground" to (fg ?: "-"),
             "名单命中" to known,
-            "探测沉浸" to detected,
+            "探测沉浸" to when {
+                known -> "名单"
+                homeForeground -> "桌面"
+                probe == null -> "不可用"
+                else -> probe.toString()
+            },
         )
     }
 

@@ -135,9 +135,36 @@ object GlobalDockPolicyGate {
      * （原车 Dock 要么被 RRO 预留、要么被 `immersive.navigation=*` 整体关掉），
      * 用户看到的就是「这个开关只对桌面 App 生效」。
      *
-     * 现在两条路径都把它接上：
-     * - 预留区路径 → [SystemNavigationPolicy] 多写一段 `immersive.navigation=*`；
-     * - 无预留区路径 → 本来就是 `*`，顺手把状态栏豁免名单也带上。
+     * ## 第193轮：预留区路径**不写** `immersive.navigation=*`
+     *
+     * 第189轮把 `hideNavigation = prefs.hideDock` 接到了**预留区路径**上，
+     * 结果和这个类自己的设计契约、以及
+     * [SystemNavigationPolicy] 的类注释**直接矛盾**：
+     *
+     * > 全局 Dock 生效时**不能**再对其它应用写 `immersive.navigation` ——
+     * > 那会把原生导航栏（连同它占的 112px 预留区）一起从窗口布局里摘掉。
+     *
+     * 一条 `immersive.navigation=*` 会同时引发三件事：
+     *
+     * 1. **预留带被摧毁** —— 系统导航栏被从**所有** App 的窗口布局里摘掉，
+     *    App 全屏，底部 112px 的预留带根本不存在 ⇒ Dock 盖住所有 App 的内容；
+     * 2. **让位探测被污染** —— WMS 因此给**每一个** App 打上
+     *    `HIDE_NAVIGATION`/`IMMERSIVE`，`dumpsys window policy` 的
+     *    `mLastSystemUiFlags` **永远**带这些位 ⇒
+     *    [ImmersiveDetector] 对任何前台 App 都判「沉浸」⇒
+     *    **Dock 在几乎所有 App 里让位**（桌面只是靠 `homeForeground` 硬编码豁免才幸免）；
+     * 3. **让位后原车导航栏露出来** —— CarDesk 的 Dock 是
+     *    `TYPE_NAVIGATION_BAR_PANEL`(2024)，**盖在**系统的 `CarNavigationBar`
+     *    窗口之上（实测同帧 `[0,968][1920,1080]`）；
+     *    Dock 一隐藏，底下的原车导航栏就露了出来。
+     *
+     * 所以预留区路径**必须**让预留带活着：原车 Dock 在这条路径上本来就被
+     * 我们的 2024 面板**顶替**了（同帧、面板在上），
+     * 「隐藏原车 Dock」的语义已经成立，不需要再拿 `immersive.navigation=*` 去摘它。
+     *
+     * **无预留区路径（2038 悬浮窗）保持原样** —— 那条路径必需：
+     * 悬浮窗层级低于系统导航栏，不把原车 nav 条从窗口布局里摘掉，
+     * 它就会画在我们的 Dock 上面。
      */
     private fun applyGlobalDock(
         context: Context,
@@ -146,19 +173,22 @@ object GlobalDockPolicyGate {
     ): Boolean {
         if (navInsetsApplied) {
             // 预留区由 RRO 保住：状态栏按开关沉浸；
-            // 「隐藏原车 Dock」打开时**额外**写 `immersive.navigation=*`（第189轮）。
+            // `immersive.navigation=*` **一律不写**（第193轮）——
+            // 写了就把预留带摘掉，App 全屏、Dock 盖内容、让位探测也会全乱。
             Logx.event(
                 LogTags.SYS,
                 "全局 Dock：接管导航栏高度路径",
                 "hideStatus" to prefs.hideStatus,
                 "hideDock" to prefs.hideDock,
+                "immersiveNavigation" to false,
             )
             return SystemNavigationPolicy.apply(
                 context = context,
                 hideStatus = prefs.hideStatus,
                 hideStatusPackages = prefs.hideStatusApps.toSet(),
                 navInsets = true,
-                hideNavigation = prefs.hideDock,
+                // 第193轮：预留带路径**禁止**写 immersive.navigation=*。
+                hideNavigation = false,
             )
         }
         // 没有预留区：让原车导航栏整体让位（B 方案，Lead 已在模拟器验过）。

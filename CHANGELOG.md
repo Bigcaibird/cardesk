@@ -1,6 +1,6 @@
 # CarDesk · 变更日志
 
-本文件是 CarDesk 的**逐轮开发记录**（第 1 ~ 192 轮），
+本文件是 CarDesk 的**逐轮开发记录**（第 1 ~ 193 轮），
 包含每一轮的根因分析、改法、判据与实测数据。
 
 项目本身的介绍、编译环境、支持的 Android 版本与功能清单见
@@ -6672,3 +6672,195 @@ CarDesk Dock 从 968 一路铺到 1080，中间无空隙。
   Dock 宽 1920 是死的，图标放大必然从别处挤出来 —— 这次挤的是媒体卡。
   所以每放大一个常量，都得重算「四段还排得下吗」，
   顺手加一条「媒体卡宽度仍 ≥ 下限、歌名区仍 > 0」的断言，比肉眼看靠谱。
+
+---
+
+## 第193轮：全局 Dock 不再到处让位 + 让位后不再露出车机自带导航栏
+
+### 一、现象
+
+用户反馈：**全局 Dock 不止在网易云、汽水音乐让位了，在几乎所有 App 都让位**，
+回到桌面也受影响；而且**让位后车机自带的导航栏露了出来**。
+
+（此前第180轮的设计是：只有「实测会铺满到底」的沉浸型播放器才让位，
+QQ音乐车机版遵守导航栏 inset，不需要让位。）
+
+### 二、根因：一处策略写错，连锁四环
+
+2026-11-17 的真车诊断包（`cardesk-logs-20261117-083723.zip`）里，
+策略日志和让位日志互相矛盾：
+
+```
+全局 Dock：接管导航栏高度路径 hideStatus=false hideDock=false
+全局 Dock：policy_control 已应用 value=immersive.navigation=* hideNavigation=true navInsets=true
+```
+
+——**预留区路径（`navInsets=true`）竟然写了 `immersive.navigation=*`**。
+
+这条策略连锁出四个环：
+
+| # | 环节 | 后果 |
+|---|---|---|
+| 1 | 第189轮把「隐藏原车 Dock」改成全局生效时，把 `hideNavigation = prefs.hideDock` **误接到了预留区路径**上 | 与 `GlobalDockPolicyGate` 自己的类注释、`SystemNavigationPolicy` 的类注释、`LauncherView.applyOemPolicy()` 的 KDoc **三处明文契约直接矛盾**（都写着「预留区在时不能写 `immersive.navigation`」） |
+| 2 | `immersive.navigation=*` 把系统导航栏连同 112px 预留带从**所有** App 的窗口布局里摘掉 | App 全屏，Dock 盖住所有 App 底部 |
+| 3 | 同一条策略让 WMS 给**每个** App 打上 `HIDE_NAVIGATION`/`IMMERSIVE`；而 `dumpsys window policy` 的 `mLastSystemUiFlags` 是**全局**值 | `ImmersiveDetector.looksImmersive()` 对任何前台 App 都返回 true |
+| 4 | 让位判定用的是这个探测 | **Dock 在几乎所有 App 里让位** |
+
+而 CarDesk 的 Dock 是 `TYPE_NAVIGATION_BAR_PANEL`(2024)，实测与 `CarNavigationBar`
+**同帧** `mFrame=[0,968][1920,1080]`、面板在上 ——
+**Dock 一隐藏，底下的原车导航栏就露出来**。这就是用户看到的第二个现象。
+
+诊断包里 6 条让位日志，4 条的判定来源都是被污染的探测：
+
+```
+yield=false foreground=com.ecarx.recents        探测沉浸=false
+yield=true  foreground=com.autonavi.amapautp.yh 探测沉浸=true    ← 高德并不沉浸
+yield=false foreground=com.ecarx.cardesk        探测沉浸=false
+yield=true  foreground=com.tencent.qqmusiccar   探测沉浸=true    ← QQ音乐并不沉浸
+```
+
+### 三、改了什么
+
+#### 3.1 Fix A：预留区路径不再写 `immersive.navigation=*`
+
+**双保险** —— 一处改闸口，一处下沉到唯一写入口：
+
+| 文件 | 改法 |
+|---|---|
+| `GlobalDockPolicyGate.applyGlobalDock()` | 预留区路径改传 `hideNavigation = false`，事件日志里显式记 `immersiveNavigation -> false` |
+| `SystemNavigationPolicy.merge()` | `if (hideNavigation && !navInsets)` 才写 `immersive.navigation=*` —— 不变量下沉到**唯一**写策略的地方 |
+
+**没有预留区的 2038 悬浮窗路径保持写 `immersive.navigation=*`** ——
+那条路径必需（悬浮窗层级低于系统导航栏，不摘掉会被原车 nav 条盖住）。
+
+至于「隐藏原车 Dock」这个语义在预留区路径上怎么实现：
+原车 Dock 在这条路径上本来就由 CarDesk 的 2024 面板**顶替**（同帧、面板在上），
+所以**不需要**再拿 `immersive.navigation=*` 去摘它。
+
+#### 3.2 Fix B：沉浸探测在全局沉浸策略下不信任 `mLastSystemUiFlags`
+
+新增纯函数 `ImmersiveDetector.hasGlobalImmersivePolicy(policy)`：
+
+- `immersive.navigation=*` / `immersive.full=*`（含 `*,-pkg` 豁免形式）→ **全局沉浸**，探测失效；
+- `immersive.navigation=com.ecarx.cardesk`（**单包**）→ 不算全局，探测仍然有效；
+- `immersive.status=*` → 不算（它管的是状态栏，不是导航栏）。
+
+`navBarHidden()` 先读 `policy_control`，有通配符沉浸策略时返回 **null（探测不可用）**
+并打警告日志 —— 由调用方回退到已知名单。
+
+#### 3.3 Fix C：让位判定抽成纯函数 `DockYieldPolicy`
+
+```kotlin
+fun decide(knownImmersive: Boolean, desktopOnScreen: Boolean, probe: Boolean?): Boolean = when {
+    knownImmersive -> true      // 名单命中 → 让位，不依赖探测
+    desktopOnScreen -> false    // 桌面在前台 → 一定不让位
+    probe == null -> false      // 探测不可用 → 保守：不让位
+    else -> probe
+}
+```
+
+抽成纯函数是为了把「**探测不可用 ⇒ 不让位**」这条**保守规则**钉在单测里：
+判定一旦又变成「探测失败也当 false 之外的东西」，单测会立刻红。
+
+「桌面永远不让位」是硬规则 —— 桌面自己的那条 Dock 是页面内 View，
+让位了桌面上就一条 Dock 都不剩。
+
+#### 3.4 日志
+
+让位日志的「探测沉浸」字段由原来的裸 `true`/`false` 改成
+**名单 / 桌面 / 不可用 / true / false** 五态，排障时能一眼看出是哪条规则生效。
+
+### 四、判据
+
+新增 `DockYieldPolicyTest`（**9 项**）+ `ImmersiveDetectorTest`（新增 **6 项**），
+改写 `SystemNavigationPolicyTest`（新增 **2 项**、1 项旧断言改写）：
+
+- 预留区路径**穷举**所有参数组合，产物里**不含** `immersive.navigation` / `immersive.full`；
+- 无预留区路径**必须**写 `immersive.navigation=*`；
+- 残留的旧沉浸段照样被剥掉；
+- `hasGlobalImmersivePolicy` 的各种组合（通配符 / 带豁免 / 单包 / 状态栏 / 空）；
+- 三条让位不变量：名单命中即让位、桌面即不让位、**探测不可用即不让位**。
+
+单测：**2291 → 2308 项全绿**，0 失败。
+
+### 五、实测（API 28 模拟器，1920×1080 @160dpi，同一套设置下新旧包 A/B 对照）
+
+模拟器上**没有**网易云 / 汽水音乐，所以按包名造了 4 个桩 App
+（`com.netease.cloudmusic.iot` / `com.luna.music.car` / `com.stub.immersive` / `com.stub.plain`，
+前两个在已知名单内，桩 App 自己调 `hideNavigationBars()` 模拟沉浸型播放器），
+让让位判定的每条分支都能被真机触发。
+
+设置对齐真车：`dockbar_hide_dock=true`（「隐藏原车 Dock」打开）。
+
+**策略侧**：
+
+| | 旧包 4268 | 新包（第193轮） |
+|---|---|---|
+| `policy_control` | `immersive.navigation=*` | **null** |
+| 策略日志 | `hideNavigation=true navInsets=true` | `hideNavigation=false navInsets=true` / `immersiveNavigation=false` |
+
+**让位矩阵**（`dumpsys window windows` 看 `CarDesk 全局 Dock` 的 `mViewVisibility` / `isOnScreen`）：
+
+| 场景 | 期望 | 旧包 4268 | 新包（第193轮） |
+|---|---|---|---|
+| 桌面 · 左右滑动 | 不让位 | 不让位 ✓ | **不让位 ✓**（切页 page=0→1→0，全程无让位日志） |
+| QQ音乐车机版 | 不让位 | **让位 ✗** | **不让位 ✓** |
+| 高德地图 | 不让位 | **让位 ✗** | **不让位 ✓** |
+| 网易云音乐（桩） | 让位 | 让位 ✓ | **让位 ✓** |
+| 汽水音乐（桩） | 让位 | 让位 ✓ | **让位 ✓** |
+| 沉浸型 App（非名单桩） | 让位 | 让位（连锁） | **让位 ✓**（探测命中） |
+| 普通 App（非名单桩） | 不让位 | **让位 ✗** | **不让位 ✓** |
+
+旧包从 QQ 音乐起就**一直**卡在让位状态，连系统设置页和普通 App 都让位 ——
+这就是用户报告的「在几乎所有 app 都让位了」。
+
+**Fix B 的闸单独验过**：手动把 `policy_control` 写成 `immersive.navigation=*`
+（模拟车机或别的 App 写了全局沉浸策略），日志打出
+
+```
+W/CarDesk/Dock: 沉浸探测失效：policy_control 有全局沉浸策略，mLastSystemUiFlags 不代表单个 App policy=immersive.navigation=*
+```
+
+此时普通 App 前台**没有**触发让位，Dock 保持可见 —— 探测不可信时宁可多盖一点。
+
+### 六、产物
+
+| 项 | 值 |
+|---|---|
+| 包 | `dist/CarDesk-platform-ecarx-cardesk-4269.apk` |
+| 包名 / 版本 | `com.ecarx.cardesk` / 4269 / 1.0.1173-system |
+| 大小 | 3 488 743 字节 |
+| 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
+| SHA-256 | `3acbfbd5bf62b16ae6f17f5de50b5da0e2b35e6dc95cc2a662244dd0d2e434e7` |
+| 更新清单 | `dist/cardesk-latest.json`（R2 key `cardesk/CarDesk-platform-ecarx-cardesk-4269.apk`） |
+| 提交 | 见 `git log` |
+| GitHub Release | [`v1.0.1173`](https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1173) |
+| R2 上传 | **未做** —— 环境里没有 `R2_AK` / `R2_SK`（凭据只从环境变量读；与第132/133/136/190/191/192轮一致） |
+| R2 上传 | **未做** —— 环境里没有 `R2_AK` / `R2_SK`（凭据只从环境变量读；与第132/133/136/190/191/192轮一致） |
+
+### 七、顺带订正第192轮的一条措辞
+
+第192轮据窗口高度 A/B 实验得出「RRO 确实把系统导航栏从 56 撑到 112，预留带是真实存在的」，
+这一点**成立**（A/B：覆盖包 enable → `Requested h=112` / disable → `Requested h=56`）。
+
+但同轮 README / Release 里「实测 112px」的说法依据的其实是**窗口高度**，
+而 `DockBottomProbe.systemNavBarHeightPx` 读到的**资源值**
+（模拟器 56 / 真车 136）**并不是**那个值 —— 那个探测函数测错了对象，
+它的「预留区已生效」结论不可靠。这是**独立的诊断准确性问题**，不是本轮报的 bug，
+本轮不动它，但以后别再拿它当「预留带生效」的证据。
+
+### 八、教训
+
+- **注释写过的契约，要有人守着**。`GlobalDockPolicyGate` 的类注释、
+  `SystemNavigationPolicy` 的类注释、`LauncherView.applyOemPolicy()` 的 KDoc
+  三处都明明白白写着「预留区在时不能写 `immersive.navigation`」，
+  第189轮还是接错了 —— 说明**契约只写在注释里没有落成断言**，于是没人拦得住。
+  本轮把不变量下沉到 `merge()` 并用单测钉死，才算真正立住。
+- **全局值不能拿来当单个对象的状态**。`mLastSystemUiFlags` 是 WMS 的全局值，
+  一旦有全局策略，它对每个 App 都长一个样 —— 这类探测必须先确认「策略没污染它」。
+- **让位这类「有副作用的降级」要选保守方向**。让位会把原车导航栏露出来，
+  误判的代价是可见的；而漏让位的代价只是多盖一点。所以「探测不可用 ⇒ 不让位」。
+- **判断前先确认前提**。第189轮之所以写错，是把「隐藏原车 Dock」和
+  「用 `immersive.navigation=*` 隐藏」当成了同一件事 ——
+  但在预留区路径上，前者由 2024 面板顶替就已经实现了，后者是**多余的**，
+  而且副作用极大。

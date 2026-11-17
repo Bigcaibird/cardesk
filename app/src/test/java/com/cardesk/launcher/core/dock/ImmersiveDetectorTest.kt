@@ -51,4 +51,50 @@ class ImmersiveDetectorTest {
         assertNull(ImmersiveDetector.parseSystemUiFlags(null))
         assertNull(ImmersiveDetector.parseSystemUiFlags(""))
     }
+
+    // ---------------------------------------- 第193轮：全局沉浸策略会让探测失效
+
+    @Test
+    fun `通配符导航沉浸算全局策略`() {
+        assertTrue(ImmersiveDetector.hasGlobalImmersivePolicy("immersive.navigation=*"))
+        assertTrue(ImmersiveDetector.hasGlobalImmersivePolicy("immersive.full=*"))
+    }
+
+    @Test
+    fun `带豁免包的通配符仍然算全局策略`() {
+        // 除豁免包外所有 App 都被强制沉浸 ⇒ 探测对绝大多数 App 都不可信。
+        assertTrue(ImmersiveDetector.hasGlobalImmersivePolicy("immersive.navigation=*,-com.ecarx.cardesk"))
+    }
+
+    @Test
+    fun `只针对单个包的策略不算全局`() {
+        // 别的 App 前台时这个全局标志位仍然有代表性 ⇒ 探测照常可用。
+        assertFalse(ImmersiveDetector.hasGlobalImmersivePolicy("immersive.navigation=com.ecarx.cardesk"))
+        assertFalse(ImmersiveDetector.hasGlobalImmersivePolicy("immersive.navigation=com.a,com.b"))
+    }
+
+    @Test
+    fun `只沉浸状态栏不算全局导航策略`() {
+        // immersive.status 也会带 IMMERSIVE 位，但它只影响状态栏，
+        // 不足以让「隐藏导航栏」的探测失效。
+        assertFalse(ImmersiveDetector.hasGlobalImmersivePolicy("immersive.status=*"))
+        assertFalse(ImmersiveDetector.hasGlobalImmersivePolicy("immersive.status=*,-com.a"))
+    }
+
+    @Test
+    fun `空策略不算全局`() {
+        assertFalse(ImmersiveDetector.hasGlobalImmersivePolicy(null))
+        assertFalse(ImmersiveDetector.hasGlobalImmersivePolicy(""))
+        assertFalse(ImmersiveDetector.hasGlobalImmersivePolicy("null"))
+        assertFalse(ImmersiveDetector.hasGlobalImmersivePolicy("foo=bar"))
+    }
+
+    @Test
+    fun `多段策略里只要有一段是通配符就算全局`() {
+        assertTrue(
+            ImmersiveDetector.hasGlobalImmersivePolicy(
+                "immersive.status=*:immersive.navigation=*:foo=bar",
+            ),
+        )
+    }
 }

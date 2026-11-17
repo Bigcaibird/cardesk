@@ -14,13 +14,27 @@ import com.cardesk.launcher.core.log.Logx
  * 那会把原生导航栏（连同它占的 112px 预留区）一起从窗口布局里摘掉，
  * 全局 Dock 就只能盖在应用内容上。所以：
  *
- * - `immersive.navigation` / `immersive.full` **任何情况下都不写**；
  * - 需要隐藏状态栏时只写 `immersive.status=*`（可带 `,-包名` 豁免）；
  * - 其它非 `immersive.*` 的策略段原样保留（别把别的功能正在用的策略抹掉）。
  *
- * 第八十七轮设计契约的修正（模拟器实测后 patch）：`navInsets` 参数**只进
- * snapshot/日志，不改变输出**。覆盖包在 /data 装不上/不生效时（见 [NavInsets]），
- * 全局 Dock 仍要按「遮住原车 Dock」工作，策略不能因为预留区而变。
+ * ## 第193轮：这条规则变成**可执行的不变量**
+ *
+ * 第八十七轮时「覆盖包装在 /data 上永远不生效」，所以当时把 `navInsets`
+ * 定成「只进 snapshot/日志，不改变输出」。
+ *
+ * 第192/193轮证明那个前提是错的 —— 覆盖包在 API 28 模拟器和这台真车上
+ * **真的生效**（系统导航栏实测 112px，CarDesk 的 2024 面板与它同帧）。
+ * 预留区既然是活的，`immersive.navigation=*` 就成了**杀死预留带的凶手**：
+ *
+ * 1. App 全屏 → Dock 盖住所有 App 的底部内容；
+ * 2. WMS 给每个 App 都打上沉浸标志 → 全局的 `mLastSystemUiFlags` 永远带沉浸位
+ *    → [ImmersiveDetector] 对谁都说「沉浸」→ **Dock 在几乎所有 App 里让位**；
+ * 3. Dock 一让位，底下的原车 `CarNavigationBar` 窗口就露了出来。
+ *
+ * 所以规则落到 [merge] 里强制执行：**预留区在（`navInsets=true`）时，
+ * 一律不写 `immersive.navigation=*`** —— 不管调用方传什么。
+ * 原车 Dock 在这条路径上本来就被 CarDesk 的 2024 导航栏面板**顶替**了
+ * （两者同帧、面板在上），语义上「原车 Dock 已隐藏」本来就成立。
  *
  * 全部 `runCatching`：没有 `WRITE_SECURE_SETTINGS` 时返回 false 由调用方降级。
  */
@@ -39,14 +53,33 @@ object SystemNavigationPolicy {
     /**
      * 纯函数：把 [current] 里所有 `immersive.*` 段剥掉，再按需要拼回。
      *
-     * 语义（第八十七轮设计契约修正版）：
+     * 语义：
      * - 先按 `:` 切段，丢弃空段和所有 `immersive.*` 段；
      * - [hideStatus] 为真 → 在剩余段后追加 `immersive.status=*`，
      *   [hideStatusPackages] 非空时按 `*,-pkg1,-pkg2` 追加豁免（这些应用**保留**状态栏）；
-     * - [hideNavigation] 为真 → 追加 `immersive.navigation=*`（第189轮）：
-     *   「隐藏原车 Dock」改成**全局生效**，所有 App 都去掉系统 Dock；
+     * - [hideNavigation] 为真 → 追加 `immersive.navigation=*`；
      * - 两个开关都为假 → 只返回剩余段，空则返回 null（调用方写 `"null"` 复位）；
-     * - [navInsets] **不影响输出**（只用于 apply 的日志/snapshot 诊断）。
+     * - 非沉浸策略段原样保留（别把别的功能正在用的策略抹掉）。
+     *
+     * ## 第193轮：[navInsets] 为真时**禁止**写 `immersive.navigation=*`
+     *
+     * 这一条以前是「navInsets 只进 snapshot/日志，不改变输出」（第八十七轮的假设：
+     * 当时以为覆盖包装在 /data 上永远不生效，所以策略不能因为预留区而变）。
+     *
+     * **第192/193轮证明那个假设是错的**：覆盖包在 API 28 模拟器和这台真车上
+     * **真的生效**（导航栏实测 112px，全局 Dock 窗口与它同帧）。
+     * 于是预留区是**活的**，而 `immersive.navigation=*` 恰好是**杀死它的东西** ——
+     * 它把系统导航栏连同 112px 预留带从**所有** App 的窗口布局里摘掉。
+     *
+     * 后果（2026-11-17 真车诊断包实测）：① App 全屏、Dock 盖住所有 App 底部；
+     * ② WMS 给每个 App 都打上 `HIDE_NAVIGATION`，全局的 `mLastSystemUiFlags`
+     * 永远带沉浸位 ⇒ [ImmersiveDetector] 对谁都说「沉浸」⇒
+     * **Dock 在几乎所有 App 里让位**（桌面只靠 `homeForeground` 豁免才幸免）；
+     * ③ Dock 一让位，底下的原车 `CarNavigationBar` 就露了出来。
+     *
+     * 所以规则改到**这一层**来强制：预留区在（`navInsets=true`）时，
+     * 无论调用方传什么 [hideNavigation]，都**不写** `immersive.navigation=*`。
+     * 原车 Dock 在这条路径上本来就被 CarDesk 的 2024 导航栏面板**顶替**了。
      *
      * 返回 null 表示不需要策略。
      */
@@ -59,7 +92,8 @@ object SystemNavigationPolicy {
     ): String? {
         val remaining = remainingSegments(current)
         val out = ArrayList<String>()
-        if (hideNavigation) {
+        // 第193轮：预留区在时禁止写 immersive.navigation=*（见 KDoc）。
+        if (hideNavigation && !navInsets) {
             out.add("immersive.navigation=*")
         }
         if (hideStatus) {

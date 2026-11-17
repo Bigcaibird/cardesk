@@ -40,6 +40,7 @@
 | 底部一体化 Dock | 左段四个导航键（主页 / 应用 / 分屏 / 360）+ 媒体控制 + 全量空调 |
 | 全局 Dock | 前台服务 + 跨应用覆盖窗，叠在其它应用之上 |
 | 导航预留带 | RRO 覆盖系统导航栏高度（112dp），与 Dock 严丝合缝 |
+| Dock 让位 | 仅在沉浸型播放器（网易云 / 汽水等）前台时收起；探测不可信时**宁可不让位** |
 | 隐藏原车 Dock / 状态栏 | 走 `policy_control`，可全局生效 |
 | Dock 可调项 | 圆角、底边距、快捷应用槽位、导航栏形态 |
 | 增强导航栏 | 槽位条形态，槽位可自由配置 |
@@ -186,7 +187,7 @@ $GRADLE testSystemUnitTest --offline
 ### 出包
 
 ```bash
-bash tools/release.sh --notes-file tools/notes-r192.md
+bash tools/release.sh --notes-file tools/notes-r193.md
 ```
 
 `tools/release.sh` 会自动：版本号 +1 → 干净目录全量构建 + 跑单测 →
@@ -208,6 +209,16 @@ python3 tools/publish_r2.py --bucket file \
   --apk dist/CarDesk-platform-ecarx-cardesk-<versionCode>.apk \
   --manifest dist/cardesk-latest.json
 ```
+
+### 发布状态
+
+| 项 | 值 |
+| --- | --- |
+| 当前版本 | `1.0.1173-system`（versionCode **4269**，第193轮） |
+| GitHub Release | [`v1.0.1173`](https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1173) —— 已发布 |
+| R2 上传 | **未做** —— 本机没有 `R2_AK` / `R2_SK` 凭据（凭据只从环境变量读） |
+
+各轮产物与发布记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 

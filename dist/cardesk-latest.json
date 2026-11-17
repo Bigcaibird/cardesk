@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1172",
-  "versionCode": 4268,
-  "tag": "v1.0.1172",
-  "name": "CarDesk 4268 / 1.0.1172-system",
-  "notes": "Dock 按 112 走（对齐系统导航预留带）+ 图标整体放大\n\n一、Dock 与系统导航预留带对齐（原来差 8px）\n- 之前系统给所有 App 让出的底部预留带是 112px（RRO 覆盖 framework-res 的 navigation_bar_height），但 CarDesk 的 Dock 只有 104 高 —— 中间那 8px 是「系统留了位、却没人画」的缝，而且诊断判据带 4px 容差，一直没报出来。\n- 现在 Dock 本体做成 112 贴底：预留带、Dock 占位、Dock 绘制高度三个数字改成相等，桌面 Dock 顶边 976 → 968。\n- 实测（API 28 模拟器 dumpsys window）：系统导航栏与 CarDesk 全局 Dock 窗口的 frame 完全重合，都是 [0,968][1920,1080]；别的 App 的可用区（mAppBounds）正好停在 968。\n\n二、图标整体放大约 8%（跟 104 → 112 同一比例）\n- 导航键槽 60 → 64、键底板圆角 20 → 22、房子图标 13 → 15、应用宫格 7×7 → 8×8、分屏图标 ±14 → ±16、360 徽标 ±24×±15 → ±26×±16。\n- 快捷应用格 76 → 82；媒体卡高 88 → 96、封面 60 → 64、播放键 44 → 48、上下曲 40 → 44。\n- 空调图标槽 48 → 52、风扇 100×70 → 106×76。\n- 间隙一律不动 —— Dock 宽 1920 是死的，挤出来的宽度由中间的媒体卡让出（歌名区 236 → 220px，仍放得下）。\n\n三、校验\n- 单测 2283 → 2291 项全绿（新增 DockHeightAlignmentTest 8 项，钉死「Dock 高度 == 预留带高度」这个不变量）。\n- 模拟器实拍：桌面 Dock 顶边 968、底边 1080；导航页内容底边 940，从未被挡；叠在别的 App 上时预留带被完整填满、无空隙。",
-  "publishedAt": "2026-11-16T16:03:33Z",
+  "version": "1.0.1173",
+  "versionCode": 4269,
+  "tag": "v1.0.1173",
+  "name": "CarDesk 4269 / 1.0.1173-system",
+  "notes": "修复全局 Dock 在几乎所有 App 里让位 + 让位后车机自带导航栏露出来\n\n一、现象\n- 全局 Dock 在几乎所有 App 里都让位（原先只有网易云、汽水音乐会让位），回到桌面也受影响。\n- Dock 一让位，底下被它盖住的车机自带导航栏（CarNavigationBar）就露了出来。\n\n二、根因（一处策略写错，连锁四环）\n- 第 189 轮把「隐藏原车 Dock」改成全局生效时，把 hideNavigation = prefs.hideDock 误接到了**预留区路径**上。\n- 结果 CarDesk 往 policy_control 写了 immersive.navigation=*，把系统导航栏连同 112px 预留带从**所有** App 的窗口布局里摘掉。\n- 同一条策略让 WMS 给**每个** App 打上 HIDE_NAVIGATION/IMMERSIVE，而 dumpsys window policy 的 mLastSystemUiFlags 是**全局**值 —— 沉浸探测对任何前台 App 都返回 true。\n- 于是 Dock 到处让位；而 CarDesk 的 Dock 是 TYPE_NAVIGATION_BAR_PANEL(2024)，本来就盖在原车导航栏**之上**，它一隐藏，底下的原车导航栏就露出来。\n\n三、改了什么\n- 预留区路径不再写 immersive.navigation=*：闸口 GlobalDockPolicyGate 改传 hideNavigation=false，SystemNavigationPolicy.merge() 里也加了结构性兜底（navInsets=true 时一律不写）。没有预留区的 2038 悬浮窗路径保持原样（那条路径必需）。\n- 沉浸探测加一道闸：policy_control 里有通配符沉浸策略时，mLastSystemUiFlags 代表的是策略而不是某个 App 的行为 —— 判为「探测不可用」，宁可不让位，也不让所有 App 都让位。\n- 让位判定抽成纯函数 DockYieldPolicy：名单命中 → 让位；桌面在前台 → 一定不让位；探测不可用 → 不让位。\n- 让位日志区分「名单 / 桌面 / 不可用 / true / false」，排障时能一眼看出是哪条规则生效。\n\n四、实测（API 28 模拟器，同一套设置下新旧包 A/B 对照）\n- 旧包 4268：从 QQ 音乐起就一直让位，高德、设置页、甚至普通 App 全部让位（复现了用户报告的现象）。\n- 新包：桌面左右滑动不触发让位；QQ 音乐、高德、普通 App 均不让位，Dock 完整显示、导航栏不再露出；网易云、汽水音乐、真正的沉浸型 App 仍按预期让位。\n- 策略侧：policy_control 由 immersive.navigation=* 变为 null，预留带保持 112px。\n\n五、校验\n- 单测 2291 → 2308 项全绿（新增 DockYieldPolicyTest 9 项、ImmersiveDetectorTest 6 项，SystemNavigationPolicyTest 改写并补 2 项）。",
+  "publishedAt": "2026-11-17T01:13:18Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4268.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4268.apk",
-    "size": 3487227,
-    "sha256": "4d5792acf1475da91beffd011ff8269d5db42191139f2cdc65aafc70d8fa1501"
+    "name": "CarDesk-platform-ecarx-cardesk-4269.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4269.apk",
+    "size": 3488743,
+    "sha256": "3acbfbd5bf62b16ae6f17f5de50b5da0e2b35e6dc95cc2a662244dd0d2e434e7"
   }
 }

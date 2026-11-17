@@ -218,11 +218,57 @@ class SystemNavigationPolicyTest {
     }
 
     @Test
-    fun `hideNavigation 开关不影响 navInsets`() {
+    fun `hideNavigation 开关在 navInsets 为真时被强制关闭`() {
+        // 第193轮：预留区在时**一律不写** immersive.navigation=* ——
+        // 写了就把 112px 预留带从所有 App 的窗口布局里摘掉，
+        // 于是 App 全屏、Dock 盖内容、沉浸探测也被全局标志位污染（所有 App 都让位）。
         val current = "foo=bar"
         assertEquals(
-            merge(current, hideStatus = true, navInsets = false, hideNavigation = true),
-            merge(current, hideStatus = true, navInsets = true, hideNavigation = true),
+            "foo=bar:immersive.navigation=*:immersive.status=*,-com.a",
+            merge(current, hideStatus = true, hideStatusPackages = setOf("com.a"), navInsets = false, hideNavigation = true),
+        )
+        assertEquals(
+            "foo=bar:immersive.status=*,-com.a",
+            merge(current, hideStatus = true, hideStatusPackages = setOf("com.a"), navInsets = true, hideNavigation = true),
+        )
+    }
+
+    @Test
+    fun `预留区在时输出里绝不含 immersive navigation`() {
+        // 穷举：无论 current / hideStatus / 名单怎么组合，预留区路径都不许写导航沉浸。
+        val currents = listOf(
+            null,
+            "",
+            "immersive.navigation=*",
+            "immersive.full=*",
+            "foo=bar",
+            "foo=bar:immersive.navigation=*:immersive.full=*",
+        )
+        for (current in currents) {
+            for (hideStatus in listOf(true, false)) {
+                for (packages in listOf(emptySet(), setOf("com.a"))) {
+                    val output = merge(current, hideStatus, packages, navInsets = true, hideNavigation = true)
+                    assertFalse(
+                        "预留区路径不该写 immersive.navigation：$output",
+                        output.orEmpty().contains("immersive.navigation"),
+                    )
+                    assertFalse(
+                        "预留区路径不该写 immersive.full：$output",
+                        output.orEmpty().contains("immersive.full"),
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `预留区在时旧的沉浸段照样被剥掉`() {
+        // 车机上残留的 immersive.navigation=* 必须被清掉，
+        // 否则这一版装上去症状照旧。
+        assertNull(merge("immersive.navigation=*", hideStatus = false, navInsets = true, hideNavigation = true))
+        assertEquals(
+            "foo=bar",
+            merge("immersive.navigation=*:foo=bar", hideStatus = false, navInsets = true, hideNavigation = true),
         )
     }
 }
