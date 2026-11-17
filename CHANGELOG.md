@@ -8071,3 +8071,21 @@ onTemp?.invoke(temperature)
 - 连发**只加温度**（每次 0.5℃），不加速 —— 加速是另一个设计决定，本轮没做。
 - 连发期间 ± 键的按压缩放**保持**不变（不会每步再缩一下，那样太抖）。
 - 本轮的修复随第199轮一起出包（4273）—— 两轮是一个包。
+
+---
+
+### 八、产物
+
+> 第199轮（温度盘拖拽失效）和第200轮（± 键连发）**一起出的包**。
+
+| 项 | 值 |
+|---|---|
+| 包 | `dist/CarDesk-platform-ecarx-cardesk-4273.apk` |
+| 包名 / 版本 | `com.ecarx.cardesk` / 4273 / 1.0.1177-system |
+| 大小 | 3 575 679 字节 |
+| 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
+| SHA-256 | `75c9fa6fdb4016e11cbeb15b0719552810e538fc8e05273c10091b6d9d1f5cd9` |
+| 更新清单 | `dist/cardesk-latest.json`（R2 key `cardesk/CarDesk-platform-ecarx-cardesk-4273.apk`） |
+| 提交 | 第199轮代码 `8b052f3`；第200轮代码 `a82176f`；出包见 `git log` |
+| GitHub Release | [`v1.0.1177`](https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1177) —— **已发布**，附件为 4273 的 APK |
+| R2 上传 | **未做** —— 环境里没有 `R2_AK` / `R2_SK`（凭据只从环境变量读；与第132/133/136/190/191/192/193轮一致） |

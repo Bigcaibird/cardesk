@@ -228,8 +228,8 @@ python3 tools/publish_r2.py --bucket file \
 
 | 项 | 值 |
 | --- | --- |
-| 当前版本 | `1.0.1176-system`（versionCode **4272**，第198轮） |
-| GitHub Release | [`v1.0.1176`](https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1176) —— 已发布 |
+| 当前版本 | `1.0.1177-system`（versionCode **4273**，第200轮） |
+| GitHub Release | [`v1.0.1177`](https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1177) —— 已发布 |
 | R2 上传 | **未做** —— 本机没有 `R2_AK` / `R2_SK` 凭据（凭据只从环境变量读） |
 
 各轮产物与发布记录见 [CHANGELOG.md](CHANGELOG.md)。
