@@ -11,6 +11,7 @@ import android.view.MotionEvent
 import android.view.TouchDelegate
 import android.view.View
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.cardesk.launcher.core.Palettes
@@ -20,6 +21,7 @@ import com.cardesk.launcher.core.Skin
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.core.media.LyricWindow
+import com.cardesk.launcher.core.media.MediaActions
 import com.cardesk.launcher.ui.Ui
 import com.cardesk.launcher.ui.pip.NavSplitPlacement
 import com.cardesk.launcher.ui.pip.PipDividerView
@@ -27,6 +29,7 @@ import com.cardesk.launcher.ui.pip.PipRatio
 import com.cardesk.launcher.ui.pip.PipRatioStore
 import com.cardesk.launcher.ui.pip.PipSides
 import com.cardesk.launcher.ui.pip.PipSurface
+import com.cardesk.launcher.ui.widget.MediaActionIcons
 
 /**
  * 导航页。
@@ -499,6 +502,54 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
             if (::playGlyph.isInitialized) playGlyph.text = if (v) "❚❚" else "▶"
         }
 
+    // ------------------------------------------- 收藏 / 播放模式（第一九五轮）
+
+    /**
+     * 当前播放器的**包名**。
+     *
+     * 决定收藏 / 播放模式这两个按钮**显不显示** ——
+     * 不支持的播放器**直接隐藏**，而不是亮一个「点了没反应」的按钮
+     * （汽水音乐车机版就没这两条通道）。
+     */
+    var musicPackage: String? = null
+        set(value) {
+            field = value
+            applyActionVisibility()
+        }
+
+    /**
+     * 收藏态（**三态**：已收藏 / 未收藏 / 不知道）。
+     *
+     * 「不知道」和「未收藏」在界面上要分得开：
+     * 不知道 → 空心心形且**不点亮**；未收藏 → 空心心形但颜色正常。
+     */
+    var favoriteState: MediaActions.FavoriteState = MediaActions.FavoriteState.UNKNOWN
+        set(value) {
+            // 桌面每秒刷新一次 → 值没变就不重画（重建矢量 Drawable 纯属浪费）。
+            if (field == value) return
+            field = value
+            applyFavoriteState()
+        }
+
+    /**
+     * 播放模式。
+     *
+     * 不知道时显示「顺序」—— 下一次点击就是切到顺序播放
+     * （见 [MediaActions.nextPlayMode]），按钮上显示的**就是点击后要切到的模式**。
+     */
+    var playModeState: MediaActions.PlayModeState = MediaActions.PlayModeState.UNKNOWN
+        set(value) {
+            if (field == value) return
+            field = value
+            applyPlayModeState()
+        }
+
+    /** 收藏按钮被点了（宿主去下发「收藏 / 取消收藏」）。 */
+    var onFavoriteToggle: (() -> Unit)? = null
+
+    /** 播放模式按钮被点了（宿主去切「顺序 → 单曲 → 随机」）。 */
+    var onPlayModeToggle: (() -> Unit)? = null
+
     // ------------------------------------------------------------------ 回调
 
     /**
@@ -680,6 +731,13 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
     private lateinit var currentTimeText: TextView
     private lateinit var totalTimeText: TextView
     private lateinit var playGlyph: TextView
+
+    /** 收藏按钮（第一九五轮；不支持的播放器会隐藏它）。 */
+    private var favoriteBtn: ImageView? = null
+
+    /** 播放模式按钮（第一九五轮；不支持的播放器会隐藏它）。 */
+    private var playModeBtn: ImageView? = null
+
     private lateinit var progressFill: View
     private lateinit var progressHost: FrameLayout
     private lateinit var pipDivider: PipDividerView
@@ -1201,6 +1259,133 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         }
         controls.addView(nextBtn, LinearLayout.LayoutParams(40, 56).apply { leftMargin = 56 })
         combinedCard.addView(controls, abs(0, COMBINED_CONTROLS_TOP, -1, 56))
+
+        // —— 收藏 / 播放模式（第一九五轮）——
+        //
+        // 放在控制键行的**左右两侧**：控制键是**居中**的（248px 宽），
+        // 卡片宽约 520 → 左右各空出约 130px，正好放下这两个按钮。
+        //
+        // **不支持的播放器直接隐藏**（[applyActionVisibility]）——
+        // 亮一个「点了没反应」的按钮比没有更糟。
+        //
+        // 第 195 轮把文字符号换成了**矢量图标**（[MediaActionIcons]）：
+        // 收藏用心形，播放模式用 repeat / repeat_one / shuffle 标准符号。
+        val favBtn = ImageView(context).apply {
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            // 内容区 28×28（外框 48×56 留出左右 10 / 上下 14）
+            setPadding(10, 14, 10, 14)
+            isClickable = true
+            contentDescription = "收藏"
+            setOnClickListener {
+                Logx.event(
+                    LogTags.NAV_UI,
+                    "导航页音乐卡收藏按钮",
+                    "title" to trackTitle,
+                    "favorited" to favoriteState.isFavorited,
+                )
+                onFavoriteToggle?.invoke()
+            }
+        }
+        favoriteBtn = favBtn
+        combinedCard.addView(favBtn, abs(24, COMBINED_CONTROLS_TOP, 48, 56))
+
+        val modeBtn = ImageView(context).apply {
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            // 内容区 28×28（外框 52×56 留出左右 12 / 上下 14）
+            setPadding(12, 14, 12, 14)
+            isClickable = true
+            contentDescription = "播放模式"
+            setOnClickListener {
+                Logx.event(
+                    LogTags.NAV_UI,
+                    "导航页音乐卡播放模式按钮",
+                    "title" to trackTitle,
+                    "mode" to (playModeState.current?.name ?: "unknown"),
+                )
+                onPlayModeToggle?.invoke()
+            }
+        }
+        playModeBtn = modeBtn
+        combinedCard.addView(
+            modeBtn,
+            LayoutParams(52, 56, Gravity.TOP or Gravity.END).apply {
+                topMargin = COMBINED_CONTROLS_TOP
+                rightMargin = 24
+            },
+        )
+        // 按钮建好了 → 按当前播放器的能力表决定显不显示
+        applyActionVisibility()
+        applyFavoriteState()
+        applyPlayModeState()
+    }
+
+    /**
+     * 收藏 / 播放模式这两个按钮**显不显示**（第一九五轮）。
+     *
+     * 只认**能力表里有的包**（[MediaActions.supportsFavorite] /
+     * [MediaActions.supportsPlayMode]）——
+     * 表里没有的包一律隐藏（不猜：猜错了会亮一个点了没反应的按钮）。
+     */
+    private fun applyActionVisibility() {
+        val pkg = musicPackage
+        favoriteBtn?.visibility =
+            if (MediaActions.supportsFavorite(pkg)) View.VISIBLE else View.GONE
+        playModeBtn?.visibility =
+            if (MediaActions.supportsPlayMode(pkg)) View.VISIBLE else View.GONE
+    }
+
+    /**
+     * 收藏态 → 收藏按钮长什么样（第一九五轮）。
+     *
+     * 三态分别长这样：
+     *
+     * | 状态 | 样子 |
+     * |---|---|
+     * | 已收藏 | **实心**心形，强调色 |
+     * | 未收藏 | **空心**心形，常规弱色 |
+     * | 不知道 | **空心**心形，**更弱**的色（别让用户以为「确定没收藏」） |
+     *
+     * 第 195 轮把 `♡` / `♥` 文字符号换成了矢量心形（[MediaActionIcons]）——
+     * 车机字体里的 `♡` 上下不对称，看着像画歪的对勾。
+     */
+    private fun applyFavoriteState() {
+        val btn = favoriteBtn ?: return
+        val filled = favoriteState.known && favoriteState.isFavorited
+        val color = when {
+            filled -> cardAccent
+            favoriteState.known -> cardPal.textDim
+            else -> cardWeakText
+        }
+        btn.setImageDrawable(MediaActionIcons.heart(filled, color))
+        btn.contentDescription = if (filled) "已收藏" else "收藏"
+    }
+
+    /**
+     * 播放模式 → 按钮上画哪个符号（第一九五轮）。
+     *
+     * 显示的是**当前**模式；点一下会切到**下一个**
+     * （顺序 → 单曲 → 随机 → 顺序，见 [MediaActions.nextPlayMode]）。
+     *
+     * | 模式 | 符号 |
+     * |---|---|
+     * | 顺序播放 | 两个箭头绕一圈（repeat） |
+     * | 单曲循环 | 循环箭头 + 中间一个 1（repeat_one） |
+     * | 随机播放 | 两条交叉箭头（shuffle） |
+     *
+     * 状态**不知道**时画「顺序」并用更弱的色 ——
+     * 因为此时下一次点击就是切到顺序播放。
+     */
+    private fun applyPlayModeState() {
+        val btn = playModeBtn ?: return
+        val mode = playModeState.current
+        val color = if (mode == null) cardWeakText else cardPal.textDim
+        btn.setImageDrawable(MediaActionIcons.playMode(mode, color))
+        btn.contentDescription = "播放模式：" + when (mode) {
+            MediaActions.PlayMode.REPEAT_ALL -> "顺序"
+            MediaActions.PlayMode.REPEAT_ONE -> "单曲"
+            MediaActions.PlayMode.SHUFFLE -> "随机"
+            null -> "顺序"
+        }
     }
 
     /** FrameLayout 绝对定位（相对组合卡左上角）。 */

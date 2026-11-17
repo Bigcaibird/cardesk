@@ -39,8 +39,31 @@ class MusicController private constructor() {
         fun onLastTrackRestored(state: LastTrackStore.State?)
     }
 
+    /**
+     * 「收藏态 / 播放模式」的**可选**监听（第一九五轮）。
+     *
+     * ## 为什么单独开一个接口
+     *
+     * 和 [RestoredListener] 同一个理由：[Listener] 已经有实现方了
+     * （`LauncherView` / `GlobalDockService`），加方法会逼着它们一起改。
+     *
+     * 音乐卡上的**收藏按钮**和**播放模式按钮**要靠它刷新 ——
+     * 这两个状态**不是**曲目的一部分（歌没换，收藏态变了），
+     * 所以不能塞进 `onMediaChanged`。
+     */
+    interface ActionStateListener {
+        /**
+         * 收藏态 / 播放模式变了。
+         *
+         * @param favorite 当前收藏态（true / false / null=不知道）
+         * @param playMode 当前播放模式（null = 不知道）
+         */
+        fun onActionStateChanged(favorite: MediaActions.FavoriteState, playMode: MediaActions.PlayModeState)
+    }
+
     private val main = Handler(Looper.getMainLooper())
     private val listeners = LinkedHashSet<Listener>()
+    private val actionStateListeners = LinkedHashSet<ActionStateListener>()
     private var context: Context? = null
     private var started = false
 
@@ -158,6 +181,212 @@ class MusicController private constructor() {
      * 优先级：**会话优先**（有会话就以会话为准），会话没有才用广播合成的。
      */
     private var broadcastTrack: TrackInfo? = null
+
+    // ------------------------------------------------- 收藏态 / 播放模式（第一九五轮）
+
+    /**
+     * 当前**收藏态**（三态：已收藏 / 未收藏 / 不知道）。
+     *
+     * ## 三态为什么不能省
+     *
+     * QQ 音乐只在 `update_song` 那类广播里带 `key_is_fav`，
+     * `update_state`（只有播放态）里**没有** →
+     * 那时若当成「未收藏」，界面会在每次播放态更新时闪一下「未收藏」，
+     * **用户看着像收藏状态丢了**。
+     */
+    var favoriteState: MediaActions.FavoriteState = MediaActions.FavoriteState.UNKNOWN
+        private set
+
+    /**
+     * 当前**播放模式**（null = 不知道）。
+     *
+     * ## 网易云：问得出来
+     *
+     * 发 `"get_play_mode_action"`，它用会话事件回（见 [NeteaseMediaActions]）。
+     *
+     * ## QQ 音乐：问不出来
+     *
+     * 它的三方广播里没有播放模式字段，URI 协议也只有「设置」没有「读取」→
+     * 所以 QQ 的模式只能由桌面**自己记**（记自己下发的最后一次）。
+     */
+    var playModeState: MediaActions.PlayModeState = MediaActions.PlayModeState.UNKNOWN
+        private set
+
+    /**
+     * 写收藏态（变了才通知上层）。
+     *
+     * @param state 新的收藏态
+     * @param optimistic true = 这是**乐观**写入（等回报的兜底），
+     *   不作废挂起的乐观更新
+     */
+    private fun setFavoriteState(state: MediaActions.FavoriteState, optimistic: Boolean = false) {
+        // 播放器的**权威回报**到了 → 挂起的乐观更新作废（以回报为准）。
+        if (!optimistic) cancelPendingFavorite()
+        if (favoriteState == state) return
+        Logx.event(
+            LogTags.MEDIA, "收藏态变化",
+            "old" to (favoriteState.favorited?.toString() ?: "unknown"),
+            "new" to (state.favorited?.toString() ?: "unknown"),
+            "乐观" to optimistic,
+        )
+        favoriteState = state
+        actionStateListeners.forEach { it.onActionStateChanged(favoriteState, playModeState) }
+    }
+
+    /**
+     * **挂起中的乐观收藏更新**（第一九五轮）。
+     *
+     * ## 为什么不立即乐观更新
+     *
+     * 收藏按钮是**实心/空心**的心形 —— 立即乐观更新的话，
+     * 界面会先跳成实心，几十毫秒后又被播放器的权威回报纠正回来 →
+     * **肉眼看到一次闪烁**（看着像按钮抽风）。
+     *
+     * → 改成**延后乐观**：下发后先等播放器回报；
+     * 回报到了就用回报值；一直没人回报（比如这个播放器不回报），
+     * [OPTIMISTIC_FAVORITE_MS] 之后才落乐观值。
+     *
+     * 播放模式那边没有这个问题（图标是 repeat / repeat_one / shuffle，
+     * 闪一下不明显，而且 QQ 根本不回报模式 → 必须立即乐观），所以它不走这里。
+     */
+    private var pendingFavorite: Runnable? = null
+
+    /** 取消挂起的乐观收藏更新。 */
+    private fun cancelPendingFavorite() {
+        pendingFavorite?.let { main.removeCallbacks(it) }
+        pendingFavorite = null
+    }
+
+    /**
+     * 排一个**延后**的乐观收藏更新。
+     *
+     * @param target true = 乐观认为「已收藏」
+     */
+    private fun scheduleOptimisticFavorite(target: Boolean) {
+        cancelPendingFavorite()
+        val state = if (target) {
+            MediaActions.FavoriteState.FAVORITED
+        } else {
+            MediaActions.FavoriteState.NOT_FAVORITED
+        }
+        val job = Runnable {
+            pendingFavorite = null
+            setFavoriteState(state, optimistic = true)
+        }
+        pendingFavorite = job
+        main.postDelayed(job, OPTIMISTIC_FAVORITE_MS)
+    }
+
+    /**
+     * 写播放模式（变了才通知上层）。
+     *
+     * @param state 新的播放模式
+     */
+    private fun setPlayModeState(state: MediaActions.PlayModeState) {
+        if (playModeState == state) return
+        playModeState = state
+        actionStateListeners.forEach { it.onActionStateChanged(favoriteState, playModeState) }
+    }
+
+    /**
+     * 换歌 → 收藏态复位成「**不知道**」（第一九五轮）。
+     *
+     * 新歌的收藏态要么由播放器重发 metadata 带来（网易云），
+     * 要么由下一条 `update_song` 广播带来（QQ 音乐）。
+     */
+    private fun resetActionStateOnSongChange() {
+        setFavoriteState(MediaActions.FavoriteState.UNKNOWN)
+        // 换歌了 → 上一首歌挂起的乐观更新没有意义。
+        cancelPendingFavorite()
+        // 播放模式是**播放器级**的（不是歌曲级）→ 换歌不该清它。
+    }
+
+    /**
+     * 从**当前会话的 metadata** 里读收藏态（网易云专用，第一九五轮）。
+     *
+     * 网易云把收藏态放在心形评分里，播放器收藏 / 取消收藏后都会重发 metadata，
+     * 所以这里直接读当前控制器的那份。
+     */
+    private fun readFavoriteFromSession() {
+        if (track?.pkg != MediaButtonTransport.NETEASE_PACKAGE) return
+        val c = MusicSessionTracker.get().boundController() ?: return
+        val heart = NeteaseMediaActions.favoriteHeart(runCatching { c.metadata }.getOrNull()) ?: return
+        setFavoriteState(
+            if (heart) MediaActions.FavoriteState.FAVORITED
+            else MediaActions.FavoriteState.NOT_FAVORITED,
+        )
+    }
+
+    /**
+     * **收藏 / 取消收藏**当前歌曲（第一九五轮）。
+     *
+     * ## 三态在这里怎么用
+     *
+     * 状态「不知道」时，按下收藏按钮 → **收藏**（不是「取消收藏」）。
+     * 理由：用户点收藏按钮的心智是「我想收藏它」，
+     * 不是「我想把状态翻转一下」。
+     *
+     * ## 乐观更新
+     *
+     * 下发成功就先按目标状态更新界面，等播放器把真实状态带回来再校正
+     * （网易云重发 metadata / QQ 音乐重发 `update_song`）。
+     *
+     * @return 是否真的下发了（false = 当前播放器不支持，或下发失败）
+     */
+    fun toggleFavorite(): Boolean {
+        val ctx = context ?: return false
+        val pkg = track?.pkg
+        if (!MediaActions.supportsFavorite(pkg)) {
+            Logx.i(LogTags.MEDIA, "收藏：当前播放器不支持", "pkg" to (pkg ?: ""))
+            return false
+        }
+        val target = !favoriteState.isFavorited
+        val ok = MediaActionsDispatcher.sendFavorite(
+            context = ctx,
+            controller = MusicSessionTracker.get().boundController(),
+            packageName = pkg,
+            favorited = target,
+        )
+        if (ok) {
+            // **不立即乐观更新** —— 等播放器的权威回报（QQ 的 `update_fav` 广播 /
+            // 网易云重发的 metadata）。没人回报时才在 [OPTIMISTIC_FAVORITE_MS] 后兜底。
+            scheduleOptimisticFavorite(target)
+        }
+        return ok
+    }
+
+    /**
+     * **切播放模式**（顺序 → 单曲 → 随机 → 顺序）（第一九五轮）。
+     *
+     * ## 状态未知时先落到「顺序播放」
+     *
+     * 见 [MediaActions.nextPlayMode]：随机播放会让用户「下一首听到的歌跟预期不一样」，
+     * 在不知道当前状态时先落到最不容易出意外的档位。
+     *
+     * @return 是否真的下发了
+     */
+    fun cyclePlayMode(): Boolean {
+        val ctx = context ?: return false
+        val pkg = track?.pkg
+        if (!MediaActions.supportsPlayMode(pkg)) {
+            Logx.i(LogTags.MEDIA, "播放模式：当前播放器不支持", "pkg" to (pkg ?: ""))
+            return false
+        }
+        val next = MediaActions.nextPlayMode(playModeState.mode)
+        val ok = MediaActionsDispatcher.sendPlayMode(
+            context = ctx,
+            controller = MusicSessionTracker.get().boundController(),
+            packageName = pkg,
+            mode = next,
+        )
+        if (ok) {
+            setPlayModeState(MediaActions.PlayModeState(next))
+            // 网易云答得出来 → 顺口问一句，用它的答案校正我们记的值。
+            MediaActionsDispatcher.requestPlayMode(ctx, MusicSessionTracker.get().boundController(), pkg)
+        }
+        return ok
+    }
+
     var lyric: LyricTimeline? = null
         private set
     var lyricIndex: Int = -1
@@ -302,6 +531,7 @@ class MusicController private constructor() {
         runCatching { prefs = com.cardesk.launcher.core.Prefs(app) }
         restoreLastSongState()
         MusicSessionTracker.get().addListener(trackerListener)
+        MusicSessionTracker.get().addActionStateListener(trackerActionListener)
         MusicSessionTracker.get().start(context)
         // 第126轮：把「广播来源的方控」落点交给 tracker ——
         // 原车把方向盘方控交给我们之后，按键要能真的作用到 QQ 音乐上
@@ -328,6 +558,7 @@ class MusicController private constructor() {
         Logx.i(LogTags.MEDIA, "媒体总控停止", "title" to (track?.title ?: ""))
         main.removeCallbacksAndMessages(null)
         MusicSessionTracker.get().removeListener(trackerListener)
+        MusicSessionTracker.get().removeActionStateListener(trackerActionListener)
         MusicSessionTracker.get().stop()
         // 第126轮：广播来源的方控落点也要一起摘掉。
         MusicSessionTracker.get().broadcastControl = null
@@ -343,6 +574,19 @@ class MusicController private constructor() {
 
     fun removeListener(l: Listener) {
         listeners.remove(l)
+    }
+
+    // ---------------------------------------------- 收藏态 / 播放模式（第一九五轮）
+
+    /** 注册「收藏态 / 播放模式」监听（可选，见 [ActionStateListener]）。 */
+    fun addActionStateListener(l: ActionStateListener) {
+        actionStateListeners.add(l)
+        l.onActionStateChanged(favoriteState, playModeState)
+    }
+
+    /** 注销「收藏态 / 播放模式」监听。 */
+    fun removeActionStateListener(l: ActionStateListener) {
+        actionStateListeners.remove(l)
     }
 
     // ---------------------------------------------------------------- tracker
@@ -416,6 +660,12 @@ class MusicController private constructor() {
             // 元数据变了 → 立刻落盘
             persistTrack(t, force = changed)
             if (changed) {
+                // 第一九五轮：换歌 → 收藏态复位成「不知道」。
+                //
+                // 新歌的收藏态由播放器自己带回来：
+                // 网易云重发 metadata（心形评分），QQ 音乐重发 `update_song`（`key_is_fav`）。
+                resetActionStateOnSongChange()
+                readFavoriteFromSession()
                 onTrackReset(t)
             }
             // —— 歌词版本复核（第四十轮新增，第七十八轮把触发条件补齐）
@@ -454,6 +704,37 @@ class MusicController private constructor() {
             }
             // 进度同样要落盘
             persistTrack(track ?: return)
+        }
+    }
+
+    /**
+     * 会话侧的**收藏态 / 播放模式**监听（第一九五轮）。
+     *
+     * ## 这条通道是谁
+     *
+     * [MusicSessionTracker] 从**会话元数据**里读网易云的心形评分（= 收藏态），
+     * 从**会话事件**里读网易云答回来的播放模式。
+     *
+     * ## 为什么只有网易云走这里
+     *
+     * QQ 音乐车机版**不发布可用会话**，它的收藏态走**广播**
+     * （`key_is_fav`，见 [handleQqLyricBroadcast]）。
+     */
+    private val trackerActionListener = object : MusicSessionTracker.ActionStateListener {
+        override fun onActionStateChanged(favoriteHeart: Boolean?, playModeCode: Int?) {
+            // 只认**当前**播放器的会话 —— 别的 App 的会话事件也会走到这里。
+            val pkg = track?.pkg
+            if (pkg != MediaButtonTransport.NETEASE_PACKAGE) return
+            if (favoriteHeart != null) {
+                setFavoriteState(
+                    if (favoriteHeart) MediaActions.FavoriteState.FAVORITED
+                    else MediaActions.FavoriteState.NOT_FAVORITED,
+                )
+            }
+            if (playModeCode != null) {
+                val mode = MediaActions.playModeFromNeteaseCode(playModeCode)
+                if (mode != null) setPlayModeState(MediaActions.PlayModeState(mode))
+            }
         }
     }
 
@@ -1248,6 +1529,21 @@ class MusicController private constructor() {
             applyQqBroadcastTrack(payload)
         }
 
+        // ——收藏态（第一九五轮）：QQ 音乐在 `update_song` 这类广播里带 `key_is_fav` ——
+        //
+        // 出处：`BroadcastSenderCenterForThird.putSongInfo()`
+        // （`i4 = (songInfo == null || !MyFavManager.H().R(songInfo)) ? 0 : 1`）
+        // → **1 = 已收藏，0 = 未收藏**。
+        //
+        // `update_state`（只有播放态）里**没有**这个字段 → 那时是「不知道」，
+        // 不能当成「未收藏」，否则界面会在每次播放态更新时闪一下（看着像收藏丢了）。
+        //
+        // 放在 [applyQqBroadcastTrack] **之后**：换歌时那里会先把收藏态复位成「不知道」，
+        // 这里再把**这首歌**的收藏态写进去。
+        setFavoriteState(
+            MediaActions.mergeFavorite(favoriteState, MediaActions.favoriteFromRaw(payload.favorite)),
+        )
+
         // ——喂给原车媒体桥：方控要靠它才能被原车接管——
         pushBroadcastToBridge(payload)
 
@@ -1449,6 +1745,11 @@ class MusicController private constructor() {
             sourceId = MediaSources.QQ_ID,
         )
         broadcastTrack = synthetic
+        // 第一九五轮：换歌了 → 收藏态复位成「不知道」。
+        //
+        // 这条广播自己就带着**这首歌**的 `key_is_fav`，
+        // 复位之后调用方会把它的收藏态写回来（顺序在 [handleQqLyricBroadcast] 里）。
+        resetActionStateOnSongChange()
         Logx.i(
             LogTags.MEDIA, "QQ 广播合成曲目",
             "title" to title, "artist" to artist,
@@ -1623,6 +1924,17 @@ class MusicController private constructor() {
 
         /** 进度往 UI 推送的最小间隔（UI 自身 1s 刷新）。 */
         const val POSITION_PUSH_MS = 1_000L
+
+        /**
+         * 收藏的**乐观更新延迟**（第一九五轮）。
+         *
+         * 下发收藏指令后，等这么久还没等到播放器的权威回报，才落乐观值。
+         *
+         * - QQ 音乐：回报是 `update_fav` 广播，**实测 50ms 内**就到；
+         * - 网易云：回报是重发的 metadata（`setRating` 之后），也就百来毫秒；
+         * - 这个间隔只是**兜底**（万一某个播放器不回报），不是等待时间。
+         */
+        const val OPTIMISTIC_FAVORITE_MS = 600L
 
         /**
          * 「上次歌曲」落盘的最小间隔。

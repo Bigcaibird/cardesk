@@ -180,13 +180,70 @@ object QqBroadcast {
     /** 停止。 */
     const val CMD_STOP = 9
 
+    // ---------------------------------------------------------------- ① 收藏（第一九五轮）
+
     /**
-     * 「允许对外发送」开关。
+     * 收藏当前歌曲。
      *
-     * 第三方发这个命令，QQ 音乐才会开始往外挂 `update_song` / `update_state` /
-     * `update_lyric`。**不发这一条，QQ 音乐一个字节都不会往外广播。**
+     * `BroadcastReceiverCenterForThird.controlPlay()` 的 `case 5`：
+     *
+     * ```java
+     * case 5:
+     * case 6:
+     *     songInfo = MusicPlayerHelper.j0().y0();   // 当前歌曲
+     *     if (songInfo != null) SongInfoUtilsForShow.s(context, songInfo, 5, "");
+     * ```
+     *
+     * → `m0=5` 是「**收藏**」，`m0=6` 是「**取消收藏**」
+     * （`SongInfoUtilsForShow` 的类型 5 = 喜欢；6 = 取消）。
+     *
+     * **注意**：这两个码在 `controlPlay()` 里走的是**同一个 case**，
+     * 收藏与取消的区别在 `SongInfoUtilsForShow` 内部按类型区分。
      */
+    const val CMD_FAVORITE = 5
+
+    /** 取消收藏当前歌曲（见 [CMD_FAVORITE]）。 */
+    const val CMD_UNFAVORITE = 6
+
+    // ---------------------------------------------------------------- ② 播放模式（第一九五轮）
+
+    /**
+     * 单曲循环。
+     *
+     * `BroadcastReceiverCenterForThird` 常量：
+     * `MODE_SONG_REPEAT = 101`。
+     *
+     * 这三个码走 `controlPlay()` 的另一组分支（`i4 == 101/103/105`），
+     * 最终调 `MusicPlayerHelper.j0().S1(mode)` —— **真的切播放模式**，
+     * 与 `m0=0/1/2/3` 那组（走 `setPlay` / `prevPlay` / `backPlay`）不是一回事。
+     */
+    const val MODE_SONG_REPEAT = 101
+
+    /** 列表循环（顺序播放）。 */
+    const val MODE_LIST_REPEAT = 103
+
+    /** 随机播放。 */
+    const val MODE_SONG_SHUFFLE = 105
+
+    /** 「打开允许对外发送」开关。 */
     const val CMD_ALLOW_SEND_OUTSIDE = 100
+
+    // ---------------------------------------------------------------- 动作名（第一九五轮）
+
+    /** 动作名：收藏当前歌曲。 */
+    const val ACTION_FAVORITE = "favorite"
+
+    /** 动作名：取消收藏当前歌曲。 */
+    const val ACTION_UNFAVORITE = "unfavorite"
+
+    /** 动作名：单曲循环。 */
+    const val MODE_REPEAT_ONE = "mode-repeat-one"
+
+    /** 动作名：列表循环（顺序播放）。 */
+    const val MODE_REPEAT_ALL = "mode-repeat-all"
+
+    /** 动作名：随机播放。 */
+    const val MODE_SHUFFLE = "mode-shuffle"
 
     // ---------------------------------------------------------------- ③ 第三方 → QQ（URI）
 
@@ -235,12 +292,42 @@ object QqBroadcast {
         val state: Int,
         /** LRC 歌词原文（`lyric`）。 */
         val lyric: String,
+        /**
+         * 收藏态（`key_is_fav`；-1 = 这条广播里没有）。
+         *
+         * ## 出处（第一九五轮逆向 `com.tencent.qqmusiccar` 1.9.8.22 得到）
+         *
+         * `BroadcastSenderCenterForThird.putSongInfo()`：
+         *
+         * ```java
+         * i4 = (songInfo == null || !MyFavManager.H().R(songInfo)) ? 0 : 1;
+         * jSONObject.put("key_is_fav", i4);
+         * ```
+         *
+         * → **1 = 已收藏，0 = 未收藏**。
+         * 只有 `update_song` 这类带歌曲信息的广播里才有它；
+         * `update_state`（只有播放态）里没有 → 那时用 **-1 表示「不知道」**，
+         * 不能当成「未收藏」，否则界面会闪成未收藏。
+         */
+        val favorite: Int = -1,
     ) {
         /** 有没有歌名或歌手（够合成一张卡片了）。 */
         val hasSong: Boolean get() = title.isNotEmpty() || artist.isNotEmpty()
 
         /** 有没有歌词。 */
         val hasLyric: Boolean get() = lyric.isNotEmpty()
+
+        /**
+         * 收藏态**已知**吗（-1 = 不知道）。
+         *
+         * 界面上「不知道」和「未收藏」要分开：
+         * 不知道 → 不点亮收藏按钮、也不置灰；
+         * 未收藏 → 显示未收藏的样子。
+         */
+        val favoriteKnown: Boolean get() = favorite >= 0
+
+        /** 是否已收藏（`favoriteKnown` 为 false 时返回 false，别拿它当状态用）。 */
+        val favorited: Boolean get() = favorite == 1
 
         /** 播放态是不是「在放」（缓冲中也算 —— 用户按了暂停就是想停）。 */
         val playing: Boolean get() = state == STATE_PLAYING || state == STATE_BUFFERING
@@ -267,6 +354,11 @@ object QqBroadcast {
             positionMs = JsonLite.long(data, "curr_time", 0L),
             state = if (data.containsKey("state")) JsonLite.long(data, "state", -1L).toInt() else -1,
             lyric = JsonLite.str(data, "lyric"),
+            favorite = if (data.containsKey("key_is_fav")) {
+                JsonLite.long(data, "key_is_fav", 0L).toInt()
+            } else {
+                -1
+            },
         )
     }
 
@@ -366,13 +458,24 @@ object QqBroadcast {
     // ---------------------------------------------------------------- 发送：URI 通道（真控制）
 
     /**
-     * 把播放/暂停/切歌的动作翻译成 QQ 音乐的命令码。
+     * 把动作翻译成 QQ 音乐的命令码（`m0`）。
      *
      * **这套编号在两个通道里是同一套**（实测 + 反编译都对上了）：
      * `0=PLAY 1=PAUSE 2=PREVIOUS 3=NEXT`，广播通道的 action 码与
      * URI 通道的 `m0` 完全一致。
      *
-     * @param action `play` / `pause` / `next` / `previous` / `stop`
+     * 第一九五轮新增（同样走 URI 通道的 `action=20`）：
+     *
+     * | 动作 | 码 | QQ 音乐那边 |
+     * |---|---|---|
+     * | 收藏 | [CMD_FAVORITE] = 5 | `controlPlay` → `case 5` → `SongInfoUtilsForShow.s(…, 5, …)` |
+     * | 取消收藏 | [CMD_UNFAVORITE] = 6 | `controlPlay` → `case 6` |
+     * | 单曲循环 | [MODE_SONG_REPEAT] = 101 | `controlPlay` → `S1(101)` |
+     * | 列表循环 | [MODE_LIST_REPEAT] = 103 | `controlPlay` → `S1(103)` |
+     * | 随机播放 | [MODE_SONG_SHUFFLE] = 105 | `controlPlay` → `S1(105)` |
+     *
+     * @param action `play` / `pause` / `next` / `previous` / `stop` /
+     *   `favorite` / `unfavorite` / `mode-repeat-one` / `mode-repeat-all` / `mode-shuffle`
      * @return 对应的命令码；不认识返回 null。
      */
     fun commandFor(action: String): Int? = when (action) {
@@ -381,6 +484,11 @@ object QqBroadcast {
         "next" -> CMD_NEXT
         "previous" -> CMD_PREVIOUS
         "stop" -> CMD_STOP
+        ACTION_FAVORITE -> CMD_FAVORITE
+        ACTION_UNFAVORITE -> CMD_UNFAVORITE
+        MODE_REPEAT_ONE -> MODE_SONG_REPEAT
+        MODE_REPEAT_ALL -> MODE_LIST_REPEAT
+        MODE_SHUFFLE -> MODE_SONG_SHUFFLE
         else -> null
     }
 
@@ -433,6 +541,69 @@ object QqBroadcast {
             false
         }
     }
+
+    /**
+     * 收藏 / 取消收藏当前歌曲（第一九五轮）。
+     *
+     * 走 ③ 号 URI 通道：`qqmusiccar://?action=20&m0=5`（收藏）/ `&m0=6`（取消）。
+     *
+     * ## 为什么不用广播通道
+     *
+     * `dispacherAction()`（广播通道）里 `case 5/6` 走的是 `openQQMusic()` ——
+     * **只会把 QQ 音乐的界面打开**，不会真的收藏。
+     * 真正执行收藏的是 `controlPlay(m0)`，它只从 URI 的 `action=20` 进来。
+     *
+     * ## 收藏态怎么回来
+     *
+     * QQ 音乐收藏成功后会通过第三方广播把 `key_is_fav` 回传
+     * （`BroadcastSenderCenterForThird.putSongInfo()`：`MyFavManager.H().R(songInfo)`）。
+     * → 界面上的收藏态**以广播为准**，不靠乐观 UI 猜。
+     *
+     * ## ⚠️ 这条通道是「**切换**」语义，不是「设为」
+     *
+     * 桌面第一次发出去时按「设为收藏」理解，**逆向后发现不是**：
+     * `BroadcastReceiverCenterForThird.controlPlay()` 里
+     *
+     * ```java
+     * case 5:
+     * case 6:                                  // ← 两个 case 落在一起
+     *     SongInfoUtilsForShow.s(context, songInfo, 5, "");   // ← 参数都是 5
+     * ```
+     *
+     * 而 `s(..., 5, ...)` → `g()` 里是：
+     *
+     * ```java
+     * final boolean zR = MyFavManager.H().R(songInfo);        // 当前是否已收藏
+     * FavorSongServer.a(songInfo, Boolean.valueOf(true ^ zR)); // 收藏 / 取消收藏
+     * ```
+     *
+     * → **m0=5 与 m0=6 完全等价，都是「翻转当前收藏态」**。
+     *
+     * 后果（已实测）：桌面状态还是「不知道」时点一下收藏，
+     * 若 QQ 那边**本来就已收藏**，这一下会把它**取消**掉
+     * → 然后 QQ 回 `key_is_fav=0`，桌面按回报显示「未收藏」。
+     *
+     * 这是**协议本身的限制**（第三方通道只有 toggle，没有「设为」），
+     * 桌面这侧只能做到「状态已知时点一下必然翻转正确」，
+     * 状态未知时的第一次点击**可能与用户预期相反**。
+     *
+     * @param favorited true = 收藏，false = 取消收藏
+     *   （**注意**：QQ 这条通道上是 toggle，两者实际等价）
+     * @return 是否真的发出去了
+     */
+    fun sendFavorite(context: Context, favorited: Boolean): Boolean =
+        sendControl(context, if (favorited) ACTION_FAVORITE else ACTION_UNFAVORITE)
+
+    /**
+     * 切播放模式（第一九五轮）。
+     *
+     * 走 ③ 号 URI 通道：`qqmusiccar://?action=20&m0=101|103|105`
+     * （单曲循环 / 列表循环 / 随机播放）。
+     *
+     * @param mode [MODE_REPEAT_ONE] / [MODE_REPEAT_ALL] / [MODE_SHUFFLE]
+     * @return 是否真的发出去了
+     */
+    fun sendPlayMode(context: Context, mode: String): Boolean = sendControl(context, mode)
 
     // ---------------------------------------------------------------- 采纳门
 

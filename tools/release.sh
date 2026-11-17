@@ -14,10 +14,21 @@
 #   tools/release.sh                                  # 升版本号 + 出包（默认）
 #   tools/release.sh --no-bump                        # 不升版本号（重出同一版）
 #   tools/release.sh --no-test                        # 跳过单测（不推荐）
-#   tools/release.sh --package com.ecarx.qq.tool      # 换包名出包
 #   tools/release.sh --code 4200 --name 1.0.1104      # 指定版本号（不自动 +1）
 #   tools/release.sh --notes "这轮更新了什么"          # 写进 R2 更新清单的更新说明
 #   tools/release.sh --notes-file notes.md            # 更新说明从文件读（优先于 --notes）
+#
+# ## 出什么包
+#
+# **只出 `com.ecarx.cardesk` 的 system 包**（平台签名 + uid 1000）。
+#
+# 第一九五轮起收紧：
+# - 包名**固定**为 `com.ecarx.cardesk`（自有包名）——
+#   不再出 `com.ecarx.qq.tool` 那个「替换参考 App」的版本
+#   （`app/build.gradle.kts` 里 `assembleSystem` 不带 `-PcardeskPackage`
+#   时的默认行为）。要替换参考 App 的话自己单独构建，别走发布脚本。
+# - 单测跑 **system 变体**（`testSystemUnitTest`），
+#   不再跑 debug 变体 —— 出的是 system 包，测的也该是 system。
 #
 # 环境变量（都有默认值，按仓库自带工具链走）：
 #   CARDESK_TOOLCHAIN   默认 <repo>/../toolchain
@@ -36,6 +47,7 @@ export GRADLE_USER_HOME="${GRADLE_USER_HOME:-$ROOT/.gradle-home}"
 GRADLE="${CARDESK_GRADLE:-$TOOLCHAIN/gradle-8.7/bin/gradle}"
 AAPT2="${CARDESK_AAPT2:-$TOOLCHAIN/sdk/build-tools/34.0.0/aapt2}"
 
+# 出包包名：**固定**为 cardesk 自己的包名（第一九五轮起不再出替换版）。
 PACKAGE="com.ecarx.cardesk"
 BUMP=1
 RUN_TEST=1
@@ -48,7 +60,15 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --no-bump) BUMP=0 ;;
         --no-test) RUN_TEST=0 ;;
-        --package) PACKAGE="$2"; shift ;;
+        --package)
+            # 第一九五轮：包名锁死成 com.ecarx.cardesk。
+            # 传同一个值当没传；传别的直接拒绝（别让「替换版」从发布脚本里溜出去）。
+            if [ "$2" != "$PACKAGE" ]; then
+                echo "包名已固定为 $PACKAGE（不接受 '$2'）" >&2
+                echo "要出别的包请自己跑 gradle assembleSystem -PcardeskPackage=..." >&2
+                exit 2
+            fi
+            shift ;;
         --code)    FORCE_CODE="$2"; shift ;;
         --name)    FORCE_NAME="$2"; shift ;;
         --notes)   NOTES="$2"; shift ;;
@@ -100,8 +120,10 @@ rsync -a --checksum \
 # ---------------------------------------------------------------- 3) 构建
 cd "$WORK"
 if [ "$RUN_TEST" -eq 1 ]; then
-    echo "== 全量构建 + 单测"
-    "$GRADLE" clean assembleSystem testDebugUnitTest \
+    echo "== 全量构建 + 单测（system 变体）"
+    # 第一九五轮：测 **system 变体**（出的是 system 包，测的也该是 system），
+    # 不再跑 debug 变体。
+    "$GRADLE" clean assembleSystem testSystemUnitTest \
         -PcardeskPackage="$PACKAGE" -PcardeskVersionCode="$CODE" -PcardeskVersionName="$NAME" \
         --no-daemon --console=plain
 else

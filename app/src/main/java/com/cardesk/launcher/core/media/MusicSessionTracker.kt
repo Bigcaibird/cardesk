@@ -93,11 +93,82 @@ class MusicSessionTracker private constructor() {
         fun onSessionLyric(pkg: String, lrc: String, lines: List<String>, cleared: Boolean)
     }
 
+    /**
+     * 「收藏态 / 播放模式」的**可选**监听（第一九五轮）。
+     *
+     * 和 [SessionLyricListener] 同一个理由：[Listener] 已经有实现方了，
+     * 加方法会逼着所有实现方一起改。
+     *
+     * 什么时候会回调：
+     * - 网易云改了收藏态（metadata 的心形评分变了）；
+     * - 网易云答了「当前播放模式」（会话事件回来了）。
+     */
+    interface ActionStateListener {
+        /**
+         * 收藏态 / 播放模式**变了**。
+         *
+         * @param favoriteHeart 收藏态（true = 已收藏；false = 未收藏；null = 不知道）
+         * @param playModeCode 播放模式编码（网易云口径 1/2/3；null = 不知道）
+         */
+        fun onActionStateChanged(favoriteHeart: Boolean?, playModeCode: Int?)
+    }
+
     private val main = Handler(Looper.getMainLooper())
     private val listeners = LinkedHashSet<Listener>()
+    private val actionStateListeners = LinkedHashSet<ActionStateListener>()
     private var appContext: Context? = null
     private var manager: MediaSessionManager? = null
     private var controller: MediaController? = null
+
+    // ------------------------------------------------- 收藏态 / 播放模式（第一九五轮）
+
+    /**
+     * 当前会话的**收藏态**（三态）。
+     *
+     * ## 从哪来
+     *
+     * 网易云把收藏态放在 **metadata 的心形评分**里
+     * （`vc/g.java` 的 `T(boolean star)` → `putRating(METADATA_KEY_USER_RATING, …)`），
+     * 所以每次 `onMetadataChanged` 都重新读一次。
+     *
+     * QQ 音乐不发布可用会话，它的收藏态走**广播**（`key_is_fav`），
+     * 由 [MusicController] 那条路处理 —— 这里只管会话来源的。
+     *
+     * **null = 不知道**（没有这个评分项 / 不是心形评分 / 还没有会话）。
+     */
+    private var sessionFavoriteHeart: Boolean? = null
+
+    /**
+     * 当前会话的**播放模式编码**（网易云口径 1/2/3；null = 不知道）。
+     *
+     * 网易云答「我现在什么模式」的方式是**会话事件**：
+     * 发 `"get_play_mode_action"` → 它回一条同名 session event，
+     * bundle 里是 `play_mode`。见 [NeteaseMediaActions]。
+     */
+    private var sessionPlayModeCode: Int? = null
+
+    /**
+     * 当前会话的**收藏态**（供上层读取）。
+     *
+     * @return true = 已收藏；false = 未收藏；null = 不知道
+     */
+    fun currentFavoriteHeart(): Boolean? = sessionFavoriteHeart
+
+    /**
+     * 当前会话的**播放模式编码**（供上层读取）。
+     *
+     * @return 网易云口径的 1 / 2 / 3；null = 不知道
+     */
+    fun currentPlayModeCode(): Int? = sessionPlayModeCode
+
+    /**
+     * 当前绑定的会话控制器（**执行层**要用它下发指令）。
+     *
+     * 网易云的收藏 / 播放模式走标准会话回调
+     * （`onSetRating` / `onCustomAction`），必须拿这个控制器才能发。
+     */
+    fun boundController(): MediaController? = controller
+
     private var lockedPkg: String? = null
     private var started = false
     private val rescan = Runnable { rescanNow() }
@@ -327,6 +398,15 @@ class MusicSessionTracker private constructor() {
                 updateMetadata(metadata)
                 touch()
                 selectAndNotify("metadata")
+                // 第一九五轮：**收藏态就藏在 metadata 的心形评分里**
+                // （网易云 `vc/g.java` 的 `T(boolean star)` → `putRating(METADATA_KEY_USER_RATING, …)`），
+                // 播放器收藏 / 取消收藏后都会重发 metadata → 这里顺手读一下。
+                if (selectedTokenKey == tokenKey) {
+                    updateActionState(
+                        NeteaseMediaActions.favoriteHeart(metadata),
+                        sessionPlayModeCode,
+                    )
+                }
             }
 
             override fun onPlaybackStateChanged(state: PlaybackState?) {
@@ -412,6 +492,46 @@ class MusicSessionTracker private constructor() {
 
     fun removeListener(l: Listener) {
         listeners.remove(l)
+    }
+
+    // ---------------------------------------------- 收藏态 / 播放模式（第一九五轮）
+
+    /** 注册「收藏态 / 播放模式」监听（可选，见 [ActionStateListener]）。 */
+    fun addActionStateListener(l: ActionStateListener) {
+        actionStateListeners.add(l)
+        l.onActionStateChanged(sessionFavoriteHeart, sessionPlayModeCode)
+    }
+
+    /** 注销「收藏态 / 播放模式」监听。 */
+    fun removeActionStateListener(l: ActionStateListener) {
+        actionStateListeners.remove(l)
+    }
+
+    /**
+     * 更新收藏态 / 播放模式，**变了才通知**（第一九五轮）。
+     *
+     * @param heart 新的收藏态（null = 不知道）
+     * @param code 新的播放模式编码（null = 不知道）
+     */
+    private fun updateActionState(heart: Boolean?, code: Int?) {
+        val heartChanged = heart != sessionFavoriteHeart
+        val codeChanged = code != sessionPlayModeCode
+        if (!heartChanged && !codeChanged) return
+        sessionFavoriteHeart = heart
+        sessionPlayModeCode = code
+        if (heartChanged) {
+            Logx.i(
+                LogTags.MEDIA, "收藏态变化",
+                "favorited" to heart, "pkg" to (controller?.packageName ?: ""),
+            )
+        }
+        if (codeChanged) {
+            Logx.i(
+                LogTags.MEDIA, "播放模式变化",
+                "code" to code, "pkg" to (controller?.packageName ?: ""),
+            )
+        }
+        actionStateListeners.forEach { it.onActionStateChanged(sessionFavoriteHeart, sessionPlayModeCode) }
     }
 
     fun start(context: Context) {
@@ -1008,6 +1128,12 @@ class MusicSessionTracker private constructor() {
         pushMetadata(null)
         // 第八十七轮：换选中会话 = 仪表该换歌，立刻推一次（不等 200ms tick 的节流）
         syncBridge(force = true)
+        // 第一九五轮：换了会话 → 收藏态重新读（心形评分就在 metadata 里），
+        // 播放模式**复位成不知道**（新会话的模式我们还没问过）。
+        updateActionState(
+            NeteaseMediaActions.favoriteHeart(runCatching { rec.controller.metadata }.getOrNull()),
+            null,
+        )
     }
 
     /**
@@ -1108,6 +1234,26 @@ class MusicSessionTracker private constructor() {
         event: String?,
         extras: Bundle?,
     ) {
+        // ——第一九五轮：网易云的**播放模式**也是走会话事件回来的 ——
+        //
+        // 桌面发 `"get_play_mode_action"` → 网易云用同名 session event 回一条
+        // （`yc/i.java`：`mediaSession.sendSessionEvent(action, bundle)`），
+        // bundle 里是 `play_mode`（1/2/3）。
+        //
+        // 注意这段**必须放在歌词解析之前** —— 歌词解析对不认识的 event 直接 return，
+        // 放到后面就永远收不到播放模式了。
+        if (event == NeteaseMediaActions.ACTION_GET_PLAY_MODE ||
+            event == NeteaseMediaActions.ACTION_PLAY_MODE
+        ) {
+            if (selectedTokenKey == tokenKey || selectedTokenKey == null) {
+                val code = extras?.getInt(NeteaseMediaActions.EXTRA_PLAY_MODE, -1) ?: -1
+                if (code > 0) {
+                    updateActionState(sessionFavoriteHeart, code)
+                }
+            }
+            // 播放模式事件**不是**歌词事件 → 到此为止
+            return
+        }
         val parsed = NeteaseSessionLyric.parse(event, bundleToMap(extras)) ?: return
         if (!parsed.hasContent) return
         if (!acceptSessionEvent(tokenKey, pkg)) {

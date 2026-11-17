@@ -6978,3 +6978,242 @@ W/CarDesk/Dock: 沉浸探测失效：policy_control 有全局沉浸策略，mLas
 - **异步的判定不能同步地下结论**。
   「发起连接」不等于「连上了」；连不上时必须有明确的降级出口，
   否则功能会从「弹前台」变成「**完全没声音**」—— 那比原问题更糟。
+
+## 第195轮：音乐卡加「收藏」+「播放模式」，并全部图标化
+
+### 一、用户提的需求
+
+> 第二页（导航页）的音乐卡片上要加**收藏按钮**，还有**随机播放 / 顺序播放**的切换；
+> 播放顺序要用**图标**表示；收藏的爱心画得有点丑，要优化。
+
+本轮范围：**收藏 + 播放模式**（播放列表本轮不做，已与用户达成共识）。
+
+---
+
+### 二、先把协议摸清楚（这一步决定了后面所有实现）
+
+三家播放器的车机版对第三方暴露的通道**完全不同**，
+所以桌面这一侧只能**按包名分发**：
+
+| 播放器 | 收藏 | 播放模式 | 通道 |
+|---|---|---|---|
+| **QQ 音乐车机版** `com.tencent.qqmusiccar` | ✅ | ✅ | 第三方 URI 协议 `qqmusiccar://?action=20&m0=…` |
+| **网易云车机版** `com.netease.cloudmusic.iot` | ✅ | ✅ | **标准 MediaSession**（`sendCustomAction`） |
+| 汽水音乐车机版 `com.luna.music.car` | ❌ | ❌ | 全包找不到对外通道 |
+
+**不支持的播放器直接把按钮隐藏**（`applyActionVisibility`）——
+亮一个「点了没反应」的按钮比没有更糟。
+
+#### 2.1 网易云：推翻了一开始的结论
+
+最初以为只有网易云的**私有 JSK / AIDL**（`IIotServer`）能下指令，
+逆向到一半发现那条路第三方**根本接不上**：
+
+- `IIotServer` 由 `CarCommonProvider` 注册进 `ServiceFacade`，
+  而 `ServiceFacade` 是网易云**进程内**的静态 `Map`
+  （`com/netease/cloudmusic/common/ServiceFacade.java`：
+  `private static Map<String, Object> sServiceMap = new HashMap()`）→ 别的进程读不到；
+- 清单里只导出 `PlayService` / `AutomotiveService`，`IIotServer` 不在其中。
+
+真正能用的是它 **MediaSession 回调里的标准入口**（反编译 `vc/g$b`）：
+
+```java
+@Override public void onSetRating(RatingCompat rating) {
+    if (rating.getRatingStyle() == 1) {          // RATING_HEART
+        Bundle b = new Bundle();
+        b.putBoolean("is_star", rating.hasHeart());
+        g.f24419a.F("star_action", b);           // → 收藏 / 取消收藏
+    }
+}
+
+@Override public void onCustomAction(String action, Bundle extras) {
+    g.f24419a.F(action, extras);                  // → "play_mode_action" 等
+}
+```
+
+动作表在 `yc/p.java`：
+
+| 动作名 | 处理器 | 作用 |
+|---|---|---|
+| `"star_action"` | `yc/s0` | 收藏 / 取消收藏（extra `is_star`） |
+| `"play_mode_action"` | `yc/y` | 切播放模式（extra `play_mode` = 1/2/3） |
+| `"get_play_mode_action"` | `yc/i` | 读当前播放模式（用 session event 回） |
+
+→ **网易云把收藏和播放模式挂在了标准会话回调上**，第三方拿会话控制器就能读写。
+
+收藏态**存在 metadata 的心形评分里**
+（`METADATA_KEY_USER_RATING` + `RatingCompat.newHeartRating`）；
+`dumpsys media_session` 实测网易云会话 `rating type=1` → 读得到。
+
+播放模式编码是**车机侧口径**：1=顺序 / 2=随机 / 3=单曲
+（网易云内部 0/1/2 → 车机 1/3/2，见 `vc/g.java` 的 `onPlayModeChange`）。
+
+#### 2.2 QQ 音乐：收藏指令其实是「**切换**」
+
+`BroadcastReceiverCenterForThird.controlPlay()`：
+
+```java
+case 5:
+case 6:                                   // ← 两个 case 落在一起
+    SongInfoUtilsForShow.s(context, songInfo, 5, "");   // ← 参数都是 5
+```
+
+而 `s(..., 5, ...)` → `g()` 里是：
+
+```java
+final boolean zR = MyFavManager.H().R(songInfo);         // 当前是否已收藏
+FavorSongServer.a(songInfo, Boolean.valueOf(true ^ zR)); // 收藏 / 取消收藏
+```
+
+→ **m0=5 与 m0=6 完全等价，都是「翻转当前收藏态」**。
+
+后果（实测）：桌面状态还是「不知道」时点一下收藏，
+若 QQ 那边**本来就已收藏**，这一下会把它**取消**掉 → QQ 回 `key_is_fav=0`，
+桌面按回报显示「未收藏」。这是**协议本身的限制**（第三方通道只有 toggle），
+桌面这侧只能做到「状态已知时点一下必然翻转正确」。
+
+QQ 音乐**不回报播放模式**（广播里没这个字段，URI 协议也只有设置没有读取）
+→ QQ 的模式只能由桌面**本地跟踪**自己下发的最后一次。
+
+---
+
+### 三、实现
+
+| 文件 | 作用 |
+|---|---|
+| `core/media/MediaActions.kt`（改） | **纯逻辑**：收藏态 / 播放模式状态模型、能力表（按包名）、模式循环、收藏态合并、网易云编码 |
+| `core/media/NeteaseMediaActions.kt`（新建） | 网易云执行层：走会话控制代理下发动作 |
+| `core/media/MediaActionsDispatcher.kt`（重写） | 按包名分发 |
+| `core/media/MusicSessionTracker.kt`（改） | 会话跟踪 + 收藏 / 模式状态（心形评分、session event） |
+| `core/media/MusicController.kt`（改） | 状态持有 + 命令下发 + 动作状态监听 |
+| `ui/pages/NavPage.kt`（改） | 音乐卡两个按钮 + 状态应用 |
+| `ui/LauncherView.kt`（改） | 接线 + `refresh()` 推送状态 |
+| `ui/widget/MediaActionIcons.kt`（新建） | **矢量图标**（心形 / repeat / repeat_one / shuffle） |
+
+收藏态是**三态**（已收藏 / 未收藏 / **不知道**）：
+QQ 的 `update_state` 广播里**没有** `key_is_fav`，
+当成「未收藏」会让界面每次播放态更新都闪一下 —— 看着像收藏状态丢了。
+`mergeFavorite()` 规定「**未知不覆盖已知**」。
+
+---
+
+### 四、图标化（用户追加的需求）
+
+第一版直接拿 Unicode 字符当图标（`♡` / `♥` / 「顺序」/「随机」），
+实机截图出来两个问题：
+
+- `♡` 在车机字体里是个**细瘦的轮廓**、上下不对称 —— 看着像「画歪了的对勾」，不像心；
+- 播放模式写成**中文** → 跟周围的纯图形控件（‹ ▶ ›）不是一个语言，视觉上多了一块文字噪声。
+
+→ 改成 `ui/widget/MediaActionIcons.kt`：**Canvas 几何自绘**的矢量图标。
+
+| 状态 | 图标 |
+|---|---|
+| 未收藏 / 不知道 | 空心心形（描边，弱色） |
+| 已收藏 | **实心**心形（强调色） |
+| 顺序播放 | 上下两条**反向**箭头 `⇄` |
+| 单曲循环 | 圆弧箭头 + 中间一个 `1` |
+| 随机播放 | 两条**交叉**的折线 + 箭头 |
+
+**为什么不用 SVG / 图片资源**：
+
+- 项目约定「所有图形由本项目自绘，不使用任何图片资源」（见 `Skin` 的 KDoc）；
+- 设备端 `android.graphics.Path` **没有公开的 `parse`**（那是 @hide），
+  裁剪过的 `android.jar` 里也没有 → SVG path data 解析不了；
+- 所以全部用**几何图元**（直线 / 贝塞尔 / 圆弧）画在 24×24 基准视口里，
+  绘制时按实际 bounds 等比缩放 → 任意尺寸都不糊。
+
+---
+
+### 五、踩到的四个坑（都已修，记在这里免得再犯）
+
+**坑一：QQ 音乐的收藏指令是「切换」，不是「设为」。**
+见 2.2。一开始按「设为收藏」实现，实测点一下反而把已收藏的歌取消了。
+→ 收藏态**以播放器回报为准**，桌面只做「未知不覆盖已知」的合并。
+
+**坑二：收藏态不能立即乐观更新。**
+最初下发成功就先把心形点亮，几十毫秒后又被播放器的权威回报纠正回来 →
+**肉眼看到一次闪烁**（像按钮抽风）。
+→ 改成**延后乐观**：先等回报（QQ 约 50ms，网易云百来毫秒），
+没人回报才在 600ms 后落乐观值。
+
+**坑三：API 28 的 `MediaController` 上既没有 `setRating` 也没有 `sendCustomAction`。**
+设备实测 `MediaController` 的 public 方法只有 `sendCommand`（+ 一堆 getter）。
+而 `sendCommand` **不能**替代 —— androidx 的 `MediaSessionCompat.Callback`
+把 `onCommand` 与 `onCustomAction` 当成**两个独立方法**，
+`onCommand` 不会自动转到 `onCustomAction`。
+
+试过的找法全都不通：
+
+| 找法 | 结果 |
+|---|---|
+| `MediaController.sendCustomAction` / `setRating` | **不存在** |
+| `MediaController` 的 `mImpl` 字段 | **不存在** |
+| `MediaController$TransportControls.mImpl` | **不存在** |
+| `MediaSession.Token.getMediaController()` | **不存在** |
+| **`MediaSession.Token.mBinder`** | ✅ **它本身就是代理** |
+
+`Token.mBinder` 的运行时类型是
+`android.media.session.ISessionController$Stub$Proxy` —— **已经是现成的代理对象**。
+
+**坑四：`ISessionController` 的签名比想象的多两个参数。**
+
+```java
+void sendCustomAction(String callingPackage, ISessionControllerCallback callback,
+                       String action, Bundle extras);
+```
+
+第一个参数是**调用方包名**（framework 拿它做权限检查，传错会被服务端拒），
+第二个是回调。照着 AOSP 9 的 `sendCustomAction(String, Bundle)` 调用会直接
+`IllegalArgumentException: argument 2 has type ISessionControllerCallback, got Bundle`。
+
+→ 所以调用参数**按参数类型定位** `action` / `extras` 的位置，
+其余参数：第一个 `String` 填真实的调用方包名，别的填 null。
+
+顺带发现：这个接口上**没有 `setRating`** → 收藏改走 `sendCustomAction("star_action", …)`，
+与网易云 `onSetRating` 内部做的事**完全一致**，依赖更少。
+
+---
+
+### 六、验证
+
+| 项 | 结果 |
+|---|---|
+| 单测 | **2341 全绿**（0 失败 0 错误 0 跳过） |
+| 新增单测 | `MediaActionsTest`（16 例，纯逻辑） |
+| 构建 | `:app:assembleSystem -PcardeskPackage=com.ecarx.cardesk` → 包名 `com.ecarx.cardesk` |
+| 模拟器端到端 | QQ 音乐、网易云**两条路都实测通过**（详见下节） |
+| 实测报告 | [`emu-verify/REPORT-r195.md`](emu-verify/REPORT-r195.md) |
+
+**QQ 音乐（收藏）**：
+
+```
+[EVT] 导航页音乐卡收藏按钮 title=素颜 favorited=false
+[EVT] 下发收藏指令 pkg=com.tencent.qqmusiccar favorited=true ok=true
+[EVT] 收藏态变化 old=unknown new=true 乐观=false      ← 来自 QQ 的 update_fav 广播
+```
+
+**网易云（收藏 + 播放模式）**：
+
+```
+[EVT] 下发收藏指令 pkg=com.netease.cloudmusic.iot favorited=true ok=true
+[EVT] 收藏态变化 old=false new=true 乐观=false        ← 来自 metadata 心形评分
+[EVT] 下发播放模式指令 pkg=com.netease.cloudmusic.iot mode=REPEAT_ALL ok=true
+播放模式变化 code=1 pkg=com.netease.cloudmusic.iot   ← 网易云用 session event 回的
+```
+
+---
+
+### 七、已知限制
+
+1. **播放列表本轮不做**。三家都做不了：
+   网易云**从不调用 `setQueue`**（实测 `queueTitle=null, size=0`），
+   QQ 音乐的第三方协议里没有队列接口，汽水两项都不支持。
+2. **QQ 音乐的收藏是 toggle**：状态未知时的第一次点击**可能与用户预期相反**
+   （见 2.2）。状态已知（读过 `update_song` / `update_fav`）时翻转必然正确。
+3. **QQ 音乐不回报播放模式** → 桌面本地跟踪自己下发的最后一次；
+   用户在 QQ 音乐 App 里自己改了模式，桌面**不会自动同步**。
+4. **网易云的收藏态靠 metadata 的心形评分**，播放器要重发 metadata 才会更新；
+   实测回报在几十毫秒内到达。
+5. 模拟器是 API 28；真车 API 29 的 `ISessionController` 签名不同
+   （没有 `callingPackage`）→ 代码按**参数类型**自适应，不用改。

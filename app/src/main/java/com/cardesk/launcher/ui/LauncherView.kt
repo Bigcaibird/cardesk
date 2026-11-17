@@ -995,6 +995,20 @@ class LauncherView(context: Context) : FrameLayout(context) {
             onPrev = { MusicController.get().previous() }
             onNext = { MusicController.get().next() }
             onSource = { openSourceMenu(navPage.sourceAnchor) }
+            // 第195轮：**收藏** / **播放模式**两个按钮。
+            //
+            // 下发失败（播放器不支持 / 通道不通）时返回 false —— 这时**不**改界面，
+            // 免得出现「界面显示已收藏，播放器其实没收藏」的错位。
+            onFavoriteToggle = {
+                val ok = MusicController.get().toggleFavorite()
+                if (!ok) toast("当前播放器不支持收藏")
+                refresh()
+            }
+            onPlayModeToggle = {
+                val ok = MusicController.get().cyclePlayMode()
+                if (!ok) toast("当前播放器不支持切换播放模式")
+                refresh()
+            }
             // 第148轮：**点音乐卡上的封面图** = 切换「歌曲图片当卡片背景」。
             //
             // 桌面不是普通 Activity，点完必须立刻给一句话反馈 ——
@@ -3650,6 +3664,13 @@ private fun showCam() {
         navPage.playing = playing
         navPage.positionText = formatTime(track?.positionMs ?: 0L)
         navPage.durationText = formatTime(track?.durationMs ?: 0L)
+        // —— 第195轮：收藏按钮 / 播放模式按钮 ——
+        //
+        // `musicPackage` 决定这两个按钮**显不显示**：
+        // 播放器没有这两条通道时直接隐藏，不亮一个「点了没反应」的按钮。
+        navPage.musicPackage = track?.pkg
+        navPage.favoriteState = MusicController.get().favoriteState
+        navPage.playModeState = MusicController.get().playModeState
         dock.bind(state)
         slotsBar?.let {
             it.state = state
@@ -4001,12 +4022,26 @@ private fun showCam() {
         return false
     }
 
+    /**
+     * 收藏态 / 播放模式变了（第一九五轮）。
+     *
+     * 这两个状态**不是**曲目的一部分（歌没换，收藏态变了），
+     * 所以不能塞进 `onMediaChanged` —— 单独一个监听，收到就整页刷新。
+     */
+    private val actionStateListener = object : MusicController.ActionStateListener {
+        override fun onActionStateChanged(
+            favorite: com.cardesk.launcher.core.media.MediaActions.FavoriteState,
+            playMode: com.cardesk.launcher.core.media.MediaActions.PlayModeState,
+        ) {
+            refresh()
+        }
+    }
+
     private val mediaListener = object : MusicController.Listener {
         override fun onMediaChanged(track: TrackInfo?) {
             mediaTrack = track
             refresh()
         }
-
         override fun onLyricChanged(timeline: LyricTimeline?, index: Int, wipe: Float) {
             mediaLyric = timeline
             mediaLyricIndex = index
@@ -4061,6 +4096,8 @@ private fun showCam() {
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         MusicController.get().addListener(mediaListener)        // 导航引导数据源跟着窗口生命周期起停
+        // 第195轮：收藏态 / 播放模式变了也要刷（用户可能在播放器自己的界面里收藏了）。
+        MusicController.get().addActionStateListener(actionStateListener)
         navGuideSource?.start()
         // 第138轮：状态栏连接类图标（蜂窝 / WiFi / 热点 / 蓝牙）按**真实状态**显示。
         // 采样器跟窗口生命周期起停 —— 后台时不用采（车机本来就在省电）。
@@ -4079,6 +4116,7 @@ private fun showCam() {
 
     override fun onDetachedFromWindow() {
         MusicController.get().removeListener(mediaListener)
+        MusicController.get().removeActionStateListener(actionStateListener)
         handler.removeCallbacksAndMessages(null)
         weatherDesk?.stop()
         navGuideSource?.stop()
