@@ -25,8 +25,9 @@ import kotlin.math.min
  * |---|---|
  * | 按下 ± 键 | 立刻 ±0.5℃（在 ACTION_DOWN） |
  * | 按住表盘拖动 | `atan2` 取角度 → 夹到 [-135°,135°] → 映射 16~32℃ → 吸附 0.5℃ |
- * | 抬手 | 回调**绝对温度** `onTemp(temp)` |
- * | 拖动中回读 | 直接忽略，避免车机回声打断手势 |
+ * | 拖动中 | 圆环和数字**跟着手指走**（直接落值，不做渐变，见 [applyDragTemperature]） |
+ * | 抬手 | 回调**绝对温度** `onTemp(temp)` —— 报的是**拖出来的那个值** |
+ * | 拖动中回读 | 只挡**外部回读**（车机下发的实际温度），避免回声打断手势 |
  * | `setSynced(true)` | **只画徽标，不禁用触摸**——同步态下仍可调温 |
  *
  * ## 版式（第四十九轮按设计板 `s04-hvac` 重排）
@@ -51,16 +52,36 @@ class TempDialView(context: Context) : View(context) {
             invalidate()
         }
 
-    var temperature: Float = 23.5f
+    /**
+     * **真实温度值**（[temperature] 背后那个字段）。
+     *
+     * 之所以把它和 [temperature] 拆开，是因为「谁在写这个值」有两种，
+     * 而两者的**规则不一样**：
+     *
+     * | 谁在写 | 走哪条路 | 拖动中允许吗 |
+     * |---|---|---|
+     * | 车机回读（实际温度下发） | [temperature] setter | **不允许**（回声会打断手势） |
+     * | 用户自己拖出来的 | [applyDragTemperature] | **必须允许**（否则拖动形同虚设） |
+     *
+     * 之前这两种走的是**同一个** setter，而 setter 在 `dragging` 为真时直接 return ——
+     * 于是用户自己拖出来的值也被当成「车机回声」挡掉了：
+     * 表盘纹丝不动，抬手时 [onTemp] 报的又是拖之前的旧温度，
+     * 宿主换算出来的增量约等于 0 → **拖表盘完全没有效果**。
+     */
+    private var tempValue: Float = 23.5f
+
+    /**
+     * 对外的温度入口（车机回读 / 外部设置）。
+     *
+     * 拖动中**忽略**外部写入：车机的回声会把用户正在拖的那个值覆盖掉，手感就断了。
+     * 用户自己拖出来的值不走这里（见 [applyDragTemperature]），所以不会被误伤。
+     */
+    var temperature: Float
+        get() = tempValue
         set(value) {
-            // setTemp:258-261 —— 拖动中不回读覆盖，避免手势被打断
+            // 拖动中不回读覆盖，避免手势被打断
             if (dragging) return
-            if (field == value) return
-            field = value
-            // 数值变了 → 圆环和数字**渐变**过去。
-            // 之前是直接改数字 + invalidate：圆环「啪」地跳一下、数字也「啪」地跳一下，
-            // 看不出是渐变过去的，像是换了一张图。
-            animateTemperature(value)
+            applyTemperature(value)
         }
 
     var caption: String = "主驾"
@@ -125,6 +146,39 @@ class TempDialView(context: Context) : View(context) {
      * 圆环弧长和中间的数字都跟着它走。
      */
     private var displayTemp = 23.5f
+
+    /**
+     * 写入温度，并让显示值**渐变**过去（外部回读走这条）。
+     *
+     * 数值变了 → 圆环和数字**渐变**过去。
+     * 之前是直接改数字 + invalidate：圆环「啪」地跳一下、数字也「啪」地跳一下，
+     * 看不出是渐变过去的，像是换了一张图。
+     */
+    private fun applyTemperature(value: Float) {
+        if (tempValue == value) return
+        tempValue = value
+        animateTemperature(value)
+    }
+
+    /**
+     * 写入**用户拖出来**的温度（拖动走这条）。
+     *
+     * 与 [applyTemperature] 只差一件事：**不渐变，直接落到目标值**。
+     *
+     * 拖动时手指是节奏的来源，渐变会永远滞后于手指 ——
+     * 每一次 MOVE 都会重启动画（从当前显示值渐变到新目标），
+     * 目标在不停变，动画永远追不上，看着就是「表盘不跟手」。
+     * 0.5℃ 的吸附步长足够细，直接落值反而跟手。
+     */
+    private fun applyDragTemperature(value: Float) {
+        if (tempValue == value) return
+        tempValue = value
+        // 作废在途的渐变帧 —— 上一段渐变的尾帧会把 displayTemp 写回旧值，
+        // 正在拖的时候那一帧一来，「跟着手指走」就断了。
+        tempToken = Any()
+        displayTemp = value
+        invalidate()
+    }
 
     /**
      * 温度渐变的「凭证」。
@@ -287,17 +341,23 @@ class TempDialView(context: Context) : View(context) {
             }
             MotionEvent.ACTION_MOVE -> {
                 if (!dragging) return true
-                temperature = temperatureFor(event.x, event.y)
-                invalidate()
+                // 走 [applyDragTemperature]（不是 `temperature = …`）：
+                // 后者在拖动中会被当成「车机回声」挡掉，指针动了值却不动。
+                applyDragTemperature(temperatureFor(event.x, event.y))
                 return true
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 if (pressedButton != null) endPress()
                 if (dragging) {
-                    onTemp?.invoke(temperature)
+                    // 顺序很重要：**先把 dragging 放下，再回调**。
+                    // 手指已经抬起来了，这时宿主在 [onTemp] 里回写的温度
+                    // 必须被接受 —— 之前顺序反了，回写被当成「拖动中的回声」丢掉了。
                     dragging = false
-                    invalidate()
+                    // 上报的是**拖出来的绝对温度**（宿主靠它换算增量）。
+                    // 之前这里报的是拖之前的旧值 → 增量≈0 → 拖表盘完全没效果。
+                    onTemp?.invoke(temperature)
                 }
+                invalidate()
                 return true
             }
         }
