@@ -7636,3 +7636,19 @@ if (key == "media") {
 3. **拉不起的 App**（没装 / 没有启动入口）给提示「该音乐应用无法打开」。
 4. 模拟器是 API 28；真车 API 29 的 `ISessionController` 签名不同 ——
    本轮不涉及会话回调，**不受影响**。
+
+---
+
+### 八、产物
+
+| 项 | 值 |
+|---|---|
+| 包 | `dist/CarDesk-platform-ecarx-cardesk-4271.apk` |
+| 包名 / 版本 | `com.ecarx.cardesk` / 4271 / 1.0.1175-system |
+| 大小 | 3 527 799 字节 |
+| 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
+| SHA-256 | `a81ea8624a11c4a97e6712d1e652238068ecd5215675aad2120f5a20f5efe91c` |
+| 更新清单 | `dist/cardesk-latest.json`（R2 key `cardesk/CarDesk-platform-ecarx-cardesk-4271.apk`） |
+| 提交 | 代码 `15af527`；出包见 `git log` |
+| GitHub Release | [`v1.0.1175`](https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1175) —— **已发布**，附件为 4271 的 APK |
+| R2 上传 | **未做** —— 环境里没有 `R2_AK` / `R2_SK`（凭据只从环境变量读；与第132/133/136/190/191/192/193轮一致） |
