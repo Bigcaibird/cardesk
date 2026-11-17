@@ -7866,6 +7866,6 @@ Kotlin 按**声明顺序**初始化属性，所以那一刻它还是 `null` → 
 | 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
 | SHA-256 | `c57e8f633023155a80ce7476be40cd0a0e99e6f7a4073b3b998d644b57a76f89` |
 | 更新清单 | `dist/cardesk-latest.json`（R2 key `cardesk/CarDesk-platform-ecarx-cardesk-4272.apk`） |
-| 提交 | 代码 `9d3a524`；出包见 `git log` |
-| GitHub Release | [`v1.0.1176`](https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1176) —— **已发布**，附件为 4272 的 APK |
+| 提交 | 代码 `9d3a524`；出包 `7e87243` |
+| GitHub Release | [`v1.0.1176`](https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1176) —— **已发布**，附件为 4272 的 APK（3 574 775 B，远端 digest 与本地 SHA-256 一致） |
 | R2 上传 | **未做** —— 环境里没有 `R2_AK` / `R2_SK`（凭据只从环境变量读；与第132/133/136/190/191/192/193轮一致） |
