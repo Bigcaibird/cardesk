@@ -42,12 +42,12 @@ class DoorAlertDialogLayoutTest {
 
     // `DoorAlertDialog` 的几何常量在 private companion 里，测试拿不到；
     // 这里按源文件的值写字面量，并标注出处（改产品常量时这里必须跟着改）。
-    /** 弹窗面板尺寸：`DoorAlertDialog.PANEL_W / PANEL_H` = 881×489 @ (519,271)。 */
-    private val panelW = 881
-    private val panelH = 489
+    /** 弹窗面板尺寸：`DoorAlertDialog.PANEL_W / PANEL_H` = 1150×640（第254轮放大）。 */
+    private val panelW = 1150
+    private val panelH = 640
 
-    /** 胶囊行可用宽度：`ROW_W = PANEL_W - SIDE(42) * 2` = 797。 */
-    private val rowW = 797
+    /** 胶囊行可用宽度：`ROW_W = PANEL_W - SIDE(55) * 2` = 1040。 */
+    private val rowW = 1040
 
     /** 造一个「N 处未关」的弹窗并完成测量 / 布局。 */
     private fun dialogOf(
@@ -126,7 +126,7 @@ class DoorAlertDialogLayoutTest {
     }
 
     /**
-     * 第242轮：面板从 760×840 收成 881×489，胶囊行宽 797、胶囊高 48 ——
+     * 第242轮：面板从 760×840 收成画板口径，第254轮又整体放大到 1150×640（胶囊行宽 1040、高 58）——
      * **6 处未关也必须排在一行**（画板口径），不许换行、也不许压扁。
      */
     @Test
@@ -146,7 +146,7 @@ class DoorAlertDialogLayoutTest {
                 row.getChildAt(i).left >= 0 && row.getChildAt(i).right <= rowW,
             )
         }
-        assertEquals("胶囊行高应该就是一个胶囊高", 48, row.height)
+        assertEquals("胶囊行高应该就是一个胶囊高", 58, row.height)
     }
 
     /**
@@ -157,7 +157,7 @@ class DoorAlertDialogLayoutTest {
         val dialog = dialogOf(listOf(false, false, false, false), hoodClosed = false, trunkClosed = false)
         val detail = dialog.detail()
         val lines = detail.layout.lineCount
-        // 新版面板窄而矮（881×489），说明文案一行就够（画板实测 1 行）。
+        // 新版面板 1150×640，说明文案一行就够（画板实测 1 行）。
         assertEquals("6 处未关时说明应该是一行，实际 $lines 行", 1, lines)
         val lastBottom = detail.layout.getLineBottom(lines - 1)
         // 框高是设计板给的 DETAIL_H=26（DETAIL_SP=20）。Robolectric 的通用字体
@@ -179,7 +179,7 @@ class DoorAlertDialogLayoutTest {
     }
 
     /**
-     * 按钮不能被面板底边切掉；也不能跑到 Dock 上（面板底 489）。
+     * 按钮不能被面板底边切掉；也不能跑到 Dock 上（面板底 640）。
      */
     @Test
     fun `第188轮 按钮不越界`() {
@@ -201,8 +201,8 @@ class DoorAlertDialogLayoutTest {
         val dialog = dialogOf(listOf(false, true, true, true))
         val detail = dialog.detail()
         val button = dialog.button()
-        assertEquals("说明文字位置变了", 86, detail.top)
-        assertEquals("按钮位置变了", 400, button.top)
+        assertEquals("说明文字位置变了", 112, detail.top)
+        assertEquals("按钮位置变了", 540, button.top)
     }
 
     /**

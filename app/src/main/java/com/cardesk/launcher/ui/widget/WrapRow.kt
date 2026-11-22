@@ -34,6 +34,15 @@ class WrapRow(context: Context) : ViewGroup(context) {
     /** 两行之间的间距（设计 px）。 */
     var gapY: Int = 0
 
+    /**
+     * 每一行是否**水平居中**（默认 true，历史行为）。
+     *
+     * 车门提醒弹窗的画板是**左对齐**（胶囊从内容左边线起排），
+     * 而这里原来是无条件居中的 —— 只有一枚胶囊时它会飘到面板正中间，
+     * 与标题、说明的左边线对不上（第 254 轮实机截图可见）。
+     */
+    var centerLines: Boolean = true
+
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val widthMode = MeasureSpec.getMode(widthMeasureSpec)
         val widthSize = MeasureSpec.getSize(widthMeasureSpec)
@@ -135,7 +144,8 @@ class WrapRow(context: Context) : ViewGroup(context) {
         for (line in lines) {
             // 整行居中（宽度扣掉最后一个子项后面的 gapX）。
             val contentW = (line.width - gapX).coerceAtLeast(0)
-            var x = paddingLeft + ((avail - contentW) / 2).coerceAtLeast(0)
+            val shift = if (centerLines) ((avail - contentW) / 2).coerceAtLeast(0) else 0
+            var x = paddingLeft + shift
             for (child in line.children) {
                 out.add(Slot(child, x, y))
                 x += child.measuredWidth + gapX
