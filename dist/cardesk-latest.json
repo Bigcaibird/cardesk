@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1215",
-  "versionCode": 4311,
-  "tag": "v1.0.1215",
-  "name": "CarDesk 4311 / 1.0.1215-system",
-  "notes": "开门弹窗整体放大（881×489 → 1150×640），车模槽位 220×250 → 320×380、胶囊/标题/说明/按钮同步放大；胶囊行改为左对齐，单枚胶囊不再飘到面板正中",
-  "publishedAt": "2026-11-22T14:08:27Z",
+  "version": "1.0.1216",
+  "versionCode": 4312,
+  "tag": "v1.0.1216",
+  "name": "CarDesk 4312 / 1.0.1216-system",
+  "notes": "开门弹窗改成接近正方形（760×720）并屏幕居中；6 处未关时说明两行、6 枚胶囊仍排一行。",
+  "publishedAt": "2026-11-22T14:41:07Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4311.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4311.apk",
-    "size": 3762311,
-    "sha256": "78006edcd3e077b988248112b77246dbb631d5d430facfa209157c417943d1ac"
+    "name": "CarDesk-platform-ecarx-cardesk-4312.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4312.apk",
+    "size": 3762391,
+    "sha256": "c7f4c2fb235283c97e79c1e1a91f4bef35a31166324e276d6d912a86d229ba6d"
   }
 }

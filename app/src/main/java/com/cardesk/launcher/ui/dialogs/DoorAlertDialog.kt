@@ -288,10 +288,10 @@ class DoorAlertDialog(
         /** 说明字号 / 位置（画板 ink y91..105 ⇒ 20px）。 */
         const val DETAIL_SP = 21f
         const val DETAIL_TOP = 90
-        const val DETAIL_H = 28
+        const val DETAIL_H = 56
 
         /** 胶囊行位置（画板 y403..450 ⇒ panel-rel 132）。 */
-        const val LIST_TOP = 128
+        const val LIST_TOP = 156
 
         /** 单个胶囊高度（画板 48）。 */
         const val CHIP_H = 48
@@ -318,7 +318,7 @@ class DoorAlertDialog(
         const val CAR_W = 320
         const val CAR_H = 390
         const val CAR_LEFT = (PANEL_W - CAR_W) / 2
-        const val CAR_TOP = 196
+        const val CAR_TOP = 214
 
         /** 底部按钮（画板 rel x620..839 / y400..455 ⇒ 220×56，右边距 41）。 */
         const val BUTTON_W = 220

@@ -157,8 +157,9 @@ class DoorAlertDialogLayoutTest {
         val dialog = dialogOf(listOf(false, false, false, false), hoodClosed = false, trunkClosed = false)
         val detail = dialog.detail()
         val lines = detail.layout.lineCount
-        // 新版面板 760×720，说明文案一行就够（画板实测 1 行）。
-        assertEquals("6 处未关时说明应该是一行，实际 $lines 行", 1, lines)
+        // 新版面板 760×720：6 处未关的整句在 660px 行宽下占 2 行（画板 881 宽时是 1 行）。
+        // 判据是「框高容得下实际行数、且没有省略号」，不是行数本身。
+        assertTrue("说明不该超过 2 行，实际 $lines 行", lines in 1..2)
         val lastBottom = detail.layout.getLineBottom(lines - 1)
         // 框高是设计板给的 DETAIL_H=26（DETAIL_SP=20）。Robolectric 的通用字体
         // 行高是 1.45em（≈29），设备上的 Noto Sans CJK 只有 ≈1.17em（≈23），
