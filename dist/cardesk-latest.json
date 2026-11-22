@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1213",
-  "versionCode": 4309,
-  "tag": "v1.0.1213",
-  "name": "CarDesk 4309 / 1.0.1213-system",
-  "notes": "UI 重设计 v3.3 全面落地：玻璃材质与浅青底、四卡几何、Dock 8 段与状态栏、空调/抽屉/车辆/最近任务/设置 25 页重做；本轮按反馈修正：Dock 右键放大、风量键改设计版风纹并带档位、车辆页后备箱行、设置左栏字号与分组、s11 槽位遮挡、胎压放大与前后排位置、空调档位改底部 --- 形式",
-  "publishedAt": "2026-11-22T12:30:55Z",
+  "version": "1.0.1214",
+  "versionCode": 4310,
+  "tag": "v1.0.1214",
+  "name": "CarDesk 4310 / 1.0.1214-system",
+  "notes": "开门弹窗车模改为实车俯视 3D（与首页车况卡/车辆页同一套 Car3dPainter 资产），开门状态跟随 CarPose；弹窗面板不透明度提到 94%，避免歌词透在面板上",
+  "publishedAt": "2026-11-22T13:10:22Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4309.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4309.apk",
-    "size": 3762007,
-    "sha256": "c08fa0e1e467a4b1b75fe2456d83d61e7e9db10af64044b2a7f57705412057ed"
+    "name": "CarDesk-platform-ecarx-cardesk-4310.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4310.apk",
+    "size": 3762331,
+    "sha256": "af3cb42fef606137d2a4230128a0857c7854e31bf575ba0cdf6a3335880ddf21"
   }
 }
