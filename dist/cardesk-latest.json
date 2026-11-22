@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1214",
-  "versionCode": 4310,
-  "tag": "v1.0.1214",
-  "name": "CarDesk 4310 / 1.0.1214-system",
-  "notes": "开门弹窗车模改为实车俯视 3D（与首页车况卡/车辆页同一套 Car3dPainter 资产），开门状态跟随 CarPose；弹窗面板不透明度提到 94%，避免歌词透在面板上",
-  "publishedAt": "2026-11-22T13:10:22Z",
+  "version": "1.0.1215",
+  "versionCode": 4311,
+  "tag": "v1.0.1215",
+  "name": "CarDesk 4311 / 1.0.1215-system",
+  "notes": "开门弹窗整体放大（881×489 → 1150×640），车模槽位 220×250 → 320×380、胶囊/标题/说明/按钮同步放大；胶囊行改为左对齐，单枚胶囊不再飘到面板正中",
+  "publishedAt": "2026-11-22T14:08:27Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4310.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4310.apk",
-    "size": 3762331,
-    "sha256": "af3cb42fef606137d2a4230128a0857c7854e31bf575ba0cdf6a3335880ddf21"
+    "name": "CarDesk-platform-ecarx-cardesk-4311.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4311.apk",
+    "size": 3762311,
+    "sha256": "78006edcd3e077b988248112b77246dbb631d5d430facfa209157c417943d1ac"
   }
 }
