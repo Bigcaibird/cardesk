@@ -262,48 +262,48 @@ class DoorAlertDialog(
         /**
          * 面板尺寸与位置。
          *
-         * 第 254 轮按用户反馈**整体放大**：画板是 881×489，实机上换乘 3D 车模后
-         * 车只占面板中间一小块、四周全是空的，用户直接说「弹窗调大一点，太小了」。
-         * 现在 1150×640（约 +30%），车模槽位同步放大到 320×380，
-         * 面板居中 (385,220)，底边 860 仍在 Dock（968）之上。
+         * 第 254 轮按用户反馈**整体放大**：画板是 881×489，换 3D 车模后车只占中间一小块。
+         * 第 255 轮用户连着提了四轮：先说「大一点」，再说「宽一点」，再说「太长、车靠底」，
+         * 最后明确「要**差不多正方形**的弹窗」，900×840 之后又嫌太大 ——
+         * 现在定稿 760×720（近正方形、屏幕正中），车模槽位 320×390。
          */
-        const val PANEL_W = 1150
-        const val PANEL_H = 640
+        const val PANEL_W = 760
+        const val PANEL_H = 720
         const val PANEL_LEFT = (Design.W.toInt() - PANEL_W) / 2
-        const val PANEL_TOP = 220
+        const val PANEL_TOP = (Design.H.toInt() - PANEL_H) / 2
 
         /** 面板圆角（画板拟合 28~30，取 28）。 */
         const val SHEET_RADIUS = 28f
 
         /** 左右内容边距（画板：标题/说明/胶囊都从 panel-rel x42 起）。 */
-        const val SIDE = 55
+        const val SIDE = 50
 
         /** 一行内容的可用宽度。 */
         const val ROW_W = PANEL_W - SIDE * 2
 
         /** 标题字号 / 位置（画板 ink y49..74、高 26 ⇒ 32px 粗体）。 */
-        const val TITLE_SP = 40f
-        const val TITLE_TOP = 52
+        const val TITLE_SP = 36f
+        const val TITLE_TOP = 38
 
         /** 说明字号 / 位置（画板 ink y91..105 ⇒ 20px）。 */
-        const val DETAIL_SP = 24f
-        const val DETAIL_TOP = 112
-        const val DETAIL_H = 32
+        const val DETAIL_SP = 21f
+        const val DETAIL_TOP = 90
+        const val DETAIL_H = 28
 
         /** 胶囊行位置（画板 y403..450 ⇒ panel-rel 132）。 */
-        const val LIST_TOP = 176
+        const val LIST_TOP = 128
 
         /** 单个胶囊高度（画板 48）。 */
-        const val CHIP_H = 58
+        const val CHIP_H = 48
 
         /** 胶囊之间、以及两行之间的间距（画板实测 13，取 12）。 */
         const val CHIP_GAP = 14
 
         /** 胶囊字号（画板 20px）。 */
-        const val CHIP_SP = 24f
+        const val CHIP_SP = 21f
 
         /** 胶囊左右内边距：3 个汉字 60 + 2×14 = 88，正好等于画板的胶囊宽度。 */
-        const val CHIP_PAD_H = 17
+        const val CHIP_PAD_H = 15
 
         /** 胶囊底色透明度（画板 (208,232,231) = accent 12% 叠白）。 */
         const val CHIP_FILL_ALPHA = 0x1F
@@ -316,21 +316,21 @@ class DoorAlertDialog(
          * 水平和画板一致（panel-rel x380..499）、纵向 196..426（画板 197..425）。
          */
         const val CAR_W = 320
-        const val CAR_H = 380
+        const val CAR_H = 390
         const val CAR_LEFT = (PANEL_W - CAR_W) / 2
-        const val CAR_TOP = 244
+        const val CAR_TOP = 196
 
         /** 底部按钮（画板 rel x620..839 / y400..455 ⇒ 220×56，右边距 41）。 */
-        const val BUTTON_W = 260
-        const val BUTTON_H = 66
+        const val BUTTON_W = 220
+        const val BUTTON_H = 58
         const val BUTTON_RIGHT = 50
-        const val BUTTON_TOP = 540
-        const val BUTTON_SP = 30f
+        const val BUTTON_TOP = 620
+        const val BUTTON_SP = 28f
 
         /** 右上 ✕ 的热区（画板 ink 只有 14×14，热区放大到 56×56）。 */
-        const val CLOSE_BOX = 64
-        const val CLOSE_RIGHT = 44
-        const val CLOSE_TOP = 44
+        const val CLOSE_BOX = 56
+        const val CLOSE_RIGHT = 38
+        const val CLOSE_TOP = 38
     }
 }
 
