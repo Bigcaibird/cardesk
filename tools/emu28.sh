@@ -22,6 +22,14 @@ SDK="${CARDESK_TOOLCHAIN:-$ROOT/toolchain}/sdk"
 AVD=cardesk28
 # 端口固定 5560：5554/5556/5558 常被别的 AVD 占着。
 PORT=5560
+# 渲染后端：默认 host（用宿主 GPU，CPU 占用远低于 swiftshader 软件渲染）。
+# 宿主 GPU 有问题时用 CARDESK_GPU=swiftshader_indirect 退回软件渲染。
+GPU="${CARDESK_GPU:-host}"
+# 是否带窗口：默认 headless（CI/后台跑）；要人工验收时 CARDESK_WINDOW=1 起窗口。
+WINDOW="${CARDESK_WINDOW:-0}"
+# 注意：bash 3.2 + set -u 下空数组展开会报 unbound，所以这里用字符串拼参数。
+WINDOW_FLAG="-no-window"
+[ "$WINDOW" = "1" ] && WINDOW_FLAG=""
 
 case "${1:-start}" in
   start)
@@ -32,9 +40,9 @@ case "${1:-start}" in
       exit 1
     fi
     nohup "$SDK/emulator/emulator" -avd "$AVD" \
-      -port "$PORT" -no-window -gpu swiftshader_indirect -no-boot-anim -no-snapshot \
+      -port "$PORT" $WINDOW_FLAG -gpu "$GPU" -no-boot-anim -no-snapshot \
       > /tmp/emu28.log 2>&1 &
-    echo "已后台启动，日志 /tmp/emu28.log"
+    echo "已后台启动（窗口：$([ "$WINDOW" = "1" ] && echo 开 || echo 关)），日志 /tmp/emu28.log"
     ;;
   wait)
     adb -s "emulator-$PORT" wait-for-device

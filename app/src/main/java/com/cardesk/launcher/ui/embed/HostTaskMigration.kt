@@ -59,6 +59,9 @@ object HostTaskMigration {
     /** 最多看多少个任务（`getRunningTasks` 的上限）。 */
     private const val MAX_TASKS = 80
 
+    /** 第225轮：守护窗口里最多「搬回」几次（防应用反复抢屏时无限搬）。 */
+    private const val VERIFY_MAX_MOVES = 3
+
     private val handler = Handler(Looper.getMainLooper())
 
     /** 正在搬移中的包名（看门狗要靠它**暂缓判黑**，见 [isMigrating]）。 */
@@ -122,7 +125,7 @@ object HostTaskMigration {
         }
         val r = runOnce(view, pkg)
         when (r) {
-            Result.DONE -> finish(pkg, moved = true, reason = "已在我们的虚拟屏上")
+            Result.DONE -> startVerify(view, pkg, 0, "已在我们的虚拟屏上")
             // 搬完**不等于搬稳了** —— AMS 调用没报错 ≠ task 真留在虚拟屏上。
             // （实测：高德进程自己起活动时会把 task 又拉回主屏。）
             // 所以搬完**再验一次**：还在 → 收工；不在 → 继续追。
@@ -157,6 +160,70 @@ object HostTaskMigration {
             "reason" to reason,
         )
         handler.postDelayed(runnable, delay)
+    }
+
+    /**
+     * 第 225 轮：**搬稳之后继续守一会儿**。
+     *
+     * 承载应用（实测是高德）进来之后自己还会再起一个活动，那个活动**不带
+     * `launchDisplayId`**，AOSP 9 会把它放到默认显示器上 —— task 又跑回主屏，
+     * 画中画变黑、应用全屏抢屏。原来的搬移在「已在我们的虚拟屏上」就收工，
+     * 正好漏掉这一次（见 [com.cardesk.launcher.core.HostTaskMigrator.verifyDelayMsForAttempt]）。
+     *
+     * 这里按 [HostTaskMigrator.verifyDelayMsForAttempt] 的节奏复查若干次：
+     * - 还在我们屏上 → 继续等下一轮；
+     * - 又跑到别的屏 → **搬回来**（只搬 task，不重启应用）；
+     * - 判据不可用 / task 暂时找不到 → 交回原来的搬移流程重试。
+     *
+     * @param round 第几次复查（0 = 搬稳后的第一次）
+     */
+    private fun startVerify(
+        view: View,
+        pkg: String,
+        round: Int,
+        reason: String,
+        moves: Int = 0,
+    ) {
+        // 第225轮：应用自己反复把活动拉到主屏时，别无限搬下去。
+        if (moves > VERIFY_MAX_MOVES) {
+            finish(pkg, moved = false, reason = "承载应用反复把自己的活动拉到主屏，停止搬移（$reason）")
+            return
+        }
+        val delay = HostTaskMigrator.verifyDelayMsForAttempt(round)
+        if (delay == null) {
+            finish(pkg, moved = true, reason = "$reason，守护窗口结束")
+            return
+        }
+        val runnable = Runnable { verify(view, pkg, round, moves) }
+        synchronized(inFlight) {
+            if (!inFlight.contains(pkg)) return
+            pending[pkg]?.let { handler.removeCallbacks(it) }
+            pending[pkg] = runnable
+        }
+        Logx.d(
+            LogTags.NAV_UI,
+            "承载任务守护",
+            "pkg" to pkg,
+            "round" to round,
+            "delay" to delay,
+            "reason" to reason,
+        )
+        handler.postDelayed(runnable, delay)
+    }
+
+    /** 守护窗口里的一次复查。 */
+    private fun verify(view: View, pkg: String, round: Int, moves: Int) {
+        synchronized(inFlight) { if (!inFlight.contains(pkg)) return }
+        when (runOnce(view, pkg)) {
+            Result.DONE -> startVerify(view, pkg, round + 1, "还在我们的虚拟屏上", moves)
+            // 刚被打回主屏、又搬回来了 —— 守护窗口从头再数一遍
+            Result.MOVED -> startVerify(view, pkg, 0, "又被拉到别的屏，已搬回", moves + 1)
+            // 判据不可用 / task 暂时不在 → 回到搬移流程（它还会再试几轮）
+            else -> {
+                Logx.d(LogTags.NAV_UI, "承载任务守护：判据不可用，回到搬移流程", "pkg" to pkg)
+                attempt(view, pkg, 0)
+            }
+        }
     }
 
     private fun finish(pkg: String, moved: Boolean, reason: String) {
@@ -233,7 +300,30 @@ object HostTaskMigration {
                 screenHeightDp = readConfigDp(t, "screenHeightDp"),
             )
         }
-        val host = HostTaskMigrator.pickHostTask(snapshots, pkg) ?: return Result.NOT_FOUND
+        // 第225轮：**先找「跑到别的屏上」的那个 task**。
+        //
+        // 承载应用（实测高德）进来之后自己会再起一个活动、建一个**新 task**；
+        // 那个 task 不带 `launchDisplayId`，会被 AMS 放到默认显示器上（全屏抢屏）。
+        // 老代码只挑「第一个有 stackId 的 task」，挑中的是**还留在虚拟屏上的那个** →
+        // 判成「已在我们的虚拟屏上」→ 收工，于是满屏的高德没人管。
+        // 现在优先挑「不在我们屏上」的那个，把它搬回来。
+        val mine = snapshots.filter { it.pkg == pkg }
+        if (mine.isEmpty()) return Result.NOT_FOUND
+        val escaped = mine.firstOrNull {
+            HostTaskMigrator.isOnOurDisplay(it, ourId, ourMetrics, mainMetrics) == false
+        }
+        val host = escaped ?: HostTaskMigrator.pickHostTask(mine, pkg) ?: return Result.NOT_FOUND
+        if (escaped != null) {
+            Logx.d(
+                LogTags.NAV_UI,
+                "承载任务跑到别的屏上，优先搬它",
+                "pkg" to pkg,
+                "task" to host.taskId,
+                "stack" to host.stackId,
+                "size" to "${host.screenWidthDp}x${host.screenHeightDp}",
+                "候选" to mine.size,
+            )
+        }
         // 诊断行（**限频**：每次搬移只有几行）：把「我们看到的」原样记下来。
         //
         // 为什么必须记：`displayId` / `stackId` 都是**隐藏字段**，

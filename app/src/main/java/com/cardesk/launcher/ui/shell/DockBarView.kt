@@ -13,11 +13,10 @@ import android.os.Handler
 import android.os.Looper
 import android.view.MotionEvent
 import android.view.View
-import com.cardesk.launcher.core.Prefs
-import com.cardesk.launcher.core.DockLayout
-import com.cardesk.launcher.core.DockMediaLayout
+import com.cardesk.launcher.core.CardStyle
 import com.cardesk.launcher.core.DockQuickApps
-import com.cardesk.launcher.core.Palettes
+import com.cardesk.launcher.core.Glass
+import com.cardesk.launcher.core.Prefs
 import com.cardesk.launcher.core.Skin
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
@@ -27,18 +26,35 @@ import com.cardesk.launcher.vehicle.HvacState
 import kotlin.math.abs
 
 /**
- * 底部一体化控制栏（布局：铺满屏宽×112（1920 板上 1920 宽），圆角 40，玻璃底 #6b162e2c）。
+ * 底部一体化控制栏（铺满屏宽 × 112，贴屏幕底边）。
  *
- * 从左到右：主页 / 应用抽屉 / 分屏 / 360 · 媒体卡(400×88) · 弹性留白 ·
- * 电源 · 主驾温度 −/+ · 风量 7 段 · 副驾温度 −/+ · A/C · AUTO · 内外循环 · 前除霜 · 后除霜。
+ * ## 第三百轮重做：按 `cardesk-ui/design/redesign/Main.png` 的版式重排
  *
- * 与对齐的细节
- * - 温度固定一位小数、缺省 23.5
- * - 播放键底色是近白实心圆 `#eef3fa`
- * - 按键按下缩放到 0.96（60ms）、抬起回 1.0（90ms）—— 与全 App 共用 `MotionSpec`
- *   （以前这里是 Dock 私有的 0.95 / 90ms / 140ms，和别处的按压手感对不上）
- * - 媒体卡左右滑动切歌：位移 ≥8px 且横向分量 > 纵向 ×1.5 才触发
- * - 主页键长按 = 原车多任务；分屏键长按 = 切换单画/双画
+ * 旧版是「四段式」（导航键 / 媒体卡 / 空调簇 / 快捷槽），由
+ * `DockLayout.sections()` 按可用宽度自动分配。设计稿是**一条定尺的仪表带**：
+ * 每个元素的 x 都是画板上的实测值，元素之间靠留白分组成
+ * 「导航 → 媒体 → 电源 → 主驾温区 → 风量 → 副驾温区 → A/C · AUTO → 功能键」。
+ *
+ * 所以这里改成**按设计坐标绝对排布**（[DESIGN_W] = 1920，`dx()` 按实际宽度线性换算），
+ * 不再让宽度分配算法决定位置 —— 分配算法在 1872 宽的全局 Dock 上会把
+ * 媒体卡压窄、把温区推开，和画板对不上。**尺寸本身不随宽度缩放**
+ * （缩放只作用在 x 坐标上），这样 1872 时各元素的视觉大小和 1920 完全一致。
+ *
+ * 逐项实测（Main.png，误差 ±2px）与画板的对应关系写在每个绘制函数的注释里。
+ *
+ * ## 保持不变的东西（硬性约束）
+ *
+ * - 所有点击 / 长按 / 滑动回调、`hit` 的 key 名、Dock 快捷槽逻辑、按压与脉冲动画；
+ * - `Prefs.dockCornerRadius`（Dock 顶部圆角设置项）：这里仍然读它，只是默认档 0
+ *   正好等于设计稿的「方角通栏」；
+ * - `DockQuickApps.SLOTS` 只渲染**配置里有的**功能键，不新增也不删除。
+ *
+ * ## 历史说明（保留）
+ *
+ * - 与对齐的细节：温度固定一位小数、缺省 23.5；按键按下缩放到 0.96（60ms）、
+ *   抬起回 1.0（90ms），与全 App 共用 `MotionSpec`；
+ * - 媒体卡左右滑动切歌：位移 ≥8px 且横向分量 > 纵向 ×1.5 才触发；
+ * - 主页键长按 = 原车多任务；分屏键长按 = 切换单画/双画。
  */
 class DockBarView(context: Context) : View(context) {
 
@@ -52,8 +68,8 @@ class DockBarView(context: Context) : View(context) {
     /**
      * 媒体卡封面。
      *
-     * 封面容器 `clipToOutline=true`、圆角 **16**
-     * 里面放的是专辑图；没有专辑图时才画默认音符占位。
+     * 设计稿的封面是 56×56、圆角 14 的方形（实测 x373..428 / y996..1051），
+     * 里面放专辑图；没有专辑图时才画默认音符占位。
      */
     private var mediaArtwork: android.graphics.Bitmap? = null
 
@@ -99,6 +115,7 @@ class DockBarView(context: Context) : View(context) {
     var onApps: (() -> Unit)? = null
     var onSplit: (() -> Unit)? = null
     var on360: (() -> Unit)? = null
+
     /**
      * 媒体卡**封面 / 歌名区**被点（第一九七轮：拉起对应音乐 App）。
      *
@@ -244,10 +261,29 @@ class DockBarView(context: Context) : View(context) {
     /**
      * 没有专辑图时的封面底色。
      *
-     * 第五十一轮按设计板 `dock` 改成 `--accentSoft` 底 + `--accent` 音符；
-     * 之前是蓝色渐变（`#4A9BFF → #1D2A4A`），日间模式下和设计板对不上。
+     * 设计稿里封面是**青绿渐变方块 + 白色音符**（`#00A9A0 → #2FD0C4`），
+     * 正好是 `ACCENT → ACCENT_LIGHT` 两个 token，所以不再写死颜色。
+     *
+     * ⚠️ 不能 `by lazy` 缓存成 val：这两个 token 在**日夜切换**时会换值，
+     * 而 Shader 一旦建好就把颜色固化了 —— 缓存的 shader 会在换主题后
+     * 继续拿旧颜色画（夜间的封面还是白天的青绿）。所以按 `Skin.isNight`
+     * 记一个快照，主题变了才重建。
      */
-    private val coverFallback = Skin.ACCENT_SOFT
+    private var coverShaderCache: Shader? = null
+    private var coverShaderNight: Boolean? = null
+
+    private fun coverShader(): Shader {
+        val night = Skin.isNight
+        coverShaderCache?.let { if (coverShaderNight == night) return it }
+        return LinearGradient(
+            0f, 0f, COVER_SIZE, COVER_SIZE,
+            Skin.ACCENT, Skin.ACCENT_LIGHT,
+            Shader.TileMode.CLAMP,
+        ).also {
+            coverShaderCache = it
+            coverShaderNight = night
+        }
+    }
 
     /**
      * Dock 圆角（设计 px）：构造时从 `Prefs` 读，设置页改了走 [refreshAll]。
@@ -263,6 +299,17 @@ class DockBarView(context: Context) : View(context) {
 
     private val r = RectF()
     private val hit = LinkedHashMap<String, RectF>()
+
+    /**
+     * 布局横向缩放比（onDraw 里按实际宽度算，见 [dx]）。
+     *
+     * 设计坐标是 1920 宽的；全局 Dock 是 1872 宽，按这个比例把 x 换算过去，
+     * 元素之间的**留白**跟着等比收一点，元素的**尺寸**不变。
+     */
+    private var layoutScale = 1f
+
+    /** 把设计稿上的 x 换算成当前宽度下的 x。 */
+    private fun dx(x: Float): Float = x * layoutScale
 
     // —— 按压反馈——
     private var pressedKey: String? = null
@@ -315,137 +362,636 @@ class DockBarView(context: Context) : View(context) {
         super.onDraw(canvas)
         val w = width.toFloat()
         val h = height.toFloat()
-        // 第四十九轮「浮屿」：Dock 底改成**不透明扁平面** + 1px 描边（不再是半透明玻璃）。
-        // 第五十轮对齐设计板 s01：Dock 1872×96 / 圆角 36。
-        // 第183轮：① 圆角改成设置项（`Prefs.dockCornerRadius`，第190轮默认 0，0..52）；
-        //          ② Dock 紧贴屏幕底部，所以**只圆上面两个角**，下面两个是直角
-        //             （否则贴底后屏幕最底部两侧会露出三角形缺口）。
-        val radius = cornerRadius.coerceIn(0f, minOf(h, w) / 2f)
-        val radii = floatArrayOf(
-            radius, radius, // 左上
-            radius, radius, // 右上
-            0f, 0f,         // 右下（贴底）
-            0f, 0f,         // 左下（贴底）
-        )
-        bgPath.reset()
-        bgPath.addRoundRect(RectF(0f, 0f, w, h), radii, Path.Direction.CW)
-        canvas.drawPath(bgPath, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            shader = null
-            color = Skin.NAV_BG
-        })
-        canvas.drawPath(bgPath, stroke.apply {
-            color = Skin.NAV_STROKE
-            strokeWidth = 1.4f
-        })
+        if (w <= 0f || h <= 0f) return
+        layoutScale = w / DESIGN_W
+        val cy = h / 2f
+
+        drawBackdrop(canvas, w, h)
         hit.clear()
 
-        // ——— 左段：四个导航入口 ———
-        var x = DockLayout.KEY_LEFT
-        val cy = h / 2f
-        drawHome(canvas, x, cy, DockLayout.KEY_SLOT)
-        x += DockLayout.KEY_SLOT + DockLayout.KEY_GAP
-        drawApps(canvas, x, cy, DockLayout.KEY_SLOT)
-        x += DockLayout.KEY_SLOT + DockLayout.KEY_GAP
-        drawSplit(canvas, x, cy, DockLayout.KEY_SLOT)
-        x += DockLayout.KEY_SLOT + DockLayout.KEY_GAP
-        draw360(canvas, x, cy, DockLayout.KEY_SLOT)
-
-        // ——— 四段式布局（第五十四轮）———
+        // ——— 左段：首页（唯一带底板的导航键）+ 三枚裸图标键 ———
         //
-        // 第五十四轮：**音乐卡与空调簇对调**，段与段之间不再刻意留大空隙，
-        // 省下来的宽度给最右边的**快捷应用**段。
-        //
-        // 「怎么摆」全部交给纯逻辑 [DockLayout.sections]，单测能锁住不压叠；
-        // 「每块多宽」由 [climateClusterWidth] 与绘制逐项对应。
-        val sections = DockLayout.sections(w, climateClusterWidth())
-        drawClimateCluster(canvas, sections.clusterRight)
+        // 画板实测：首页块 72×72 @ (28,988..1060)，圆角 20；
+        // 网格 / 分屏 / 360 的中心 x = 148 / 220 / 316，图标 40，**无底板**。
+        drawHome(canvas, dx(HOME_LEFT), cy)
+        drawApps(canvas, dx(NAV_GRID_CX), cy)
+        drawSplit(canvas, dx(NAV_SPLIT_CX), cy)
+        draw360(canvas, dx(NAV_360_CX), cy)
 
-        val mediaX = sections.mediaLeft
-        val mediaTop = (h - DockMediaLayout.CARD_H) / 2f
-        val mediaW = sections.mediaWidth
-        drawMedia(canvas, mediaX, mediaTop, mediaW, DockMediaLayout.CARD_H)
-        hit["media"] = RectF(mediaX, mediaTop, mediaX + mediaW, mediaTop + DockMediaLayout.CARD_H)
-        // 第三十九轮：三个键排成「上一首 | 播放暂停 | 下一首」，
-        // 播放键放在前后曲**中间**并从 60 缩到 44；前后曲放大到 40，间隙收到 8。
-        val keys = DockMediaLayout.keys(mediaW)
-        val playLeft = mediaX + keys.playLeft
-        val nextLeft = mediaX + keys.nextLeft
-        val prevLeft = mediaX + keys.prevLeft
-        hit["play"] = RectF(
-            playLeft,
-            mediaTop + (DockMediaLayout.CARD_H - DockMediaLayout.PLAY_BTN) / 2f,
-            playLeft + DockMediaLayout.PLAY_BTN,
-            mediaTop + (DockMediaLayout.CARD_H + DockMediaLayout.PLAY_BTN) / 2f,
-        )
-        hit["mediaNext"] = RectF(
-            nextLeft,
-            mediaTop + (DockMediaLayout.CARD_H - DockMediaLayout.SKIP_BTN) / 2f,
-            nextLeft + DockMediaLayout.SKIP_BTN,
-            mediaTop + (DockMediaLayout.CARD_H + DockMediaLayout.SKIP_BTN) / 2f,
-        )
-        hit["mediaPrev"] = RectF(
-            prevLeft,
-            mediaTop + (DockMediaLayout.CARD_H - DockMediaLayout.SKIP_BTN) / 2f,
-            prevLeft + DockMediaLayout.SKIP_BTN,
-            mediaTop + (DockMediaLayout.CARD_H + DockMediaLayout.SKIP_BTN) / 2f,
-        )
+        // ——— 媒体胶囊：x365..735、高 72（实测圆角 ≈28，不是全圆）———
+        drawMedia(canvas, dx(MEDIA_LEFT), cy - MEDIA_H / 2f, MEDIA_W, MEDIA_H)
 
-        // ——— 最右段：快捷应用槽位（第五十四轮）———
-        drawQuickApps(canvas, sections)
+        // ——— 电源键：x≈805，只有一个描边图标，无底板 ———
+        drawPower(canvas, dx(POWER_CX), cy)
+
+        // ——— 主驾温区 → 风量 → 副驾温区 → A/C → AUTO ———
+        drawTempPill(canvas, dx(TEMP_DRIVER_LEFT), cy, TEMP_DRIVER_W, passenger = false)
+        drawFan(canvas, dx(FAN_LEFT), cy - FAN_SIZE / 2f, FAN_SIZE)
+        drawTempPill(canvas, dx(TEMP_PASS_LEFT), cy, TEMP_PASS_W, passenger = true)
+        drawClimateChip(canvas, dx(AC_LEFT), cy, AC_W, "A/C", active = hvac?.ac == true)
+        drawClimateChip(canvas, dx(AUTO_LEFT), cy, AUTO_W, "AUTO", active = hvac?.auto == true)
+
+        // ——— 右侧 5 枚功能键（严格按配置渲染：循环 / 后除霜 / 前除霜 / 快捷 1 / 快捷 2）———
+        drawRightKeys(canvas, cy)
+    }
+
+    // ================================================================
+    // 底板
+    // ================================================================
+
+    /**
+     * Dock 通栏玻璃底。
+     *
+     * 画板上这条带子是一条**满宽的浅色玻璃**，顶沿有一道 1~2px 亮边
+     * （实测 y968 处 #EFF5FB），下面没有阴影 —— 它贴屏幕底边，阴影无处可落。
+     *
+     * 圆角仍然走设置项 `dockCornerRadius`（默认 0 = 方角）：只有**上面两个角**
+     * 参与圆角，下面两个是直角（贴底后若圆下角，屏幕最底部两侧会露出三角缺口，
+     * 第183轮的结论继续有效）。
+     */
+    private fun drawBackdrop(canvas: Canvas, w: Float, h: Float) {
+        val radius = cornerRadius.coerceIn(0f, minOf(h, w) / 2f)
+        val rect = RectF(0f, 0f, w, h)
+        if (radius <= 0f) {
+            Glass.card(canvas, rect, 0f, Skin.NAV_BG, shadow = false, sheen = true, stroke = Skin.GLASS_STROKE)
+            return
+        }
+        // 有圆角时：先裁成「上圆下方」的形状，再让玻璃按整块矩形去画
+        // （clipPath 没有抗锯齿，只影响最外侧那一圈像素，实际不可见）。
+        bgPath.reset()
+        bgPath.addRoundRect(
+            rect,
+            floatArrayOf(radius, radius, radius, radius, 0f, 0f, 0f, 0f),
+            Path.Direction.CW,
+        )
+        canvas.save()
+        canvas.clipPath(bgPath)
+        Glass.card(canvas, rect, 0f, Skin.NAV_BG, shadow = false, sheen = true, stroke = 0)
+        canvas.restore()
+        stroke.color = Skin.GLASS_STROKE
+        stroke.strokeWidth = 1f
+        canvas.drawPath(bgPath, stroke)
+    }
+
+    // ================================================================
+    // 左段：首页 / 网格 / 分屏 / 360
+    // ================================================================
+
+    /**
+     * 首页键（画板：72×72 圆角 20，accent-soft 底 + accent 房子）
+     *
+     * 当前页高亮：`activePage == 0` 时是 accent-soft 底 + accent 图标；
+     * 不在首页时降为普通玻璃底 + 弱色图标 —— 高亮语义（原先由
+     * `Skin.ACCENT_LIGHT` 描边表达）保持不变，只是换成画板的「块状高亮」。
+     */
+    private fun drawHome(canvas: Canvas, left: Float, cy: Float) {
+        val size = HOME_SIZE
+        val active = activePage == 0
+        val tile = RectF(left, cy - size / 2f, left + size, cy + size / 2f)
+        withPress(canvas, "home", tile.centerX(), cy) {
+            Glass.card(
+                canvas, tile, HOME_RADIUS,
+                if (active) Skin.ACCENT_SOFT else Skin.surfaceStrong,
+                shadow = false, sheen = true, stroke = Skin.GLASS_STROKE,
+            )
+            stroke.color = if (active) Skin.ACCENT else Skin.TEXT_SOFT
+            stroke.strokeWidth = 2.6f
+            HomeHouseIcon.draw(canvas, tile.centerX(), cy, HOME_ICON_UNIT, stroke)
+        }
+        // 命中区：整块 + 上下留一点余量（≥56，画板 72 已满足）。
+        hit["home"] = RectF(left, cy - HIT_MIN / 2f, left + size, cy + HIT_MIN / 2f)
     }
 
     /**
-     * 快捷应用槽位（第五十四轮）。
+     * 「应用」键（网格图标）。
      *
-     * 每个槽位是一格 [DockLayout.QUICK_TILE] 见方：
-     * - 配了应用 → 直接画**真实应用图标**（不套底板，让应用自己的颜色说话）；
-     * - 没配 → 画一个圆角方框 + 「+」，点它就是去配置。
-     *
-     * 槽位之间只有 [DockLayout.QUICK_GAP] 的间隙 —— 整段贴住 Dock 右边缘。
+     * 画板上非活跃态是**裸图标**（无底板），所以底板只在抽屉打开
+     * （[appsOpen] = true）时出现 —— 状态反馈不能因为去了底板就丢掉。
      */
-    private fun drawQuickApps(canvas: Canvas, sections: DockLayout.Sections) {
-        val cy = height / 2f
-        val tile = DockLayout.QUICK_TILE
-        for (i in 0 until DockQuickApps.SLOTS) {
-            val left = DockLayout.quickSlotLeft(sections, i)
-            val app = quickApps.getOrNull(i)
-            val cx = left + tile / 2f
-            // 快捷应用槽以前按下去毫无反应，现在跟别的键一样有按压反馈。
-            withPress(canvas, "quick$i", cx, cy) {
-                if (app == null || app.pkg.isEmpty()) {
-                    // 空槽位：圆角方框 + 加号
-                    r.set(left, cy - tile / 2f, left + tile, cy + tile / 2f)
-                    canvas.drawRoundRect(r, 18f, 18f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        color = Skin.surfaceSoft
-                    })
-                    canvas.drawRoundRect(r, 18f, 18f, stroke.apply {
-                        color = Skin.NAV_STROKE
-                        strokeWidth = 1.4f
-                    })
-                    stroke.color = Skin.TEXT_DIM
-                    stroke.strokeWidth = 2.6f
-                    stroke.strokeCap = Paint.Cap.ROUND
+    private fun drawApps(canvas: Canvas, cx: Float, cy: Float) {
+        val active = appsOpen
+        withPress(canvas, "apps", cx, cy) {
+            if (active) {
+                val tile = RectF(cx - NAV_TILE / 2f, cy - NAV_TILE / 2f, cx + NAV_TILE / 2f, cy + NAV_TILE / 2f)
+                Glass.card(
+                    canvas, tile, HOME_RADIUS, Skin.ACCENT_SOFT,
+                    shadow = false, sheen = true, stroke = Skin.GLASS_STROKE,
+                )
+            }
+            fill.color = if (active) Skin.ACCENT else Skin.TEXT_SOFT
+            // 3×3 宫格：每格 8×8、间距 4 —— 总宽 32，落在 40 的图标框里。
+            for (row in 0..2) for (col in 0..2) {
+                val left = cx - 16f + col * 12f
+                val top = cy - 16f + row * 12f
+                canvas.drawRoundRect(RectF(left, top, left + 8f, top + 8f), 2f, 2f, fill)
+            }
+        }
+        registerIconHit("apps", cx, cy)
+    }
+
+    /** 分屏键（画板：两个并排的圆角矩形，无底板）。 */
+    private fun drawSplit(canvas: Canvas, cx: Float, cy: Float) {
+        withPress(canvas, "split", cx, cy) {
+            stroke.color = Skin.TEXT_SOFT
+            stroke.strokeWidth = 2.4f
+            r.set(cx - 16f, cy - 13f, cx - 2f, cy + 13f)
+            canvas.drawRoundRect(r, 4f, 4f, stroke)
+            r.set(cx + 2f, cy - 13f, cx + 16f, cy + 13f)
+            canvas.drawRoundRect(r, 4f, 4f, stroke)
+        }
+        registerIconHit("split", cx, cy)
+    }
+
+    /** 360 键（画板：圆角框 + 「360」字，无底板）。 */
+    private fun draw360(canvas: Canvas, cx: Float, cy: Float) {
+        withPress(canvas, "360", cx, cy) {
+            // 圆角 10、1.8px 描边：日间模式下这层浅蓝在白底上看不见，沿用主题弱文字色。
+            stroke.color = if (Skin.isNight) Skin.TEXT else Skin.TEXT_SOFT
+            stroke.strokeWidth = 1.8f
+            r.set(cx - 19f, cy - 13f, cx + 19f, cy + 13f)
+            canvas.drawRoundRect(r, 10f, 10f, stroke)
+            text.color = stroke.color
+            text.textSize = 15f
+            text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            text.textAlign = Paint.Align.CENTER
+            canvas.drawText("360", cx, cy + 5.5f, text)
+        }
+        registerIconHit("360", cx, cy)
+    }
+
+    /**
+     * 裸图标键的统一命中区：**不小于 56×56**（设计稿视觉 40）。
+     *
+     * 用户明确要求「画板视觉 40~56，点击区要放大到 56，用透明命中盒」——
+     * 视觉不放大，命中盒放大，手不用瞄得那么准。
+     */
+    private fun registerIconHit(key: String, cx: Float, cy: Float) {
+        hit[key] = RectF(cx - HIT_MIN / 2f, cy - HIT_MIN / 2f, cx + HIT_MIN / 2f, cy + HIT_MIN / 2f)
+    }
+
+    // ================================================================
+    // 媒体胶囊
+    // ================================================================
+
+    /**
+     * 媒体胶囊（画板 x365..735 / 高 72 / 圆角 28 / 灰白玻璃）。
+     *
+     * 内部从左到右：封面 56×56（圆角 14，青绿渐变 + 音符）→ 标题 15 粗 + 副标题 11 弱
+     * → ⏮（中心 629）→ 播放（白色实心圆，直径 40，中心 666.5）→ ⏭（中心 705）。
+     * 三个键的 x 由**右边缘**反推，和画板一致，也与旧版 `DockMediaLayout` 的
+     * 「从右往左量」同一套思路。
+     */
+    private fun drawMedia(canvas: Canvas, left: Float, top: Float, w: Float, h: Float) {
+        withPress(canvas, "media", left + w / 2f, top + h / 2f) {
+            drawMediaCard(canvas, left, top, w, h)
+        }
+        hit["media"] = RectF(left, top, left + w, top + h)
+    }
+
+    private fun drawMediaCard(canvas: Canvas, left: Float, top: Float, w: Float, h: Float) {
+        val cy = top + h / 2f
+        r.set(left, top, left + w, top + h)
+        Glass.card(canvas, r, MEDIA_RADIUS, Skin.surfaceStrong, shadow = false, sheen = true, stroke = Skin.GLASS_STROKE)
+
+        // —— 封面（56×56，圆角 14）——
+        val coverTop = cy - COVER_SIZE / 2f
+        val cover = RectF(left + COVER_PAD, coverTop, left + COVER_PAD + COVER_SIZE, coverTop + COVER_SIZE)
+        val art = mediaArtwork
+        if (art != null) {
+            // 有专辑图 → 按裁剪成圆角矩形贴上去
+            val clipPath = Path().apply { addRoundRect(cover, COVER_RADIUS, COVER_RADIUS, Path.Direction.CW) }
+            canvas.save()
+            canvas.clipPath(clipPath)
+            canvas.drawBitmap(art, null, cover, Paint(Paint.FILTER_BITMAP_FLAG))
+            canvas.restore()
+        } else {
+            // 设计稿：青绿渐变底 + 白色音符（渐变端点取自 ACCENT / ACCENT_LIGHT）
+            fill.shader = coverShader()
+            canvas.drawRoundRect(cover, COVER_RADIUS, COVER_RADIUS, fill)
+            fill.shader = null
+            stroke.color = ON_ACCENT
+            stroke.strokeWidth = 2.2f
+            val nx = cover.centerX() + 2f
+            val ny = cover.centerY()
+            canvas.drawLine(nx + 4f, ny - 11f, nx + 4f, ny + 5f, stroke)
+            canvas.drawCircle(nx - 2f, ny + 7f, 4.6f, stroke)
+            canvas.drawLine(nx + 4f, ny - 11f, nx + 12f, ny - 7f, stroke)
+        }
+
+        // —— 标题 / 副标题（滑动时整体位移 + 露出预览文案）——
+        val textLeft = left + COVER_PAD + COVER_SIZE + MEDIA_TEXT_GAP
+        val textW = (left + w - MEDIA_SKIP_FROM_RIGHT - 18f) - textLeft
+        text.textAlign = Paint.Align.LEFT
+        text.typeface = Typeface.DEFAULT
+        text.isFakeBoldText = false
+        canvas.save()
+        canvas.translate(swipeOffset, 0f)
+        text.textSize = 15f
+        text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        text.color = Skin.TEXT
+        canvas.drawText(clip(mediaTitle, text, textW), textLeft, cy - 3f, text)
+        text.typeface = Typeface.DEFAULT
+        text.textSize = 11f
+        text.color = Skin.TEXT_SOFT
+        canvas.drawText(clip(mediaArtist, text, textW), textLeft, cy + 14f, text)
+        canvas.restore()
+
+        if (swipeFraction > 0f) {
+            text.textAlign = Paint.Align.LEFT
+            text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            text.textSize = 15f
+            text.color = Skin.TEXT
+            canvas.save()
+            canvas.translate(-swipeOffset, 0f)
+            canvas.drawText(clip(swipePreviewTitle, text, textW), textLeft, cy - 3f, text)
+            text.typeface = Typeface.DEFAULT
+            text.textSize = 11f
+            text.color = Skin.TEXT_SOFT
+            canvas.drawText(clip(swipePreviewArtist, text, textW), textLeft, cy + 14f, text)
+            canvas.restore()
+        }
+
+        // —— 播放键：白色实心圆 40（画板 647..686 / 1004..1043）——
+        val playCx = left + w - MEDIA_PLAY_FROM_RIGHT
+        val nextCx = left + w - MEDIA_NEXT_FROM_RIGHT
+        val prevCx = left + w - MEDIA_PREV_FROM_RIGHT
+        withPress(canvas, "play", playCx, cy) {
+            fill.color = Skin.surfaceStrong
+            canvas.drawCircle(playCx, cy, PLAY_BTN / 2f, fill)
+            fill.color = Skin.TEXT
+            if (mediaPlaying) {
+                // 暂停：两根竖条
+                canvas.drawRoundRect(RectF(playCx - 6f, cy - 9f, playCx - 6f + 5f, cy + 9f), 2f, 2f, fill)
+                canvas.drawRoundRect(RectF(playCx + 1f, cy - 9f, playCx + 1f + 5f, cy + 9f), 2f, 2f, fill)
+            } else {
+                // 播放：朝右的三角形（视觉重心右移 1px，才不显得偏左）
+                val p = Path().apply {
+                    moveTo(playCx - 5f, cy - 8f)
+                    lineTo(playCx + 9f, cy)
+                    lineTo(playCx - 5f, cy + 8f)
+                    close()
+                }
+                canvas.drawPath(p, fill)
+            }
+        }
+        withPress(canvas, "mediaNext", nextCx, cy) { skipIcon(canvas, nextCx, cy, next = true) }
+        withPress(canvas, "mediaPrev", prevCx, cy) { skipIcon(canvas, prevCx, cy, next = false) }
+
+        // —— 播放进度：只在真的有进度时画一条 3px 的细线（画板静止态没有它）——
+        if (mediaProgress > 0f) {
+            fill.color = Skin.ACCENT
+            canvas.drawRoundRect(
+                RectF(left + COVER_PAD, top + h - 5f, left + COVER_PAD + (w - COVER_PAD * 2) * mediaProgress, top + h - 2f),
+                2f, 2f, fill,
+            )
+        }
+
+        // —— 三个键的命中区（纵向撑满胶囊，横向 56）——
+        val keyTop = cy - HIT_MIN / 2f
+        val keyBottom = cy + HIT_MIN / 2f
+        hit["play"] = RectF(playCx - HIT_MIN / 2f, keyTop, playCx + HIT_MIN / 2f, keyBottom)
+        hit["mediaNext"] = RectF(nextCx - HIT_MIN / 2f, keyTop, nextCx + HIT_MIN / 2f, keyBottom)
+        hit["mediaPrev"] = RectF(prevCx - HIT_MIN / 2f, keyTop, prevCx + HIT_MIN / 2f, keyBottom)
+    }
+
+    // ================================================================
+    // 电源
+    // ================================================================
+
+    /** 电源键（画板：中心 x≈805，只有一个描边图标，无底板）。 */
+    private fun drawPower(canvas: Canvas, cx: Float, cy: Float) {
+        val on = hvac?.power == true
+        withPress(canvas, "power", cx, cy) {
+            stroke.color = if (on) Skin.ACCENT else Skin.TEXT_SOFT
+            stroke.strokeWidth = 2.6f
+            r.set(cx - 13f, cy - 14f, cx + 13f, cy + 12f)
+            canvas.drawArc(r, 300f, 300f, false, stroke)
+            canvas.drawLine(cx, cy - 20f, cx, cy - 3f, stroke)
+        }
+        // 命中区 56×56（视觉 28，点击区放大）。
+        hit["power"] = RectF(cx - HIT_MIN / 2f, cy - HIT_MIN / 2f, cx + HIT_MIN / 2f, cy + HIT_MIN / 2f)
+    }
+
+    // ================================================================
+    // 温区胶囊
+    // ================================================================
+
+    /**
+     * 主驾 / 副驾温区胶囊（画板 x845..1050 / x1166..1373，高 72、圆角 28）。
+     *
+     * 内部：`−`（距左 15）· 温度（26 粗）与 `°`（13）居中 · 下方 11px「主驾 / 副驾」· `+`（距右 14）。
+     * 注意这三个数字都是**画板实测**：温度是 26 而不是旧版的 50，
+     * 因为新版把「加减」并进了胶囊内部，数字必须让位。
+     */
+    private fun drawTempPill(canvas: Canvas, left: Float, cy: Float, w: Float, passenger: Boolean) {
+        val rect = RectF(left, cy - TEMP_PILL_H / 2f, left + w, cy + TEMP_PILL_H / 2f)
+        Glass.card(canvas, rect, TEMP_PILL_RADIUS, Skin.surfaceStrong, shadow = false, sheen = true, stroke = Skin.GLASS_STROKE)
+
+        val cx = rect.centerX()
+        val state = hvac
+        val value = if (passenger) state?.tempPassenger ?: 23.5f else state?.tempDriver ?: 23.5f
+        val shown = formatTemp(value)
+
+        // —— 温度数字 + °（作为一组居中；放不下就等比缩小）——
+        val numSize = 26f
+        val degSize = 13f
+        text.textAlign = Paint.Align.LEFT
+        text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        text.textSize = numSize
+        var numW = text.measureText(shown)
+        text.textSize = degSize
+        var degW = text.measureText("°")
+        var groupW = numW + degW
+        var k = 1f
+        // 数字区可用宽度 = 胶囊宽 − 两端各 56 的命中区 − 8 的呼吸位
+        // （命中区不再围着加减键的圆心，而是从胶囊两端各切 56，见下面的 hit 赋值）。
+        val maxGroup = w - 2f * HIT_MIN - 8f
+        if (groupW > maxGroup && groupW > 0f) {
+            k = maxGroup / groupW
+            text.textSize = numSize * k
+            numW = text.measureText(shown)
+            text.textSize = degSize * k
+            degW = text.measureText("°")
+            groupW = numW + degW
+        }
+        val startX = cx - groupW / 2f
+
+        val pulse = if (passenger) tempPassengerPulse.scale else tempDriverPulse.scale
+        canvas.save()
+        if (pulse != 1f) canvas.scale(pulse, pulse, cx, cy)
+        text.textSize = numSize * k
+        text.color = Skin.TEXT
+        // 数字基线：画板上数字 bbox 1004..1023、中心 1013.5（相对 1024 偏上 10.5），
+        // 26px 字的视觉中心大约在基线上方 9.5 ⇒ 基线落在 cy - 1。
+        canvas.drawText(shown, startX, cy - 1f, text)
+        text.textSize = degSize * k
+        text.color = Skin.TEXT_SOFT
+        canvas.drawText("°", startX + numW, cy - 11f, text)
+        canvas.restore()
+
+        // —— 主驾 / 副驾（11px 弱字，居中在数字下方）——
+        text.typeface = Typeface.DEFAULT
+        text.textSize = 11f
+        text.color = Skin.TEXT_DIM
+        text.textAlign = Paint.Align.CENTER
+        canvas.drawText(if (passenger) "副驾" else "主驾", cx, cy + 17f, text)
+
+        // —— 加减键（画板：− 距左 14、+ 距右 17，统一取 16）——
+        val minusCx = left + TEMP_ARROW_INSET
+        val plusCx = left + w - TEMP_ARROW_INSET
+        val minusKey = if (passenger) "tempP-" else "temp-"
+        val plusKey = if (passenger) "tempP+" else "temp+"
+        withPress(canvas, minusKey, minusCx, cy) { plusMinus(canvas, minusCx, cy, plus = false) }
+        withPress(canvas, plusKey, plusCx, cy) { plusMinus(canvas, plusCx, cy, plus = true) }
+        // 命中区：**从胶囊两端各切 56 宽**、纵向撑满 72，而不是在圆心周围画 56 的方框。
+        // 为什么：两个圆心只隔 ~170，若各自套一个 56 的盒子，中间会叠出 30 多 px，
+        // 而 `hit` 是按插入顺序取第一个命中的 —— 叠住的那段永远只归减号，加号会「半失灵」。
+        // 从两端切分后两块各 56 宽且互不重叠，落点稳定。
+        hit[minusKey] = RectF(left, cy - TEMP_PILL_H / 2f, left + HIT_MIN, cy + TEMP_PILL_H / 2f)
+        hit[plusKey] = RectF(left + w - HIT_MIN, cy - TEMP_PILL_H / 2f, left + w, cy + TEMP_PILL_H / 2f)
+    }
+
+    /**
+     * 温度调节按钮的图形（第三十七轮：由左右箭头改成 **「−」/「+」**）。
+     *
+     * 用户要求：Dock 空调的温度调整按钮改成 “+/-” 按钮。
+     * 之前画的是一对左右尖角，在深色玻璃底上不太像「加减」，
+     * 也和中间那组温度数字的语义对不上；现在就是标准的减号 / 加号。
+     */
+    private fun plusMinus(canvas: Canvas, cx: Float, cy: Float, plus: Boolean) {
+        stroke.color = Skin.TEXT_SOFT
+        stroke.strokeWidth = 2.2f
+        stroke.strokeCap = Paint.Cap.ROUND
+        val half = 7f
+        canvas.drawLine(cx - half, cy, cx + half, cy, stroke)
+        if (plus) canvas.drawLine(cx, cy - half, cx, cy + half, stroke)
+    }
+
+    /**
+     * `DesignDock.format(float)`
+     * 温度 ≤ 0 时按 23.5 处理，并且**固定一位小数**。
+     */
+    private fun formatTemp(value: Float): String {
+        val v = if (value <= 0f) 23.5f else value
+        return String.format(java.util.Locale.US, "%.1f", v)
+    }
+
+    // ================================================================
+    // 风量
+    // ================================================================
+
+    /**
+     * 风量键（画板 x1082..1138 / 56×56 / 圆角 18 / 白色玻璃方块）。
+     *
+     * 画板上的图标是**「风」字形**（三条横线带卷曲端头），
+     * 不是旧版的「三叶风扇 + 7 段档位条」。旧版的 7 段档位条在这里没有位置
+     * （56 的方块塞不下 7 段），所以档位改成**颜色 + 变化脉冲**表达：
+     * 开了风（或 AUTO）图标就是强调色，换档时图标会「鼓」一下。
+     */
+    private fun drawFan(canvas: Canvas, left: Float, top: Float, size: Float) {
+        val state = hvac
+        val level = state?.fanLevel ?: 0
+        val auto = state?.fanAuto == true
+        val on = level > 0 || auto
+        val cx = left + size / 2f
+        val cy = top + size / 2f
+        val rect = RectF(left, top, left + size, top + size)
+
+        withPress(canvas, "fan", cx, cy) {
+            Glass.card(canvas, rect, FAN_RADIUS, Skin.surfaceStrong, shadow = false, sheen = true, stroke = Skin.GLASS_STROKE)
+            val glyphColor = if (on) Skin.ACCENT else Skin.TEXT_SOFT
+            val pulse = fanPulse.scale
+            canvas.save()
+            if (pulse != 1f) canvas.scale(pulse, pulse, cx, cy)
+            fanGlyph(canvas, cx, cy, glyphColor, level, auto)
+            canvas.restore()
+        }
+        hit["fan"] = RectF(cx - HIT_MIN / 2f, cy - HIT_MIN / 2f, cx + HIT_MIN / 2f, cy + HIT_MIN / 2f)
+    }
+
+    /**
+     * 风量键图标：**圆罩 + 三片扇叶 + 轮毂**（第246轮按用户「中间那个空调图标
+     * 不明所以」重画）。
+     *
+     * 旧版画的是三根带卷钩的横线（airflow），56 的键上读不出「风量」，
+     * 用户直接问「这是什么」。现在改成一眼能认的**风扇**：
+     * 外圈 Ø23.2 的细描边、三片 120° 均分的实心扇叶（外缘 r9.1、
+     * 内缘 r2.9、扫过 44°）、中心 r3 的轮毂（用键底色挖空，把三片叶子分开）。
+     *
+     * 颜色只有两种：开风（或 AUTO）= 强调色，关 = 弱字色 —— 与旧版语义一致。
+     */
+    private fun fanGlyph(canvas: Canvas, cx: Float, cy: Float, color: Int, level: Int, auto: Boolean) {
+        // 图标 = 设计板 Dock 里那枚「风」：三条横线，上条右端往上卷、下条左端往下卷。
+        // 第 246 轮先试过「圆罩 + 四片楔形扇叶」，56px 上读成十字/警示牌，用户否掉了；
+        // 改回画板原样的「风」，档位单独用下面一排点表示 —— 图标负责「是什么」，
+        // 点负责「几档风」，两者不抢。
+        stroke.color = color
+        stroke.strokeWidth = 3f
+        stroke.strokeCap = Paint.Cap.ROUND
+
+        // 三条线整体上移 3px，把下半部分让给档位点。
+        val gy = cy - 3f
+        val top = Path()
+        top.moveTo(cx - 12f, gy - 8f)
+        top.lineTo(cx + 3f, gy - 8f)
+        top.cubicTo(cx + 9f, gy - 8f, cx + 9f, gy - 16f, cx + 2.5f, gy - 16f)
+        canvas.drawPath(top, stroke)
+
+        canvas.drawLine(cx - 9.5f, gy, cx + 9.5f, gy, stroke)
+
+        val bottom = Path()
+        bottom.moveTo(cx + 12f, gy + 8f)
+        bottom.lineTo(cx - 3f, gy + 8f)
+        bottom.cubicTo(cx - 9f, gy + 8f, cx - 9f, gy + 16f, cx - 2.5f, gy + 16f)
+        canvas.drawPath(bottom, stroke)
+
+        // 档位点：7 档，亮到第 level 颗；风关着（0 档且非 AUTO）时整排不画 ——
+        // 一排灰点会被读成「这里坏了」，而不是「0 档」。
+        val shown = if (auto) 7 else level.coerceIn(0, 7)
+        if (shown <= 0) return
+        val dotOn = if (auto) CardStyle.scaleAlpha(color, 0.75f) else color
+        val dotOff = CardStyle.scaleAlpha(Skin.TEXT_SOFT, 0.55f)
+        val pitch = 5.4f
+        val startX = cx - pitch * 3f
+        for (i in 0 until 7) {
+            fill.color = if (i < shown) dotOn else dotOff
+            canvas.drawCircle(startX + i * pitch, cy + 21f, 1.9f, fill)
+        }
+    }
+
+    // ================================================================
+    // A/C · AUTO
+    // ================================================================
+
+    /**
+     * A/C 与 AUTO（画板：A/C 白玻璃胶囊 x1416..1472、AUTO accent-soft 胶囊 x1483..1547，高 44）。
+     *
+     * AUTO 的 accent-soft 底是**画板固定的**，不随开关变化；开关状态改的是字色
+     * （开 = accent，关 = 弱色），这样「按了有反应」但版式不走样。
+     */
+    private fun drawClimateChip(canvas: Canvas, left: Float, cy: Float, w: Float, label: String, active: Boolean) {
+        val rect = RectF(left, cy - CLIMATE_CHIP_H / 2f, left + w, cy + CLIMATE_CHIP_H / 2f)
+        withPress(canvas, label, rect.centerX(), cy) {
+            Glass.card(
+                canvas, rect, CLIMATE_CHIP_RADIUS,
+                if (label == "AUTO") Skin.ACCENT_SOFT else Skin.surfaceStrong,
+                shadow = false, sheen = true, stroke = Skin.GLASS_STROKE,
+            )
+            text.textAlign = Paint.Align.CENTER
+            text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            text.textSize = 15f
+            text.color = if (active) Skin.ACCENT else Skin.TEXT_SOFT
+            canvas.drawText(label, rect.centerX(), cy + 5.5f, text)
+        }
+        // 命中区：横向用**胶囊自身的宽度**（A/C 56、AUTO 64，都 ≥56），纵向放大到 56。
+        // 若在这里也套 56 宽的中心盒，A/C 与 AUTO 之间只隔 11，两个盒子会叠 17px，
+        // 而 A/C 先插入 ⇒ AUTO 左边缘那条按不动。用自身宽度就天然不重叠。
+        hit[label] = RectF(rect.left, cy - HIT_MIN / 2f, rect.right, cy + HIT_MIN / 2f)
+    }
+
+    // ================================================================
+    // 右侧功能键
+    // ================================================================
+
+    /**
+     * 右侧 5 枚 46×46（圆角 16）玻璃方块，中心 x = 1627 / 1684 / 1741 / 1798 / 1855。
+     *
+     * ## 顺序为什么是这样
+     *
+     * 画板这 5 格是「内循环 / 后除霜 / ✳ / + / +」。我们能渲染的功能键只有
+     * `circ / defrostF / defrostR / quick0 / quick1` 五个（配置项里就这些，
+     * 不新增也不删除），所以 ✳ 那一格承载**前除霜**（用户原话里前除霜就排在
+     * 星号快捷之前），两个 `+` 是自定义快捷槽。
+     */
+    private fun drawRightKeys(canvas: Canvas, cy: Float) {
+        val keys = arrayOf("circ", "defrostR", "defrostF", "quick0", "quick1")
+        keys.forEachIndexed { i, key ->
+            val cx = dx(RIGHT_FIRST_CX + RIGHT_PITCH * i)
+            drawRightKey(canvas, cx, cy, key)
+        }
+    }
+
+    private fun drawRightKey(canvas: Canvas, cx: Float, cy: Float, key: String) {
+        val half = RIGHT_KEY / 2f
+        val rect = RectF(cx - half, cy - half, cx + half, cy + half)
+        withPress(canvas, key, cx, cy) {
+            // 快捷槽里已经配了应用 → 只画应用图标本身（不套底板，让应用自己的颜色说话）；
+            // 空槽 / 功能键 → 玻璃方块底。
+            val quick = if (key.startsWith("quick")) quickApps.getOrNull(key.removePrefix("quick").toIntOrNull() ?: 0) else null
+            val hasIcon = quick?.icon != null
+            if (!hasIcon) {
+                Glass.card(canvas, rect, RIGHT_RADIUS, Skin.surfaceStrong, shadow = false, sheen = true, stroke = Skin.GLASS_STROKE)
+            }
+            when {
+                hasIcon -> drawAppIcon(canvas, quick!!.icon!!, cx, cy, RIGHT_KEY - 12f)
+                quick != null && quick.pkg.isNotEmpty() -> {
+                    // 有包名但取不到图标 → 首字占位
+                    text.textAlign = Paint.Align.CENTER
+                    text.textSize = 18f
+                    text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                    text.color = Skin.TEXT_SOFT
+                    canvas.drawText(quick.label.take(1), cx, cy + 6f, text)
+                }
+                key.startsWith("quick") -> {
+                    // 空槽：一个「+」
+                    stroke.color = Skin.TEXT_SOFT
+                    stroke.strokeWidth = 2.4f
                     canvas.drawLine(cx - 9f, cy, cx + 9f, cy, stroke)
                     canvas.drawLine(cx, cy - 9f, cx, cy + 9f, stroke)
-                } else {
-                    val icon = app.icon
-                    if (icon != null) {
-                        drawAppIcon(canvas, icon, cx, cy, tile - 6f)
-                    } else {
-                        // 取不到图标 → 首字占位（与应用选择器同一套兜底）
-                        r.set(left, cy - tile / 2f, left + tile, cy + tile / 2f)
-                        canvas.drawRoundRect(r, 18f, 18f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                            color = Skin.surfaceSoft
-                        })
-                        text.textAlign = Paint.Align.CENTER
-                        text.textSize = 26f
-                        text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-                        text.color = Skin.TEXT_SOFT
-                        canvas.drawText(app.label.take(1), cx, cy + 9f, text)
-                    }
                 }
+                key == "circ" -> circulationGlyph(canvas, cx, cy)
+                key == "defrostR" -> defrostGlyph(canvas, cx, cy, front = false)
+                key == "defrostF" -> defrostGlyph(canvas, cx, cy, front = true)
             }
-            hit["quick$i"] = RectF(left, cy - tile / 2f, left + tile, cy + tile / 2f)
+        }
+        hit[key] = RectF(cx - HIT_MIN / 2f, cy - HIT_MIN / 2f, cx + HIT_MIN / 2f, cy + HIT_MIN / 2f)
+    }
+
+    /**
+     * 内外循环：两个首尾相接的圆弧 + 箭头（画板上的 refresh 形）。
+     *
+     * 内循环（`hvac.circulation == 0`）用强调色，外循环用弱色 —— 与旧版语义一致。
+     */
+    private fun circulationGlyph(canvas: Canvas, cx: Float, cy: Float) {
+        val inner = hvac?.circulation == 0
+        stroke.color = if (inner) Skin.ACCENT else Skin.TEXT_SOFT
+        stroke.strokeWidth = 2f
+        r.set(cx - 12.5f, cy - 10f, cx + 12.5f, cy + 10f)
+        canvas.drawArc(r, 30f, 140f, false, stroke)
+        canvas.drawArc(r, 210f, 140f, false, stroke)
+        // 箭头（向右上 / 向左下），与圆弧端头接上
+        val p = Path().apply {
+            moveTo(cx + 11f, cy - 2f)
+            lineTo(cx + 11f, cy - 8f)
+            lineTo(cx + 5f, cy - 8f)
+        }
+        canvas.drawPath(p, stroke)
+        val q = Path().apply {
+            moveTo(cx - 11f, cy + 2f)
+            lineTo(cx - 11f, cy + 8f)
+            lineTo(cx - 5f, cy + 8f)
+        }
+        canvas.drawPath(q, stroke)
+    }
+
+    /**
+     * 除霜：一个圆角矩形（风挡）+ 三条气流线。
+     *
+     * 后除霜的线是**竖直**的，前除霜带一点斜度（与旧版一致：前除霜气流朝外散）。
+     */
+    private fun defrostGlyph(canvas: Canvas, cx: Float, cy: Float, front: Boolean) {
+        val on = if (front) hvac?.defrostFront == true else hvac?.defrostRear == true
+        stroke.color = if (on) Skin.ACCENT else Skin.TEXT_SOFT
+        stroke.strokeWidth = 1.8f
+        r.set(cx - 14.5f, cy - 13.5f, cx + 14.5f, cy + 2.5f)
+        canvas.drawRoundRect(r, 5.5f, 5.5f, stroke)
+        for (i in 0..2) {
+            val x0 = cx - 9f + i * 9f
+            if (front) {
+                canvas.drawLine(x0, cy + 6f, x0 - 2.5f, cy + 12f, stroke)
+            } else {
+                canvas.drawLine(x0, cy + 6f, x0, cy + 12f, stroke)
+            }
         }
     }
 
@@ -474,82 +1020,6 @@ class DockBarView(context: Context) : View(context) {
     }
 
     /**
-     * 空调簇的**占位宽度**（只量不画）。
-     *
-     * 第四十九轮「浮屿」把空调簇挪到 Dock 正中间，所以必须先知道它有多宽才能居中。
-     * 数字全部取自 [CLIMATE_SLOT] / [FAN_W] / [TEMP_ITEM_W] 等常量，
-     * 与 [drawClimateCluster] 一一对应 —— 改常量时两边同时生效，不会走偏。
-     */
-    private fun climateClusterWidth(): Float {
-        val wAuto = textItemWidth("AUTO", CLIMATE_TEXT_SIZE)
-        val wAc = textItemWidth("A/C", CLIMATE_TEXT_SIZE)
-        // 与 [drawClimateCluster] 的从右往左排布**逐项对应**：
-        //   defrostR / defrostF / circ / AUTO / A/C / 副驾温度 / 风扇 / 主驾温度 / 电源
-        // 算式与实际消耗必须完全相等 —— 否则簇的左右边界会算偏，
-        // 第五十三轮「平均铺开」就靠这个把两段间隙摆成一样宽。
-        return CLIMATE_SLOT * 4 + // 循环 / 前除霜 / 后除霜 / 电源
-            CLIMATE_ICON_GAP * 4 + // 三个图标之间 + A/C 之后
-            CLIMATE_POWER_GAP + // 电源之前
-            wAuto + wAc + // A/C · AUTO
-            TEMP_ITEM_W * 2 + FAN_W // 副驾温度 / 风扇 / 主驾温度
-    }
-
-    /** 文字型空调项（A/C · AUTO）的占位宽度：文字宽 + 左右留白。 */
-    private fun textItemWidth(label: String, size: Float): Float {
-        text.textAlign = Paint.Align.CENTER
-        text.textSize = size
-        text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        return text.measureText(label) + CLIMATE_TEXT_PAD
-    }
-
-    /**
-     * 右侧气候簇（从右往左排：电源 → 主驾温度 → 风扇 → 副驾温度 → A/C → AUTO → 三枚图标）。
-     *
-     * 排布顺序
-     * `dockPower → dockTempDown → 主驾 → dockTempUp → dockFan → dockTempPDown → 副驾 → dockTempPUp
-     *  dockAc → dockAuto → dockCirc → dockDefrostF → dockDefrostR`。
-     *
-     * 第四十九轮「浮屿」：这一簇被挪到 **Dock 正中间**（见 [onDraw]），
-     * 槽宽从 70 收到 64、电源前的空档从 70 收到 16 —— 腾出的宽度让媒体卡能贴到右边缘。
-     * 所有尺寸都来自常量，[climateClusterWidth] 用同一份数字，不会走偏。
-     *
-     * @param right 右边界
-     * @return 这一整簇的**左边界**
-     */
-    private fun drawClimateCluster(canvas: Canvas, right: Float): Float {
-        val h = height.toFloat()
-        val cy = h / 2f
-        var cur = right
-        cur = climateItem(canvas, cur, CLIMATE_SLOT, "defrostR")
-        cur -= CLIMATE_ICON_GAP
-        cur = climateItem(canvas, cur, CLIMATE_SLOT, "defrostF")
-        cur -= CLIMATE_ICON_GAP
-        cur = climateItem(canvas, cur, CLIMATE_SLOT, "circ")
-        cur -= CLIMATE_ICON_GAP
-        cur = textItem(canvas, cur, "AUTO", CLIMATE_TEXT_SIZE, hvac?.auto == true)
-        cur = textItem(canvas, cur, "A/C", CLIMATE_TEXT_SIZE, hvac?.ac == true)
-        cur -= CLIMATE_ICON_GAP
-        cur = tempItem(canvas, cur, passenger = true)
-        cur -= FAN_W
-        val fanTop = (h - 76f) / 2f
-        // 风量键以前是「按了没反应」的一档（没有按压反馈）——
-        // 现在跟别的键一样按下去会轻轻一沉。
-        withPress(canvas, "fan", cur + FAN_W / 2f, fanTop + 38f) {
-            drawFan(canvas, cur, fanTop, FAN_W, 76f)
-        }
-        hit["fan"] = RectF(cur, fanTop, cur + FAN_W, fanTop + 76f)
-        cur = tempItem(canvas, cur, passenger = false)
-        // 第五十三轮修重叠：[drawPower] 是**左锚点**画的（占 [left, left + slot]），
-        // 原来这里只减了 16 的间隙就把左边界传进去 —— 64 宽的槽有 48 压在主驾温度上，
-        // 「−」按钮被电源图标盖掉一半。现在整个槽挪到温度区左边。
-        cur -= CLIMATE_POWER_GAP
-        val powerLeft = cur - CLIMATE_SLOT
-        drawPower(canvas, powerLeft, cy, CLIMATE_SLOT)
-        hit["power"] = RectF(powerLeft, cy - 44f, powerLeft + CLIMATE_SLOT, cy + 44f)
-        return powerLeft
-    }
-
-    /**
      * 按下时把该按键缩放到 [MotionSpec.PRESS_SCALE]，抬起回 1.0。
      *
      * 只缩**这一个键**（围绕它自己的中心），不是缩整条 Dock ——
@@ -564,492 +1034,6 @@ class DockBarView(context: Context) : View(context) {
     }
 
     /**
-     * 导航键底板（设计板 `.tile`：60×60 圆角 20，surfaceSoft 底 + 1px 描边）。
-     *
-     * 第四十九轮之前 Dock 左段是**裸图标**，第五十轮按设计板补上底板，
-     * 四个键（主页 / 应用 / 分屏 / 360）共用同一块底板尺寸。
-     */
-    private fun drawKeyTile(canvas: Canvas, cx: Float, cy: Float) {
-        val half = DockLayout.KEY_SLOT / 2f
-        r.set(cx - half, cy - half, cx + half, cy + half)
-        canvas.drawRoundRect(r, 22f, 22f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Skin.surfaceSoft })
-        canvas.drawRoundRect(r, 22f, 22f, stroke.apply {
-            color = Skin.NAV_STROKE
-            strokeWidth = 1.4f
-        })
-    }
-
-    /**
-     * home 键（主页）。
-     *
-     * 第七十七轮之前画的是「圆环 + 圆点」——
-     * 那个形状**看不出是主页**，用户反馈不直观。
-     * 现在改成**房子**（[HomeHouseIcon]），
-     * 和导航槽栏里的「主页」槽位**同一个形状**。
-     *
-     * 旧的圆环外径 28，这里房子的半宽取 13（宽高都是 26），
-     * 视觉重量与原来基本一致。
-     */
-    private fun drawHome(canvas: Canvas, x: Float, cy: Float, slot: Float) {
-        val cx = x + slot / 2f
-        val active = activePage == 0
-        drawKeyTile(canvas, cx, cy)
-        withPress(canvas, "home", cx, cy) {
-            stroke.color = if (active) Skin.ACCENT_LIGHT else Skin.TEXT_SOFT
-            stroke.strokeWidth = 2.8f
-            HomeHouseIcon.draw(canvas, cx, cy, HOME_ICON_UNIT, stroke)
-        }
-        hit["home"] = RectF(x, cy - 48f, x + slot, cy + 48f)
-    }
-
-    private fun drawApps(canvas: Canvas, x: Float, cy: Float, slot: Float) {
-        val cx = x + slot / 2f
-        val active = appsOpen
-        drawKeyTile(canvas, cx, cy)
-        withPress(canvas, "apps", cx, cy) {
-            fill.color = if (active) Skin.ACCENT_LIGHT else Skin.TEXT_SOFT
-            // 第192轮：宫格 7×7@11 → 8×8@12（跟 Dock 高 104 → 112 同一比例放大）。
-            for (row in 0..2) for (col in 0..2) {
-                canvas.drawRoundRect(
-                    RectF(cx - 17f + col * 12f, cy - 17f + row * 12f, cx - 9f + col * 12f, cy - 9f + row * 12f),
-                    2f, 2f, fill,
-                )
-            }
-        }
-        hit["apps"] = RectF(x, cy - 48f, x + slot, cy + 48f)
-    }
-
-    private fun drawSplit(canvas: Canvas, x: Float, cy: Float, slot: Float) {
-        val cx = x + slot / 2f
-        drawKeyTile(canvas, cx, cy)
-        withPress(canvas, "split", cx, cy) {
-            stroke.color = Skin.TEXT_SOFT
-            stroke.strokeWidth = 2.6f
-            // 第192轮：±14 → ±16 高、左右各外扩 2（跟 Dock 高 104 → 112 同一比例放大）。
-            r.set(cx - 17f, cy - 16f, cx + 3f, cy + 16f)
-            canvas.drawRoundRect(r, 4f, 4f, stroke)
-            r.set(cx + 1f, cy - 16f, cx + 17f, cy + 16f)
-            canvas.drawRoundRect(r, 4f, 4f, stroke)
-        }
-        hit["split"] = RectF(x, cy - 48f, x + slot, cy + 48f)
-    }
-
-    private fun draw360(canvas: Canvas, x: Float, cy: Float, slot: Float) {
-        val cx = x + slot / 2f
-        drawKeyTile(canvas, cx, cy)
-        withPress(canvas, "360", cx, cy) {
-            // 圆角 12、2px 描边 #9ee6eefa
-            // 第五十一轮：日间模式下这层浅蓝在白底上看不见，改成跟随主题的弱文字色。
-            val glyphColor = if (Skin.isNight) 0x9EE6EEFA.toInt() else Skin.TEXT_SOFT
-            stroke.color = glyphColor
-            stroke.strokeWidth = 2f
-            // 第192轮：±24×±15 → ±26×±16、字 22 → 24（跟 Dock 高 104 → 112 同一比例放大）。
-            r.set(cx - 26f, cy - 16f, cx + 26f, cy + 16f)
-            canvas.drawRoundRect(r, 12f, 12f, stroke)
-            text.color = glyphColor
-            text.textSize = 24f
-            text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            text.textAlign = Paint.Align.CENTER
-            canvas.drawText("360", cx, cy + 8f, text)
-        }
-        hit["360"] = RectF(x, cy - 48f, x + slot, cy + 48f)
-    }
-
-    /**
-     * 媒体卡。
-     *
-     * 整块（封面 / 歌名区）都是点击热区，所以按压反馈作用在**整张卡**上，
-     * 围绕卡片自己的中心缩放 —— 视觉重心在卡片身上，而不是某个小图标。
-     */
-    private fun drawMedia(canvas: Canvas, left: Float, top: Float, w: Float, h: Float) {
-        withPress(canvas, "media", left + w / 2f, top + h / 2f) {
-            drawMediaCard(canvas, left, top, w, h)
-        }
-    }
-
-    private fun drawMediaCard(canvas: Canvas, left: Float, top: Float, w: Float, h: Float) {
-        r.set(left, top, left + w, top + h)
-        // #12ffffff、圆角 28
-        canvas.drawRoundRect(r, 28f, 28f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Skin.GLASS_FILL })
-
-        // 第三十九轮：三键布局统一由 `DockMediaLayout` 算（上一首 | 播放 | 下一首）。
-        val keys = DockMediaLayout.keys(w)
-
-        // 封面（圆角 16，clipToOutline）—— 第192轮：边长用 [DockMediaLayout.COVER_SIZE]
-        // （60 → 64），并且**垂直居中**在卡里，不再写死「距顶 14」。
-        val coverSize = DockMediaLayout.COVER_SIZE
-        val coverTop = top + (h - coverSize) / 2f
-        val cover = RectF(
-            left + DockMediaLayout.PAD_L,
-            coverTop,
-            left + DockMediaLayout.PAD_L + coverSize,
-            coverTop + coverSize,
-        )
-        val art = mediaArtwork
-        if (art != null) {
-            // 有专辑图 → 按裁剪成圆角矩形贴上去
-            val clip = Path().apply { addRoundRect(cover, 16f, 16f, Path.Direction.CW) }
-            canvas.save()
-            canvas.clipPath(clip)
-            canvas.drawBitmap(art, null, cover, Paint(Paint.FILTER_BITMAP_FLAG))
-            canvas.restore()
-        } else {
-            // 第五十一轮：设计板用 `--accentSoft` 底 + `--accent` 音符（不再是蓝色渐变）。
-            canvas.drawRoundRect(cover, 16f, 16f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = coverFallback })
-            // 音符
-            stroke.color = Skin.ACCENT
-            stroke.strokeWidth = 2.6f
-            canvas.drawLine(cover.centerX() + 4f, cover.centerY() - 12f, cover.centerX() + 4f, cover.centerY() + 6f, stroke)
-            canvas.drawCircle(cover.centerX() - 1f, cover.centerY() + 8f, 5.5f, stroke)
-            canvas.drawLine(cover.centerX() + 4f, cover.centerY() - 12f, cover.centerX() + 13f, cover.centerY() - 8f, stroke)
-        }
-
-        // 标题/艺术家（滑动时整体位移 + 淡出，并露出预览文案）
-        val tx = left + keys.textLeft
-        val textW = keys.textWidth
-        text.textAlign = Paint.Align.LEFT
-        text.typeface = Typeface.DEFAULT
-        text.textSize = 22f
-        text.isFakeBoldText = false
-        text.color = Skin.TEXT
-        canvas.save()
-        canvas.translate(swipeOffset, 0f)
-        canvas.drawText(clip(mediaTitle, text, textW), tx, top + h / 2f - 4f, text)
-        text.color = Skin.TEXT_DIM
-        text.textSize = 16f
-        canvas.drawText(clip(mediaArtist, text, textW), tx, top + h / 2f + 18f, text)
-        canvas.restore()
-
-        if (swipeFraction > 0f) {
-            text.textAlign = Paint.Align.LEFT
-            text.typeface = Typeface.DEFAULT
-            text.textSize = 22f
-            text.color = Skin.TEXT
-            canvas.save()
-            canvas.translate(-swipeOffset, 0f)
-            canvas.drawText(clip(swipePreviewTitle, text, textW), tx, top + h / 2f - 4f, text)
-            text.textSize = 16f
-            text.color = Skin.TEXT_DIM
-            canvas.drawText(clip(swipePreviewArtist, text, textW), tx, top + h / 2f + 18f, text)
-            canvas.restore()
-        }
-        // 播放/暂停按钮 44×44：**去掉外圈白色圆底**，只留字形。
-        //
-        // 第四十轮（用户反馈「播放按钮外圈的白色圆环去掉，保持与上下切换的风格统一」）：
-        // （#eef3fa 近白圆底）+ 26×26 图标
-        // 但那个 60×60 的白圆在 88px 高的媒体卡里视觉权重过重，和左右两个
-        // 「纯字形」的切歌按钮完全不是一套语言。这里按用户要求去掉圆底，
-        // 字形改用与 [skipIcon] 完全相同的 `Skin.TEXT_SOFT` 软白，
-        // 尺寸也按切歌三角形（24px 高）对齐。
-        val playCx = left + keys.playLeft + DockMediaLayout.PLAY_BTN / 2f
-        val by = top + h / 2f
-        withPress(canvas, "play", playCx, by) {
-            fill.color = Skin.TEXT_SOFT
-            if (mediaPlaying) {
-                // 暂停：两根竖条（圆角与切歌图标的小竖条一致）
-                // 第192轮：随播放键 44 → 48 一起放大一档。
-                val barW = 6f
-                val barH = 12f
-                canvas.drawRoundRect(
-                    RectF(playCx - 7f, by - barH, playCx - 7f + barW, by + barH),
-                    2f, 2f, fill,
-                )
-                canvas.drawRoundRect(
-                    RectF(playCx + 1.5f, by - barH, playCx + 1.5f + barW, by + barH),
-                    2f, 2f, fill,
-                )
-            } else {
-                // 播放：三角形（高度与切歌三角形的 24px 一致）
-                // 第192轮：随播放键 44 → 48 一起放大一档。
-                val pth = Path().apply {
-                    moveTo(playCx - 9f, by - 13f)
-                    lineTo(playCx + 11f, by)
-                    lineTo(playCx - 9f, by + 13f)
-                    close()
-                }
-                canvas.drawPath(pth, fill)
-            }
-        }
-
-        // 上一首 / 下一首（第三十七轮新增，第三十九轮调整位置与尺寸）：
-        // 排成「上一首 | 播放暂停 | 下一首」，播放键夹在中间。
-        val nextCx = left + keys.nextLeft + DockMediaLayout.SKIP_BTN / 2f
-        val prevCx = left + keys.prevLeft + DockMediaLayout.SKIP_BTN / 2f
-        withPress(canvas, "mediaNext", nextCx, by) {
-            skipIcon(canvas, nextCx, by, next = true)
-        }
-        withPress(canvas, "mediaPrev", prevCx, by) {
-            skipIcon(canvas, prevCx, by, next = false)
-        }
-
-        // 播放进度 3px（dockMediaProg：#3d7bff）
-        if (mediaProgress > 0f) {
-            fill.color = Skin.ACCENT
-            canvas.drawRoundRect(
-                RectF(left + 14f, top + h - 5f, left + 14f + (w - 28f) * mediaProgress, top + h - 2f),
-                2f, 2f, fill,
-            )
-        }
-    }
-
-    /**
- * 一个温度块（主驾 / 副驾）。
- *
- * 结构是**三段并排**
- *
- * `xml
- * <FrameLayout id="dockTempDown" width=52 marginStart=8 /> ← − 按钮
- * <LinearLayout width=118 gravity=center_horizontal> ← 温度区
- *     <LinearLayout gravity=bottom>
- *         <TextView textSize=50 text="23.5" /> ← 数字
- *         <TextView textSize=26 text="°" /> ← 度号（跟在数字右边）
- *     </LinearLayout>
- *     <TextView textSize=13 text="主驾" />
- * </LinearLayout>
- * <FrameLayout id="dockTempUp" width=52 /> ← + 按钮
- * `
- *
- * 之前我们把温度区画在 `[right-118, right]`，**和 + 按钮重叠**，
- * 而数字（50px 字号，「23.5」约 97px 宽）又会盖住 + 按钮的箭头
- * —— 真机上就是「温度数字遮住了加减按钮」。
- *
- * 现在严格按三段排：`[− 52] [温度区 118] [+ 52]`，数字与 ° 作为**一组**居中，
- * 放不下时等比缩小字号，保证永远不会压到按钮上。
- */
-private fun tempItem(canvas: Canvas, right: Float, passenger: Boolean): Float {
-        val state = hvac
-        val value = if (passenger) state?.tempPassenger ?: 23.5f else state?.tempDriver ?: 23.5f
-        // （:425-430）：固定一位小数，<=0 时按 23.5 处理
-        val shown = formatTemp(value)
-
-        val plusW = TEMP_PLUS_W
-        val zoneW = TEMP_ZONE_W
-        val minusW = TEMP_MINUS_W
-        val gap = TEMP_GAP
-
-        // 从右往左量：+ 按钮 → 温度区 → − 按钮
-        //
-        // 第五十三轮修一处「算式与绘制对不上」的老毛病：
-        // 原来 [zoneLeft = plusLeft - zoneW] 把中间那个 8px 间隙**漏掉**了，
-        // 于是「+」按钮直接贴死在温度区上（视觉上像「温度数字压住了 + 按钮」），
-        // 而空出来的 8px 跑到整块的最左边去了。
-        // 现在两个间隙都在该在的位置：
-        //   `[− 48] [8] [温度区 112] [8] [+ 48]` = 224 = [TEMP_ITEM_W]，**不多不少**。
-        val plusRight = right
-        val plusLeft = plusRight - plusW
-        val zoneLeft = plusLeft - gap - zoneW
-        val minusRight = zoneLeft - gap
-        val minusLeft = minusRight - minusW
-        val cx = (zoneLeft + plusLeft) / 2f
-
-        // —— 数字 + ° 作为一组居中；放不下就等比缩小 ——
-        val numSize = 50f
-        val degSize = 26f
-        text.textAlign = Paint.Align.LEFT
-        text.textSize = numSize
-        var numW = text.measureText(shown)
-        text.textSize = degSize
-        var degW = text.measureText("°")
-        var groupW = numW + degW
-        var scale = 1f
-        val maxGroup = zoneW - 10f
-        if (groupW > maxGroup) {
-            scale = maxGroup / groupW
-            text.textSize = numSize * scale
-            numW = text.measureText(shown)
-            text.textSize = degSize * scale
-            degW = text.measureText("°")
-            groupW = numW + degW
-        }
-        val startX = cx - groupW / 2f
-
-        // 数字
-        //
-        // 温度是**自绘**的：值一变只能硬切，数字「啪」地跳过去，余光根本注意不到。
-        // 变化时给这个数字补一个短暂的放大脉冲（比例 / 时长见 [MotionSpec.STATE_BUMP]）。
-        val pulse = if (passenger) tempPassengerPulse.scale else tempDriverPulse.scale
-        canvas.save()
-        if (pulse != 1f) canvas.scale(pulse, pulse, cx, height / 2f)
-        text.textSize = numSize * scale
-        text.color = Skin.TEXT
-        canvas.drawText(shown, startX, height / 2f + 12f * scale, text)
-        // °（跟在数字右边；是 LinearLayout 水平排列）
-        text.textSize = degSize * scale
-        text.color = Skin.TEXT_SOFT
-        canvas.drawText("°", startX + numW, height / 2f + 2f * scale, text)
-        canvas.restore()
-        // 主驾 / 副驾
-        text.textSize = 13f
-        text.color = Skin.TEXT_DIM
-        text.textAlign = Paint.Align.CENTER
-        canvas.drawText(if (passenger) "副驾" else "主驾", cx, height / 2f + 38f, text)
-
-        // —— 两个加减按钮（画在数字之后：万一有重叠，按钮在上层）——
-        // 第五十三轮：按钮槽 52 → 48，所以字形中心从 +26 改成 +24（真正居中）。
-        //
-        // 加减键以前是「按了没反应」的一档（没有按压反馈），现在补上。
-        val minusKey = if (passenger) "tempP-" else "temp-"
-        val plusKey = if (passenger) "tempP+" else "temp+"
-        withPress(canvas, minusKey, minusLeft + 24f, height / 2f) {
-            plusMinus(canvas, minusLeft + 24f, height / 2f, plus = false)
-        }
-        withPress(canvas, plusKey, plusLeft + 24f, height / 2f) {
-            plusMinus(canvas, plusLeft + 24f, height / 2f, plus = true)
-        }
-        hit[minusKey] =
-            RectF(minusLeft, height / 2f - 44f, minusRight, height / 2f + 44f)
-        hit[plusKey] =
-            RectF(plusLeft, height / 2f - 44f, plusRight, height / 2f + 44f)
-
-        // 整块占位 = 48 + 8 + 112 + 8 + 48 = 224 = [TEMP_ITEM_W]，
-        // 返回**真实左边界**，算式与绘制从此完全一致（第五十三轮）。
-        return minusLeft
-    }
-
-    /**
-     * `DesignDock.format(float)`
-     * 温度 ≤ 0 时按 23.5 处理，并且**固定一位小数**。
-     */
-    private fun formatTemp(value: Float): String {
-        val v = if (value <= 0f) 23.5f else value
-        return String.format(java.util.Locale.US, "%.1f", v)
-    }
-
-    private fun drawFan(canvas: Canvas, left: Float, top: Float, w: Float, h: Float) {
-        val state = hvac
-        val level = state?.fanLevel ?: 0
-        val auto = state?.fanAuto == true
-        val cx = left + w / 2f
-        // 风扇图标
-        stroke.color = if (level > 0 || auto) Skin.ACCENT_LIGHT else Skin.TEXT_SOFT
-        stroke.strokeWidth = 2.4f
-        val fanCy = top + 24f
-        canvas.drawCircle(cx, fanCy, 3f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = stroke.color })
-        for (i in 0..2) {
-            val a = Math.toRadians((i * 120).toDouble())
-            val bx = cx + (Math.cos(a) * 12f).toFloat()
-            val by = fanCy + (Math.sin(a) * 12f).toFloat()
-            canvas.drawCircle(bx, by, 8f, stroke)
-        }
-        // 7 段
-        val segW = 9f
-        val gap = 4f
-        val total = 7 * segW + 6 * gap
-        var sx = cx - total / 2f
-        val sy = top + h - 19f
-        // 风量档位变了 → 7 段短暂放大一下（「这里变了」要被看见）。
-        val pulse = fanPulse.scale
-        canvas.save()
-        if (pulse != 1f) canvas.scale(pulse, pulse, cx, sy + 7.5f)
-        for (i in 0 until 7) {
-            fill.color = if (i < level) Skin.ACCENT_LIGHT else Skin.surfaceStrong
-            canvas.drawRoundRect(RectF(sx, sy, sx + segW, sy + 15f), 3f, 3f, fill)
-            sx += segW + gap
-        }
-        canvas.restore()
-        if (auto) {
-            text.color = Skin.ACCENT_LIGHT
-            text.textSize = 13f
-            text.textAlign = Paint.Align.CENTER
-            canvas.drawText("AUTO", cx, top + 4f, text)
-        }
-    }
-
-    private fun textItem(canvas: Canvas, right: Float, label: String, size: Float, active: Boolean): Float {
-        text.textAlign = Paint.Align.CENTER
-        text.textSize = size
-        text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        text.color = if (active) Skin.ACCENT else Skin.TEXT_SOFT
-        // 第三十九轮：左右留白 40 → 28。
-        // 这一簇是「从右往左量」的固定占位，留白越大，整簇就越宽；
-        // 28 已经够两个标签各自独立（里 AUTO / A/C 就是 wrap_content，没有额外留白）。
-        val w = text.measureText(label) + CLIMATE_TEXT_PAD
-        withPress(canvas, label, right - w / 2f, height / 2f) {
-            canvas.drawText(label, right - w / 2f, height / 2f + 10f, text)
-        }
-        hit[label] = RectF(right - w, height / 2f - 44f, right, height / 2f + 44f)
-        return right - w
-    }
-
-    private fun climateItem(canvas: Canvas, right: Float, slot: Float, key: String): Float {
-        val cx = right - slot / 2f
-        val cy = height / 2f
-        withPress(canvas, key, cx, cy) {
-            stroke.strokeWidth = 2.6f
-            when (key) {
-                "circ" -> {
-                    val inner = hvac?.circulation == 0
-                    stroke.color = if (inner) Skin.ACCENT_LIGHT else Skin.TEXT_SOFT
-                    r.set(cx - 16f, cy - 13f, cx + 16f, cy + 13f)
-                    canvas.drawRoundRect(r, 13f, 13f, stroke)
-                    val pth = Path().apply {
-                        moveTo(cx - 8f, cy + 1f)
-                        lineTo(cx - 2f, cy + 7f)
-                        lineTo(cx + 10f, cy - 7f)
-                    }
-                    if (inner) canvas.drawPath(pth, stroke) else {
-                        canvas.drawPath(Path().apply {
-                            moveTo(cx + 8f, cy + 1f)
-                            lineTo(cx + 2f, cy + 7f)
-                            lineTo(cx - 10f, cy - 7f)
-                        }, stroke)
-                    }
-                }
-                "defrostF" -> {
-                    val on = hvac?.defrostFront == true
-                    stroke.color = if (on) Skin.ACCENT_LIGHT else Skin.TEXT_SOFT
-                    r.set(cx - 17f, cy - 12f, cx + 17f, cy + 12f)
-                    canvas.drawRoundRect(r, 8f, 8f, stroke)
-                    for (i in 0..2) {
-                        val x0 = cx - 10f + i * 10f
-                        canvas.drawLine(x0, cy + 16f, x0 - 3f, cy + 24f, stroke)
-                    }
-                }
-                "defrostR" -> {
-                    val on = hvac?.defrostRear == true
-                    stroke.color = if (on) Skin.ACCENT_LIGHT else Skin.TEXT_SOFT
-                    r.set(cx - 17f, cy - 12f, cx + 17f, cy + 12f)
-                    canvas.drawRoundRect(r, 8f, 8f, stroke)
-                    for (i in 0..2) {
-                        val x0 = cx - 10f + i * 10f
-                        canvas.drawLine(x0, cy + 16f, x0, cy + 24f, stroke)
-                    }
-                }
-            }
-        }
-        hit[key] = RectF(right - slot, cy - 44f, right, cy + 44f)
-        return right - slot
-    }
-
-    private fun drawPower(canvas: Canvas, left: Float, cy: Float, slot: Float) {
-        val on = hvac?.power == true
-        val cx = left + slot / 2f
-        withPress(canvas, "power", cx, cy) {
-            stroke.color = if (on) Skin.ACCENT_LIGHT else Skin.TEXT_SOFT
-            stroke.strokeWidth = 3f
-            r.set(cx - 14f, cy - 16f, cx + 14f, cy + 14f)
-            canvas.drawArc(r, 300f, 300f, false, stroke)
-            canvas.drawLine(cx, cy - 22f, cx, cy - 4f, stroke)
-        }
-    }
-
-    /**
-     * 温度调节按钮的图形（第三十七轮：由左右箭头改成 **「−」/「+」**）。
-     *
-     * 用户要求：Dock 空调的温度调整按钮改成 “+/-” 按钮。
-     * 之前画的是一对左右尖角，在深色玻璃底上不太像「加减」，
-     * 也和中间那组温度数字的语义对不上；现在就是标准的减号 / 加号。
-     */
-    private fun plusMinus(canvas: Canvas, cx: Float, cy: Float, plus: Boolean) {
-        stroke.color = Skin.TEXT_SOFT
-        stroke.strokeWidth = 2.8f
-        stroke.strokeCap = Paint.Cap.ROUND
-        val half = 9f
-        canvas.drawLine(cx - half, cy, cx + half, cy, stroke)
-        if (plus) canvas.drawLine(cx, cy - half, cx, cy + half, stroke)
-    }
-
-    /**
      * 切歌按钮的图形（第三十七轮新增）。
      *
      * - 下一首：三角形朝右 + 右边一条竖条；
@@ -1057,28 +1041,24 @@ private fun tempItem(canvas: Canvas, right: Float, passenger: Boolean): Float {
      */
     private fun skipIcon(canvas: Canvas, cx: Float, cy: Float, next: Boolean) {
         fill.color = Skin.TEXT_SOFT
-        // 第三十九轮：按钮从 36 放大到 40，图标跟着放大一点，
-        // 和中间的 44px 播放圆**协调**（太小会显得像两个小点）。
-        // 第192轮：按钮 40 → 44，图标同步放大（12 → 13 高、竖条 3.6 → 4）。
-        val triH = 13f
-        val barW = 4f
+        // 画板：切歌图标高约 26、竖条 3.6 宽，和 40 的播放圆协调。
+        val triH = 11f
+        val barW = 3.4f
         if (next) {
-            // ▶|：三角形朝右，右边一条竖条
-            canvas.drawRoundRect(RectF(cx + 6f, cy - triH, cx + 6f + barW, cy + triH), 2f, 2f, fill)
+            canvas.drawRoundRect(RectF(cx + 5f, cy - triH, cx + 5f + barW, cy + triH), 1.7f, 1.7f, fill)
             val p = Path().apply {
-                moveTo(cx - 12f, cy - triH)
+                moveTo(cx - 10f, cy - triH)
                 lineTo(cx + 2f, cy)
-                lineTo(cx - 12f, cy + triH)
+                lineTo(cx - 10f, cy + triH)
                 close()
             }
             canvas.drawPath(p, fill)
         } else {
-            // |◀：左边一条竖条，三角形朝左
-            canvas.drawRoundRect(RectF(cx - 10f, cy - triH, cx - 10f + barW, cy + triH), 2f, 2f, fill)
+            canvas.drawRoundRect(RectF(cx - 8f, cy - triH, cx - 8f + barW, cy + triH), 1.7f, 1.7f, fill)
             val p = Path().apply {
-                moveTo(cx + 12f, cy - triH)
+                moveTo(cx + 10f, cy - triH)
                 lineTo(cx - 2f, cy)
-                lineTo(cx + 12f, cy + triH)
+                lineTo(cx + 10f, cy + triH)
                 close()
             }
             canvas.drawPath(p, fill)
@@ -1577,6 +1557,113 @@ private fun tempItem(canvas: Canvas, right: Float, passenger: Boolean): Float {
          */
         const val DOCK_HEIGHT = 112
 
+        // ================================================================
+        // 第三百轮：设计坐标常量（全部来自 Main.png 的 1:1 实测）
+        //
+        // 一切 x 都是**画板绝对值**，绘制时经 [dx] 按实际宽度换算；
+        // 尺寸（宽 / 高 / 字号）不换算 —— 1872 宽时元素还是那么大，
+        // 只是留白等比收一点。
+        // ================================================================
+
+        /** 设计稿宽度（布局缩放的分母）。 */
+        const val DESIGN_W = 1920f
+
+        /** 首页键：左边距 28、72×72、圆角 20。 */
+        const val HOME_LEFT = 28f
+        const val HOME_SIZE = 72f
+        const val HOME_RADIUS = 20f
+
+        /** 网格 / 分屏 / 360 三枚裸图标键的中心 x。 */
+        const val NAV_GRID_CX = 148f
+        const val NAV_SPLIT_CX = 220f
+        const val NAV_360_CX = 316f
+
+        /** 「应用」键打开抽屉时才出现的底板边长（和首页块同尺寸）。 */
+        const val NAV_TILE = 64f
+
+        /** 媒体胶囊：x365、370×72、圆角 28（实测，不是全圆）。 */
+        const val MEDIA_LEFT = 365f
+        const val MEDIA_W = 370f
+        const val MEDIA_H = 72f
+        const val MEDIA_RADIUS = 28f
+
+        /** 封面：56×56、圆角 14、距胶囊左 8。 */
+        const val COVER_SIZE = 56f
+        const val COVER_RADIUS = 14f
+        const val COVER_PAD = 8f
+
+        /** 封面与标题之间的间距。 */
+        const val MEDIA_TEXT_GAP = 16f
+
+        /** 三个媒体键的圆心距**胶囊右边缘**的距离（画板：705 / 666.5 / 629，右边缘 735）。 */
+        const val MEDIA_NEXT_FROM_RIGHT = 30f
+        const val MEDIA_PLAY_FROM_RIGHT = 68f
+        const val MEDIA_PREV_FROM_RIGHT = 106f
+
+        /** 文本区右边界与「上一首」键之间留的间距（给切歌图标让位）。 */
+        const val MEDIA_SKIP_FROM_RIGHT = 124f
+
+        /** 播放键白色实心圆直径（画板 40）。 */
+        const val PLAY_BTN = 40f
+
+        /** 电源键中心 x（只有一个描边图标，无底板）。 */
+        const val POWER_CX = 805f
+
+        /** 主驾温区胶囊：x845、宽 205、高 72、圆角 28。 */
+        const val TEMP_DRIVER_LEFT = 845f
+        const val TEMP_DRIVER_W = 205f
+
+        /** 副驾温区胶囊：x1166、宽 207。 */
+        const val TEMP_PASS_LEFT = 1166f
+        const val TEMP_PASS_W = 207f
+
+        /** 温区胶囊高度。 */
+        const val TEMP_PILL_H = 72f
+        const val TEMP_PILL_RADIUS = 28f
+
+        /** 温区胶囊里 − / + 的中心距胶囊左右边缘的距离（画板实测 14 / 17，取 16）。 */
+        const val TEMP_ARROW_INSET = 16f
+
+        /** 风量键：x1082、56×56、圆角 18。 */
+        const val FAN_LEFT = 1082f
+        const val FAN_SIZE = 56f
+        const val FAN_RADIUS = 18f
+
+        /** A/C：x1416、56 宽；AUTO：x1483、64 宽；都高 44、圆角 22。 */
+        const val AC_LEFT = 1416f
+        const val AC_W = 56f
+        const val AUTO_LEFT = 1483f
+        const val AUTO_W = 64f
+        const val CLIMATE_CHIP_H = 44f
+        const val CLIMATE_CHIP_RADIUS = 22f
+
+        /**
+         * 右侧 5 枚功能键：首格中心 1608、步距 64、56×56、圆角 18。
+         *
+         * 第246轮按用户「右侧图标有点小，不方便操作」放大：
+         * 46×46 / 步距 57 → 56×56 / 步距 64，右缘仍落在 1892（= W - 28），
+         * 与 A/C·AUTO 组（右到 1547）之间留 33。
+         */
+        const val RIGHT_FIRST_CX = 1608f
+        const val RIGHT_PITCH = 64f
+        const val RIGHT_KEY = 56f
+        const val RIGHT_RADIUS = 18f
+
+        /**
+         * 最小命中区边长（用户要求：画板视觉 40~56，点击区放大到 56）。
+         *
+         * 用透明命中盒实现 —— 视觉一点不放大，只是 `hit` 里那块 RectF 变大了。
+         */
+        const val HIT_MIN = 56f
+
+        /**
+         * 强调色块上的前景色（封面里的音符）。
+         *
+         * 出处：设计稿 `Main.png` / `n01-home-night.png` 里封面都是「青绿渐变 + **纯白**音符」，
+         * 两套主题都不翻 —— 它压在 accent 上，不属于主题 token 体系。
+         */
+        const val ON_ACCENT = 0xFFFFFFFF.toInt()
+
         /**
          * home 键房子图标的**半宽**（像素）。
          *
@@ -1584,58 +1671,10 @@ private fun tempItem(canvas: Canvas, right: Float, passenger: Boolean): Float {
          * 半宽取 13 ⇒ 宽高都是 26，视觉重量与原来基本一致。
          *
          * 第192轮：13 → 15（跟 Dock 高 104 → 112 同一比例放大）。
+         * 第三百轮：72 的方块里房子保持 15（宽高 30），
+         * 比旧版 64 方块里的 15 更「松」，与画板一致。
          */
         const val HOME_ICON_UNIT = 15f
-
-        /**
-         * 空调簇里**图标型**按钮（内外循环 / 前除霜 / 后除霜 / 电源）的槽宽。
-         *
-         * 第四十九轮「浮屿」从 70 收到 64；第五十三轮再收到 **48** ——
-         * 图标本身只有 28~38px 宽，64 的槽白白留着；收窄之后
-         * 整条 Dock 才能「平均铺开」（见 [DockLayout.GROUP_GAP]）。
-         *
-         * 第192轮：48 → 52（跟 Dock 高 104 → 112 同一比例放大）。
-         */
-        const val CLIMATE_SLOT = 52f
-
-        /** 图标按钮之间的间隙。 */
-        const val CLIMATE_ICON_GAP = 8f
-
-        /** 电源与主驾温度之间的间隙。 */
-        const val CLIMATE_POWER_GAP = 16f
-
-        /** A/C · AUTO 的字号。 */
-        const val CLIMATE_TEXT_SIZE = 28f
-
-        /** A/C · AUTO 文字的左右留白。 */
-        const val CLIMATE_TEXT_PAD = 28f
-
-        /**
-         * 风扇图标 + 7 段的占位宽。
-         *
-         * 第192轮：100 → 106（跟 Dock 高 104 → 112 同一比例放大）。
-         */
-        const val FAN_W = 106f
-
-        /** 温度块里「−」按钮的槽宽。 */
-        const val TEMP_MINUS_W = 48f
-
-        /** 温度块里数字 + 度的占位宽。 */
-        const val TEMP_ZONE_W = 112f
-
-        /** 温度块里「+」按钮的槽宽。 */
-        const val TEMP_PLUS_W = 48f
-
-        /** 温度块内部（− 与数字区之间）的间隙。 */
-        const val TEMP_GAP = 8f
-
-        /**
-         * 一个温度块的占位宽：− 按钮 48 + 间隙 8 + 温度区 112 + + 按钮 48 + 尾部间隙 8。
-         *
-         * 第五十三轮从 238 收到 **224**：数字区从 118 收到 112（放不下会等比缩字号），
-         * 加减按钮从 52 收到 48（按钮里只画一条 18px 的横线）。
-         */
-        const val TEMP_ITEM_W = TEMP_MINUS_W + TEMP_ZONE_W + TEMP_PLUS_W + TEMP_GAP * 2
 
         /**
          * 按下缩放到 0.96。
@@ -1667,12 +1706,8 @@ private fun tempItem(canvas: Canvas, right: Float, passenger: Boolean): Float {
         /** 进度 = min(1, |dx| / 24)。 */
         const val SWIPE_PROGRESS_FULL = 24f
 
-        /** 媒体卡文本区宽度（第三十七轮：媒体卡加宽到 496，文本区也跟着变宽）。 */
-        const val SWIPE_TEXT_AREA = 236f
-
-        // 第三十九轮：媒体卡宽度改为**动态**（按右侧空调簇实际占位收敛），
-        // 三个键的尺寸与间隙、文本区宽度都在 `core/DockMediaLayout.kt`（纯逻辑、可单测）。
-        // 第183轮：Dock 圆角可调（设置项 `dock_corner_radius`）。
+        /** 媒体卡文本区宽度（第三百轮：新胶囊里文本区约 190，取 180 与实测接近）。 */
+        const val SWIPE_TEXT_AREA = 180f
 
         /** 活着的 DockBarView 实例（桌面里一份、全局 Dock 窗口里一份）。 */
         private val live =

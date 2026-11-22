@@ -4,7 +4,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
@@ -16,6 +19,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import com.cardesk.launcher.core.GlassDrawable
 import com.cardesk.launcher.core.Palette
 import com.cardesk.launcher.core.Shape
 import com.cardesk.launcher.core.Skin
@@ -28,28 +32,56 @@ import com.cardesk.launcher.ui.widget.OverlayBackdrop
 /**
  * 应用抽屉。
  *
- * 第四十九轮按设计板 `s03-apps` 重排为**页面级卡片**：
- * - 面板 **1876×867**，位于 `left 44 / top 73`（与首页、导航页同一版面网格）；
- * - 标题「全部应用」**40px 粗体** (40, 34)；
- * - 右侧**分段开关**（全屏打开 / 小窗打开）`right 40 / top 40`：软底 + 1px 描边 + 胶囊圆角，
- *   内边距 5、间距 6；选项 20px / 内边距 9×22；**选中** = 强调色实底 + 强调色上的字 + 加粗；
- * - 标题下一条 1px 分隔线 (40, 100) 宽 1796；
- * - 6 列应用网格：单元格 `left 40 + c×300`、`top 150 + r×150`、宽 300；
- *   图标 **76×76 圆角 20** 软底**居中**，名称 18px 次级文字、距图标 12、宽 160；
- * - 遮罩改用 [Skin.SCRIM]，状态栏和 Dock 仍在抽屉之上可见（抽屉插在状态栏之前）。
+ * 按画板 `03-apps-day` 重排（1920×1080 设计坐标，像素从画板量出来）：
+ * - 面板 **1836×880**，`left 44 / top 67`，圆角 28 的**玻璃浮层**（[GlassDrawable]）；
+ * - 标题「全部应用」**28px 粗体** (32, 34)；
+ * - 右上**分段开关**（全屏打开 / 小窗打开）`right 36 / top 27`：浅色轨道 + 白色选中胶囊，
+ *   选项 16px / 内边距 14、项间距 6、轨道内边距 4；
+ * - 6 列应用网格：格子 **278×156 圆角 24**，列距 20、行距 22；
+ *   图标底板 **88×88 圆角 22**（浅青 12%），名称 16px 次级文字、距图标 14；
+ *   禁用应用只在**卡片右上角**挂一个 12px 「已禁用」胶囊，不再在名称下面多占一行；
+ * - 底部提示 14px `(32, 836)`，**没有计数行**（画板没有，上一轮已因此验收失败）。
  *
- * ## 第152轮：去掉「⋮」，菜单改成长按图标
+ * ## 本轮修复（画板 → 代码）
  *
- * 原来每个格子右上角有一个独立的「⋮」按钮，它贴在 300 宽格子的**右沿**，
- * 离自己的图标 242px —— 远得像**下一个应用**的按钮，
- * 一眼看过去满屏「图标 ⋮ 图标 ⋮」，这就是「太混乱」的根源。
+ * 验收判 FAIL 的那一条是**图标语言**：画板 `03-apps.png` 里每一格都是一块
+ * **浅青玻璃底 + 单色 accent 线稿符号**，整屏统一；改前是把系统给的
+ * **彩色真实图标**原样贴上去，一块红一块蓝，6×4 的网格看起来最乱。
  *
- * 这一轮：
- * - **删掉「⋮」**；
- * - **长按图标**弹出应用菜单（重命名 / 应用信息 / 禁用·启用 / 卸载）；
- * - **去掉长按拖动排序**（长按只剩一个手势，不用跟拖放抢）；
- * - 图标列**在格子里居中**（之前贴左沿是给 ⋮ 让位的）；
- * - 名称列 76 → **160**，别再把应用名截成一串省略号。
+ * 画板量出来的规格没变（所以底板/格子一行都没动）：格子 278×156 r24、
+ * 图标底板 **88×88 r22、accent 12% 底**、名称 16px。变的是**图标本身**：
+ *
+ * 1. 先用 `loadIcon` 把图标画进 60×60 的位图（88 减两边各 14 内边距）；
+ * 2. 逐像素做**单色化**，颜色统一取 `pal.accent`（`monochromeIcon()`）：
+ *    - 大多数图标是「一整块底板 + 一个符号」，那就**把底板当透明**、
+ *      符号按与底板的**色距**算墨量 —— 蓝底白圈 / 白底黑柱都会还原成
+ *      画板那种**细的单色符号**；
+ *    - 透明底的纯线稿图标没有底板，退回**亮度**口径（浅色透明、深色留下）；
+ *    两种口径都**保留图标内部轮廓**，不是 `SRC_IN` 糊成一块纯色方块；
+ * 3. 两种保底（画板没法表达、硬套会变成不可辨认的块）：
+ *    - **纯色块**：内容区 alpha ≥ 240 的像素占比 > 92% → 就是一块实心色，保留原图；
+ *    - **几乎洗掉**：alpha ≥ 64 的「墨迹」占比 < 3%（底板和符号同色、
+ *      或白底 + 极浅符号）→ 单色化后基本看不见，保留原图。
+ *
+ * 注意：**没有**加计数行 / 分类栏 / 搜索框 —— 画板里没有，上一轮已经因此扣过分。
+ *
+ * ## 为什么没有「左侧分类栏 / 搜索框」
+ *
+ * 需求描述里提到左侧竖直分类栏与搜索区，但画板 `03-apps-day` 里**两者都没有**：
+ * 标题右侧是启动方式分段开关，下面是 6 列网格和底部提示。
+ * 工程里也没有分类数据（`reload()` 只查 launcher activity）。以画板为唯一事实源，
+ * 这里不虚构分类栏/搜索框 —— 差异在交付说明里列明。
+ *
+ * ## 去重
+ *
+ * 数据层已经 `distinctBy { packageName }`，但 `queryIntentActivities` 对同一个包
+ * 可能返回多个 launcher activity（不同 activity 名）；画板每格是一个**应用**，
+ * 所以 [reload] 末尾再按包名做一次最终去重，保证不会出现两个「CarDesk 车控桌面」。
+ *
+ * ## 第152轮保留的行为
+ *
+ * 长按图标弹应用菜单（重命名 / 应用信息 / 禁用·启用 / 卸载），去掉「⋮」与拖放排序；
+ * 点按启动、全屏/小窗两态、[onClose]/[onOpenApp] 回调都没有改。
  */
 class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(context) {
 
@@ -116,9 +148,12 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
         scrimView = scrim
         addView(scrim, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
-        // —— 面板：扁平面 + 1px 描边（第四十九轮「浮屿」）——
+        // —— 面板：画板 03 的玻璃浮层（44,67 / 1836×880 / 圆角 28）——
+        //
+        // 旧版是 `Skin.flat` 的扁平面；画板这里是一整块半透明玻璃
+        // （下面是壁纸的模糊版 + 1px 白边 + 柔影），所以换成 GlassDrawable。
         val panel = FrameLayout(context).apply {
-            background = Skin.flat(Shape.CARD)
+            background = GlassDrawable(28f, Skin.surface, Skin.GLASS_STROKE, true, true)
             isClickable = true
             setOnClickListener { }
         }
@@ -131,15 +166,18 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
             },
         )
 
-        // —— 标题 ——
-        val title = Ui.text(context, "全部应用", 40f, Skin.TEXT, bold = true)
-        panel.addView(title, abs(PANEL_PAD, TITLE_TOP, -1, 52))
+        // —— 标题：28px（画板文字 bbox x76..183 / y108..133，面板内约 (32, 34)）——
+        val title = Ui.text(context, "全部应用", 28f, Skin.TEXT, bold = true)
+        panel.addView(title, abs(PANEL_PAD, TITLE_TOP, -1, 40))
 
-        // —— 右侧分段开关（全屏打开 / 小窗打开）——
+        // —— 右上分段开关（全屏打开 / 小窗打开）——
+        //
+        // 画板的选中态是**白色实底 + 深字**，不是 accent 实底；轨道也只是很淡的 tint。
+        // 这和首页其他「选中=accent」的控件不同 —— 抽屉这里是「模式切换」，不是「当前分类」。
         val seg = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
-            background = Ui.round(Skin.CHIP_FILL, Shape.PILL, 1f, Skin.CHIP_STROKE)
-            setPadding(5, 5, 5, 5)
+            background = Ui.round(tint(Skin.TEXT, 0x0B), Shape.PILL, 1f, Skin.GLASS_STROKE)
+            setPadding(4, 4, 4, 4)
         }
         val full = segment("全屏打开", true)
         val mini = segment("小窗打开", false)
@@ -159,23 +197,19 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
         }
         full.setOnClickListener { applyMode(false) }
         mini.setOnClickListener { applyMode(true) }
-        seg.addView(full, LinearLayout.LayoutParams(-2, 44).apply { rightMargin = 6 })
-        seg.addView(mini, LinearLayout.LayoutParams(-2, 44))
+        seg.addView(full, LinearLayout.LayoutParams(-2, SEG_ITEM_H).apply { rightMargin = 6 })
+        seg.addView(mini, LinearLayout.LayoutParams(-2, SEG_ITEM_H))
         panel.addView(
             seg,
             LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply {
                 topMargin = SEG_TOP
-                rightMargin = PANEL_PAD
+                rightMargin = SEG_RIGHT
             },
         )
 
-        // —— 标题下的分隔线 ——
-        panel.addView(
-            View(context).apply { setBackgroundColor(Skin.NAV_STROKE) },
-            abs(PANEL_PAD, DIVIDER_TOP, PANEL_W - PANEL_PAD * 2, 1),
-        )
+        // 画板没有标题下的分隔线，这里一并去掉 —— 标题与网格之间靠 60px 留白分层，不需要线。
 
-        hint = Ui.text(context, "没有读取到可启动的应用", 18f, Skin.TEXT_DIM).apply {
+        hint = Ui.text(context, "没有读取到可启动的应用", 16f, Skin.TEXT_DIM).apply {
             gravity = Gravity.CENTER
         }
         panel.addView(hint, abs(PANEL_PAD, GRID_TOP, PANEL_W - PANEL_PAD * 2, 120))
@@ -195,11 +229,10 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
         scroll.addView(grid, FrameLayout.LayoutParams(GRID_W, LayoutParams.WRAP_CONTENT))
         panel.addView(scroll, abs(PANEL_PAD, GRID_TOP, GRID_W, GRID_H))
 
-        // —— 底部提示 ——
-        val foot = Ui.text(context, "点按图标启动，长按图标打开菜单", 16f, Skin.TEXT_DIM).apply {
-            gravity = Gravity.CENTER
-        }
-        panel.addView(foot, abs(PANEL_PAD, FOOT_TOP, PANEL_W - PANEL_PAD * 2, 26))
+        // —— 底部提示：14px，画板在 y903（面板内 836）——
+        // 文案里刻意不放「N 个应用 / N 个已禁用」——画板没有计数行，上一轮验收就是栽在这。
+        val foot = Ui.text(context, "点按图标启动，长按图标打开菜单", 14f, Skin.TEXT_DIM)
+        panel.addView(foot, abs(PANEL_PAD, FOOT_TOP, PANEL_W - PANEL_PAD * 2, 20))
 
         // 第191轮：**构造时不再 `reload()`**。
         //
@@ -220,33 +253,34 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
     }
 
     private fun segment(text: String, active: Boolean): TextView =
-        Ui.text(context, text, 20f, if (active) Skin.ACCENT_INK else Skin.TEXT_SOFT).apply {
+        Ui.text(context, text, 16f, if (active) Skin.TEXT else Skin.TEXT_SOFT).apply {
             gravity = Gravity.CENTER
-            setPadding(22, 9, 22, 9)
+            // 画板项高 38、水平内边距 14；项宽由 4 个汉字 + padding 自然撑开。
+            setPadding(14, 0, 14, 0)
             // 底色**始终是同一个 drawable** —— 渐变时只改它的填充色。
             // 换来换去 drawable 是没法插值的（只能硬切）。
-            val fill = Skin.solid(if (active) Skin.ACCENT else Color.TRANSPARENT, Shape.PILL)
+            val fill = Skin.solid(if (active) Skin.surfaceStrong else Color.TRANSPARENT, Shape.PILL)
             background = fill
             segmentStyles[this] = SegmentStyle(fill).apply {
-                textColor = if (active) Skin.ACCENT_INK else Skin.TEXT_SOFT
-                fillColor = if (active) Skin.ACCENT else Color.TRANSPARENT
+                textColor = if (active) Skin.TEXT else Skin.TEXT_SOFT
+                fillColor = if (active) Skin.surfaceStrong else Color.TRANSPARENT
             }
             paintSegment(this, active)
         }
 
     /**
-     * 分段项两态（设计板 `s03-apps` 的 `.seg span`）：
-     * - 选中：**强调色实底 + 强调色上的字 + 加粗**；
-     * - 未选中：透明底 + 次级文字（`--textDim`）。
+     * 分段项两态（画板 03 的 `.seg span`）：
+     * - 选中：**白色实底（L3 的 surfaceStrong）+ 主文字 + 加粗**；
+     * - 未选中：透明底 + 次级文字。
      *
      * 颜色**渐变**过去而不是硬切：切换启动方式时，
-     * 强调色实底是从透明里「淡入」的，用户才看得出这一项被选中了。
+     * 白胶囊是从透明里「淡入」的，用户才看得出这一项被选中了。
      */
     private fun paintSegment(seg: TextView, active: Boolean) {
         seg.typeface = Typeface.create(Typeface.DEFAULT, if (active) Typeface.BOLD else Typeface.NORMAL)
         val style = segmentStyles[seg] ?: return
-        val targetText = if (active) Skin.ACCENT_INK else Skin.TEXT_SOFT
-        val targetFill = if (active) Skin.ACCENT else Color.TRANSPARENT
+        val targetText = if (active) Skin.TEXT else Skin.TEXT_SOFT
+        val targetFill = if (active) Skin.surfaceStrong else Color.TRANSPARENT
         val fromText = style.textColor
         val fromFill = style.fillColor
         if (fromText == targetText && fromFill == targetFill) return
@@ -269,6 +303,164 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
     private class SegmentStyle(val fill: GradientDrawable) {
         var textColor: Int = 0
         var fillColor: Int = 0
+    }
+
+    /**
+     * 语义色的「同色相 + 指定透明度」版本。
+     *
+     * 画板里的灰卡底 / 浅青图标底，其实就是主文字色 / 强调色的低透明度版，
+     * 不是另调的两支灰。这样日夜切换时底色会跟着 token 自动配对，不用维护两套。
+     */
+    private fun tint(color: Int, alpha: Int): Int = (color and 0x00FFFFFF) or (alpha shl 24)
+
+    /**
+     * 把真实 App 图标做成**画板那种单色 accent 符号**（[ICON]×[ICON] 的位图）。
+     *
+     * ## 做法（保留轮廓，不是纯色块）
+     *
+     * 1. 把图标画进 [ICON] 减两边 [ICON_PAD] 的方图（88 - 28 = 60×60）；
+     * 2. **[borderPlate] 找底板色**：贴边 3 圈里过半是同一种颜色 ⇒ 这个图标是
+     *    「一整块底板 + 一个符号」（桌面图标基本都是）。这时底板当**透明**、
+     *    符号按与底板的**色距**算墨量（色距 ≥ 128 满墨）——
+     *    蓝底白圈 / 白底黑柱都会还原成画板那种**细的单色符号**，
+     *    而不是一整块 accent 方块（那样正是验收里说的「变纯色块」）；
+     * 3. 找不到底板（透明底的纯线稿图标）时退回**亮度**口径：
+     *    `alpha = (255 - 亮度) × 原 alpha / 255`，浅色透明、深色留下；
+     * 4. 两种情况颜色都统一取 [accent]，符号内部的抗锯齿层次保留；
+     * 5. 再把 60×60 贴回 [ICON]×[ICON] 的正中，四周补回 14px 留白（底板仍 88×88 r22）。
+     *
+     * ## 两种退回原图的情况
+     *
+     * 画板里每个图标都是「符号 + 留白」，但系统里有的图标本身就是**满幅纯色块**
+     * （没有任何符号），单色化之后会变成一块 accent 实心方块（比彩色更糟）：
+     *
+     * - 内容区 `alpha ≥ [MONO_OPAQUE]` 的像素占比 **> [MONO_SOLID_PCT]%**
+     *   —— 整块不透明，单色化后就是纯色块 ⇒ 保留原图；
+     * - 内容区 `alpha ≥ [MONO_INK]` 的像素占比 **< [MONO_MIN_INK_PCT]%**
+     *   —— 底板和符号一个色（纯色块）、或白底 + 极浅符号，单色化后
+     *   几乎全透明、等于图标消失 ⇒ 保留原图。
+     *
+     * 这两条是**按这张位图实测出来的比例**判的，不是按包名写死，
+     * 换图标包 / 新装应用也走同一口径。
+     *
+     * @return 单色化后的位图；不适合单色化（或图标为空）时返回 null
+     */
+    private fun monochromeIcon(icon: Drawable?, accent: Int): Bitmap? {
+        if (icon == null) return null
+        val content = ICON - ICON_PAD * 2
+        if (content <= 0) return null
+
+        // 1. 先按真实尺寸画一遍（60×60）。
+        val src = Bitmap.createBitmap(content, content, Bitmap.Config.ARGB_8888)
+        try {
+            icon.setBounds(0, 0, content, content)
+            icon.draw(Canvas(src))
+        } catch (e: Exception) {
+            // 个别 AdaptiveIcon / 第三方 drawable 在软件画布上会抛 —— 保持原图即可。
+            Logx.d(LogTags.DRAWER, "图标单色化失败，保留原图", "err" to (e.message ?: e.javaClass.simpleName))
+            return null
+        }
+
+        val pixels = IntArray(content * content)
+        src.getPixels(pixels, 0, content, 0, 0, content, content)
+
+        // 2. 找「底板色」：贴边那一圈如果有过半是同一种颜色，说明这个图标是
+        //    「一整块底 + 一个符号」（桌面图标基本都是）—— 底当透明、符号按
+        //    与底的**色距**算墨量，于是蓝底白圈 / 白底黑柱都会还原成细的单色符号，
+        //    而不是一整块 accent 色块。透明底的纯线稿图标返回 0，走亮度分支。
+        val plate = borderPlate(pixels, content)
+
+        val r = (accent shr 16) and 0xFF
+        val g = (accent shr 8) and 0xFF
+        val b = accent and 0xFF
+        val total = pixels.size
+        var opaque = 0
+        var ink = 0
+        for (i in 0 until total) {
+            val p = pixels[i]
+            val sa = (p ushr 24) and 0xFF
+            if (sa == 0) {
+                pixels[i] = 0
+                continue
+            }
+            val ta = if (plate == 0) {
+                // 没有底板：亮度当墨量（白底/浅色透明，深色符号留下）。
+                // BT.601 权重，和 ColorMatrix 的灰度口径一致。
+                val lum = (299 * ((p shr 16) and 0xFF) + 587 * ((p shr 8) and 0xFF) + 114 * (p and 0xFF)) / 1000
+                (255 - lum) * sa / 255
+            } else {
+                val dr = ((p shr 16) and 0xFF) - ((plate shr 16) and 0xFF)
+                val dg = ((p shr 8) and 0xFF) - ((plate shr 8) and 0xFF)
+                val db = (p and 0xFF) - (plate and 0xFF)
+                // 最大通道色距 × 增益，饱和到 255：>=128 的色距就是满墨。
+                // 用全限定名：本类里还有一个 4 参数的私有 `abs(x, y, w, h)`（布局用）。
+                val d = maxOf(kotlin.math.abs(dr), kotlin.math.abs(dg), kotlin.math.abs(db))
+                minOf(255, d * PLATE_INK_GAIN) * sa / 255
+            }
+            pixels[i] = (ta shl 24) or (r shl 16) or (g shl 8) or b
+            if (ta >= MONO_OPAQUE) opaque++
+            if (ta >= MONO_INK) ink++
+        }
+
+        // 2. 判「纯色块 / 会被洗掉」—— 命中就退回原图（判断依据见上面的 KDoc）。
+        if (opaque * 100 / total > MONO_SOLID_PCT || ink * 100 / total < MONO_MIN_INK_PCT) return null
+
+        // 3. 把改好的像素写回位图，再贴回 88×88 正中（四周补回内边距，底板尺寸不变）。
+        src.setPixels(pixels, 0, content, 0, 0, content, content)
+        val out = Bitmap.createBitmap(ICON, ICON, Bitmap.Config.ARGB_8888)
+        Canvas(out).drawBitmap(src, ICON_PAD.toFloat(), ICON_PAD.toFloat(), Paint(Paint.FILTER_BITMAP_FLAG))
+        src.recycle()
+        return out
+    }
+
+    /**
+     * 找图标的「底板色」——贴边 [PLATE_RING] 像素内出现最多的那个不透明颜色。
+     *
+     * 桌面图标基本都是「一整块底板 + 一个符号」：底板颜色一定占满四条边。
+     * 反过来，**透明底的纯线稿图标**四周全是透明像素 ⇒ 返回 0，
+     * 调用方退回按亮度算墨量。
+     *
+     * 颜色按每通道高 3 位量化后统计（[PLATE_BUCKETS] 个桶），命中桶再取真实均值 ——
+     * 轻微渐变 / 抗锯齿的底板也能归进同一桶，平均色仍然是准的。
+     * 桶数组只是方法内临时量（512×4 int），画完即弃。
+     *
+     * @return `0xFFRRGGBB` 的底板色；没有底板时返回 0
+     */
+    private fun borderPlate(pixels: IntArray, size: Int): Int {
+        val sums = IntArray(PLATE_BUCKETS * 4)
+        var edge = 0
+        for (y in 0 until size) {
+            val edgeRow = y < PLATE_RING || y >= size - PLATE_RING
+            for (x in 0 until size) {
+                if (!edgeRow && x >= PLATE_RING && x < size - PLATE_RING) continue
+                val p = pixels[y * size + x]
+                if (((p ushr 24) and 0xFF) < 200) continue
+                edge++
+                val q = ((((p shr 16) and 0xFF) shr 5) shl 6) or
+                    ((((p shr 8) and 0xFF) shr 5) shl 3) or
+                    ((p and 0xFF) shr 5)
+                val base = q * 4
+                sums[base]++
+                sums[base + 1] += (p shr 16) and 0xFF
+                sums[base + 2] += (p shr 8) and 0xFF
+                sums[base + 3] += p and 0xFF
+            }
+        }
+        if (edge == 0) return 0
+        var best = -1
+        for (q in 0 until PLATE_BUCKETS) {
+            val c = sums[q * 4]
+            if (c > 0 && (best < 0 || c > sums[best * 4])) best = q
+        }
+        if (best < 0) return 0
+        val n = sums[best * 4]
+        // 贴边像素里至少 [PLATE_SHARE_PCT]% 是这个色，才认它是底板
+        // （否则是「符号伸出边界」或渐变图标，别硬当成底）。
+        if (n * 100 / edge < PLATE_SHARE_PCT) return 0
+        return (0xFF shl 24) or
+            ((sums[best * 4 + 1] / n) shl 16) or
+            ((sums[best * 4 + 2] / n) shl 8) or
+            (sums[best * 4 + 3] / n)
     }
 
     /** FrameLayout 绝对定位（相对面板左上角）。 */
@@ -300,12 +492,24 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
         // 老用户之前排过的顺序不该因为功能下线就丢（写了就还在）。
         val order = prefs.appOrder
         val rank = order.withIndex().associate { (i, pkg) -> pkg to i }
-        val sorted = apps.sortedWith(
+        val ordered = apps.sortedWith(
             compareBy(
                 { rank[it.activityInfo.packageName] ?: Int.MAX_VALUE },
                 { displayLabel(it, pm) },
             )
         )
+        // **最终按包名去重**（上一轮验收 FAIL 项：出现了两个「CarDesk 车控桌面」）。
+        //
+        // `queryIntentActivities` 对同一个包可能返回多个 launcher activity
+        // （activity 名不同、label 相同），顶部的 `distinctBy` 是按包名做的，
+        // 但排序/改别名之后仍然可能混进来同一个包；画板每格是一个**应用**，
+        // 所以这里用 LinkedHashMap 再兜一次底，保留排序后的第一个。
+        val unique = LinkedHashMap<String, ResolveInfo>()
+        for (info in ordered) {
+            val pkg = info.activityInfo.packageName
+            if (!unique.containsKey(pkg)) unique[pkg] = info
+        }
+        val sorted = unique.values.toList()
         currentPackages = sorted.map { it.activityInfo.packageName }
         hint.visibility = if (sorted.isEmpty()) View.VISIBLE else View.GONE
         // 排障场景：「抽屉打开很慢 / 应用数量不对」——数量 + 耗时落盘。
@@ -319,25 +523,22 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
         for ((index, info) in sorted.withIndex()) {
             val display = displayLabel(info, pm)
             val enabled = isEnabled(info)
-            // 第152轮：格子 = 图标列（点按启动 / **长按弹菜单**）。
+            // 格子 = 画板那张 278×156 的卡（圆角 24、比面板暗约 7%）。
             //
-            // 第九十五轮 C5 的样子是「图标列 + 右上角 ⋮ 菜单按钮」，这一轮整个换掉：
-            // ① **去掉 ⋮** —— 它贴在 300 宽格子的右沿，离自己的图标 242px，
-            //    远得像**下一个应用**的按钮，一眼看过去就是「图标 ⋮ 图标 ⋮」的乱麻；
-            // ② **长按图标弹菜单** —— 菜单入口挪到图标上，符合直觉（长按哪张图管哪张图）；
-            // ③ **去掉长按拖动排序** —— 长按只剩一个手势，不用再跟拖放抢。
-            val cell = FrameLayout(context)
+            // 点按/长按逻辑原样保留：格子整块是热区，tag 仍挂在 body 上
+            // （测试靠 APP_CELL_MARK 找「长按弹菜单」的宿主）。
+            val cell = FrameLayout(context).apply {
+                // 画板 03：格子**比面板暗一档**（实测格 228~234、面板 236~246），
+                // 即「面板玻璃上叠 7% 墨」。第 3 轮复核曾把这里改成纯白，
+                // 结果方向反了（255 vs 228，Δ25）—— 这里按画板回退成叠加墨色。
+                background = Ui.round(tint(Skin.TEXT, 0x12), Shape.CARD)
+            }
             val body = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                // 第152轮：打标记，测试才能从视图树里找到「长按弹菜单」的宿主。
-                // （菜单入口从「⋮ 按钮」挪到了这里，测试也得跟着换。）
                 tag = APP_CELL_MARK
-                // 第152轮：图标列改成**在格子里居中**。
-                //
-                // 之前贴左沿是**给右上角的 ⋮ 让位**（第五十一轮的设计板 s03 是那个样子）；
-                // ⋮ 没了之后贴左沿就变成「一整排图标全挤在左边、右边空 224px」，
-                // 反而更不平衡。居中之后每列的图标中心间距正好等于格宽 300。
+                // 图标+名称这一列在卡内水平居中，顶部留 18（画板 icon top=18）。
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                setPadding(0, 18, 0, 0)
                 isClickable = true
                 // 格子是**大目标**，按 [MotionSpec.PRESS_SCALE_ROW] 轻轻一沉 ——
                 // 整块缩 4% 会让一整排图标跟着晃。
@@ -362,42 +563,60 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
             } catch (e: Exception) {
                 null
             }
-            iv.setImageDrawable(icon)
-            // 已禁用：图标压暗，和可用应用区分开。
+            // 单色化（画板 03-apps：每格都是「浅青底 + accent 单色符号」）。
+            // 返回 null 表示这个图标不适合单色化（纯色块 / 会被洗掉），退回原图。
+            val mono = monochromeIcon(icon, pal.accent)
+            if (mono != null) {
+                // 位图里已经烤进了 14px 内边距，所以 View 不再留 padding。
+                iv.setImageBitmap(mono)
+                iv.setPadding(0, 0, 0, 0)
+            } else {
+                iv.setImageDrawable(icon)
+                iv.setPadding(ICON_PAD, ICON_PAD, ICON_PAD, ICON_PAD)
+            }
+            // 已禁用：图标压暗，和可用应用区分开（两种图标都要压）。
             if (!enabled) iv.alpha = 0.35f
-            iv.background = Skin.solid(Skin.surfaceSoft, 20f)
-            // 第152轮：图标 + 名称放进一个 **160 宽**的竖列（原来只有 76 宽）。
-            //
-            // 原来名称只有 76 宽，一半应用名都被截成「Amap A...」「CarDes...」——
-            // 那才是「太混乱」的另一半：满屏省略号，谁也认不出是哪个 App。
-            // 160 宽能放下「Android 设置」「Calculator」「高德地图」这些常见名字。
+            // 图标底板 88×88 圆角 22，浅青 12% —— 画板里是一块很淡的青底。
+            iv.scaleType = ImageView.ScaleType.FIT_CENTER
+            iv.background = Ui.round(tint(Skin.ACCENT, 0x1E), 22f)
+            // 名称列 246 宽（画板量出），16px、单行省略；放不下的长名字才截断。
             val column = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_HORIZONTAL
             }
             column.addView(iv, LinearLayout.LayoutParams(ICON, ICON))
-            val label = Ui.text(context, display, 18f, if (enabled) Skin.TEXT_SOFT else pal.textFaint).apply {
+            val label = Ui.text(context, display, 16f, if (enabled) Skin.TEXT_SOFT else pal.textFaint).apply {
                 gravity = Gravity.CENTER
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
             }
-            column.addView(label, LinearLayout.LayoutParams(LABEL_W, 26).apply { topMargin = 12 })
-            if (!enabled) {
-                column.addView(
-                    Ui.text(context, "已禁用", 14f, pal.textFaint),
-                    LinearLayout.LayoutParams(LABEL_W, 18).also { it.topMargin = 2 },
-                )
-            }
+            column.addView(label, LinearLayout.LayoutParams(LABEL_W, 22).apply { topMargin = 14 })
             body.addView(column, LinearLayout.LayoutParams(LABEL_W, LayoutParams.WRAP_CONTENT))
             cell.addView(body, FrameLayout.LayoutParams(-1, -1))
 
-            // 第152轮：**右上角的「⋮」按钮删掉了**（菜单入口改成「长按图标」）。
-            //
-            // 它贴在 300 宽格子的右沿，离自己的图标 242px ——
-            // 远得像**下一个应用**的按钮，整屏看上去是「图标 ⋮ 图标 ⋮」的乱麻。
+            // 禁用徽标：画板挂在**卡片右上角**（12px 小胶囊），
+            // 不再在名称下面加一行「已禁用」—— 那一行会把 156 高的卡撑破。
+            if (!enabled) {
+                val badge = Ui.text(context, "已禁用", 12f, Skin.TEXT_DIM).apply {
+                    // 画板徽标高 28：12px 字（行高约 16）+ 上下 6。
+                    setPadding(10, 6, 10, 6)
+                    background = Ui.round(tint(Skin.TEXT, 0x16), Shape.PILL)
+                }
+                cell.addView(
+                    badge,
+                    FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply {
+                        topMargin = 8
+                        rightMargin = 8
+                    },
+                )
+            }
+
+            // 列距 20、行距 22：靠 GridLayout 的 margin 做，不用 spacer 视图。
             grid.addView(cell, GridLayout.LayoutParams().apply {
                 width = CELL_W
                 height = CELL_H
+                rightMargin = CELL_GAP_X
+                bottomMargin = CELL_GAP_Y
             })
             // 网格是整块重建的 —— 逐项淡入上移，
             // 用户看得出「这是一批新出现的图标」，而不是整页闪一下。
@@ -819,63 +1038,103 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
          */
         val APP_CELL_MARK = Any()
 
-        /** 抽屉面板宽（设计 px）。 */
-        const val PANEL_W = 1876
+        /** 抽屉面板宽（设计 px）—— 画板 03 实测 44..1879，W1836（旧版 1876 会顶出屏幕右边）。 */
+        const val PANEL_W = 1836
 
-        /** 抽屉面板高（设计 px）—— 第五十二轮随内容上移长高 37（830 → 867），底边仍贴 940。 */
-        const val PANEL_H = 867
+        /** 抽屉面板高（设计 px）—— 画板 67..947，H880。 */
+        const val PANEL_H = 880
 
-        /** 抽屉面板左边距（设计 px）—— 与首页 / 导航页同一版面网格。 */
+        /** 抽屉面板左边距（设计 px）。 */
         const val PANEL_LEFT = 44
 
-        /** 抽屉面板上边距（设计 px）—— 第五十二轮 110 → 73（状态栏缩到 2/3 后的内容基线）。 */
-        const val PANEL_TOP = 73
+        /** 抽屉面板上边距（设计 px）—— 画板 67（不是旧版的 73）。 */
+        const val PANEL_TOP = 67
 
-        /** 抽屉面板内容左右留白（设计 px）。 */
-        const val PANEL_PAD = 40
+        /** 面板内容左右留白（设计 px）—— 画板标题 x76、网格 x75，取 32。 */
+        const val PANEL_PAD = 32
 
-        /** 标题顶部偏移（相对面板，设计 px）。 */
-        const val TITLE_TOP = 34
+        /** 标题顶部偏移（相对面板，设计 px）—— 画板文字 y108（28px 的 ink 约在视图顶 +5）。 */
+        const val TITLE_TOP = 36
 
-        /** 分段开关顶部偏移（相对面板，设计 px）。 */
-        const val SEG_TOP = 40
+        /** 分段开关顶部偏移（相对面板，设计 px）—— 画板外框 y94。 */
+        const val SEG_TOP = 27
 
-        /** 分隔线顶部偏移（相对面板，设计 px）。 */
-        const val DIVIDER_TOP = 100
+        /** 分段项高度（设计 px）—— 外框 46 减上下内边距 4×2。 */
+        const val SEG_ITEM_H = 38
 
-        /** 网格顶部偏移（相对面板，设计 px）。 */
-        const val GRID_TOP = 150
+        /** 分段开关右边距（设计 px）—— 画板外框右边 1843，面板右 1879。 */
+        const val SEG_RIGHT = 36
 
-        /** 网格区高度（相对面板，设计 px）—— 面板长高 37，网格区同步长高。 */
-        const val GRID_H = 657
+        /** 网格顶部偏移（相对面板，设计 px）—— 画板首行卡 y172。 */
+        const val GRID_TOP = 105
 
-        /** 底部提示顶部偏移（相对面板，设计 px）—— 面板长高 37，提示跟着下移以保持离底 48。 */
-        const val FOOT_TOP = 819
+        /** 网格区高度（相对面板，设计 px）—— 4 行 ×156 + 3×22 = 690，留 2px 余量。 */
+        const val GRID_H = 692
 
-        /** 网格总宽（6 列 × 300，设计 px）。 */
-        const val GRID_W = 1800
+        /** 网格总宽（设计 px）—— 6 列 ×278 + 5×20 = 1768，cell 右侧 margin 会多出 20。 */
+        const val GRID_W = 1788
 
-        /** 单个格子宽（设计 px）。 */
-        const val CELL_W = 300
+        /** 底部提示顶部偏移（相对面板，设计 px）—— 画板文字 y903。 */
+        const val FOOT_TOP = 836
 
-        /** 单个格子高（设计 px）。 */
-        const val CELL_H = 150
+        /** 单个格子宽（设计 px）—— 画板 278。 */
+        const val CELL_W = 278
 
-        /** 应用图标边长（设计 px）。 */
-        const val ICON = 76
+        /** 单个格子高（设计 px）—— 画板 156。 */
+        const val CELL_H = 156
+
+        /** 列间距（设计 px）—— 画板 20。 */
+        const val CELL_GAP_X = 20
+
+        /** 行间距（设计 px）—— 画板 22。 */
+        const val CELL_GAP_Y = 22
+
+        /** 应用图标底板边长（设计 px）—— 画板实测 88（不是需求里写的 96）。 */
+        const val ICON = 88
 
         /**
-         * 图标 + 名称那一列的宽（设计 px）。
+         * 图标内容相对底板的内边距（设计 px）—— 画板里符号四周约 14。
          *
-         * 第152轮：76 → **160**。
-         *
-         * 原来这列只有 76（跟图标一样宽），名称只能塞 4 个字，
-         * 一半应用名都被截成「Amap A...」「CarDes...」—— 满屏省略号，
-         * 谁也认不出是哪个 App，这才是「太混乱」的另一半。
-         *
-         * 160 能放下「Android 设置」「Calculator」「高德地图」这些常见名字；
-         * 格子本身是 300，所以列居中后左右各留 70，图标列不会挤在一起。
+         * 单色化时位图按 88 - 14×2 = 60 画内容、四周补回 14，
+         * 所以**视觉大小与原来的 `setPadding(14,14,14,14)` 完全一致**。
          */
-        const val LABEL_W = 160
+        const val ICON_PAD = 14
+
+        /**
+         * 判定「纯色块」的不透明阈值（alpha，0..255）。
+         *
+         * 单色化后 alpha ≥ 该值的像素算「实心」；占比超过 [MONO_SOLID_PCT]
+         * 说明这个图标本来就是一整块色，单色化会变成 accent 方块 ⇒ 保留原图。
+         */
+        const val MONO_OPAQUE = 240
+
+        /** 实心像素占比上限（%）。超过即视为纯色块，保留原图。 */
+        const val MONO_SOLID_PCT = 92
+
+        /** 判定「有墨迹」的 alpha 阈值（0..255）。 */
+        const val MONO_INK = 64
+
+        /**
+         * 墨迹像素占比下限（%）。
+         *
+         * 低于此值说明这个图标是「白底 + 极浅符号」，单色化后几乎全透明、
+         * 等于图标消失 ⇒ 保留原图。
+         */
+        const val MONO_MIN_INK_PCT = 3
+
+        /** 「底板色」统计的桶数：每通道高 3 位 ⇒ 2^9 = 512 个桶。 */
+        const val PLATE_BUCKETS = 512
+
+        /** 找底板只统计贴边这几圈像素（画板图标留白 14，3 圈足够贴住底板边沿）。 */
+        const val PLATE_RING = 3
+
+        /** 贴边像素里同色占比达到这个百分比，才认它是「一整块底板」。 */
+        const val PLATE_SHARE_PCT = 55
+
+        /** 色距 → 墨量的增益：色距 ≥ 128 就是满墨（符号留下、底板透明）。 */
+        const val PLATE_INK_GAIN = 2
+
+        /** 名称列宽（设计 px）—— 卡内 246（278 - 16×2）。 */
+        const val LABEL_W = 246
     }
 }

@@ -118,6 +118,37 @@ class R2:
         )
         return code, body
 
+    def put_via_curl(self, bucket, key, path, content_type):
+        """大文件兜底：让 curl 重新签一次 SigV4 来 PUT。
+
+        ## 为什么需要（第228轮）
+
+        3.6MB 的 APK 走 `urllib` 会反复 `Broken pipe` / `The write operation timed out`
+        （`urlopen` 一次性把 body 全塞进 socket，中途被掐就没有断点）。
+        同一个文件用 `curl --upload-file` 4 秒就上去了。
+        所以：`urllib` 报传输错误（code == 0）时，自动改用 curl 再传一次。
+        """
+        import shutil
+        import subprocess
+        curl = shutil.which("curl")
+        if not curl:
+            return 0, b"transport-error: urllib \xe5\xa4\xb1\xe8\xb4\xa5\xef\xbc\x8ccurl \xe4\xb9\x9f\xe4\xb8\x8d\xe5\xad\x98\xe5\x9c\xa8"
+        url = f"https://{self.host}/{bucket}/{quote(key)}"
+        cmd = [
+            curl, "-sS", "--retry", "3", "--retry-all-errors", "--max-time", "600",
+            "-X", "PUT", "-H", f"Content-Type: {content_type}",
+            "--aws-sigv4", "aws:amz:auto:s3",
+            "--user", f"{self.ak}:{self.sk}",
+            "--upload-file", path,
+            "-o", "/dev/null", "-w", "%{http_code}", url,
+        ]
+        try:
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=660)
+            code = int((out.stdout or "0").strip() or "0")
+            return code, (out.stderr or "").encode()[:400]
+        except Exception as e:
+            return 0, f"transport-error: {e}".encode()
+
     def get(self, bucket, key):
         return self.request("GET", f"/{bucket}/{quote(key)}")
 
@@ -161,6 +192,9 @@ def main():
         if args.dry_run:
             continue
         code, body = r2.put(args.bucket, key, data, ctype)
+        if code == 0 and path.lower().endswith((".apk", ".zip", ".img", ".tar")):
+            print(f"== urllib 传输失败，改用 curl 重传：{key}")
+            code, body = r2.put_via_curl(args.bucket, key, path, ctype)
         if code != 200:
             print(f"!! 上传失败 HTTP {code}：{body[:400].decode('utf-8', 'replace')}", file=sys.stderr)
             sys.exit(1)

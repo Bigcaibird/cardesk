@@ -38,8 +38,8 @@ object CardStyle {
     /** 透明度上限。 */
     const val MAX_OPACITY = 100
 
-    /** 圆角默认 28（= [Shape.CARD] 的出厂值）。 */
-    const val DEFAULT_RADIUS = 28
+    /** 圆角默认 24（= [Shape.CARD] 的出厂值，画板 s08 的默认卡片圆角）。 */
+    const val DEFAULT_RADIUS = 24
 
     /** 圆角下限（0 = 直角）。 */
     const val MIN_RADIUS = 0

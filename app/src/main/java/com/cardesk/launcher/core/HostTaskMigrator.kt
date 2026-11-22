@@ -211,4 +211,43 @@ object HostTaskMigrator {
 
     /** 最多试几次。 */
     const val MAX_ATTEMPTS = 8
+
+    /**
+     * 第 225 轮：**搬稳之后的守护窗口**里，第 n 次复查隔多久（毫秒）。
+     *
+     * ## 为什么「搬稳了」还要继续看
+     *
+     * 实测（cardesk AVD / API 28，承载高德）：
+     *
+     * ```
+     * 21:53:10.115 START 高德 UsbFillActivity（我们下发的启动）
+     * 21:53:10.184 承载任务搬到我们的虚拟屏 task=855 stack=62 to=10   ← 搬到了
+     * 21:53:10.499 承载任务搬移完成  reason=已在我们的虚拟屏上        ← 收工
+     * 21:53:10.917 START 高德 MainMapActivity（**高德进程自己起的**）  ← 晚了 400ms
+     * ```
+     *
+     * 高德进来之后**自己**还会再起一个活动（`UsbFillActivity` 只是入口闪屏，
+     * 真正的 `MainMapActivity` 由它自己 `FLAG_ACTIVITY_NEW_TASK` 拉起）。
+     * 这个新活动**不带 `launchDisplayId`**，AOSP 9 会把它放到**默认显示器**上 ⇒
+     * 高德整块跑到主屏全屏、画中画那块变黑 —— 用户看到的就是「高德跳回首页」。
+     *
+     * 原来的搬移只在启动后的头 800ms 内盯（0 / 300 / 800），
+     * 正好在「高德自己起活动」之前收工 ⇒ 漏掉。
+     *
+     * ## 所以：搬稳之后继续守 ~7 秒
+     *
+     * 复查拿到这些延迟（累加约 6.9 秒），期间一旦发现 task 又跑到别的屏，
+     * 就**再搬回来**（不是重启应用，只是搬 task，用户看不到重启）。
+     *
+     * @param round 第几次复查（0 = 搬稳后的第一次）
+     * @return 延迟毫秒；null = 守护窗口结束
+     */
+    fun verifyDelayMsForAttempt(round: Int): Long? = when (round) {
+        0 -> 600L
+        1 -> 900L
+        2 -> 1_200L
+        3 -> 1_800L
+        4 -> 2_400L
+        else -> null
+    }
 }

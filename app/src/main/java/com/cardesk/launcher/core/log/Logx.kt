@@ -85,6 +85,41 @@ object Logx {
     fun d(tag: String, message: String, vararg fields: Pair<String, Any?>) =
         write(LogLevel.DEBUG, tag, message, null, fields)
 
+    /**
+     * 调试级日志：**Logcat 全量，落盘按 key 节流**（第220轮）。
+     *
+     * ## 为什么要这样
+     *
+     * 高频来源（氛围灯逐帧 20/s、车控回调 21/s、信号降级链 14/s）
+     * 全量落盘的话，4MB 的日志预算 **6.5 分钟**就写满 ——
+     * 诊断包只能装最近 8 份，最老的直接被丢，
+     * 「出问题之前发生了什么」全没了。
+     *
+     * 所以：**Logcat 保持全量**（要查细节随时 `adb logcat` 能查到），
+     * **落盘按 key 节流**（每 [intervalMs] 最多一条），
+     * 把有限的落盘额度留给真正的异常。
+     *
+     * @param key 区分来源的键（同一个 key 共享一个节流窗口）
+     * @param intervalMs 落盘的最小间隔（毫秒）
+     */
+    fun dThrottled(
+        tag: String,
+        key: String,
+        intervalMs: Long,
+        message: String,
+        vararg fields: Pair<String, Any?>,
+    ) {
+        val full = LogFormat.message(message, fields)
+        try {
+            Log.d(tag, full)
+        } catch (t: Throwable) {
+            // Logcat 本身失败不能影响业务
+        }
+        if (!LogThrottle.allow("file:$key", intervalMs)) return
+        if (!LogLevel.DEBUG.reached(level())) return
+        runCatching { sink?.write(LogLevel.DEBUG, tag, full, null) }
+    }
+
     /** 调试级（带异常）。DEBUG 不落盘，只在 logcat 里看。 */
     fun d(tag: String, message: String, error: Throwable, vararg fields: Pair<String, Any?>) =
         write(LogLevel.DEBUG, tag, message, error, fields)
@@ -135,8 +170,29 @@ object Logx {
         } catch (t: Throwable) {
             // Logcat 本身失败不能影响业务
         }
+        // 第220轮：**DEBUG 级的重复内容，落盘按窗口去重**。
+        //
+        // 车端每秒都在刷同一批「读不到 / 不被固件支持 / 通道不可用」——
+        // 实车诊断包实测 14 行/秒，全是同几句话。
+        // 这些行**第一次必须记**（现场信息），
+        // 之后同内容在窗口内就不重复落盘了（Logcat 里仍然全量）。
+        //
+        // 窗口内被去重的只有「**逐字相同**」的 DEBUG 行 ——
+        // 任何带变化字段的行（值变了、序号变了）都不受影响。
+        if (level == LogLevel.DEBUG) {
+            if (!level.reached(level())) return
+            if (!LogThrottle.allow("dup:$tag|$full", DEBUG_DUP_WINDOW_MS)) return
+        }
         runCatching { sink?.write(level, tag, full, error) }
     }
+
+    /**
+     * DEBUG 级重复内容落盘的去重窗口（毫秒）。
+     *
+     * 60 秒：足够把「同一个探针一直读不到」压成一条，
+     * 又不会把两次独立故障（间隔很久）合并掉。
+     */
+    private const val DEBUG_DUP_WINDOW_MS = 60_000L
 
     // ------------------------------------------------------------------ 导出
 
@@ -162,6 +218,28 @@ object Logx {
         sink?.clear()
         i(LogTags.LOG, "日志已清空")
     }
+
+    /**
+     * 等落盘队列排空（导出诊断包前调一次）。
+     *
+     * 落盘是**后台线程**做的（第220轮），所以刚写完的日志可能还在队列里。
+     * 导出前不等一下，包里会少最后几行。
+     *
+     * @return true = 已经排空
+     */
+    fun flush(timeoutMs: Long = 2000L): Boolean = sink?.flush(timeoutMs) ?: true
+
+    /**
+     * 落盘的平均耗时（微秒/行）—— 诊断用。
+     *
+     * 旧写法每行都要「开文件 → lseek → write → 关文件」，
+     * 实车（高通 820A + eMMC）上一次要 2~5ms；
+     * 现在是常驻句柄 + 一次 write()，应该只有几十微秒。
+     */
+    fun avgWriteMicros(): Long = sink?.avgWriteMicros() ?: 0L
+
+    /** 已经落盘的行数（诊断用）。 */
+    fun writtenLines(): Long = sink?.writtenLines() ?: 0L
 
     // ------------------------------------------------------------------ 持久化键
 

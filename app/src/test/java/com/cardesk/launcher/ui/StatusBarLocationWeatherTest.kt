@@ -125,15 +125,20 @@ class StatusBarLocationWeatherTest {
         // 第八十二轮：位置 + 天气**从中置挪到右侧图标行**（和蓝牙/信号/时钟在一起），
         // 屏幕正中改放翻页指示圆点（那个在 PageDotsView 里，不在本 View）。
         //
-        // 右侧：从「位置胶囊 + 天气胶囊」那一段量 ——
-        // 它紧挨着连接图标（蓝牙）的左边，右边界大约在 1545 附近。
-        val right = content(bmp, 1300, 30, 1545, 90)
+        // 第三百轮：这一行整体上移到 ROW_TOP=5 / ROW_H=33（中心 y=21.5），
+        // 量像素必须跟着这一行的实际范围走，不能写死 y30..90。
+        val top = ShellStatusBar.ROW_TOP.toInt()
+        val bottom = (ShellStatusBar.ROW_TOP + ShellStatusBar.ROW_H).toInt()
+        // 右侧：位置 + 天气（裸元素）排在连接图标左边。
+        val right = content(bmp, 1200, top, 1800, bottom)
         assertTrue("右侧应该画着位置+天气，实际 $right", right > 0)
-        // 正中必须**空出来**（这里以前画的是位置+天气）
-        val mid = content(bmp, 880, 30, 1060, 90)
-        assertEquals("状态栏正中没有位置/天气了，实际 $mid", 0, mid)
+        // 正中必须**空出来**：翻页点只占 x870..906，左右两侧都不该有位置/天气。
+        val midLeft = content(bmp, 620, top, 840, bottom)
+        assertEquals("状态栏正中左侧不该有位置/天气，实际 $midLeft", 0, midLeft)
+        val midRight = content(bmp, 1000, top, 1250, bottom)
+        assertEquals("状态栏正中右侧不该有位置/天气，实际 $midRight", 0, midRight)
         // 更左边（空白区）同样不能有
-        val left = content(bmp, 620, 30, 780, 90)
+        val left = content(bmp, 400, top, 620, bottom)
         assertEquals("位置/天气不该画到左边，实际 $left", 0, left)
     }
 
@@ -143,7 +148,10 @@ class StatusBarLocationWeatherTest {
         bar.setLocationWeather("", "", null)
         val bmp = render(bar)
         assertEquals("", bar.locationText)
-        assertTrue(content(bmp, 1300, 30, 1545, 90) > 0)
+        val top = ShellStatusBar.ROW_TOP.toInt()
+        val bottom = (ShellStatusBar.ROW_TOP + ShellStatusBar.ROW_H).toInt()
+        // 占位文案（「位置获取中」/ `--°`）也必须落在右侧这一行里。
+        assertTrue(content(bmp, 1200, top, 1800, bottom) > 0)
     }
 
     // ---------------------------------------------------------------
@@ -227,10 +235,13 @@ class StatusBarLocationWeatherTest {
         bar.setLocationWeather("A".repeat(200), "晴", 14)
         val bmp = render(bar)
 
-        // 从圆点右边开始往右找第一个有内容的像素 —— 那就是位置胶囊的左边界
+        // 从圆点右边开始往右找第一个有内容的像素 —— 那就是位置段的左边界。
+        // 第三百轮：行中心是 ROW_TOP + ROW_H/2，不能再按旧的 y=38 扫。
+        val cy = (ShellStatusBar.ROW_TOP + ShellStatusBar.ROW_H / 2f).toInt()
         var first = -1
-        for (x in 1005..1400) {
-            if (contentAt(bmp, x, 38)) {
+        // 城市名最多占 LOC_MAX_W=260，整段右对齐到连接图标左边 ⇒ 左边界不会早于 ~1400。
+        for (x in 1005..1600) {
+            if (contentAt(bmp, x, cy)) {
                 first = x
                 break
             }
@@ -275,29 +286,29 @@ class StatusBarLocationWeatherTest {
         val bar = newBar()
         val bmp = render(bar)
 
-        // 口径：状态栏这一行（band）一个字都不动 ——
-        // 边距 29、顶边距 17、行高 43（行底 60）保持第五十二轮的值。
+        // 第三百轮按设计稿重排：边距 29、顶边距 5、行高 33（行底 38）。
         assertEquals(29f, com.cardesk.launcher.ui.shell.ShellStatusBar.EDGE, 0.01f)
-        assertEquals(17f, com.cardesk.launcher.ui.shell.ShellStatusBar.ROW_TOP, 0.01f)
-        assertEquals(43f, com.cardesk.launcher.ui.shell.ShellStatusBar.ROW_H, 0.01f)
+        assertEquals(5f, com.cardesk.launcher.ui.shell.ShellStatusBar.ROW_TOP, 0.01f)
+        assertEquals(33f, com.cardesk.launcher.ui.shell.ShellStatusBar.ROW_H, 0.01f)
 
-        // 头像 36 → 40，仍在行内垂直居中（y 18.5~58.5）
-        assertEquals(40f, com.cardesk.launcher.ui.shell.ShellStatusBar.AVATAR, 0.01f)
+        // 左上设置入口：34×34 玻璃方块，在行内垂直居中（y 4.5~38.5）
+        assertEquals(34f, com.cardesk.launcher.ui.shell.ShellStatusBar.AVATAR, 0.01f)
         val avatarRows = (0 until 80).count { contentAt(bmp, 45, it) }
-        assertTrue("头像应该占满约 40 行（40×40），实际 $avatarRows", avatarRows in 40..42)
-        assertTrue("头像应该画在 x=29~69 / y=18~58", contentAt(bmp, 45, 38))
-        assertFalse("头像不该横向超过 x=69", contentAt(bmp, 72, 38))
-        assertFalse("头像不该纵向超过 y=58", contentAt(bmp, 45, 61))
+        assertTrue("头像应该占满约 34 行（34×34），实际 $avatarRows", avatarRows in 33..35)
+        assertTrue("头像应该画在 x=29~63 / y=4.5~38.5", contentAt(bmp, 45, 21))
+        assertFalse("头像右边（间距 12）不该有内容", contentAt(bmp, 66, 21))
+        assertFalse("头像不该纵向超过 y=38.5", contentAt(bmp, 45, 41))
 
-        // 状态胶囊 29 → 34，从 x=81（29 + 40 + 12）开始，高 34（y 21.5~55.5）
+        // 驾驶胶囊仍然高 34，从 x=75（29 + 34 + 12）开始
         assertEquals(34f, com.cardesk.launcher.ui.shell.ShellStatusBar.CHIP_H, 0.01f)
-        assertTrue("驾驶模式胶囊应该画在 x=81 之后", content(bmp, 82, 22, 300, 56) > 0)
+        assertTrue("驾驶模式胶囊应该画在 x=75 之后", content(bmp, 76, 6, 300, 38) > 0)
 
-        // 时钟 25 → 32：墨迹行数明显变多（字放大了）
+        // 时钟字号 17（第三百轮定稿）：墨迹行数按字号收缩
+        assertEquals(17f, com.cardesk.launcher.ui.shell.ShellStatusBar.CLOCK_TEXT_SIZE, 0.01f)
         val clockRows = (0 until 80).count { y -> (1805..1885).any { contentAt(bmp, it, y) } }
-        assertTrue("时钟字号应该放大（墨迹约 23 行），实际 $clockRows", clockRows >= 21)
+        assertTrue("时钟字号 17px 的墨迹行数应该在 11~15 之间，实际 $clockRows", clockRows in 11..15)
 
-        // 连接图标 17 → 22
-        assertEquals(22f, com.cardesk.launcher.ui.shell.ShellStatusBar.ICON, 0.01f)
+        // 连接图标 22 → 18
+        assertEquals(18f, com.cardesk.launcher.ui.shell.ShellStatusBar.ICON, 0.01f)
     }
 }

@@ -119,112 +119,99 @@ class Car3dPreviewTest {
     }
 
     @Test
-    fun `第185轮 胎压与车轮同一水平线 位置与门态无关`() {
+    fun `第244轮 车模居中 胎压贴轮 全车已关在下部居中`() {
         val app = RuntimeEnvironment.getApplication()
         Car3dSettings.enabled = true
-        data class R(val centers: List<android.graphics.PointF>, val ref: RectF, val image: RectF, val anchors: Map<String, com.cardesk.launcher.core.car3d.CardSnapshot.NormPoint>)
 
-        fun render(doors: List<Boolean?>): R {
-            val page = ScenePage(app)
-            page.carModel = "01"
-            page.showCarStatusCard = true
-            page.bind(
-                VehicleInfo(
-                    rangeKm = 386, fuelPercent = 62,
-                    doorsClosed = doors, doorsAllClosed = doors.all { it == true },
-                    hoodClosed = true, trunkClosed = true,
-                    windowsOpen = booleanArrayOf(false, false, false, false), windowsAllClosed = true,
-                    tires = floatArrayOf(240f, 240f, 238f, 235f),
-                ),
-                HvacState(), 0,
-            )
-            page.measure(
-                View.MeasureSpec.makeMeasureSpec(1920, View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
-            )
-            page.layout(0, 0, 1920, 1080)
-            page.draw(Canvas(Bitmap.createBitmap(1920, 1080, Bitmap.Config.ARGB_8888)))
-            val image = RectF(page.lastCarImageRect!!)
-            val slot = Car3dAssets.slotOf(app, "lynk01", Car3dAssets.VIEW_CARDTOP)!!
-            val n = Car3dAssets.closedBoundsNorm(app, "lynk01", Car3dAssets.VIEW_CARDTOP, slot.first, slot.second)!!
-            val ref = RectF(
-                image.left + n.left * image.width(), image.top + n.top * image.height(),
-                image.left + n.right * image.width(), image.top + n.bottom * image.height(),
-            )
-            val anchors = Car3dAssets.anchors(app, "lynk01", Car3dAssets.VIEW_CARDTOP)!!
-            return R(page.lastTirePillCenters, ref, image, anchors)
+        fun render(doors: List<Boolean?>): Bitmap {
+            val p = page(doors)
+            val bmp = Bitmap.createBitmap(1920, 1080, Bitmap.Config.ARGB_8888)
+            p.draw(Canvas(bmp))
+            return bmp
         }
 
-        val a = render(listOf(true, true, true, true))
-        val b = render(listOf(false, true, true, true))
-        val closed = a.centers
-        assertEquals("四颗胎压", 4, closed.size)
-        for (k in 0 until 4) {
-            assertEquals("第 $k 颗 x 与门态无关", closed[k].x, b.centers[k].x, 0.01f)
-            assertEquals("第 $k 颗 y 与门态无关", closed[k].y, b.centers[k].y, 0.01f)
+        // 以「同一行、卡片左内边」的像素当底色参照 —— 玻璃卡有斜光渐变，
+        // 跨行比较会把渐变当成墨。同一行里横向比较才可靠。
+        fun isInk(bmp: Bitmap, x: Int, y: Int, refX: Int): Boolean {
+            val ref = bmp.getPixel(refX, y)
+            val px = bmp.getPixel(x, y)
+            var d = 0
+            d = maxOf(d, kotlin.math.abs(((px shr 16) and 0xFF) - ((ref shr 16) and 0xFF)))
+            d = maxOf(d, kotlin.math.abs(((px shr 8) and 0xFF) - ((ref shr 8) and 0xFF)))
+            d = maxOf(d, kotlin.math.abs((px and 0xFF) - (ref and 0xFF)))
+            return d > 24
         }
-        // y 和对应车轮锚点同一水平线；x 贴车体（离车体 24px，胶囊自己往外长）
-        //
-        // 第189轮：胶囊从 52×46 放大到 72×62 → 半宽 26 → 36、半高 23 → 31。
-        // 胶囊的**右边缘**位置没变（还是离车体 24px），只是左边缘多长出去 20px。
-        val pillHalfW = 36f
-        val pillHalfH = 31f
-        val keys = arrayOf("tires.fl", "tires.fr", "tires.rl", "tires.rr")
+
+        val card = RectF(cardRegion)
+        // 车模框：**水平居中**（第244轮），上沿 = 卡顶 + CAR_STATUS_CAR_BOX_TOP。
+        val car = RectF(
+            card.centerX() - ScenePage.CAR_STATUS_CAR_BOX_W / 2f,
+            card.top + ScenePage.CAR_STATUS_CAR_BOX_TOP,
+            card.centerX() + ScenePage.CAR_STATUS_CAR_BOX_W / 2f,
+            card.top + ScenePage.CAR_STATUS_CAR_BOX_TOP + ScenePage.CAR_STATUS_CAR_BOX_H,
+        )
+        val gapX = ScenePage.CAR_STATUS_TIRE_GAP_X
+        // 第251轮：横向仍按 rect 边缘（离车体留白），纵向按比例落前后轴（0.37 / 0.69）。
+        val frontY = car.top + car.height() * 0.18f + 14f
+        val rearY = car.top + car.height() * 0.69f + 14f
+        val anchors = arrayOf(
+            Pair(car.left - gapX, frontY),
+            Pair(car.right + gapX, frontY),
+            Pair(car.left - gapX, rearY),
+            Pair(car.right + gapX, rearY),
+        )
+
+        val closed = render(listOf(true, true, true, true))
+        val lfOpen = render(listOf(false, true, true, true))
+        val counts = IntArray(4)
         for (k in 0 until 4) {
-            val an = a.anchors[keys[k]] ?: error("缺锚点 $k")
-            val wantY = a.image.top + an.y * a.image.height()
-            assertEquals("第 $k 颗 y 应与锚点同水平线", wantY, closed[k].y, 0.6f)
-            val wantX = if (an.x < 0.5f) a.ref.left - 24f - pillHalfW else a.ref.right + 24f + pillHalfW
-            assertEquals("第 $k 颗 x 应离车体 24px", wantX, closed[k].x, 0.6f)
-        }
-        assertEquals("前轮两颗同 y", closed[0].y, closed[1].y, 0.01f)
-        assertEquals("后轮两颗同 y", closed[2].y, closed[3].y, 0.01f)
-        // 状态文字保守框：x 从卡内 16 起、基线 352、26px 字（第189轮 13 → 26）→ 取 326..356
-        val statusRect = RectF(1488f + 16f, 376f + 326f, 1488f + 250f, 376f + 356f)
-        for (k in 0 until 4) {
-            val pill = RectF(closed[k].x - pillHalfW, closed[k].y - pillHalfH, closed[k].x + pillHalfW, closed[k].y + pillHalfH)
-            assertFalse("第 $k 颗胶囊不能压状态文字：$pill vs $statusRect", RectF.intersects(pill, statusRect))
-        }
-        // 与车漆像素最近距离 ≥6px
-        val slot3 = Car3dAssets.slotOf(app, "lynk01", Car3dAssets.VIEW_CARDTOP)!!
-        val mask = Car3dAssets.closedBitmap(app, "lynk01", Car3dAssets.VIEW_CARDTOP, slot3.first, slot3.second)!!
-        val sx = a.image.width() / mask.width
-        val sy = a.image.height() / mask.height
-        val dists = FloatArray(4)
-        for (k in 0 until 4) {
-            val pl = closed[k].x - pillHalfW; val pt = closed[k].y - pillHalfH
-            val pr = closed[k].x + pillHalfW; val pb = closed[k].y + pillHalfH
-            var best = Float.MAX_VALUE
-            for (my in 0 until mask.height step 2) {
-                for (mx in 0 until mask.width step 2) {
-                    if ((mask.getPixel(mx, my) ushr 24) < 200) continue
-                    val ax = a.image.left + mx * sx
-                    val ay = a.image.top + my * sy
-                    if (ax < pl - 80f || ax > pr + 80f || ay < pt - 80f || ay > pb + 80f) continue
-                    val dx = when { ax < pl -> pl - ax; ax > pr -> ax - pr; else -> 0f }
-                    val dy = when { ay < pt -> pt - ay; ay > pb -> ay - pb; else -> 0f }
-                    val d = kotlin.math.hypot(dx, dy)
-                    if (d < best) best = d
+            val (ax, ay) = anchors[k]
+            // 文字块：左列右对齐、右列左对齐；第250轮起「数字在上、单位在下」两行一组。
+            val x0 = (if (k % 2 == 0) ax - 100f else ax).toInt().coerceIn(card.left.toInt(), card.right.toInt() - 2)
+            val x1 = (if (k % 2 == 0) ax else ax + 100f).toInt().coerceIn(card.left.toInt() + 2, card.right.toInt())
+            val y0 = (ay - 34f).toInt()
+            val y1 = (ay + 30f).toInt()
+            val refX = (card.left + 8f).toInt()
+            var ink = 0
+            for (y in y0 until y1) {
+                for (x in x0 until x1) {
+                    if (isInk(closed, x, y, refX)) ink++
                 }
             }
-            dists[k] = best
-            assertTrue("第 $k 颗胶囊离车漆应在 20~40px，实际 $best", best in 20f..40f)
+            counts[k] = ink
+            assertTrue("第 ${k + 1} 处胎压文字没画在车轮旁边（墨 $ink 像素）", ink >= 60)
         }
-        val out = java.io.File("../preview/review13").apply { mkdirs() }
-        java.io.File(out, "pill-centers-01.txt").writeText(
-            "closed: " + closed.joinToString(" ") { "(%.1f, %.1f)".format(it.x - 1488f, it.y - 376f) } +
-                "\nlf    : " + b.centers.joinToString(" ") { "(%.1f, %.1f)".format(it.x - 1488f, it.y - 376f) } +
-                "\nanchors: fl(%.3f,%.3f) fr(%.3f,%.3f) rl(%.3f,%.3f) rr(%.3f,%.3f)".format(
-                    a.anchors["tires.fl"]!!.x, a.anchors["tires.fl"]!!.y,
-                    a.anchors["tires.fr"]!!.x, a.anchors["tires.fr"]!!.y,
-                    a.anchors["tires.rl"]!!.x, a.anchors["tires.rl"]!!.y,
-                    a.anchors["tires.rr"]!!.x, a.anchors["tires.rr"]!!.y,
-                ) +
-                "\ndist-to-paint(px): %.1f / %.1f / %.1f / %.1f".format(dists[0], dists[1], dists[2], dists[3]) +
-                "\nimage: (%.1f, %.1f)-(%.1f, %.1f)".format(
-                    a.image.left - 1488f, a.image.top - 376f, a.image.right - 1488f, a.image.bottom - 376f,
-                ),
+        // 门态变了只该影响车模高亮，胎压文字一个像素都不该动。
+        for (k in 0 until 4) {
+            val (ax, ay) = anchors[k]
+            val x0 = (if (k % 2 == 0) ax - 100f else ax).toInt().coerceIn(card.left.toInt(), card.right.toInt() - 2)
+            val x1 = (if (k % 2 == 0) ax else ax + 100f).toInt().coerceIn(card.left.toInt() + 2, card.right.toInt())
+            var ink = 0
+            for (y in (ay - 34f).toInt() until (ay + 30).toInt()) {
+                for (x in x0 until x1) if (isInk(lfOpen, x, y, (card.left + 8f).toInt())) ink++
+            }
+            assertEquals("第 ${k + 1} 处胎压墨量随门态变了", counts[k], ink)
+        }
+
+        // 「✓ 全车已关」：卡片下部居中。取底部 60px 带，墨迹水平中心应贴卡片中心。
+        var l = Int.MAX_VALUE
+        var r = Int.MIN_VALUE
+        var t = Int.MAX_VALUE
+        var b = Int.MIN_VALUE
+        val refX = (card.left + 8f).toInt()
+        for (y in (card.bottom - 52f).toInt() until (card.bottom - 6f).toInt()) {
+            for (x in (card.left + 8f).toInt() until (card.right - 8f).toInt()) {
+                if (!isInk(closed, x, y, refX)) continue
+                l = minOf(l, x); r = maxOf(r, x); t = minOf(t, y); b = maxOf(b, y)
+            }
+        }
+        assertTrue("车况卡下部没有状态文字", b > t)
+        val mid = (l + r) / 2f
+        assertTrue(
+            "「全车已关」没有在卡片下部居中：墨迹 $l..$r，卡片中心 ${card.centerX()}",
+            kotlin.math.abs(mid - card.centerX()) <= 14f,
         )
+        assertTrue("「全车已关」没有落在卡片下部（墨迹底部 $b，卡底 ${card.bottom}）", b > card.bottom - 46f)
     }
 
     @Test

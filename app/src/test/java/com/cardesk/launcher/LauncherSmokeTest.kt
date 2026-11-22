@@ -50,8 +50,20 @@ class LauncherSmokeTest {
         return null
     }
 
-    private fun designRoot(launcher: LauncherView): FrameLayout =
-        launcher.getChildAt(1) as FrameLayout
+    /**
+     * 桌面的**内容层**（设计稿 1920×1080 的那个 FrameLayout）。
+     *
+     * 按**类型**找，不按下标 —— 第207轮在背景层与内容层之间插了
+     * 一层视频壁纸的 [android.view.TextureView]，
+     * 原来「`getChildAt(1)` 就是内容层」的假设已经不成立。
+     */
+    private fun designRoot(launcher: LauncherView): FrameLayout {
+        for (i in 0 until launcher.childCount) {
+            val v = launcher.getChildAt(i)
+            if (v is FrameLayout) return v
+        }
+        throw AssertionError("LauncherView 里找不到内容层（FrameLayout）")
+    }
 
     @Test
     fun activityCreatesAndLaysOutThreePages() {

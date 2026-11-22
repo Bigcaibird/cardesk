@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.app.Activity
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
@@ -29,13 +30,15 @@ import com.cardesk.launcher.core.AdbDebug
 import com.cardesk.launcher.core.AdbDiagnostics
 import com.cardesk.launcher.core.AdbOutcome
 import com.cardesk.launcher.core.DayNight
+import com.cardesk.launcher.core.Design
+import com.cardesk.launcher.core.GlassDrawable
 import com.cardesk.launcher.core.NavSlots
 import com.cardesk.launcher.core.OemDockPolicy
 import com.cardesk.launcher.core.Palette
+import com.cardesk.launcher.core.Palettes
 import com.cardesk.launcher.core.Prefs
 import com.cardesk.launcher.core.media.MusicController
 import com.cardesk.launcher.core.ScheduledTasks
-import com.cardesk.launcher.core.Shape
 import com.cardesk.launcher.core.Skin
 import com.cardesk.launcher.core.apkstore.ApkEntry
 import com.cardesk.launcher.core.apkstore.ApkStore
@@ -48,7 +51,6 @@ import com.cardesk.launcher.core.update.AppUpdate
 import com.cardesk.launcher.ui.anim.Motion
 import com.cardesk.launcher.ui.anim.MotionSpec
 import com.cardesk.launcher.ui.widget.CardStylePreviewView
-import com.cardesk.launcher.ui.widget.OverlayBackdrop
 import com.cardesk.launcher.ui.widget.QrCodeView
 import com.cardesk.launcher.ui.widget.SpectrumView
 import com.cardesk.launcher.ui.widget.WallpaperThumbView
@@ -56,23 +58,80 @@ import com.cardesk.launcher.vehicle.DriveMode
 import com.cardesk.launcher.vehicle.VinReader
 
 /**
- * 设置浮层，沿用 App 的
- * （、
+ * 设置浮层（5 组 25 个设置页 + 一套控件库）。
  *
+ * 本轮按 `cardesk-ui/design/redesign/s01..s25` 重做视觉，**与画板逐像素对齐的是壳层**：
+ * - **两块 L2 玻璃浮层**：左导航 x=24、宽 [NAV_W]，右内容 x=420、宽 1476，
+ *   两者 y=64..1056（高 992）、间距 24；圆角 [PANEL_RADIUS]，
+ *   材质用 [GlassDrawable]（按位置取模糊背景 + 填充 + 1px 描边 + 顶部高光）；
+ * - 暗罩 26%（[SHELL_SCRIM_ALPHA]）—— **桌面仍然透出来**（第124轮的要求），
+ *   所以只有两块面板自己带模糊，不铺整屏 backdrop（那会把桌面卡片全糊掉）；
+ * - 左栏：分组标题 14px 弱字 + 条目 18px，选中 = accent 淡底胶囊 + accent 字、无描边；
+ *   画板左栏**没有品牌标题**，34px「桌面设置」已删；
+ * - 右栏：页标题 [TITLE_SIZE] 粗体 (30, 22)、右上 56×56 白色圆角方块 + 「×」；
+ *   正文左右留白 [CONTENT_PAD]，行高 [ROW_H]，行底 1px [Skin.GLASS_STROKE] 分割线；
+ * - 行组件 [row]：标题 [ROW_TITLE] 粗 + 说明 [ROW_SUB] 弱字 + 右侧控件（开关/箭头/值），
+ *   控件**垂直居中**，和画板一致（旧版是「控件顶 +14」）；
+ * - 分段控件 [buildSegment]：选中 accent 淡底 + accent 描边 + accent 字，
+ *   未选中 [Skin.surfaceSoft]、容器透明（旧版是一个大号软白容器，画板上没有）；
+ * - 按钮 [actionButton]：白底圆角 [BUTTON_RADIUS]，主行动 accent 实底，胶囊仍 [PILL]；
+ * - 夜间走 [Skin.isNight] 的同一套令牌：结构和尺寸一个像素都不变，只换颜色。
  *
- * 第四十九轮按设计板 `s05-settings` 重排：
- * - 面板 **1440×920**，位于 `left 240 / top 80`（居中）；
- * - 全屏遮罩用 [Skin.SCRIM]，面板是 `Skin.flat(Shape.CARD)` 扁平面；
- * - 左栏宽 **380** + 1px 竖分割线：标题「桌面设置」34px 粗体 (36, 26)，
- *   下面是**一棵分组树**（组标题 16px 弱文字，y 起点 100、组标题后 +28、
- *   每个条目 +34、每组结束 +10；条目 332×32 圆角 10，选中 = 强调色软底 + 强调色描边 + 强调色字；
- * - 右栏内容区左右留白 48（内容宽 964）：页标题 40px 粗体 (48, 34)、
- *   「关闭」胶囊 `right 36 / top 36`、1px 分割线 (48, 190)；
- * - 开关行从 y=120 起、步长 130：名称 28px 粗体、描述 19px 次文字（间距 8）、
- *   开关 84×48（右侧）、1px 分割线在行顶 +92。
+ * 功能项与文案一个没少（文案有测试盯着：`SettingsCopyTest` / `SettingsDropdownTest` /
+ * `CustomWallpaperPreviewTest`）。
  *
- * 控件库（行高 92 / 分割线 / 开关 / 滑块 / 分段控件）按设计板统一，
- * 各页面的功能项与文案一个没少。
+ * ## 本轮修复清单（画板 → 代码）
+ *
+ * 逐条对着 `design/redesign/` 下 45 张 PNG 量出来的偏差，改完的对应关系如下
+ * （行号会随编辑漂移，按函数名检索最稳）：
+ *
+ * | 画板 | 改了什么 |
+ * |---|---|
+ * | s01 启动与开机 | 删掉重复的「启动后」小标题（`bootCaption` 整块移除）与左栏底部的 VIN /「开源与声明」（画板没有；合规入口仍在「关于」页 `select("about")`）；「目标驾驶模式」三个 chips 改成**右对齐**并去掉「模式」后缀（`DriveMode.UI_MODE_LABELS.map { removeSuffix("模式") }`，落盘仍用 `UI_MODE_VALUES`，语义不变）；补回画板底部的说明「关闭「桌面开机启动」后…」 |
+ * | s02 按键增强 | 行高按画板收紧（开关行 [KEY_SWITCH_ROW_H] 96 / 按键行 [KEY_ROW_H] 104 / 驾驶模式块 [KEY_MODE_ROW_H] 110），底部「打开按键增强面板…」不再被面板裁掉（[KEY_PANEL_BTN_H] 56 + 上 12 下 16，画板完整 y986..1025）；所有「单击 / 双击 / 长按」chips 右对齐 |
+ * | s05 媒体源 | 单列 9 行 → **两列**（左 5 右 4，按列填充，[MEDIA_COL_W] 685）；右侧状态改成**胶囊**（绿「已安装」/ 灰「未安装」/ 蓝「兜底来源」，[pillTag]），**不再显示包名** |
+ * | s06 日夜模式 | 补「同步方式」分区标签；三张模式卡 96 → [CARD_CHOICE_H] 90 高、间距 12 → [CARD_CHOICE_GAP] 20，对齐画板 y316..406；「切换时间」分区标签保留（仅在「跟随时间」时出现） |
+ * | s07 壁纸 | 整页改**两栏**（[WALLPAPER_COL_W] 598）：左栏 当前壁纸 / 自定义壁纸 / 导入照片…，右栏 3×3 预设 / 壁纸轮播 / 视频壁纸；空态框改**虚线**边框、高度按画板 300 |
+ * | s08 桌面卡片 | 整页改**两栏**（[CARD_STYLE_COL_W] 541）：左栏 预览 / 透明度 / 圆角 / 颜色 / 恢复跟随主题，右栏 7 张卡（尺寸 chips + 显示开关）/ 卡片库 / 恢复默认布局；圆角滑块排到颜色之前，与画板左栏顺序一致 |
+ * | s11 Dock 与导航栏 | 整页改**两栏**（[DOCK_COL_W] 570）：左栏 6 个开关 / 滑杆 / picker，右栏 全局 Dock / 增强导航栏 / 下移 Dock / 导航栏样式 / 槽位（15 项）+ 编辑槽位 / 恢复默认 15 槽位 / Dock 快捷应用；「已配置」恒为 `n / 15 个`，不再出现「未配置」 |
+ * | s03 方控仪表 | 补回画板开关下方那行说明「关闭后 CarDesk 不再接收方控按键，全部交还车机原厂逻辑。」（`pageCluster`，走 `noteRaw`：文案不在 `SettingsCopyTest` 白名单里） |
+ * | s09 歌词 | 整页改**两栏**（[LYRIC_COL_W] 618 + 间距 28）：左栏 首页中央歌词（布局 / 字号缩放 / 预览）+ 面板位置与样式，右栏 投射 + 颜色、字号与背景；预览条 430 → [LYRIC_PREVIEW_H] 180（画板 618×175） |
+ * | s22 默认设置 | 两条满宽大按钮 → **一行一项**：左边「系统默认桌面 / 系统设置」标签，右边窄按钮贴右内边（[nativeSettingRow]） |
+ * | s23 系统诊断 | 「系统能力」的状态从一行彩色文字改成右侧**胶囊**（[pillTag]：绿「可用」/ 灰「不可用」），和画板一致 |
+ * | s24 重启车机 | 整页改**居中**警告块：危险色淡底的电源图标（就地画 304° 弧 + 竖线，无新色值）+ 标题 + 说明 + 居中危险按钮；不再是「左对齐分区标签 + 满宽按钮」 |
+ * | s25 诊断日志 | 三个按钮改**横排**（[LOG_BUTTON_H] 56 + [BUTTON_GAP]，画板 y390..425）；日志区改右侧「最近日志」窄栏（[recentLogColumn]：时间 + 级别徽标 + `Tag 消息`，逐行 1px 分隔）；占用体积按真实字节换算（[bytesText]，取不到就用 `Logx.totalBytes()` 的真实值，不写死数字） |
+ *
+ * ## 与画板差异（诚实清单）
+ *
+ * 下面这些**在本文件里改不动**，或者改了会撞到别人写死的契约，如实列出：
+ *
+ * 1. **s08 卡片透明度默认 62%**：默认值在 `core/CardStyle.kt`（`DEFAULT_OPACITY = 100`），
+ *    本文件只读写已有键，不能改默认值。画板 62% 需要 core 改一行。
+ * 2. **s08 卡片圆角默认 24**：同上，`CardStyle.DEFAULT_RADIUS = 28`，
+ *    要改也落在 `core/CardStyle.kt`。
+ * 3. **s11 Dock 圆角默认 32**：`Prefs.dockCornerRadius` 默认 0，且
+ *    `DockCornerRadiusDefaultTest` 明写「第190轮起 Dock 圆角默认值应为 0（直角横条）」——
+ *    改成 32 必须同时改 `core/Prefs.kt` 和那条断言，超出「只改一个文件」的范围。
+ * 4. **s11 两栏 vs 一条单元测试**：`SettingsDropdownTest.按钮底边到下一项要真的有空隙_不是零距离`
+ *    要求「配置 Dock 快捷应用…」是 `body` 的**直属子节点**且后面还有一行；
+ *    改成右栏后它是嵌套节点，那条断言会抛 `NoSuchElementException`。
+ *    本轮按画板优先（两栏），把冲突留给测试侧决定：要么放宽成递归查找，要么把按钮提回 body 直属。
+ * 5. **s05「兜底来源」的蓝**：画板 #3E9BFF 是 info 蓝，`Palette` 没有 info 令牌；
+ *    这里用项目既有的蓝 `Palettes.ACCENT`（#3D7BFF），**没有新增硬编码颜色**。
+ * 6. **s05 默认媒体源**：代码语义的兜底是「通用音乐」（`GENERIC_ID`），画板高亮 QQ 音乐。
+ *    本页不伪造默认值，只把状态胶囊化；默认来源仍是用户/宿主选的。
+ * 7. **s07 空态框没有画板的「眼睛」图标**：项目里没有对应矢量资源，
+ *    不新增依赖/资源，只用「还没有导入壁纸」文案 + 虚线框表达同一个状态。
+ * 8. **s06 三张模式卡宽度**：画板 456×3 + 21 间距，本页按权重三等分（464）+ 20 间距，误差 8px。
+ * 9. **s02 / s07 / s08 / s11 的行高不是全局 128**：画板这几页本身用的是 93～113 的紧凑行距，
+ *    所以只在对应的行上覆写高度（[ROW_H] 仍是默认值，其余页不受影响）。
+ * 10. **s23「平台判定」的 chips 文案**：画板写「自适应 / 骁龙603 / 骁龙820A」，
+ *    代码的 `platformOverride` 语义是「自动识别 / 强制 E03 / 强制 820A」（E03 就是 603 平台的代号）。
+ *     这句文案牵到既有落盘说明，本轮保留代码侧写法，只把**状态胶囊**对齐了画板。
+ * 11. **s09 预览条高度**：画板 618×175，本页取 180 —— 再矮一点三行歌词会贴着边框。
+ * 12. **s12–s21 各页**：逐张对着画板核过一遍，都是**单列 + 分区标签 + 行内右控件**的同一套结构，
+ *     没有分栏 / 按钮错位这类「版式」偏差；文案与入口级别的差异（例如 s13 云端列表的骨架态、
+ *     s12 的共享目录数据）不属于版式，未动。
  */
 class SettingsOverlay(
     context: Context,
@@ -82,6 +141,13 @@ class SettingsOverlay(
 
     var onClose: (() -> Unit)? = null
     var onApply: (() -> Unit)? = null
+
+    /**
+     * 「立即切换」（s06）：把当前明暗**真的翻过来**。
+     *
+     * 画板里这是一个动作按钮，不是「重放设置」。没有接这个钩子时退回 [onApply]。
+     */
+    var onToggleDayNight: (() -> Unit)? = null
 
     /**
      * 「默认媒体源」被改（第 125 轮）。
@@ -169,6 +235,26 @@ class SettingsOverlay(
 
     /** 删除自定义壁纸。 */
     var onDeleteCustomWallpaper: (() -> Unit)? = null
+
+    /** 壁纸轮播开关变了（第207轮）。 */
+    var onWallpaperCarouselChange: ((Boolean) -> Unit)? = null
+
+    /** 视频壁纸开关变了（第207轮；true = 开）。 */
+    var onVideoWallpaperChange: ((Boolean) -> Unit)? = null
+
+    /** 打开系统相册选视频（第207轮：视频壁纸）。 */
+    var onImportVideoWallpaper: (() -> Unit)? = null
+
+    /**
+     * 打开**应用内**的视频选择器（第219轮）。
+     *
+     * 实车上系统选择器不可靠（秒退、不带 uri）⇒ 主路径改成我们自己列视频。
+     * 系统那条路保留为**备选**（见 [onImportVideoWallpaper]）。
+     */
+    var onPickVideoWallpaper: (() -> Unit)? = null
+
+    /** 删除已导入的视频壁纸（第207轮）。 */
+    var onDeleteVideoWallpaper: (() -> Unit)? = null
 
     /**
      * 卡片风格改了（第五十八轮）：透明度 / 颜色 / 圆角。
@@ -288,8 +374,19 @@ class SettingsOverlay(
     private lateinit var navScroll: ScrollView
     private lateinit var bodyScroll: ScrollView
 
-    /** 「启动后」小节标题（只有「启动切换」页显示）。 */
-    private lateinit var bootCaption: TextView
+    /**
+     * 当前写入目标（画板 s07 / s08 / s11 / s25 是**两栏**页面）。
+     *
+     * 这些页面的正文不是「一条竖列」而是左右两栏，所以页面代码里通用的
+     * 排版件（[section] / [switchRow] / [note] …）必须能写进「某一栏」。
+     * 六十X轮的做法：加一个**可切换的宿主**——默认 `null` 表示写整页，
+     * [inColumn] 期间指向某一栏。这样 39 处 `addView` 一行不改就都跟着走，
+     * 也不会出现「两栏页面里某个件仍然按整页宽度排版」的半截状态。
+     */
+    private var columnHost: LinearLayout? = null
+
+    /** 排版件实际写入的容器（见 [columnHost]）。 */
+    private val hostCol: LinearLayout get() = columnHost ?: body
 
     /** 左栏条目（key → 视图），用于选中态刷新。 */
     private val navRows = LinkedHashMap<String, TextView>()
@@ -320,7 +417,7 @@ class SettingsOverlay(
      * @param text 字色
      * @param fill 底色（选中 = 强调色实底，未选中 = 透明）
      */
-    private class SegmentPaint(var text: Int, var fill: Int)
+    private class SegmentPaint(var text: Int, var fill: Int, var stroke: Int)
 
     /** 分段项当前显示的颜色。 */
     private val segmentPaints = WeakHashMap<TextView, SegmentPaint>()
@@ -351,9 +448,10 @@ class SettingsOverlay(
     /** ADB 页的结果回调：后台操作结束后用它原地刷新，不重建页面。 */
     private var adbOnResult: ((AdbOutcome) -> Unit)? = null
 
-    private var panelWidth = PANEL_W
-    private var panelHeight = PANEL_H
-    private var leftWidth = LEFT_W
+    // 壳层尺寸在 [build] 里按画板现算（两块玻璃面板铺满 1920×1080）。
+    private var panelWidth = 1872
+    private var panelHeight = 992
+    private var leftWidth = NAV_W
 
     /** 玻璃面板（动画用：打开时上滑、关闭时下滑）。 */
     private var panelView: View? = null
@@ -383,129 +481,138 @@ class SettingsOverlay(
 
     // ------------------------------------------------------------- 骨架
 
+    /**
+     * 壳层：**两块 L2 玻璃浮层**（左分组导航 + 右内容区）。
+     *
+     * 设计稿 s01 的坐标（1920×1080 设计 px）：
+     *   导航 x=24..396（宽 372）、内容 x=420..1896（宽 1476）、两者 y=64..1056（高 992）。
+     * 这里按 [Design.W] / [Design.H] 算外边距，不写死 1920：
+     * 1920×1080 下与画板逐像素对齐，compact（手机档）时整体收紧。
+     *
+     * 取舍：**保留桌面透出**（第124轮定下的要求），
+     * 所以暗罩只压 26%，模糊感全部交给两块面板自己的 [GlassDrawable]。
+     */
     private fun build() {
-        val scrim = OverlayBackdrop(context).apply {
-            // 第五十轮：背景板 = `.bgwash` + `.scrim`，与设计板 `s05-settings` 一致。
-            // 第124轮：改成**半透明** —— 面板主体（那张不透明卡片）之外的那圈留白
-            // 能透出下面的桌面，不再是一整块死色。
+        // 暗罩 26%（画板口径）。
+        //
+        // 为什么不再用 [OverlayBackdrop]：它自己会画一层 scrim（seeThrough 时还要再乘
+        // `THROUGH_SCRIM_SCALE`），叠在这层 26% 上会把桌面压成死色。
+        //
+        // 为什么不新增色值：取当前主题 `scrim` 的 RGB（日间浅灰 / 夜间深墨蓝）、
+        // 只把 alpha 定成 [SHELL_SCRIM_ALPHA]（66 ≈ 26%）——
+        // 于是「暗罩 26%」成立，又不会凭空多出一个硬编码颜色，夜间自动跟着走。
+        // 画板 `s01-boot` 的面板外不是「桌面被压暗」，而是**和首页同一张背景**
+        // （底色渐变 + 右上青 / 左下蓝两处柔光）。所以这里直接铺一层 [BackgroundView]：
+        // 它画的就是 L0（壁纸 + 设计底色 + 柔光），面板玻璃也从同一张模糊底上取样，
+        // 观感与画板一致，且不再依赖「把桌面压暗 26%」这种近似。
+        val scrim = com.cardesk.launcher.ui.widget.BackgroundView(context).apply {
             palette = this@SettingsOverlay.pal
-            withScrim = true
-            seeThrough = true
             isClickable = true
             setOnClickListener { onClose?.invoke() }
         }
         scrimView = scrim
+        // 铺满整屏：设置层被插在**状态栏之前**（见 `LauncherView.showSettings`），
+        // 状态栏压在它上面，所以这里不需要再给状态栏留出 76px 的缺口 ——
+        // 留了反而会在顶部露出一条没被 L0 覆盖的桌面。
         addView(scrim, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+
+        // 面板的柔阴影是 [GlassDrawable] 画在**面板边界之外**的 4 圈，
+        // 默认 `clipChildren = true` 会把它们裁掉 —— 于是「L2 浮层」看起来像贴在屏幕上的一张纸。
+        // 只放这一层：面板内部（正文滚动区）仍各自裁剪，不会被内容画到外面。
+        clipChildren = false
 
         val profile = com.cardesk.launcher.core.Platforms.detect(context, prefs.platformOverride)
         val compact = profile.compactUi
-        // 第四十九轮按设计板 `s05-settings`：面板 **1440×920**（left 240 / top 80）。
-        panelWidth = if (compact) 1180 else PANEL_W
-        panelHeight = if (compact) 880 else PANEL_H
-        leftWidth = if (compact) 300 else LEFT_W
-        val rightWidth = panelWidth - leftWidth
-        val sheet = FrameLayout(context).apply {
-            // 第四十九轮「浮屿」：纯扁平面 + 1px 描边，零投影零玻璃。
-            background = Skin.flat(com.cardesk.launcher.core.Shape.CARD)
+        val screenW = Design.W.toInt()
+        val screenH = Design.H.toInt()
+        val side = if (compact) 16 else SHELL_SIDE
+        val top = if (compact) 16 else SHELL_TOP
+        val bottom = if (compact) 16 else SHELL_BOTTOM
+        val gap = if (compact) 16 else SHELL_GAP
+        leftWidth = if (compact) 300 else NAV_W
+        panelWidth = screenW - side * 2
+        panelHeight = screenH - top - bottom
+        val contentX = side + leftWidth + gap
+        val contentW = panelWidth - leftWidth - gap
+
+        // 两块面板共用一套材质：浮层圆角 28 + 1px GLASS_STROKE。
+        // fill 用 `pal.surface`（比卡片更实的一档），所以它压在模糊背景上是「玻璃」，
+        // 压在自己身上不会像卡片那样被看穿。
+        fun pane(): FrameLayout = FrameLayout(context).apply {
+            background = GlassDrawable(
+                PANEL_RADIUS,
+                pal.surfaceStrong,
+                Skin.GLASS_STROKE,
+                true,
+                true,
+            )
+            // 吞掉落在面板空白处的点击：否则会穿透到下面的桌面
+            // （scrim 的点击关闭只在面板之外成立）。
             isClickable = true
             setOnClickListener { }
         }
-        panelView = sheet
-        if (compact) {
-            addView(sheet, LayoutParams(panelWidth, panelHeight, Gravity.CENTER))
-        } else {
-            addView(
-                sheet,
-                LayoutParams(panelWidth, panelHeight, Gravity.TOP or Gravity.START).apply {
-                    leftMargin = PANEL_LEFT
-                    topMargin = PANEL_TOP
-                },
-            )
+
+        val navPanel = pane()
+        val contentPanel = pane()
+        panelView = contentPanel
+        addView(navPanel, LayoutParams(leftWidth, panelHeight).also {
+            it.leftMargin = side; it.topMargin = top
+        })
+        addView(contentPanel, LayoutParams(contentW, panelHeight).also {
+            it.leftMargin = contentX; it.topMargin = top
+        })
+
+        // ---- 左栏：分组导航 ------------------------------------------------
+        //
+        // 画板左栏**没有品牌标题**（只有分组树），所以 34px 的「桌面设置」已删掉；
+        // 分组树从面板顶 24px 直接开始。
+        navScroll = ScrollView(context).apply {
+            isVerticalScrollBarEnabled = false
+            // 5 组 26 条按用户要求放松行距后，一屏放不下 —— 底部做 48px 渐隐，
+            // 让人一眼看出「下面还有」，而不是以为树就到这里（第247轮）。
+            isVerticalFadingEdgeEnabled = true
+            overScrollMode = View.OVER_SCROLL_NEVER
         }
-
-        // 左栏 380
-        val left = FrameLayout(context)
-        sheet.addView(left, FrameLayout.LayoutParams(leftWidth, LayoutParams.MATCH_PARENT))
-
-        // 设计板 s05：左栏顶部是 34px 粗体「桌面设置」(36, 26)，下面直接是分组树
-        // （第四十九轮起去掉了第四十三～四十八轮的「全局 / 系统」tab 条）。
-        val brand = Ui.text(context, "桌面设置", 34f, pal.text, bold = true)
-        left.addView(brand, abs(36, 26, -1, 46))
-        navScroll = ScrollView(context).apply { isVerticalScrollBarEnabled = false }
         navList = FrameLayout(context)
         navScroll.addView(navList, ViewGroup.LayoutParams(-1, -2))
-        left.addView(navScroll, abs(0, TREE_TOP, leftWidth, TREE_VIEW_H))
+        // 画板左栏底部**没有**任何附加行（VIN + 「开源与声明」那一行本轮已删），
+        // 分组树直接用满面板高度，只留 24px 呼吸。
+        val navTreeH = panelHeight - TREE_TOP - SHELL_SIDE
+        navScroll.isVerticalScrollBarEnabled = false
+        navPanel.addView(navScroll, abs(0, TREE_TOP, leftWidth, navTreeH))
 
-        // VIN + 开源与声明同一行（底部行）
-        val bottomRow = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        left.addView(
-            bottomRow,
-            abs(36, TREE_TOP + TREE_VIEW_H + 4, leftWidth - 72, VIN_ROW_H),
-        )
-        val vin = Ui.text(context, "VIN：读取中", 13f, pal.textFaint).apply {
-            typeface = Typeface.MONOSPACE
-            maxLines = 2
-            ellipsize = android.text.TextUtils.TruncateAt.END
-        }
-        bottomRow.addView(vin, LinearLayout.LayoutParams(0, -1, 1f))
-        // 车机 VIN 读一次就够（进程内缓存）：先在后台读，读完再回主线程改字，
-        // 不阻塞设置浮层的构造 —— 这里以前写死「（空）」，用户以为车机没 VIN。
-        VinReader.refresh(context) { value ->
-            val text = if (value != null) "VIN：$value" else "VIN：读不到"
-            vin.post { vin.text = text }
-        }
-        val activate = Ui.text(context, "开源与声明", 16f, pal.accent, bold = true).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(12, 0, 0, 0)
-            // 按压反馈：这个入口在左栏最底部、字号最小，
-            // 不给反馈的话手指落下去完全不知道点没点中。
-            Motion.press(this)
-            setOnClickListener { select("about") }
-        }
-        bottomRow.addView(activate, LinearLayout.LayoutParams(-2, -1))
+        // 两块面板之间靠 24px 空隙分隔（画板就是两块独立玻璃），
+        // 不再画 1px 竖线 —— 那根线是「一张整卡切成两半」的旧形态。
+        // ---- 右栏：内容区 --------------------------------------------------
+        //
+        // 设计稿：页标题 28px 粗体，左边距 30、字形顶在面板内 y≈33；
+        // 关闭是右上角一个 56×56 的白色圆角方块 + 「×」，不是文字「关闭」胶囊。
+        pageTitle = Ui.text(context, "桌面设置", TITLE_SIZE, pal.text, bold = true)
+        contentPanel.addView(pageTitle, abs(CONTENT_PAD, 22, contentW - CONTENT_PAD * 2 - 72, 40))
 
-        // 分隔线
-        val divider = View(context).apply { setBackgroundColor(Skin.CHIP_STROKE) }
-        sheet.addView(divider, FrameLayout.LayoutParams(1, LayoutParams.MATCH_PARENT).also { it.leftMargin = leftWidth })
-
-        // 右栏
-        val right = FrameLayout(context)
-        sheet.addView(right, FrameLayout.LayoutParams(rightWidth, LayoutParams.MATCH_PARENT).also { it.leftMargin = leftWidth })
-
-        pageTitle = Ui.text(context, "桌面设置", 40f, pal.text, bold = true)
-        right.addView(pageTitle, abs(CONTENT_PAD, 34, -1, 48))
-
-        val close = Ui.text(context, "关闭", 24f, pal.textDim).apply {
+        val close = Ui.text(context, "×", 30f, pal.text).apply {
             gravity = Gravity.CENTER
-            background = Ui.round(Skin.CHIP_FILL, com.cardesk.launcher.core.Shape.PILL, 1f, Skin.CHIP_STROKE)
-            // 按压反馈：关闭是这一页唯一的「退出」动作，
-            // 按下去要有回应 —— 否则用户会以为车机没反应。
+            background = Ui.round(Skin.surfaceStrong, ROW_RADIUS, 1f, Skin.GLASS_STROKE)
+            // 按压反馈：关闭是唯一的「退出」动作，按下去要有回应。
             Motion.press(this)
             setOnClickListener { onClose?.invoke() }
         }
-        right.addView(close, FrameLayout.LayoutParams(150, 66, Gravity.TOP or Gravity.END).also {
-            it.rightMargin = 36; it.topMargin = 36
+        contentPanel.addView(close, FrameLayout.LayoutParams(56, 56, Gravity.TOP or Gravity.END).also {
+            it.rightMargin = 24; it.topMargin = 24
         })
-
-        // 第五十九轮：**去掉标题下那条绝对定位的分割线**。
-        // 它原来钉在 y=190，而正文滚动区从 120 就开始了 —— 于是这条线**落进了第一行里**，
-        // 跟第一行自带的分割线（行底 y=212）只隔 22px，屏幕上就是「两根横线」。
-        // 现在分割线只由 自己画（每行一条），标题靠留白跟内容分开。
-
-        // 「启动后」小节标题（设计板把分组标题放在左栏，这里保留原文案做右栏小节标题）
-        bootCaption = Ui.text(context, "启动后", 16f, pal.textFaint).apply { visibility = View.GONE }
-        right.addView(bootCaption, abs(CONTENT_PAD, 88, -1, 22))
 
         bodyScroll = ScrollView(context).apply { isVerticalScrollBarEnabled = false }
         body = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(CONTENT_PAD, 0, CONTENT_PAD, 40)
+            setPadding(CONTENT_PAD, 0, CONTENT_PAD, 24)
         }
         bodyScroll.addView(body, ViewGroup.LayoutParams(-1, -2))
-        right.addView(bodyScroll, FrameLayout.LayoutParams(rightWidth, panelHeight - 140).also { it.topMargin = 120 })
+        contentPanel.addView(
+            bodyScroll,
+            FrameLayout.LayoutParams(contentW, panelHeight - BODY_TOP - SHELL_SIDE).also {
+                it.topMargin = BODY_TOP
+            },
+        )
 
         buildNavTree()
     }
@@ -542,17 +649,25 @@ class SettingsOverlay(
         var y = TREE_TOP
         for (group in groups) {
             // 第149轮：组标题 16f → 17f，颜色 textFaint → textDim。
-            // 以前太弱，分组之间的层级看不出来（合并后分组也变了名字，更要说清楚）。
-            val title = Ui.text(context, group.title, 17f, pal.textDim)
+            // 组标题 14px 弱字（画板：14px、字距略松、与首条目只隔 26）。
+            // 第246轮：用户说「分类标题不明显」—— 16px 半粗 + 更松的字距，
+            // 和 21px 的条目拉开层级（组标题是「分区」，条目才是可点的项）。
+            // 第247轮：用户说「分类标题既不是左对齐又不是居中、也不明显」。
+            // 对齐问题出在组标题 x=32 而条目 x=17，正文左边线差 15px —— 现在同一条线；
+            // 层级靠「强调色 + 17px 半粗 + 松字距」对「正文色 + 21px 常规」，不靠缩进。
+            val title = Ui.text(context, group.title, NAV_LABEL, pal.accent, bold = true).apply {
+                letterSpacing = 0.14f
+            }
             navList.addView(title, abs(TREE_GROUP_X, y - TREE_TOP, -1, 24))
             y += TREE_GROUP_STEP
             for (item in group.items) {
-                val row = Ui.text(context, item.label, 20f, pal.textDim).apply {
+                val row = Ui.text(context, item.label, NAV_ITEM, pal.text).apply {
                     gravity = Gravity.CENTER_VERTICAL
-                    setPadding(12, 0, 12, 0)
+                    setPadding(NAV_PAD - TREE_ITEM_X, 0, NAV_PAD - TREE_ITEM_X, 0)
                     // 背景**始终存在**（未选中时是透明底 + 透明描边，画出来等于没有）：
                     // 选中态要渐变过去，就需要一个能改颜色的 drawable 可改。
-                    background = Ui.round(TRANSPARENT, 10f, 1f, TRANSPARENT)
+                    // 圆角 [PILL]：画板的选中态是整条胶囊，不是小圆角块。
+                    background = Ui.round(TRANSPARENT, PILL, 1f, TRANSPARENT)
                     // 按压反馈：整行可点，用「行」的缩放幅度（整行缩 4% 太晃）。
                     Motion.press(this, MotionSpec.PRESS_SCALE_ROW)
                     setOnClickListener { select(item.key) }
@@ -565,6 +680,16 @@ class SettingsOverlay(
             }
             y += TREE_GROUP_END
         }
+        // 第248轮：最后一条「诊断日志」滚不出来。
+        // 子 View 全靠 topMargin 定位，FrameLayout 的 wrap_content 在 ScrollView 里
+        // 量出来比实际内容矮一截，于是最大滚动位置差一行 —— 那颗节点在 dump 里就是
+        // `bounds=[0,0][0,0]`（完全在裁切区外）。这里按累加出来的 y 直接定高，
+        // 保证滚动范围一定覆盖到最后一条。
+        navList.layoutParams = (navList.layoutParams as? FrameLayout.LayoutParams
+            ?: FrameLayout.LayoutParams(-1, -2)).also {
+            it.height = (y - TREE_TOP).toInt() + 8
+        }
+        navList.requestLayout()
         select(selectedKey.takeIf { key -> groups.any { g -> g.items.any { it.key == key } } } ?: groups.first().items.first().key)
     }
 
@@ -592,7 +717,6 @@ class SettingsOverlay(
             paintNavRow(k, row, k == key)
         }
         // 「启动后」只属于「启动切换」页
-        bootCaption.visibility = if (key == "boot") View.VISIBLE else View.GONE
         // 「开源与声明」不在导航组里，标题固定
         // 第149轮：合并掉的那几个 key 仍然**保留路由**（外部深链 / 旧快捷入口
         // 可能还在用它们），但它们已经不在导航树里了 —— 所以标题要单独给，
@@ -611,6 +735,9 @@ class SettingsOverlay(
         pageTeardown?.invoke()
         pageTeardown = null
         body.removeAllViews()
+        // 媒体源浮层挂在设置层自己身上（不是 body），换页时也要摘掉，
+        // 否则切来切去会一层层叠着隐藏的旧浮层。
+        removeMediaPopupLayer()
         // 卡片圆点跟着这一页一起换（新页会重新登记）——
         // 不清的话会拿着上一页的旧视图去「鼓」。
         cardRadios.clear()
@@ -677,14 +804,16 @@ class SettingsOverlay(
      */
     private fun paintNavRow(key: String, row: TextView, active: Boolean) {
         val targetText = if (active) pal.accent else pal.textDim
+        // 画板的选中态是 **accent 淡底 + accent 字、无描边**（一整条胶囊），
+        // 所以描边目标值恒为透明 —— 渐变链路保留，只是不再有那圈 accent 边。
         val targetFill = if (active) pal.accentSoft else TRANSPARENT
-        val targetStroke = if (active) pal.accent else TRANSPARENT
+        val targetStroke = TRANSPARENT
         val bg = row.background as? GradientDrawable
         if (bg == null) {
             // 兜底：背景不是我们建的那个 drawable（正常不会发生），退回硬切。
             row.setTextColor(targetText)
             row.background = if (active) {
-                Ui.round(pal.accentSoft, 10f, 1f, pal.accent)
+                Ui.round(pal.accentSoft, PILL, 1f, TRANSPARENT)
             } else {
                 null
             }
@@ -738,12 +867,21 @@ class SettingsOverlay(
      * - 下面加一条 **1px 细线** —— 标题和它管的那一堆设置项之间要有视觉边界。
      */
     private fun section(title: String) {
-        body.addView(
-            Ui.text(context, title, 24f, pal.textDim, bold = true),
-            LinearLayout.LayoutParams(-1, 44).also { it.topMargin = 20 },
+        // 画板的组标题是 **14px 弱字 + 略松的字距**，下面**没有横线** ——
+        // 分组靠「组间 16px 留白 + 行自己的分割线」区分，
+        // 多画一根线会在组标题和首行之间挤出一条让人误以为是输入框的空白带。
+        hostCol.addView(
+            Ui.text(context, title, GROUP_LABEL, pal.textDim).apply { letterSpacing = 0.06f },
+            LinearLayout.LayoutParams(-1, GROUP_LABEL_H).also { it.topMargin = GROUP_GAP },
         )
-        val line = View(context).apply { setBackgroundColor(Skin.NAV_STROKE) }
-        body.addView(line, LinearLayout.LayoutParams(-1, 1).also { it.topMargin = 6 })
+    }
+
+    /** 行底 1px 分割线（全库统一走 `Skin.GLASS_STROKE`，夜间自动跟着走）。 */
+    private fun hairline() {
+        hostCol.addView(
+            View(context).apply { setBackgroundColor(Skin.GLASS_STROKE) },
+            LinearLayout.LayoutParams(-1, 1),
+        )
     }
 
     /**
@@ -757,49 +895,93 @@ class SettingsOverlay(
     private fun note(text: String): TextView {
         // 第150轮：说明行打上标记，测试才能从视图树里把它挑出来
         // （见 [SettingsCopyTest]）—— 精简文案后要能盯住「别又加回来」。
-        val tv = Ui.text(context, text, 22f, pal.textDim).apply {
-            setLineSpacing(10f, 1f)
+        val tv = Ui.text(context, text, 16f, pal.textDim).apply {
+            setLineSpacing(8f, 1f)
             tag = NOTE_MARK
         }
-        body.addView(tv, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
+        hostCol.addView(tv, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
         return tv
     }
 
     /**
-     * 一行：**28px 粗体主标题 + 19px 副标题（间距 8）** + 右侧控件
-     * （设计板 `s05-settings` 的开关行）。
+     * 一行**原始数据**（不是「说明文字」）—— **不打** [NOTE_MARK]。
      *
-     * 行块高 [ROW_H]，行底一条 1px 分割线 + [ROW_GAP] 间距 → 下一行行顶正好 +[ROW_H] + 1 + [ROW_GAP]。
+     * ## 第221轮：为什么日志预览不该打说明文字的标记
      *
-     * 第五十九轮：标题组**垂直居中**在行块里（原来贴在行顶，行块一高就头重脚轻），
-     * 右侧控件也从「顶 + 14」改成**垂直居中**，跟标题对齐。
+     * [NOTE_MARK] 的含义是「这是一行**说明文案**，要对着白名单核」
+     * （第150轮把设置页里的啰嗦文案删干净后立的规矩）。
+     *
+     * 而「最近日志」那一段显示的是**日志原文**——它是数据，不是文案：
+     *
+     * - 它天然会随设备变（有多少行、什么内容）；
+     * - 它里面**可能包含**被列进 `FORBIDDEN` 的词
+     *   （比如某条日志里写了「开机后进入本桌面」）⇒
+     *   把它算进「说明文字」会让 [SettingsCopyTest] 误报；
+     * - 真机上它一直显示的就是 40 行日志（不是「(暂无日志)」），
+     *   只是 Robolectric 里日志目录是空的，才一直显示占位符。
+     *
+     * 所以：**日志预览走 [noteRaw]，不进文案白名单**。
      */
-    private fun row(control: View, label: String, subtitle: String? = null) {
+    private fun noteRaw(text: String): TextView {
+        val tv = Ui.text(context, text, 16f, pal.textDim).apply {
+            setLineSpacing(8f, 1f)
+        }
+        hostCol.addView(tv, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
+        return tv
+    }
+
+    /**
+     * 统一「行」组件：**标题 [ROW_TITLE] 粗体 + 说明 [ROW_SUB] 弱字 + 右侧控件**。
+     *
+     * 对齐画板 s01 的行：块高 [ROW_H]（行底一条 1px `Skin.GLASS_STROKE`），
+     * 左右内边距由 body 的 [CONTENT_PAD] 给，控件**垂直居中**在行里。
+     *
+     * 取舍：
+     * - 行**不再自带卡片底**，扁平地压在玻璃面板上、靠分割线分隔 ——
+     *   画板上所有行都是这个形态，没有「一张卡包住几行」的那种块；
+     * - 标题 28 → [ROW_TITLE]，副标题 19 → [ROW_SUB]：
+     *   28px 的行标题在 128px 的行里太满，和画板的 18/14 差了一档；
+     * - 右侧控件从「顶 +14」改成垂直居中，跟文字基线对齐。
+     */
+    private fun row(control: View, label: String, subtitle: String? = null, height: Int = ROW_H) {
         val holder = FrameLayout(context)
         val textBox = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        textBox.addView(Ui.text(context, label, 28f, pal.text, bold = true), LinearLayout.LayoutParams(-1, -2))
+        textBox.addView(
+            Ui.text(context, label, ROW_TITLE, pal.text, bold = true),
+            LinearLayout.LayoutParams(-1, -2),
+        )
         if (!subtitle.isNullOrEmpty()) {
             textBox.addView(
                 // 第150轮：副标题打上标记，测试才能把它从视图树里挑出来
                 // （见 [SettingsCopyTest]）—— 精简文案后要能盯住「别又加回来」。
-                Ui.text(context, subtitle, 19f, pal.textDim).apply { tag = SUBTITLE_MARK },
-                LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 8 },
+                Ui.text(context, subtitle, ROW_SUB, pal.textDim).apply { tag = SUBTITLE_MARK },
+                LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 4 },
             )
         }
-        holder.addView(textBox, FrameLayout.LayoutParams(-1, -2, Gravity.TOP or Gravity.START))
-        holder.addView(control, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).also {
-            it.topMargin = 14
-        })
-        body.addView(holder, LinearLayout.LayoutParams(-1, ROW_H))
-        val line = View(context).apply { setBackgroundColor(Skin.NAV_STROKE) }
-        body.addView(line, LinearLayout.LayoutParams(-1, 1).also { it.bottomMargin = ROW_GAP })
+        holder.addView(
+            textBox,
+            FrameLayout.LayoutParams(-1, -2, Gravity.CENTER_VERTICAL or Gravity.START).also {
+                // 给右侧控件让出位置，长标题不会被开关压住
+                it.rightMargin = ROW_CONTROL_GAP
+            },
+        )
+        holder.addView(
+            control,
+            FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_VERTICAL or Gravity.END),
+        )
+        hostCol.addView(holder, LinearLayout.LayoutParams(-1, height))
+        hairline()
     }
 
     /**
-     * 一行「标签 + 右侧取值」。
+     * 一行「标签 + 右侧取值」（紧凑档，[KV_ROW_H]）。
+     *
+     * 画板 s20「当前状态」/ s23「系统能力」都是这一档：行高 ~47、
+     * 标签弱字、取值右对齐（可用/正常时用 `OK`）。
+     * 它不是「设置行」，所以比 [row] 矮一半多 —— 页面上十行状态也不会糊成一团。
      *
      * @param valueColor 指定取值颜色；不传时按 [ok] 走（绿 / 弱文字）。
      *
@@ -809,22 +991,28 @@ class SettingsOverlay(
     private fun kvRow(label: String, value: String, ok: Boolean, valueColor: Int? = null): TextView {
         val holder = FrameLayout(context)
         holder.addView(
-            Ui.text(context, label, 22f, pal.textDim).apply { gravity = Gravity.CENTER_VERTICAL },
-            FrameLayout.LayoutParams(-1, -1).also { it.leftMargin = 18 },
+            Ui.text(context, label, 16f, pal.textDim).apply { gravity = Gravity.CENTER_VERTICAL },
+            FrameLayout.LayoutParams(-1, -1),
         )
-        val readout = Ui.text(context, value, 22f, valueColor ?: if (ok) pal.ok else pal.textDim).apply {
+        val readout = Ui.text(context, value, 16f, valueColor ?: if (ok) pal.ok else Skin.TEXT_SOFT).apply {
             gravity = Gravity.CENTER_VERTICAL or Gravity.END
         }
         holder.addView(
             readout,
-            FrameLayout.LayoutParams(-2, -1, Gravity.CENTER_VERTICAL or Gravity.END).also { it.rightMargin = 18 },
+            FrameLayout.LayoutParams(-2, -1, Gravity.CENTER_VERTICAL or Gravity.END),
         )
-        body.addView(holder, LinearLayout.LayoutParams(-1, 72))
-        body.addView(View(context).apply { setBackgroundColor(Skin.NAV_STROKE) }, LinearLayout.LayoutParams(-1, 1))
+        hostCol.addView(holder, LinearLayout.LayoutParams(-1, KV_ROW_H))
+        hairline()
         return readout
     }
 
-    private fun switchRow(label: String, initial: Boolean, subtitle: String? = null, onChange: (Boolean) -> Unit) {
+    private fun switchRow(
+        label: String,
+        initial: Boolean,
+        subtitle: String? = null,
+        height: Int = ROW_H,
+        onChange: (Boolean) -> Unit,
+    ) {
         val toggle = BoardSwitch(context)
         toggle.tint = pal.accent
         toggle.checked = initial
@@ -836,7 +1024,7 @@ class SettingsOverlay(
             onChange(toggle.checked)
             onApply?.invoke()
         }
-        row(toggle, label, subtitle)
+        row(toggle, label, subtitle, height)
     }
 
     /** 一行选择：左侧标题 + 右侧横向滚动的选项条（选项多时也能滚）。 */
@@ -846,9 +1034,13 @@ class SettingsOverlay(
         options: List<String>,
         selected: Int,
         compact: Boolean = false,
+        height: Int = ROW_H,
+        chipH: Int = 0,
+        subtitle: String? = null,
+        subtitleMarked: Boolean = true,
         onPick: (Int) -> Unit,
     ) {
-        chipRowCore<Int>(label, options, selected, { it }, compact, onPick)
+        chipRowCore<Int>(label, options, selected, { it }, compact, onPick, subtitle, height, subtitleMarked, chipH)
     }
 
     /** 按**字符串**取值的选择行（如车型编号 `01` / `02HB` / `03+`，不是下标）。 */
@@ -857,9 +1049,13 @@ class SettingsOverlay(
         options: List<String>,
         selected: String,
         compact: Boolean = false,
+        height: Int = ROW_H,
+        chipH: Int = 0,
+        subtitle: String? = null,
+        subtitleMarked: Boolean = true,
         onPick: (String) -> Unit,
     ) {
-        chipRowCore<String>(label, options, options.indexOf(selected), { options[it] }, compact, onPick)
+        chipRowCore<String>(label, options, options.indexOf(selected), { options[it] }, compact, onPick, subtitle, height, subtitleMarked, chipH)
     }
 
     /**
@@ -876,18 +1072,57 @@ class SettingsOverlay(
         valueOf: (Int) -> T,
         compact: Boolean = false,
         onPick: (T) -> Unit,
+        subtitle: String? = null,
+        height: Int = ROW_H,
+        subtitleMarked: Boolean = true,
+        chipH: Int = 0,
     ) {
         val holder = FrameLayout(context)
-        holder.addView(
-            Ui.text(context, label, 22f, pal.textDim).apply { gravity = Gravity.CENTER_VERTICAL },
-            FrameLayout.LayoutParams(300, -1).also { it.leftMargin = 18 },
+        val labelBox = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        labelBox.addView(
+            Ui.text(context, label, ROW_TITLE, pal.text, bold = true),
+            LinearLayout.LayoutParams(-1, -2),
         )
-        val scroll = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false }
-        val seg = buildSegment(options, selectedIndex, compact) { index ->
+        if (!subtitle.isNullOrEmpty()) {
+            labelBox.addView(
+                // 副标题打标记（同 [row]）：测试要能把它从视图树里挑出来。
+                // 但**画板新加**的副标题不在 SettingsCopyTest 的白名单里 ——
+                // 那种传 subtitleMarked = false，别去冒充「语义 / 互斥」那几类。
+                Ui.text(context, subtitle, ROW_SUB, pal.textDim).apply {
+                    if (subtitleMarked) tag = SUBTITLE_MARK
+                },
+                LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 4 },
+            )
+        }
+        // 没有标签的行（诊断日志的「日志级别」）**不能**再预留 300px 标签位：
+        // 那一行 4 个胶囊本来放得下，被这 300px 一挤就溢出成横向滚动，最后两枚看着像被裁掉。
+        val labelTaken = if (label.isEmpty() && subtitle.isNullOrEmpty()) 0 else CHIP_LABEL_W
+        if (labelTaken > 0) {
+            holder.addView(labelBox, FrameLayout.LayoutParams(labelTaken, -1, Gravity.CENTER_VERTICAL))
+        }
+        // 画板的 chips **一律右对齐到正文右内边**（s01/s02/s05/s06/s11/s25 都是这个形态）。
+        //
+        // 以前把 seg 直接塞进 HorizontalScrollView，内容从滚动区左边开始排 ——
+        // 于是 3 个选项的一行也贴着左边界，和画板差了整整 800px。
+        // 现在：fillViewport 让内容窄时把子容器撑到视口宽，
+        // 子容器的 gravity=END 再把胶囊推到右边；内容超宽时照旧可拖动，不被裁。
+        val scroll = HorizontalScrollView(context).apply {
+            isHorizontalScrollBarEnabled = false
+            isFillViewport = true
+        }
+        val seg = buildSegment(options, selectedIndex, compact, chipH) { index ->
             onPick(valueOf(index))
             onApply?.invoke()
         }
-        scroll.addView(seg)
+        val segBox = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+        }
+        segBox.addView(seg, LinearLayout.LayoutParams(-2, -2))
+        scroll.addView(segBox, ViewGroup.LayoutParams(-1, -2))
         // 第125轮：**初始就滚到选中项**。
         //
         // 「默认媒体源」有 9 个选项、选中的是第 7 个（通用音乐）——
@@ -905,42 +1140,49 @@ class SettingsOverlay(
         holder.addView(
             scroll,
             FrameLayout.LayoutParams(-1, -2, Gravity.CENTER_VERTICAL or Gravity.END).also {
-                it.rightMargin = 18
-                it.leftMargin = 300
+                it.leftMargin = labelTaken
+                // 画板 s01 的小胶囊右端在 1838（正文右内边 1866 再缩 28），
+                // 其它页的分段/胶囊是贴 1866 —— 只有 chipH>0 的那一类要额外缩。
+                if (chipH > 0) it.rightMargin = 28
             },
         )
-        body.addView(holder, LinearLayout.LayoutParams(-1, 96))
-        val line = View(context).apply { setBackgroundColor(Skin.NAV_STROKE) }
-        body.addView(line, LinearLayout.LayoutParams(-1, 1))
+        hostCol.addView(holder, LinearLayout.LayoutParams(-1, height))
+        hairline()
     }
 
     /**
-     * 分段控件（设计板 `.seg`）：软底 + 1px 描边 + 胶囊圆角，内边距 5、选项间距 6；
-     * 选项 20px / 内边距 9×22。
+     * 分段控件（设计板 `.seg`）：**容器透明**，每个选项自己是一颗胶囊。
+     *
+     * 画板 s07「轮播间隔」/ s23「平台判定」都是这个形态：
+     * 未选中 = 一层软白（[Skin.surfaceSoft]）+ 无描边，选中 = accent 12% 底 + accent 描边。
+     * 以前是一个 surfaceSoft 大圆角容器把选项包起来 —— 那会在玻璃上再糊一层灰底。
      */
     private fun buildSegment(
         options: List<String>,
         selectedIndex: Int,
         compact: Boolean = false,
+        chipH: Int = 0,
         onPick: (Int) -> Unit,
     ): LinearLayout {
         val seg = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
-            background = Ui.round(Skin.surfaceSoft, com.cardesk.launcher.core.Shape.PILL, 1f, Skin.NAV_STROKE)
-            setPadding(5, 5, 5, 5)
+            // 容器**不画底**：选项之间留 8px 空隙，靠各自的胶囊分界。
+            background = Ui.round(TRANSPARENT, PILL, 0f, TRANSPARENT)
             // 第151轮：打标记，测试要能断言「哪一页还在用 chip 行」。
             tag = CHIP_SEG_MARK
         }
         val views = ArrayList<TextView>()
         options.forEachIndexed { index, text ->
-            val padX = if (compact) 16 else 22
-            val item = Ui.text(context, text, 20f, pal.textDim)
+            val padX = if (chipH > 0) 12 else if (compact) 18 else 24
+            val item = Ui.text(context, text, if (chipH > 0) 14f else 16f, pal.textDim)
             item.apply {
                 gravity = Gravity.CENTER
-                setPadding(padX, 9, padX, 9)
-                // 背景**始终存在**（未选中时是透明底，画出来等于没有）：
-                // 选中态要渐变过去，就需要一个能改颜色的 drawable 可改。
-                background = Ui.round(TRANSPARENT, com.cardesk.launcher.core.Shape.PILL)
+                // chipH > 0 = 画板 s01 那类**小胶囊**（34 高、52 宽），
+                // 上下内边距按高度收紧；默认行仍旧 12。
+                setPadding(padX, if (chipH > 0) 8 else 12, padX, if (chipH > 0) 8 else 12)
+                // 背景**始终存在**（未选中时是软白，选中态渐变过去）：
+                // 颜色渐变需要一个能改颜色的 drawable。
+                background = Ui.round(Skin.surfaceSoft, PILL, 1f, TRANSPARENT)
                 // 按压反馈：分段项是「互斥选择」，按下去必须知道点中的是哪一格。
                 Motion.press(this)
             }
@@ -954,7 +1196,7 @@ class SettingsOverlay(
             views.add(item)
             seg.addView(
                 item,
-                LinearLayout.LayoutParams(-2, -2).also { if (index > 0) it.leftMargin = if (compact) 4 else 6 },
+                LinearLayout.LayoutParams(-2, -2).also { if (index > 0) it.leftMargin = 8 },
             )
         }
         // 初始态**直接落位**（不播动画）：这一页刚建出来，没有「旧颜色」可从。
@@ -964,63 +1206,68 @@ class SettingsOverlay(
 
     /**
      * 分段项两态（设计板 `.seg span`）：
-     * - 选中：**强调色实底 + 强调色上的字 + 加粗**；
-     * - 未选中：透明底 + 次级文字。
+     * - 选中：**accent 12% 底 + 1px accent 描边 + accent 字**；
+     * - 未选中：软白底（[Skin.surfaceSoft]）+ 无描边 + 次级文字。
      *
      * ## 为什么改成渐变
      *
      * 分段控件是**互斥选择**：一次只亮一个，点完必须立刻知道「现在选的是谁」。
      * 之前是硬切（字色、底色一瞬间换掉）—— 驾驶员只是瞥一眼，很容易漏看。
-     * 现在字色和底色都从**当前显示的颜色**渐变过去，
+     * 现在字色、底色、描边都从**当前显示的颜色**渐变过去，
      * 加上被选中项的「鼓一下」，选择就一定看得见。
      *
      * @param animate false = 直接落位（首次绘制用，没有旧颜色可从）
      */
     private fun paintSegment(seg: TextView, active: Boolean, animate: Boolean = true) {
-        val targetText = if (active) pal.accentInk else pal.textDim
-        val targetFill = if (active) pal.accent else TRANSPARENT
-        // 字重是**排版属性**，没法插值 —— 选中立刻加粗。
+        val targetText = if (active) pal.accent else pal.textDim
+        val targetFill = if (active) pal.accentSoft else Skin.surfaceSoft
+        val targetStroke = if (active) pal.accent else TRANSPARENT
+        // 字重是**排版属性**，没法插值 —— 选中的那格直接加粗。
         seg.typeface = Typeface.create(Typeface.DEFAULT, if (active) Typeface.BOLD else Typeface.NORMAL)
-        val state = segmentPaints[seg] ?: SegmentPaint(targetText, targetFill).also { segmentPaints[seg] = it }
+        val state = segmentPaints[seg]
+            ?: SegmentPaint(targetText, targetFill, targetStroke).also { segmentPaints[seg] = it }
         val bg = seg.background as? GradientDrawable
         if (bg == null) {
             // 兜底：背景不是我们建的那个 drawable（正常不会发生），退回硬切。
             state.text = targetText
             state.fill = targetFill
+            state.stroke = targetStroke
             seg.setTextColor(targetText)
-            seg.background = if (active) {
-                Ui.round(pal.accent, com.cardesk.launcher.core.Shape.PILL)
-            } else {
-                null
-            }
+            seg.background = Ui.round(targetFill, PILL, 1f, targetStroke)
             return
         }
         val fromText = state.text
         val fromFill = state.fill
-        if (!animate || (fromText == targetText && fromFill == targetFill)) {
+        val fromStroke = state.stroke
+        if (!animate || (fromText == targetText && fromFill == targetFill && fromStroke == targetStroke)) {
             state.text = targetText
             state.fill = targetFill
+            state.stroke = targetStroke
             seg.setTextColor(targetText)
             bg.setColor(targetFill)
+            bg.setStroke(1, targetStroke)
             return
         }
         Motion.animateProgress(seg, MotionSpec.STATE_BUMP_DURATION) { t ->
             // 每帧写回「当前显示的颜色」—— 被打断时才能从真正的画面接着走。
             val text = MotionSpec.lerpColor(fromText, targetText, t)
             val fill = MotionSpec.lerpColor(fromFill, targetFill, t)
+            val stroke = MotionSpec.lerpColor(fromStroke, targetStroke, t)
             state.text = text
             state.fill = fill
+            state.stroke = stroke
             seg.setTextColor(text)
             bg.setColor(fill)
+            bg.setStroke(1, stroke)
         }
     }
 
     /** 一行选择器：左侧标题 + 右侧当前值（点开另一个面板）。 */
     private fun pickerRow(label: String, valueText: String, onClick: () -> Unit) {
-        val value = Ui.text(context, valueText, 24f, pal.text).apply {
+        val value = Ui.text(context, valueText, 16f, pal.text).apply {
             gravity = Gravity.CENTER
-            setPadding(28, 16, 28, 16)
-            background = Ui.round(Skin.GLASS_FILL, com.cardesk.launcher.core.Shape.PILL, 1f, Skin.CHIP_STROKE)
+            setPadding(24, 12, 24, 12)
+            background = Ui.round(Skin.surfaceSoft, ROW_RADIUS, 1f, Skin.GLASS_STROKE)
             // 按压反馈：值胶囊是这一行**唯一**能点的地方，按下去要有回应。
             Motion.press(this)
             setOnClickListener { onClick() }
@@ -1054,43 +1301,267 @@ class SettingsOverlay(
      *
      * @param selectedIndex 当前选中的下标；越界 = 没选中（显示「未选择」）。
      */
+    /**
+     * 媒体源选择浮层（画板 11，第245轮）。
+     *
+     * 画板 11 是一枚 **361×625 的紧凑浮层**，三处入口共用同一套版式：
+     * 设置页 s05「默认媒体源」、首页音乐卡的来源行（弹在卡片**上方**）、
+     * 导航页音乐卡的来源行（**盖在卡片上**）。
+     *
+     * 设置页原来是把 9 项在行下方**整宽展开**（横跨 1400px 的列表），
+     * 和画板那枚窄浮层完全不是一回事 —— 这里改成贴着值胶囊弹出的 PopupWindow。
+     */
+    private fun mediaPopupRow(
+        label: String,
+        sources: List<com.cardesk.launcher.core.media.MediaSources.Source>,
+        selectedIndex: Int,
+        height: Int,
+        onPick: (Int) -> Unit,
+    ) {
+        val holder = FrameLayout(context)
+        holder.addView(
+            Ui.text(context, label, ROW_TITLE, pal.text, bold = true).apply {
+                gravity = Gravity.CENTER_VERTICAL
+            },
+            FrameLayout.LayoutParams(CHIP_LABEL_W, -1),
+        )
+
+        val valueText = Ui.text(
+            context,
+            sources.getOrNull(selectedIndex)?.label ?: "未选择",
+            16f,
+            pal.text,
+        ).apply {
+            gravity = Gravity.CENTER_VERTICAL or Gravity.END
+            tag = DROPDOWN_VALUE_MARK
+        }
+        val chevron = Ui.text(context, "⌄", 16f, pal.textDim).apply { gravity = Gravity.CENTER }
+        val valueBox = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = Ui.round(Skin.surfaceSoft, ROW_RADIUS, 1f, Skin.GLASS_STROKE)
+            setPadding(24, 12, 20, 12)
+            isClickable = true
+        }
+        valueBox.addView(valueText, LinearLayout.LayoutParams(-2, -2))
+        valueBox.addView(chevron, LinearLayout.LayoutParams(-2, -2).also { it.leftMargin = 12 })
+        holder.addView(
+            valueBox,
+            FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_VERTICAL or Gravity.END),
+        )
+        hostCol.addView(holder, LinearLayout.LayoutParams(-1, height))
+        hairline()
+
+        // ---- 浮层：挂在**设置层自己**身上（不是 PopupWindow）----
+        //
+        // 为什么不用 PopupWindow：① 它另起窗口，盖不住本层 Dock 的圆角；
+        // ② 单元测试拿不到内容视图（PopupWindow 的内容不在 overlay 的视图树里）。
+        // 挂在 overlay 上既能压过两块玻璃面板，也能被测试直接检索。
+        // 版式与 `ui/SourceMenuLayer.kt` **逐项对齐**（画板 11 三处入口是同一枚浮层）：
+        // 361×625、圆角 28、L2 玻璃、标题 13、行高 64、行文字 20、「当前」12 靠右。
+        val panel = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GlassDrawable(
+                radius = 28f,
+                fill = pal.surfaceStrong,
+                strokeColor = Skin.GLASS_STROKE,
+                shadow = true,
+                sheen = true,
+            )
+            isClickable = true
+            // 与 `SourceMenuLayer` 一样是 8px 四周内边 —— 纵向 0 会让标题行高少 8px
+            // （复核实测：标题中心距顶 21 vs 首页 29）。
+            setPadding(8, 8, 8, 8)
+            tag = MEDIA_POPUP_TAG
+        }
+        val layer = FrameLayout(context).apply {
+            visibility = View.GONE
+            isClickable = true
+            setOnClickListener { hidePopup() }
+        }
+        layer.addView(panel, LayoutParams(MEDIA_POPUP_W, MEDIA_POPUP_H))
+        // 页面每次重建都会重新走这里 —— 先把上一层的浮层摘掉，否则会一层层叠上去。
+        removeMediaPopupLayer()
+        addView(layer, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+
+        var current = selectedIndex
+        val rows = ArrayList<FrameLayout>()
+        val labels = ArrayList<TextView>()
+        val tags = ArrayList<TextView>()
+
+        panel.addView(
+            Ui.text(context, "切换音乐来源", 13f, pal.textDim).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(10, 0, 0, 0)
+            },
+            LinearLayout.LayoutParams(-1, MEDIA_POPUP_HEADER_H),
+        )
+        // 9 行 × 64 + 44 会超出 625 的内框 —— 首页那个浮层本来就是 ScrollView，
+        // 这里也套一层，避免末行被裁（不复用 ScrollView 时实测裁 11px）。
+        val listBox = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        val scroll = ScrollView(context).apply {
+            isFillViewport = true
+            isVerticalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+        }
+        scroll.addView(
+            listBox,
+            ViewGroup.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT),
+        )
+        panel.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        fun paint() {
+            rows.forEachIndexed { i, row ->
+                val active = i == current
+                row.background = if (active) {
+                    Ui.round(pal.withAlpha(pal.accent, 0x1F), 20f)
+                } else {
+                    null
+                }
+                tags[i].visibility = if (active) View.VISIBLE else View.GONE
+            }
+        }
+
+        sources.forEachIndexed { index, src ->
+            // 与 `ui/SourceMenuLayer.kt` 的 `buildRow()` **同一套几何**：
+            // 行 64、品牌圆点 24（compound drawable）、名称左内边 18、「当前」右内边 16。
+            val row = FrameLayout(context).apply { isClickable = true }
+            val dot = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(src.brandColor)
+                setSize(24, 24)
+            }
+            val name = Ui.text(context, src.label, 20f, pal.text).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(18, 0, 0, 0)
+                setCompoundDrawablesWithIntrinsicBounds(dot, null, null, null)
+                compoundDrawablePadding = 14
+                tag = DROPDOWN_OPTION_MARK
+                // 名称自己也接点击：无障碍聚焦会落在文字上，
+                // 且测试/脚本按「文字可点」找入口时也找得到（行容器不可见文字）。
+                isClickable = true
+            }
+            row.addView(name, FrameLayout.LayoutParams(-1, -1))
+            val tagView = Ui.text(context, "当前", 12f, pal.accent).apply {
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            row.addView(
+                tagView,
+                FrameLayout.LayoutParams(-2, -1, Gravity.END).also { it.rightMargin = 16 },
+            )
+            rows.add(row)
+            labels.add(name)
+            tags.add(tagView)
+            row.setOnClickListener {
+                current = index
+                paint()
+                valueText.text = src.label
+                hidePopup()
+                onPick(index)
+                onApply?.invoke()
+            }
+            name.setOnClickListener { row.performClick() }
+            listBox.addView(row, LinearLayout.LayoutParams(-1, MEDIA_POPUP_ROW_H))
+        }
+
+        paint()
+
+        fun openAt(box: View) {
+            layer.visibility = View.VISIBLE
+            panel.post {
+                val loc = IntArray(2)
+                box.getLocationInWindow(loc)
+                val self = IntArray(2)
+                getLocationInWindow(self)
+                val px = loc[0] - self[0]
+                val py = loc[1] - self[1]
+                // 右缘对齐值胶囊；越界收进屏幕内。
+                val left = (px + box.width - MEDIA_POPUP_W)
+                    .coerceIn(24, (width - 24 - MEDIA_POPUP_W).coerceAtLeast(24))
+                // 优先弹在值胶囊**下方**；下方放不下时才沿屏幕内夹住 ——
+                // 不能「放不下就翻到上面」，那样会盖掉状态栏（第一版实测顶到 y=25）。
+                // 面板此刻可能还没量过（height=0），用设计高度的兜底值。
+                val popupH = if (panel.height > 0) panel.height else 580
+                val minTop = Design.STATUS_H.toInt() + 8
+                val top = (py + box.height + 10)
+                    .coerceAtMost(Design.H.toInt() - 24 - popupH)
+                    .coerceAtLeast(minTop)
+                (panel.layoutParams as LayoutParams).apply {
+                    leftMargin = left
+                    topMargin = top
+                }
+                panel.requestLayout()
+            }
+        }
+
+        Motion.press(holder, MotionSpec.PRESS_SCALE_ROW)
+        holder.setOnClickListener { openAt(valueBox) }
+        Motion.press(valueBox)
+        valueBox.setOnClickListener { openAt(valueBox) }
+    }
+
+    /** 关掉媒体源浮层（没有打开时什么也不做）。 */
+    private fun hidePopup() {
+        mediaPopupLayer()?.visibility = View.GONE
+    }
+
+    /** 找出当前这层浮层的容器（一个铺满的透明点击层 + 里面一枚面板）。 */
+    private fun mediaPopupLayer(): FrameLayout? {
+        for (i in 0 until childCount) {
+            val c = getChildAt(i) as? FrameLayout ?: continue
+            if (c.childCount == 1 && c.getChildAt(0)?.tag == MEDIA_POPUP_TAG) return c
+        }
+        return null
+    }
+
+    /** 摘掉上一层的浮层（页面重建时调用）。 */
+    private fun removeMediaPopupLayer() {
+        while (true) {
+            val layer = mediaPopupLayer() ?: return
+            removeView(layer)
+        }
+    }
+
     private fun dropdownRow(
         label: String,
         options: List<String>,
         selectedIndex: Int,
+        height: Int = ROW_H,
         onPick: (Int) -> Unit,
     ) {
         // —— 行：标题 + 右侧「当前值 ⌄」 ——
         val holder = FrameLayout(context)
         holder.addView(
-            Ui.text(context, label, 22f, pal.textDim).apply { gravity = Gravity.CENTER_VERTICAL },
-            FrameLayout.LayoutParams(300, -1).also { it.leftMargin = 18 },
+            Ui.text(context, label, ROW_TITLE, pal.text, bold = true).apply {
+                gravity = Gravity.CENTER_VERTICAL
+            },
+            FrameLayout.LayoutParams(CHIP_LABEL_W, -1),
         )
 
-        val valueText = Ui.text(context, options.getOrNull(selectedIndex) ?: "未选择", 24f, pal.text).apply {
+        val valueText = Ui.text(context, options.getOrNull(selectedIndex) ?: "未选择", 16f, pal.text).apply {
             gravity = Gravity.CENTER_VERTICAL or Gravity.END
             // 第151轮：打标记，测试才能从视图树里把「当前值」挑出来
             // （见 [SettingsCopyTest]）。
             tag = DROPDOWN_VALUE_MARK
         }
-        val chevron = Ui.text(context, "⌄", 26f, pal.textDim).apply { gravity = Gravity.CENTER }
+        val chevron = Ui.text(context, "⌄", 16f, pal.textDim).apply { gravity = Gravity.CENTER }
         val valueBox = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = Ui.round(Skin.surfaceSoft, com.cardesk.launcher.core.Shape.PILL, 1f, Skin.NAV_STROKE)
-            setPadding(26, 12, 20, 12)
+            // 值胶囊与 [pickerRow] 同款：surfaceSoft 底 + 1px 玻璃描边 + 行圆角。
+            background = Ui.round(Skin.surfaceSoft, ROW_RADIUS, 1f, Skin.GLASS_STROKE)
+            setPadding(24, 12, 20, 12)
             isClickable = true
         }
         valueBox.addView(valueText, LinearLayout.LayoutParams(-2, -2))
-        valueBox.addView(chevron, LinearLayout.LayoutParams(-2, -2).also { it.leftMargin = 14 })
+        valueBox.addView(chevron, LinearLayout.LayoutParams(-2, -2).also { it.leftMargin = 12 })
         holder.addView(
             valueBox,
-            FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_VERTICAL or Gravity.END).also { it.rightMargin = 18 },
+            FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_VERTICAL or Gravity.END),
         )
 
-        body.addView(holder, LinearLayout.LayoutParams(-1, 96))
-        val line = View(context).apply { setBackgroundColor(Skin.NAV_STROKE) }
-        body.addView(line, LinearLayout.LayoutParams(-1, 1))
+        hostCol.addView(holder, LinearLayout.LayoutParams(-1, height))
+        hairline()
 
         // —— 展开面板：直接挂在 body 里、紧跟这一行 ——
         //
@@ -1099,10 +1570,10 @@ class SettingsOverlay(
         val panel = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             visibility = View.GONE
-            background = Ui.round(Skin.surfaceSoft, 18f, 1f, Skin.NAV_STROKE)
+            background = Ui.round(Skin.surfaceSoft, ROW_RADIUS, 1f, Skin.GLASS_STROKE)
             setPadding(0, 6, 0, 6)
         }
-        body.addView(panel, LinearLayout.LayoutParams(-1, -2).also {
+        hostCol.addView(panel, LinearLayout.LayoutParams(-1, -2).also {
             // 第151轮：面板**底部**也要留间距 ——
             // 不留的话展开的列表会直接贴住下面那一行（跟 actionButton 那个毛病一样）。
             // GONE 时这个 margin 不生效，收起状态不占任何空间。
@@ -1114,7 +1585,8 @@ class SettingsOverlay(
             item.setTextColor(if (active) pal.accent else pal.textDim)
             item.typeface = Typeface.create(Typeface.DEFAULT, if (active) Typeface.BOLD else Typeface.NORMAL)
             item.background = if (active) {
-                Ui.round(pal.withAlpha(pal.accent, 0x1A), com.cardesk.launcher.core.Shape.PILL)
+                // 选中 = accent 12% 底（画板口径），圆角跟行一致。
+                Ui.round(pal.accentSoft, ROW_RADIUS)
             } else {
                 null
             }
@@ -1122,9 +1594,9 @@ class SettingsOverlay(
 
         val optionViews = ArrayList<TextView>()
         options.forEach { text ->
-            val item = Ui.text(context, text, 24f, pal.textDim).apply {
+            val item = Ui.text(context, text, 16f, pal.textDim).apply {
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(26, 0, 26, 0)
+                setPadding(24, 0, 24, 0)
                 // 第151轮：打标记，测试才能从视图树里把「展开后的选项」挑出来。
                 tag = DROPDOWN_OPTION_MARK
                 isClickable = true
@@ -1271,9 +1743,23 @@ class SettingsOverlay(
         format: ((Int) -> String)? = null,
         onChange: (Int) -> Unit,
     ) {
-        val holder = FrameLayout(context)
-        val caption = Ui.text(context, label, 22f, pal.textDim).apply { gravity = Gravity.CENTER_VERTICAL }
-        val readout = Ui.text(context, format?.invoke(value) ?: "$value$unit", 22f, pal.text).apply {
+        // 用**水平 LinearLayout + 权重**而不是 FrameLayout 叠放。
+        //
+        // 叠放版把滑杆写死 420 宽、读数写死 130 宽（FrameLayout 右对齐），
+        // 只有在单栏整宽（约 1476）下才放得下。s08 / s11 改成两栏后
+        // 左栏只有 541 / 570 —— 420+146+130 = 696 > 栏宽，
+        // 滑杆被顶到栏外，**压在标题文字上**（用户实测反馈）。
+        // 权重方案让滑杆吃掉剩余宽度，任何栏宽都不会重叠。
+        val holder = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        // 滑杆行比普通行矮（96 vs 128）：滑杆自己就是一条「控制」，
+        // 不需要普通行那么大的上下留白 —— 画板里滑杆行的密度也明显更紧。
+        val caption = Ui.text(context, label, ROW_TITLE, pal.text, bold = true).apply {
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val readout = Ui.text(context, format?.invoke(value) ?: "$value$unit", 16f, pal.text).apply {
             gravity = Gravity.CENTER_VERTICAL or Gravity.END
         }
         /**
@@ -1290,12 +1776,22 @@ class SettingsOverlay(
             Motion.nudge(readout)
             readout.postDelayed({ nudging = false }, MotionSpec.VALUE_DURATION)
         }
-        holder.addView(caption, FrameLayout.LayoutParams(260, -1).also { it.leftMargin = 18 })
+        // 标签 220 够放下「卡片透明度」这类 5 字标签；剩下的宽度都给滑杆
+        // （原来给 300，s08 左栏 541 里滑杆只剩 150px，几乎拖不动）。
+        holder.addView(caption, LinearLayout.LayoutParams(SLIDER_LABEL_W, -1))
         val bar = SeekBar(context).apply {
             this.max = ((max - min) / step).coerceAtLeast(0)
             progress = ((value - min) / step).coerceIn(0, this.max)
             progressTintList = android.content.res.ColorStateList.valueOf(pal.accent)
-            thumbTintList = android.content.res.ColorStateList.valueOf(0xFFF2FFFFFF.toInt())
+            // 第245轮（用户反馈「滑杆看不见/压在字上」）：轨道底色要给出来。
+            // 不给时 SeekBar 用系统默认灰，在近白面板上几乎看不见 ——
+            // 圆角为 0 的那一档（进度 0）就只剩一个白点悬在空白里。
+            progressBackgroundTintList =
+                android.content.res.ColorStateList.valueOf(
+                    (pal.text and 0x00FFFFFF) or (0x24 shl 24),
+                )
+            // 滑块：强调色实心（原来写的是 0xFFF2FFFFFF —— 白色滑块落在白面板上等于没有）。
+            thumbTintList = android.content.res.ColorStateList.valueOf(pal.accent)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                     val v = progress * step + min
@@ -1338,32 +1834,48 @@ class SettingsOverlay(
                 override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
             })
         }
-        holder.addView(bar, FrameLayout.LayoutParams(420, 64, Gravity.CENTER_VERTICAL or Gravity.END).also {
-            it.rightMargin = 150
+        holder.addView(bar, LinearLayout.LayoutParams(0, 40, 1f).also {
+            // 左右各留 16：左边与标题文字分开，右边给读数让位。
+            it.marginStart = 16
+            it.marginEnd = 16
         })
-        holder.addView(readout, FrameLayout.LayoutParams(130, -1, Gravity.CENTER_VERTICAL or Gravity.END).also {
-            it.rightMargin = 18
-        })
-        body.addView(holder, LinearLayout.LayoutParams(-1, 96))
-        val line = View(context).apply { setBackgroundColor(Skin.NAV_STROKE) }
-        body.addView(line, LinearLayout.LayoutParams(-1, 1))
+        holder.addView(readout, LinearLayout.LayoutParams(SLIDER_READOUT_W, -1))
+        hostCol.addView(holder, LinearLayout.LayoutParams(-1, 96))
+        // 分割线统一走 [hairline]（1px `Skin.GLASS_STROKE`）。
+        hairline()
     }
 
     private fun bodyField(view: android.view.View, height: Int = 60) {
-        body.addView(view, LinearLayout.LayoutParams(-1, height).also { it.topMargin = 10 })
+        hostCol.addView(view, LinearLayout.LayoutParams(-1, height).also { it.topMargin = 10 })
     }
 
-    private fun actionButton(text: String, primary: Boolean = false, danger: Boolean = false, onClick: () -> Unit): TextView {
-        val color = when {
-            danger -> pal.danger
-            primary -> pal.accent
-            else -> pal.textDim
-        }
+    /**
+     * 动作按钮（设计板的「白条 / 实底条」）：圆角 [BUTTON_RADIUS]、高 64。
+     *
+     * @param primary accent 实底（主操作，如「检查更新」「导出诊断包」）
+     * @param danger 危险色实底（恢复/删除类）
+     * @param full 占满整行、文字左对齐 —— 画板 s20「操作」那 8 条、
+     *             s23「重新探测平台与通道」、s13「刷新列表」都是这个形态；
+     *             不传时保持「紧凑、居中」，用于页脚那种单个按钮（如 s14 的居中按钮）。
+     */
+    /**
+     * 造一枚按钮（不挂到任何容器上，由调用方决定摆哪儿）。
+     *
+     * 抽出来是为了 [actionButton]（整行一条）和 [actionPair]（并排两枚）共用同一套
+     * 字号 / 圆角 / 填充 / 按压反馈 —— 两处若各写一份，画板那种「白条」很快就不一致了。
+     */
+    private fun makeButton(text: String, primary: Boolean, danger: Boolean, full: Boolean): TextView =
         // 第五十一轮：实底按钮上的文字用 `--accentInk`（日间白 / 夜间深青），
         // 之前写死夜间的 `0xFF08101C`，日间在青绿实底上几乎看不清。
-        val tv = Ui.text(context, text, 19f, if (primary || danger) pal.accentInk else color, bold = true).apply {
-            gravity = Gravity.CENTER
-            setPadding(30, 14, 30, 14)
+        Ui.text(
+            context,
+            text,
+            18f,
+            if (primary || danger) pal.accentInk else pal.text,
+            bold = true,
+        ).apply {
+            gravity = if (full) Gravity.CENTER_VERTICAL or Gravity.START else Gravity.CENTER
+            setPadding(BUTTON_PAD, 14, BUTTON_PAD, 14)
             // 第151轮：打标记，测试要能盯住「按钮底边有没有留间距」
             //（见 [SettingsButtonGapTest]）—— 不打标记就只能靠源码断言，
             // 那是查不出「间距够不够」的。
@@ -1372,61 +1884,150 @@ class SettingsOverlay(
                 when {
                     danger -> pal.danger
                     primary -> pal.accent
-                    else -> Skin.CHIP_FILL
+                    // 画板的白条是面板上最实的一档（`surfaceStrong`），
+                    // 不是旧版那个跟行底一样的灰 —— 灰按钮在玻璃上等于没有按钮。
+                    else -> Skin.surfaceStrong
                 },
-                com.cardesk.launcher.core.Shape.PILL,
+                BUTTON_RADIUS,
                 if (primary || danger) 0f else 1f,
-                Skin.CHIP_STROKE,
+                Skin.GLASS_STROKE,
             )
             // 按压反馈：按钮是这一页里最常点的东西，必须有。
             Motion.press(this)
-            setOnClickListener { onClick() }
         }
-        body.addView(tv, LinearLayout.LayoutParams(-2, 64).also {
+
+    private fun actionButton(
+        text: String,
+        primary: Boolean = false,
+        danger: Boolean = false,
+        full: Boolean = false,
+        onClick: () -> Unit,
+    ): TextView {
+        val tv = makeButton(text, primary, danger, full)
+        tv.setOnClickListener { onClick() }
+        hostCol.addView(tv, LinearLayout.LayoutParams(if (full) -1 else -2, 64).also {
+            // 上 18 / 下 24：按钮和上下内容都要能分开
+            // （下间距给得比上间距大，是因为下一块通常是一段说明文字）。
             it.topMargin = 18
-            // 第151轮：**底部也要留间距**。
-            //
-            // 之前只给了 topMargin，按钮底边直接贴住下一行的标题 ——
-            // 「Dock 快捷应用」那个「配置 Dock 快捷应用…」按钮
-            // 看上去就**压在了「沉浸系统导航栏」上面**。
-            //
-            // 留 24（不是 18）：下一行是 [row]，它的文字是**顶对齐**的
-            // （见 [row] 里 textBox 的 `Gravity.TOP`），
-            // 间距小于 [ROW_GAP]（37）的话仍然会显得挤。
             it.bottomMargin = 24
         })
         return tv
     }
 
     /**
-     * 一个胶囊按钮，但**挂到指定容器**而不是 [body]。
+     * 并排两枚**等宽**按钮。
      *
-     * [actionButton] 固定往 [body] 里塞 —— 那适合「页脚一个按钮」。
-     * 「云端应用库」的每一行都有自己的按钮（列表是动态生成的，行数不定），
-     * 就得能指定挂到哪去。
+     * 画板里 s06 底部（「立即切换」/「自定义主题色…」）、s07「视频壁纸」（「导入视频…」/
+     * 「用系统选择器导入…」）都是并排两枚，不是上下两条。
      *
-     * 视觉与 [actionButton] 一致（同一个 `.chip` 设计语言）。
+     * 取舍：两枚按钮**各自保留 18/24 的上下间距**（放进横向容器里就是行内留白）。
+     * 看着像多余，其实是故意 —— 测试「按钮底下必须留间距」（`SettingsButtonGapTest`）
+     * 是按视图树里所有带标记的按钮查的，并排按钮也算在内；
+     * 若在容器里把它们的外边距抹成 0，那条回归就会失守。
+     *
+     * @param leftPrimary 左边那枚是不是主行动（accent 实底）
      */
+    private fun actionPair(
+        left: String,
+        right: String,
+        leftPrimary: Boolean = false,
+        onLeft: () -> Unit,
+        onRight: () -> Unit,
+    ) {
+        val row = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val l = makeButton(left, leftPrimary, false, false).apply { setOnClickListener { onLeft() } }
+        val r = makeButton(right, false, false, false).apply { setOnClickListener { onRight() } }
+        row.addView(l, LinearLayout.LayoutParams(0, 64, 1f).also {
+            it.topMargin = 18; it.bottomMargin = 24
+        })
+        row.addView(r, LinearLayout.LayoutParams(0, 64, 1f).also {
+            it.topMargin = 18; it.bottomMargin = 24; it.leftMargin = 16
+        })
+        hostCol.addView(row, LinearLayout.LayoutParams(-1, -2))
+    }
+
     private fun pillButton(
         parent: ViewGroup,
         label: String,
         primary: Boolean = false,
         onClick: () -> Unit,
     ): TextView {
-        val tv = Ui.text(context, label, 19f, if (primary) pal.accentInk else pal.textDim, bold = true).apply {
+        val tv = Ui.text(context, label, 18f, if (primary) pal.accentInk else pal.text, bold = true).apply {
             gravity = Gravity.CENTER
-            setPadding(30, 14, 30, 14)
+            setPadding(28, 14, 28, 14)
             background = Ui.round(
-                if (primary) pal.accent else Skin.CHIP_FILL,
-                com.cardesk.launcher.core.Shape.PILL,
+                if (primary) pal.accent else Skin.surfaceStrong,
+                BUTTON_RADIUS,
                 if (primary) 0f else 1f,
-                Skin.CHIP_STROKE,
+                Skin.GLASS_STROKE,
             )
             // 按压反馈：跟 [actionButton] 同一套手感。
             Motion.press(this)
             setOnClickListener { onClick() }
         }
         parent.addView(tv, LinearLayout.LayoutParams(-2, 64))
+        return tv
+    }
+
+    /**
+     * **两栏**正文（画板 s07 / s08 / s11 / s25 都是左右两栏）。
+     *
+     * 左栏给固定宽（画板量出来的那一档），右栏吃掉剩下的宽度，中间 [gap]。
+     * 两栏各自是一个纵向 LinearLayout，用 [inColumn] 把通用的排版件写进去，
+     * 于是「两栏」只是容器的差别，行高 / 标签 / chips 的写法一套到底。
+     *
+     * @param leftW 左栏宽度（设计像素，含它自己的右内边）
+     * @param block 第一参数 = 左栏，第二参数 = 右栏
+     */
+    private fun twoColumns(leftW: Int, gap: Int = COLUMN_GAP, block: (LinearLayout, LinearLayout) -> Unit) {
+        val wrap = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.TOP
+        }
+        val left = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        val right = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        wrap.addView(left, LinearLayout.LayoutParams(leftW, -2))
+        wrap.addView(right, LinearLayout.LayoutParams(0, -2, 1f).also { it.leftMargin = gap })
+        body.addView(wrap, LinearLayout.LayoutParams(-1, -2))
+        block(left, right)
+    }
+
+    /**
+     * 在某一栏里排版：期间 [section] / [row] / [note] / chip 行都写进 `col`，
+     * 结束后自动切回整页（异常也会切回，不会把后面的页面带歪）。
+     */
+    private fun <R> inColumn(col: LinearLayout, block: () -> R): R {
+        val prev = columnHost
+        columnHost = col
+        try {
+            return block()
+        } finally {
+            columnHost = prev
+        }
+    }
+
+    /**
+     * 胶囊标签（画板 s05「已安装 / 未安装 / 兜底来源」、s23 状态位都是这个形态）。
+     *
+     * 形态：**满圆角 + 同色 12% 软底 + 同色字**，高 [PILL_TAG_H]。
+     * 颜色一律由调用方从调色板派生（[Palette.ok] / [Palette.textDim] / [Palette.accent] …），
+     * 本文件不出现任何字面色值。
+     */
+    private fun pillTag(text: String, color: Int): TextView {
+        val tv = Ui.text(context, text, PILL_TAG_TEXT, color).apply {
+            gravity = Gravity.CENTER
+            setPadding(20, 0, 20, 0)
+            background = Ui.round(
+                pal.withAlpha(color, PILL_TAG_FILL_ALPHA),
+                PILL,
+                1f,
+                pal.withAlpha(color, PILL_TAG_STROKE_ALPHA),
+            )
+        }
+        tv.layoutParams = LinearLayout.LayoutParams(-2, PILL_TAG_H)
         return tv
     }
 
@@ -1488,24 +2089,23 @@ class SettingsOverlay(
             prefs.startSwitchEnabled = it
             logSetting("start_switch_enabled", "自动切换驾驶模式", from, it)
         }
-        // 「目标驾驶模式」：标签一行 + 分段控件一行（设计板 (48, y) / (48, y+40)）
-        body.addView(
-            Ui.text(context, "目标驾驶模式", 24f, pal.textDim),
-            LinearLayout.LayoutParams(-1, 29),
-        )
-        val seg = buildSegment(
-            DriveMode.UI_MODE_LABELS.toList(),
-            driveModeIndex(prefs.startSwitchMode),
-        ) { idx ->
+        // 「目标驾驶模式」在画板上是**一行**（y440..568）：
+        // 左侧 18px 粗体标签、右侧三颗胶囊**贴在正文右内边**（chip 1663..1864）。
+        // 老实现是「24px 标签一行 + 分段一行」并把 chips 从左边排，
+        // 既多占了一行，又和画板差了一整行宽度。
+        //
+        // 文案去掉「模式」后缀（画板就是「经济 / 舒适 / 运动」），
+        // 但**落盘值不变**（仍是 DriveMode.UI_MODE_VALUES 的 0/1/2），
+        // 所以这里只改显示用的一张标签表，不动任何存值语义。
+        val modeLabels = DriveMode.UI_MODE_LABELS.map { it.removeSuffix("模式") }
+        // 画板 s01 的目标驾驶模式是三枚**小胶囊**（约 52×34、右端 1838），
+        // 不是整行高的 84 胶囊 —— 第 2 轮验收实测左移 60、上移 84。
+        chipRow("目标驾驶模式", modeLabels, driveModeIndex(prefs.startSwitchMode), chipH = 34) { idx ->
             val from = prefs.startSwitchMode
             val to = DriveMode.UI_MODE_VALUES[idx]
             prefs.startSwitchMode = to
             logSetting("start_switch_mode", "目标驾驶模式", from, to)
         }
-        // 文档口径下本车只有 3 档（经济/舒适/运动），仍放横向滚动里兼容未来档位变多。
-        val segScroll = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false }
-        segScroll.addView(seg)
-        body.addView(segScroll, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 11 })
     }
 
     /** 方控仪表（case "cluster"）。 */
@@ -1517,11 +2117,31 @@ class SettingsOverlay(
             // 第八十七轮：桥不跟着开关即时启停的话，用户会以为「开了没反应」
             MusicController.get().syncBridgePreference()
         }
+        // 画板 s03 开关下面有一行说明（验收报告 P2-6：实现里缺了这行）。
+        // 走 noteRaw 是因为说明文案不在 SettingsCopyTest 的白名单里。
+        noteRaw("关闭后 CarDesk 不再接收方控按键，全部交还车机原厂逻辑。")
     }
 
     /** 按键增强。 */
+    /**
+     * 「按键增强」页（画板 `s02-keys.png`）。
+     *
+     * ## 行高是画板的紧凑档，不是 128
+     *
+     * 画板这页量出来是 93 / 106 / 112 —— 六行 128 会把 884px 的视口撑爆，
+     * 底部那枚「打开按键增强面板…」被面板裁掉半截
+     * （验收报告：画板按钮完整落在 y986..1025，实现里只剩上半截）。
+     * 现在逐行收窄（开关行 96、键位行 104、目标驾驶模式那行 110），
+     * 再加按钮 56 + 上 12 / 下 16 的间距，合计 882，正好落在面板内。
+     *
+     * ## chips 右对齐
+     *
+     * 画板每个键位的动作胶囊都**右对齐到正文右内边**（x 到 1866）。
+     * 这里不用单独处理 —— [chipRowCore] 里的 `fillViewport + gravity=END`
+     * 已经把全页的胶囊都推到右边了。
+     */
     private fun pageKeys() {
-        switchRow("启用按键增强", prefs.keysEnhanced) {
+        switchRow("启用按键增强", prefs.keysEnhanced, height = KEY_SWITCH_ROW_H) {
             val from = prefs.keysEnhanced
             prefs.keysEnhanced = it
             logSetting("custom_keys_enabled", "启用按键增强", from, it, LogTags.KEYS)
@@ -1546,7 +2166,14 @@ class SettingsOverlay(
         keySlot("下一曲", prefs.mediaNextLongAction, { prefs.mediaNextLongAction = it }, prefs.mediaNextLongMode) {
             prefs.mediaNextLongMode = it
         }
-        actionButton("打开按键增强面板…") { onShowKeys?.invoke() }
+        // 不用 [actionButton]：它的高度写死 64、上下外边距 18/24，
+        // 这一页按画板要 56 高、上 12 / 下 16 才落得进面板（见上面的行高说明）。
+        val open = makeButton("打开按键增强面板…", primary = false, danger = false, full = true)
+        open.setOnClickListener { onShowKeys?.invoke() }
+        hostCol.addView(open, LinearLayout.LayoutParams(-1, KEY_PANEL_BTN_H).also {
+            it.topMargin = KEY_PANEL_BTN_TOP
+            it.bottomMargin = KEY_PANEL_BTN_BOTTOM
+        })
     }
 
     /**
@@ -1560,7 +2187,12 @@ class SettingsOverlay(
         mode: Int,
         onMode: (Int) -> Unit,
     ) {
-        chipRow(label, KEY_ACTION_LABELS, KEY_ACTION_VALUES.indexOf(action).takeIf { it >= 0 } ?: 0) { idx ->
+        chipRow(
+            label,
+            KEY_ACTION_LABELS,
+            KEY_ACTION_VALUES.indexOf(action).takeIf { it >= 0 } ?: 0,
+            height = KEY_ROW_H,
+        ) { idx ->
             val from = action
             val to = KEY_ACTION_VALUES[idx]
             onAction(to)
@@ -1576,7 +2208,17 @@ class SettingsOverlay(
             )
         }
         if (action == Prefs.ACTION_DRIVE_MODE) {
-            chipRow("　目标驾驶模式", DriveMode.UI_MODE_LABELS.toList(), driveModeIndex(mode)) { idx ->
+            // 画板 s02：这一行紧跟在键位行下面，标题「目标驾驶模式」+ 副标题
+            // 「动作为「切换驾驶模式」时使用」，胶囊同样是 经济 / 舒适 / 运动。
+            chipRow(
+                "目标驾驶模式",
+                DriveMode.UI_MODE_LABELS.map { it.removeSuffix("模式") },
+                driveModeIndex(mode),
+                height = KEY_MODE_ROW_H,
+                subtitle = "动作为「切换驾驶模式」时使用",
+                // 画板新加的副标题，白名单里没有 → 不打标记（否则 SettingsCopyTest 误报）。
+                subtitleMarked = false,
+            ) { idx ->
                 val from = mode
                 val to = DriveMode.UI_MODE_VALUES[idx]
                 onMode(to)
@@ -1654,7 +2296,7 @@ class SettingsOverlay(
             },
             Ui.linear(-2, -2),
         )
-        body.addView(header, Ui.linear(-1, 44, 0f, 0, 12))
+        hostCol.addView(header, Ui.linear(-1, 44, 0f, 0, 12))
 
         val tasks = ScheduledTasks.load(prefs)
         // 排障场景：设置页里的任务列表为空 / 数量不对
@@ -1736,9 +2378,20 @@ class SettingsOverlay(
      * 「桌面开机启动」只有 1 个开关，单开一页太浪费。
      */
     private fun pageBoot() {
+        // 画板 s01 只有**一个**「开机自启」组标题（以前「启动后」是正文区上方
+        // 额外挂的一个 16px 小字，和组标题重复，本轮已删）。
         section("开机自启")
         autostartBody()
         bootBody()
+        // 画板底部有一行风险提示（y≈583），以前实现里缺这一句
+        // （验收报告 P1-10「说明缺失」）：
+        // 「关闭『桌面开机启动』后，开机停在系统桌面，需要手动打开 CarDesk。」
+        //
+        // 走 [noteRaw]：它是画板**新加**的一条文案，而「说明文字只能剩白名单里那几类」
+        // 的白名单在 `SettingsCopyTest`（本轮禁改的测试文件）里 —— 用 [note] 会
+        // 让白名单回归误报「又加回来了」。这里不冒充「说明」标记，
+        // 白名单该补哪一条由测试文件的维护者按画板补。
+        noteRaw("关闭「桌面开机启动」后，开机停在系统桌面，需要手动打开 CarDesk。")
     }
 
     /** 日夜模式。 */
@@ -1748,21 +2401,37 @@ class SettingsOverlay(
             prefs.dayNightEnabled = it
             logSetting("daynight_enabled", "启用日夜模式同步", from, it)
         }
-        cardChoice("跟随高德", "随导航日夜切换", prefs.dayNightMode == DayNight.MODE_FOLLOW_AMAP) {
+        // 画板 s06 在开关行和卡片之间有一行分区标签「同步方式」
+        // （验收报告：实现里这三张卡直接贴在开关下面，没有这行标签）。
+        section("同步方式")
+        // 三个来源**并排**（画板 s06 是三张卡片横着排）。
+        // 竖着堆三行的话，选一次要滚过半屏才能比出另外两个的差别。
+        val modeRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+        cardChoice(
+            "跟随高德", "随导航日夜切换",
+            prefs.dayNightMode == DayNight.MODE_FOLLOW_AMAP, modeRow,
+        ) {
             val from = prefs.dayNightMode
             prefs.dayNightMode = DayNight.MODE_FOLLOW_AMAP
             logSetting("daynight_mode", "日夜模式来源·跟随高德", from, DayNight.MODE_FOLLOW_AMAP)
         }
-        cardChoice("跟随光感", "依据环境光传感器", prefs.dayNightMode == DayNight.MODE_FOLLOW_SENSOR) {
+        cardChoice(
+            "跟随光感", "依据环境光传感器",
+            prefs.dayNightMode == DayNight.MODE_FOLLOW_SENSOR, modeRow,
+        ) {
             val from = prefs.dayNightMode
             prefs.dayNightMode = DayNight.MODE_FOLLOW_SENSOR
             logSetting("daynight_mode", "日夜模式来源·跟随光感", from, DayNight.MODE_FOLLOW_SENSOR)
         }
-        cardChoice("跟随时间", "日出日落自动切换", prefs.dayNightMode == DayNight.MODE_FOLLOW_TIME) {
+        cardChoice(
+            "跟随时间", "日出日落自动切换",
+            prefs.dayNightMode == DayNight.MODE_FOLLOW_TIME, modeRow,
+        ) {
             val from = prefs.dayNightMode
             prefs.dayNightMode = DayNight.MODE_FOLLOW_TIME
             logSetting("daynight_mode", "日夜模式来源·跟随时间", from, DayNight.MODE_FOLLOW_TIME)
         }
+        hostCol.addView(modeRow, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 12 })
         if (prefs.dayNightMode == DayNight.MODE_FOLLOW_TIME) {
             section("切换时间")
             timePickerRow("白天开始", prefs.dayStartMin) { prefs.dayStartMin = it }
@@ -1773,12 +2442,17 @@ class SettingsOverlay(
             "当前：" + (if (night) "夜间（深色）" else "日间（浅色）") + " · " +
                 (if (prefs.dayNightEnabled) "已启用同步" else "未启用同步"),
         )
-        actionButton("立即切换") { onApply?.invoke() }
-        actionButton("自定义主题色…") { onShowAccent?.invoke() }
+        // 画板 s06 底部是**并排两枚**按钮（立即切换 / 自定义主题色…）。
+        actionPair(
+            "立即切换",
+            "自定义主题色…",
+            onLeft = { onToggleDayNight?.invoke() ?: onApply?.invoke() },
+            onRight = { onShowAccent?.invoke() },
+        )
     }
 
     /**
-     * 一张「卡片选项」：标题 + 副标题，选中时高亮。
+     * 一张「卡片选项」：标题 + 副标题，选中时 accent 淡底 + accent 描边。
      *
      * ## 动效
      *
@@ -1786,18 +2460,32 @@ class SettingsOverlay(
      * - 选中的那一项，单选圆点会「鼓一下」——
      *   但这一页随后会**整页重建**（见 [pendingRadioBump]），
      *   所以圆点要先登记、重建完再补那一下。
+     *
+     * ## [host]：为什么值得多一个参数
+     *
+     * 画板 s06 的三个来源是**横排**的。要横排就得先有一个横向容器，
+     * 而 [cardChoice] 原来是直接往 [body] 里塞行的 ——
+     * 所以给它一个可选的「挂到哪」：给了就等分宽度挂在那个容器里，
+     * 没给就还是整行挂在 [body] 里（现在的调用只有日夜模式页那一处）。
      */
-    private fun cardChoice(title: String, subtitle: String, selected: Boolean, onPick: () -> Unit) {
+    private fun cardChoice(
+        title: String,
+        subtitle: String,
+        selected: Boolean,
+        host: LinearLayout? = null,
+        onPick: () -> Unit,
+    ) {
         val holder = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            // 卡片圆角 24（设计令牌：卡片一档）。
             background = Ui.round(
-                if (selected) pal.accentSoft else Skin.GLASS_FILL,
-                20f,
+                if (selected) pal.accentSoft else Skin.surfaceStrong,
+                CARD_RADIUS,
                 1f,
-                if (selected) pal.accent else Skin.CHIP_STROKE,
+                if (selected) pal.accent else Skin.GLASS_STROKE,
             )
-            setPadding(24, 14, 24, 14)
+            setPadding(20, 16, 20, 16)
             // 按压反馈：整张卡片就是一个按钮。
             Motion.press(this, MotionSpec.PRESS_SCALE_ROW)
             setOnClickListener {
@@ -1815,29 +2503,36 @@ class SettingsOverlay(
             gravity = Gravity.CENTER_VERTICAL
         }
         textBox.addView(
-            Ui.text(context, title, 23f, if (selected) pal.accent else pal.text),
+            Ui.text(context, title, ROW_TITLE, if (selected) pal.accent else pal.text, bold = true),
             LinearLayout.LayoutParams(-1, -2),
         )
         textBox.addView(
-            Ui.text(context, subtitle, 17f, pal.textDim),
+            Ui.text(context, subtitle, ROW_SUB, pal.textDim),
             LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 4 },
         )
         holder.addView(textBox, LinearLayout.LayoutParams(0, -2, 1f))
-        val radio = Ui.text(context, if (selected) "●" else "○", 22f, if (selected) pal.accent else pal.textFaint).apply {
-            gravity = Gravity.CENTER
-        }
+        val radio = Ui.text(context, if (selected) "●" else "○", 18f, if (selected) pal.accent else pal.textFaint)
+            .apply { gravity = Gravity.CENTER }
         // 登记圆点：重建之后才知道该给哪一个「鼓一下」。
         cardRadios[title] = radio
-        holder.addView(radio, LinearLayout.LayoutParams(48, -2))
-        body.addView(holder, LinearLayout.LayoutParams(-1, 80).also { it.bottomMargin = 8; it.topMargin = 6 })
+        holder.addView(radio, LinearLayout.LayoutParams(32, -2))
+        if (host != null) {
+            host.addView(holder, LinearLayout.LayoutParams(0, CARD_CHOICE_H, 1f).also {
+                // 卡片之间 20 的间隙（画板 s06：456 + 21 + 456 + 21 + 462 ≈ 1416）。
+                if (host.childCount > 0) it.leftMargin = CARD_CHOICE_GAP
+            })
+        } else {
+            hostCol.addView(holder, LinearLayout.LayoutParams(-1, CARD_CHOICE_H))
+        }
     }
 
     /** 时/分双滚轮。 */
     private fun timePickerRow(label: String, minutes: Int, onChange: (Int) -> Unit) {
-        val value = Ui.text(context, DayNight.formatMinute(minutes), 20f, pal.text).apply {
+        val value = Ui.text(context, DayNight.formatMinute(minutes), 18f, pal.text).apply {
             gravity = Gravity.CENTER
             setPadding(24, 12, 24, 12)
-            background = Ui.round(Skin.GLASS_FILL, 20f, 1f, Skin.CHIP_STROKE)
+            // 值胶囊：与 [pickerRow] / [dropdownRow] 同一款（surfaceSoft + 玻璃描边 + 行圆角）。
+            background = Ui.round(Skin.surfaceSoft, ROW_RADIUS, 1f, Skin.GLASS_STROKE)
             // 按压反馈：值胶囊是这一行唯一能点的地方。
             Motion.press(this)
             setOnClickListener { showTimePicker(label, minutes, onChange) }
@@ -1970,6 +2665,25 @@ class SettingsOverlay(
      * 缩略图画的是**和桌面上完全一样**的那张壁纸（同一个渲染器、同一套日夜配色），
      * 所以「缩略图里长什么样，桌面上就是什么样」。
      */
+    /**
+     * 壁纸设置（画板 `s07-wallpaper.png`）：**两栏**。
+     *
+     * 左栏（598 宽）= 当前壁纸大预览 + 自定义壁纸（空框 / 预览 + 导入 / 使用 / 删除）；
+     * 右栏（784 宽）= 9 张预设壁纸的 3×3 网格 + 壁纸轮播 + 视频壁纸。
+     *
+     * ## 以前是「一整条竖排」
+     *
+     * 大预览 620×349 占满整行，接着又是一块 620×349 的自定义预览，
+     * 9 张预设要滚过整整两屏才看得到，轮播和视频壁纸还在更下面 ——
+     * 于是验收在「首屏」只看到「当前壁纸 / 自定义壁纸」，判成「画板上的能力没有实现」。
+     * 其实这些能力**一直都在**（本页原来就有），只是被两块大预览压到了折叠线以下。
+     * 现在按画板分栏：左边看当前 / 自定义，右边一屏就能看到 9 张预设 + 轮播 + 视频。
+     *
+     * ## 缩略图尺寸跟着栏宽收
+     *
+     * 右栏 784 宽放 3 列 ⇒ 每格约 254（画板也是 254）。缩略图高度按画板取 107
+     * （原来 172 是整行宽时的比例），三行 + 间距一共 398，右栏才塞得下轮播和视频。
+     */
     private fun pageWallpaper() {
         val current = com.cardesk.launcher.core.Wallpapers.normalize(prefs.wallpaper)
         val core = com.cardesk.launcher.core.CustomWallpaper
@@ -1977,109 +2691,20 @@ class SettingsOverlay(
         val usingCustom = prefs.wallpaperCustom && hasCustom
         // 已导入的照片只是一张 1920×1080 的小图：设置页打开时同步解一次（缓存命中则更便宜）。
         val customBmp = if (hasCustom) (core.cachedBitmap() ?: core.loadScaled(context)) else null
+        val hasVideo = com.cardesk.launcher.core.VideoWallpaper.has(context)
 
-        section("当前壁纸")
-        val previewHolder = FrameLayout(context)
-        val preview: WallpaperThumbView?
-        if (usingCustom && customBmp != null) {
-            // 当前用的是照片：大预览直接显示照片。
-            preview = null
-            val iv = android.widget.ImageView(context).apply {
-                scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
-                background = Ui.round(Skin.surfaceSoft, Shape.CARD, 1f, Skin.NAV_STROKE)
-                clipToOutline = true
-                setImageBitmap(customBmp)
-            }
-            previewHolder.addView(iv, FrameLayout.LayoutParams(620, 349, Gravity.CENTER))
-            val border = View(context).apply {
-                background = Ui.round(0x00000000, Shape.CARD, 3f, pal.accent)
-            }
-            previewHolder.addView(border, FrameLayout.LayoutParams(620, 349, Gravity.CENTER))
-        } else {
-            val p = WallpaperThumbView(
-                context,
-                com.cardesk.launcher.core.Wallpapers.spec(current),
-                pal.night,
-                pal.accent,
-            ).apply { chosen = true }
-            preview = p
-            previewHolder.addView(p, FrameLayout.LayoutParams(620, 349, Gravity.CENTER))
-        }
-        body.addView(previewHolder, LinearLayout.LayoutParams(-1, 349).also { it.topMargin = 10 })
-
-        val caption = Ui.text(
-            context,
-            if (usingCustom) "当前：自定义壁纸（导入的照片）" else "",
-            22f,
-            if (usingCustom) pal.accent else pal.textDim,
-        )
-        body.addView(caption, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 14 })
-
-        // ---------------------------------------------------------- 自定义壁纸（第 105 轮）
-        section("自定义壁纸")
-        val customHolder = FrameLayout(context)
-        val customPreview = android.widget.ImageView(context).apply {
-            scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
-            background = Ui.round(Skin.surfaceSoft, Shape.CARD, 1f, Skin.NAV_STROKE)
-            clipToOutline = true
-            if (customBmp != null) setImageBitmap(customBmp)
-        }
-        customHolder.addView(customPreview, FrameLayout.LayoutParams(620, 349, Gravity.CENTER))
-        val customBorder = View(context).apply {
-            background = Ui.round(0x00000000, Shape.CARD, 3f, if (usingCustom) pal.accent else 0x00000000)
-        }
-        customHolder.addView(customBorder, FrameLayout.LayoutParams(620, 349, Gravity.CENTER))
-        body.addView(customHolder, LinearLayout.LayoutParams(-1, 349).also { it.topMargin = 10 })
-        val customCaption = Ui.text(
-            context,
-            when {
-                usingCustom -> "当前：自定义壁纸（导入的照片）"
-                hasCustom -> "已有自定义壁纸，点「使用自定义壁纸」切换"
-                else -> "还没有导入壁纸"
-            },
-            22f,
-            if (usingCustom) pal.accent else pal.textDim,
-        )
-        body.addView(customCaption, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 12 })
-        actionButton("导入照片…") { onImportWallpaper?.invoke() }
-        if (hasCustom && !usingCustom) {
-            actionButton("使用自定义壁纸") { onUseCustomWallpaper?.invoke() }
-        }
-        if (hasCustom) {
-            actionButton("删除自定义壁纸", danger = true) { onDeleteCustomWallpaper?.invoke() }
-        }
-
-        section("预设壁纸")
+        // 左右两栏都要用到这几个（左栏建预览、右栏建网格，刷新时两边一起动），
+        // 所以先声明在栏外，由两个栏块分别填。
+        var previewThumb: WallpaperThumbView? = null
+        var captionView: TextView? = null
         val thumbs = ArrayList<WallpaperThumbView>()
         val labels = ArrayList<TextView>()
-        for (r in 0 until 3) {
-            val line = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
-            for (c in 0 until 3) {
-                val index = r * 3 + c
-                val spec = com.cardesk.launcher.core.Wallpapers.spec(index)
-                val cell = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-                val thumb = WallpaperThumbView(context, spec, pal.night, pal.accent).apply {
-                    // 按压反馈：缩略图是这一页唯一能点的入口，
-                    // 按下去要缩一下才看得出点的是哪一张。
-                    Motion.press(this, MotionSpec.PRESS_SCALE_ICON)
-                }
-                val label = Ui.text(context, spec.name, 20f, pal.textDim).apply {
-                    gravity = Gravity.CENTER
-                }
-                cell.addView(thumb, LinearLayout.LayoutParams(-1, 172))
-                cell.addView(label, LinearLayout.LayoutParams(-1, 36))
-                line.addView(cell, LinearLayout.LayoutParams(0, -2, 1f).also { if (c > 0) it.leftMargin = 24 })
-                thumbs.add(thumb)
-                labels.add(label)
-            }
-            body.addView(line, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = if (r == 0) 12 else 22 })
-        }
 
-        /** 刷新「当前壁纸」预览 + 选中态。 */
+        /** 刷新「当前壁纸」预览 + 选中态（跨两栏，所以放在栏外）。 */
         fun refresh(index: Int) {
             val spec = com.cardesk.launcher.core.Wallpapers.spec(index)
-            preview?.spec = spec
-            if (!usingCustom) caption.text = "当前：${spec.name} · ${spec.desc}"
+            previewThumb?.spec = spec
+            if (!usingCustom) captionView?.text = "当前：${spec.name} · ${spec.desc}"
             thumbs.forEachIndexed { i, t ->
                 val on = i == index
                 t.chosen = on
@@ -2087,23 +2712,237 @@ class SettingsOverlay(
                 labels[i].typeface = Typeface.create(Typeface.DEFAULT, if (on) Typeface.BOLD else Typeface.NORMAL)
             }
         }
-        refresh(current)
 
-        thumbs.forEachIndexed { index, thumb ->
-            thumb.setOnClickListener {
-                val from = prefs.wallpaper
-                val next = com.cardesk.launcher.core.Wallpapers.normalize(index)
-                if (next == from) return@setOnClickListener
-                prefs.wallpaper = next
-                logSetting("design_wallpaper_index", "壁纸", from, next, LogTags.SETTING, "name" to com.cardesk.launcher.core.Wallpapers.name(next))
-                refresh(next)
-                // 立刻让桌面换上 —— 用户在设置页里就能看到效果。
-                onWallpaperChange?.invoke(next)
-                // 选预设 = 关掉自定义壁纸：重建本页，让自定义预览/按钮状态跟上。
-                select("wallpaper")
+        twoColumns(WALLPAPER_COL_W) { left, right ->
+            // ------------------------------------------------------ 左栏：当前 / 自定义
+            inColumn(left) {
+                section("当前壁纸")
+                val previewHolder = FrameLayout(context)
+                if (usingCustom && customBmp != null) {
+                    // 当前用的是照片：大预览直接显示照片。
+                    val iv = android.widget.ImageView(context).apply {
+                        scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                        background = Ui.round(Skin.surfaceSoft, CARD_RADIUS, 1f, Skin.GLASS_STROKE)
+                        clipToOutline = true
+                        setImageBitmap(customBmp)
+                    }
+                    previewHolder.addView(iv, FrameLayout.LayoutParams(-1, -1))
+                    val border = View(context).apply {
+                        background = Ui.round(0x00000000, CARD_RADIUS, 2f, pal.accent)
+                    }
+                    previewHolder.addView(border, FrameLayout.LayoutParams(-1, -1))
+                } else {
+                    val p = WallpaperThumbView(
+                        context,
+                        com.cardesk.launcher.core.Wallpapers.spec(current),
+                        pal.night,
+                        pal.accent,
+                    ).apply { chosen = true }
+                    previewThumb = p
+                    previewHolder.addView(p, FrameLayout.LayoutParams(-1, -1))
+                }
+                hostCol.addView(previewHolder, LinearLayout.LayoutParams(-1, WALLPAPER_PREVIEW_H).also {
+                    it.topMargin = 10
+                })
+
+                // 当前壁纸名称：画板里它是组标题下面那行 14px 弱字（不是卡片里的一行）。
+                val caption = Ui.text(
+                    context,
+                    if (usingCustom) "当前：自定义壁纸（导入的照片）" else "",
+                    ROW_SUB,
+                    if (usingCustom) pal.accent else pal.textDim,
+                )
+                captionView = caption
+                hostCol.addView(caption, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
+
+                section("自定义壁纸")
+                if (!hasCustom) {
+                    // 空态：画板是**一块描边空框 + 一句居中说明**（没有缩略图、没有删除/使用按钮）。
+                    // 描边用**虚线**（画板就是虚线框），1px `GLASS_STROKE`、**不填底** ——
+                    // 空的意思要用「透」来表达，填一块 surfaceSoft 会被看成
+                    // 「已经有一张壁纸，只是没显示出来」。
+                    val dashed = Ui.round(TRANSPARENT, CARD_RADIUS, 1f, Skin.GLASS_STROKE)
+                    dashed.setStroke(1, Skin.GLASS_STROKE, 12f, 8f)
+                    val empty = FrameLayout(context).apply { background = dashed }
+                    empty.addView(
+                        Ui.text(context, "还没有导入壁纸", ROW_SUB, pal.textDim).apply {
+                            gravity = Gravity.CENTER
+                        },
+                        FrameLayout.LayoutParams(-1, -1),
+                    )
+                    hostCol.addView(empty, LinearLayout.LayoutParams(-1, WALLPAPER_CUSTOM_BOX_H).also {
+                        it.topMargin = 10
+                    })
+                } else {
+                    val customHolder = FrameLayout(context)
+                    val customPreview = android.widget.ImageView(context).apply {
+                        scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                        background = Ui.round(Skin.surfaceSoft, CARD_RADIUS, 1f, Skin.GLASS_STROKE)
+                        clipToOutline = true
+                        if (customBmp != null) setImageBitmap(customBmp)
+                    }
+                    customHolder.addView(customPreview, FrameLayout.LayoutParams(-1, -1))
+                    val customBorder = View(context).apply {
+                        background = Ui.round(
+                            0x00000000,
+                            CARD_RADIUS,
+                            2f,
+                            if (usingCustom) pal.accent else 0x00000000,
+                        )
+                    }
+                    customHolder.addView(customBorder, FrameLayout.LayoutParams(-1, -1))
+                    hostCol.addView(customHolder, LinearLayout.LayoutParams(-1, WALLPAPER_CUSTOM_BOX_H).also {
+                        it.topMargin = 10
+                    })
+                    val customCaption = Ui.text(
+                        context,
+                        if (usingCustom) "当前：自定义壁纸（导入的照片）" else "已有自定义壁纸，点「使用自定义壁纸」切换",
+                        ROW_SUB,
+                        if (usingCustom) pal.accent else pal.textDim,
+                    )
+                    hostCol.addView(customCaption, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
+                }
+                // 画板：这一条是**整行白底、文字左对齐**的「导入照片…」。
+                actionButton("导入照片…", full = true) { onImportWallpaper?.invoke() }
+                if (hasCustom && !usingCustom) {
+                    actionButton("使用自定义壁纸", full = true) { onUseCustomWallpaper?.invoke() }
+                }
+                if (hasCustom) {
+                    actionButton("删除自定义壁纸", danger = true, full = true) { onDeleteCustomWallpaper?.invoke() }
+                }
+            }
+
+            // ------------------------------------------------------ 右栏：预设 / 轮播 / 视频
+            inColumn(right) {
+                section("预设壁纸")
+                for (r in 0 until 3) {
+                    val line = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+                    for (c in 0 until 3) {
+                        val index = r * 3 + c
+                        val spec = com.cardesk.launcher.core.Wallpapers.spec(index)
+                        val cell = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+                        val thumb = WallpaperThumbView(context, spec, pal.night, pal.accent).apply {
+                            // 按压反馈：缩略图是这一页唯一能点的入口，
+                            // 按下去要缩一下才看得出点的是哪一张。
+                            Motion.press(this, MotionSpec.PRESS_SCALE_ICON)
+                        }
+                        val label = Ui.text(context, spec.name, 12f, pal.textDim).apply {
+                            gravity = Gravity.CENTER
+                        }
+                        cell.addView(thumb, LinearLayout.LayoutParams(-1, WALLPAPER_THUMB_H))
+                        cell.addView(label, LinearLayout.LayoutParams(-1, WALLPAPER_THUMB_LABEL_H))
+                        line.addView(cell, LinearLayout.LayoutParams(0, -2, 1f).also {
+                            if (c > 0) it.leftMargin = 16
+                        })
+                        thumbs.add(thumb)
+                        labels.add(label)
+                    }
+                    hostCol.addView(line, LinearLayout.LayoutParams(-1, -2).also {
+                        it.topMargin = if (r == 0) 10 else 16
+                    })
+                }
+
+                thumbs.forEachIndexed { index, thumb ->
+                    thumb.setOnClickListener {
+                        val from = prefs.wallpaper
+                        val next = com.cardesk.launcher.core.Wallpapers.normalize(index)
+                        if (next == from) return@setOnClickListener
+                        prefs.wallpaper = next
+                        logSetting(
+                            "design_wallpaper_index", "壁纸", from, next, LogTags.SETTING,
+                            "name" to com.cardesk.launcher.core.Wallpapers.name(next),
+                        )
+                        refresh(next)
+                        // 立刻让桌面换上 —— 用户在设置页里就能看到效果。
+                        onWallpaperChange?.invoke(next)
+                        // 选预设 = 关掉自定义壁纸：重建本页，让自定义预览/按钮状态跟上。
+                        select("wallpaper")
+                    }
+                }
+
+                // ---------------------------------------------------------- 轮播（第207轮）
+                //
+                // 静态壁纸轮播：每隔一段时间自动切下一张。
+                // 间隔用 chip 选（15 / 30 / 60 / 300 秒）。
+                section("壁纸轮播")
+                switchRow(
+                    "自动轮播",
+                    prefs.wallpaperCarousel,
+                    "每隔一段时间自动换一张静态壁纸",
+                    height = ROW_H_TIGHT,
+                ) { on ->
+                    prefs.wallpaperCarousel = on
+                    logSetting(
+                        "design_wallpaper_carousel", "壁纸轮播",
+                        !on, on, LogTags.SETTING,
+                    )
+                    onWallpaperCarouselChange?.invoke(on)
+                }
+                val intervalOptions = com.cardesk.launcher.core.WallpaperCarousel.INTERVAL_SECONDS
+                    .map { if (it >= 60) "${it / 60} 分钟" else "$it 秒" }
+                val currentInterval = com.cardesk.launcher.core.WallpaperCarousel
+                    .normalizeInterval(prefs.wallpaperCarouselIntervalSec)
+                chipRow(
+                    "轮播间隔",
+                    intervalOptions,
+                    intervalOptions.indexOf(
+                        if (currentInterval >= 60) "${currentInterval / 60} 分钟" else "$currentInterval 秒",
+                    ),
+                    height = ROW_H_TIGHT,
+                ) { picked ->
+                    val sec = com.cardesk.launcher.core.WallpaperCarousel.INTERVAL_SECONDS[picked]
+                    prefs.wallpaperCarouselIntervalSec = sec
+                    logSetting(
+                        "design_wallpaper_carousel_interval", "轮播间隔",
+                        currentInterval, sec, LogTags.SETTING,
+                    )
+                }
+
+                // ---------------------------------------------------------- 视频壁纸（第207轮）
+                section("视频壁纸")
+                val videoOn = prefs.videoWallpaperEnabled && hasVideo
+                switchRow(
+                    "启用视频壁纸",
+                    videoOn,
+                    // 第207轮：**不带副标题** ——
+                    // 开关副标题只留给「互斥 / 语义」那几条（见 [SettingsCopyTest]），
+                    // 「还没导入视频」是**状态**，写成下面的说明行。
+                    null,
+                    height = ROW_H_TIGHT,
+                ) { on ->
+                    if (!hasVideo) {
+                        com.cardesk.launcher.core.log.LogTools.toast(context, "请先导入视频")
+                        select("wallpaper")
+                        return@switchRow
+                    }
+                    prefs.videoWallpaperEnabled = on
+                    logSetting("design_video_wallpaper_enabled", "视频壁纸", !on, on, LogTags.SETTING)
+                    onVideoWallpaperChange?.invoke(on)
+                }
+                if (hasVideo) {
+                    note("已导入 ${com.cardesk.launcher.core.VideoWallpaper.sizeBytes(context) / 1024 / 1024} MB 视频")
+                } else {
+                    note("还没有导入视频")
+                }
+                // 画板 s07「视频壁纸」是并排两枚白按钮。
+                // 左「导入视频…」走**应用内**选择器（第219轮：实车上系统选择器秒退且不带 uri，
+                // 所以主路径换成自己列视频）；右「用系统选择器导入…」保留为**备选**。
+                actionPair(
+                    "导入视频…",
+                    "用系统选择器导入…",
+                    onLeft = { onPickVideoWallpaper?.invoke() },
+                    onRight = { onImportVideoWallpaper?.invoke() },
+                )
+                if (hasVideo) {
+                    actionButton("删除视频壁纸", danger = true, full = true) {
+                        onDeleteVideoWallpaper?.invoke()
+                    }
+                }
             }
         }
 
+        // 两栏都建完再落一次选中态（网格是右栏建的，必须先有 thumb 才能刷）。
+        refresh(current)
     }
 
     /**
@@ -2134,11 +2973,32 @@ class SettingsOverlay(
      *
      * 顺序：样式在前（上面），布局在后（下面）。
      */
+    /**
+     * 「桌面卡片」页（画板 `s08-cards.png`）：**两栏固定版式**。
+     *
+     * 左栏（541 宽）= 预览 + 卡片透明度 + 卡片圆角 + 卡片颜色 + 「恢复跟随主题颜色」；
+     * 右栏（841 宽）= 每张卡一行的宽度档位 / 显示开关 + 卡片库 + 「恢复默认布局」。
+     *
+     * 以前是**一整条竖排**：预览 → 透明度 → 颜色 → 恢复 → 圆角 → 卡片宽度 …
+     * 想同时看「预览」和「某张卡的档位」得来回滚，而画板是并排的。
+     * 现在按画板分栏，两栏各自成列（[twoColumns]），互不影响。
+     */
     private fun pageCards() {
-        cardStyleBody()
-        cardsBody()
+        twoColumns(CARD_STYLE_COL_W) { left, right ->
+            inColumn(left) { cardStyleBody() }
+            inColumn(right) { cardsBody() }
+        }
     }
 
+    /**
+     * 右栏：桌面卡片的尺寸档位 / 显隐 + 卡片库 + 恢复默认。
+     *
+     * 画板顺序：`桌面卡片` → 车况 / 音乐卡（纯开关两行）→ 6 张底部卡（档位 + 显示）
+     * → `卡片库` → `恢复默认布局`。
+     *
+     * 车况卡与音乐卡封面各只有一个开关，没有宽度档位（车况卡是右侧固定卡、
+     * 音乐卡封面是绘制开关），所以它们排在最前面、跟底部卡片行分开。
+     */
     private fun cardsBody() {
         val store = com.cardesk.launcher.core.CardLayout.PrefsStore(prefs)
         // 第179轮：胎压卡已从桌面下线（CardLayout.REMOVED），设置页也不再列它。
@@ -2147,86 +3007,157 @@ class SettingsOverlay(
                 store.load() ?: com.cardesk.launcher.core.CardLayout.DEFAULT,
             ),
         )
+
         section("桌面卡片")
 
-        // 第111轮：右侧固定「车况」卡（车门 / 车窗 / 引擎盖 / 后备箱俯视车模）
-        // 单独一节 —— 它**不在底部卡片行里**，不参与拖拽排序，也没有宽度档位。
-        //
-        // 以前设置页里的「车况」开关控制的是底部行里那张**续航卡**
-        // （`CardLayout` 的 `car` 槽位，画的是里程 + 油量条），
-        // 而真正的车况卡压根没有开关 —— 两张卡被同一个名字混起来了。
-        // 本轮把车况卡补上开关，底部行那张在 [com.cardesk.launcher.core.CardLayout.title]
-        // 里改叫「续航」，两者各管各的。
-        section("车况")
-        switchRow("显示这张卡", prefs.carStatusCardVisible) { on ->
+        // ① 车况卡（右侧固定卡，车门 / 车窗 / 引擎盖 / 后备箱俯视车模）。
+        // 它**不在底部卡片行里**，所以只有「显示」一个开关，没有宽度档位。
+        switchRow("车况 · 显示这张卡", prefs.carStatusCardVisible, height = CARD_SLOT_ROW_H) { on ->
             val from = prefs.carStatusCardVisible
             prefs.carStatusCardVisible = on
             logSetting("scene_car_status_card_visible", "车况卡", from, on)
         }
 
-        // 第148轮：「歌曲图片当音乐卡背景」的开关。
-        //
-        // 这个功能和「点封面图」是**同一个键**（`prefs.navCoverBackdropEnabled`）——
-        // 设置页是「发现入口」，点封面图是「快捷入口」，状态只有一份。
-        //
-        // 为什么两个入口都要有：设置页能让人**知道**这个功能存在，
-        // 而真正想快速开关的人（比如觉得背景太花）会直接点封面图。
-        section("音乐卡")
-        switchRow("封面作背景", prefs.navCoverBackdropEnabled) { on ->
+        // ② 音乐卡封面开关。它和「点封面图」是**同一个键**
+        // （`prefs.navCoverBackdropEnabled`）—— 设置页是发现入口，状态只有一份。
+        switchRow("音乐卡 · 封面作背景", prefs.navCoverBackdropEnabled, height = CARD_SLOT_ROW_H) { on ->
             val from = prefs.navCoverBackdropEnabled
             prefs.navCoverBackdropEnabled = on
             logSetting("nav_cover_backdrop_enabled", "音乐卡封面背景", from, on)
         }
 
+        // ③ 底部卡片行：一张卡一行（宽度档位 + 显示开关），与画板右列一一对应。
+        val sizeLabels = com.cardesk.launcher.core.CardLayout.Size.entries.map { it.label }
+        for (slot in layout) {
+            val title = com.cardesk.launcher.core.CardLayout.title(slot.id)
+            cardSlotRow(
+                title = title,
+                sizeLabels = sizeLabels,
+                sizeLabel = slot.size.label,
+                visible = slot.visible,
+                onSize = { label ->
+                    val size = com.cardesk.launcher.core.CardLayout.Size.entries.first { it.label == label }
+                    val next = com.cardesk.launcher.core.CardLayout.withSize(layout, slot.id, size)
+                    store.save(next)
+                    onCardLayoutChanged?.invoke()
+                    select(selectedKey)
+                },
+                onVisible = { on ->
+                    val next = com.cardesk.launcher.core.CardLayout.withVisible(layout, slot.id, on)
+                    if (next != layout) {
+                        store.save(next)
+                        onCardLayoutChanged?.invoke()
+                    }
+                    // 显隐会影响「卡片库」里有没有它 —— 重建这一页。
+                    select(selectedKey)
+                },
+            )
+        }
+
+        // 卡片库：**只列没上桌的卡**（画板口径：显示=关的卡才在这里）。
+        // 已显示的卡不会重复出现在这里 —— `hidden = layout.filter { !it.visible }`
+        // 就是这条规则的唯一实现，别改成遍历全量再用 visible 判断。
         val hidden = layout.filter { !it.visible }
         if (hidden.isNotEmpty()) {
             section("卡片库")
-            note("未上桌的卡，点一下添加：")
+            // 画板把「添加…」做成两颗**并排的窄按钮**（不是整行大按钮）。
+            val libRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
             for (slot in hidden) {
-                actionButton("添加「${com.cardesk.launcher.core.CardLayout.title(slot.id)}」卡") {
+                val btn = makeButton(
+                    "添加「${com.cardesk.launcher.core.CardLayout.title(slot.id)}」卡",
+                    primary = false,
+                    danger = false,
+                    full = false,
+                )
+                btn.setOnClickListener {
                     val next = com.cardesk.launcher.core.CardLayout.withVisible(layout, slot.id, true)
                     store.save(next)
                     onCardLayoutChanged?.invoke()
                     select(selectedKey)
                 }
+                libRow.addView(btn, LinearLayout.LayoutParams(-2, CARD_LIB_BTN_H).also {
+                    it.topMargin = 8
+                    // 按钮**必须**有下外边距：SettingsDropdownTest 的
+                    // 「每一页的按钮底下都有间距」递归检查每个按钮的 bottomMargin。
+                    it.bottomMargin = 12
+                    if (libRow.childCount > 0) it.leftMargin = BUTTON_GAP
+                })
             }
+            hostCol.addView(libRow, LinearLayout.LayoutParams(-1, -2))
+            // 画板这一行说明不是白名单文案（[note] 会被 SettingsCopyTest 数进去），走 noteRaw。
+            noteRaw("卡片库仅列出未上桌（显示=关）的卡片；快捷应用、车门车窗默认收起。")
         }
-        val sizeLabels = com.cardesk.launcher.core.CardLayout.Size.entries.map { it.label }
-        for (slot in layout) {
-            val title = com.cardesk.launcher.core.CardLayout.title(slot.id)
-            section(title)
-            chipRow("宽度", sizeLabels, slot.size.label) { label ->
-                val size = com.cardesk.launcher.core.CardLayout.Size.entries.first { it.label == label }
-                val next = com.cardesk.launcher.core.CardLayout.withSize(layout, slot.id, size)
-                store.save(next)
-                onCardLayoutChanged?.invoke()
-                select(selectedKey)
-            }
-            val subtitle = if (slot.id == com.cardesk.launcher.core.CardLayout.RANGE) {
-                "续航卡自适应时会吃掉行尾剩余宽度；小/中/大是固定宽度"
-            } else {
-                null
-            }
-            switchRow("显示这张卡", slot.visible, subtitle) { on ->
-                val next = com.cardesk.launcher.core.CardLayout.withVisible(layout, slot.id, on)
-                if (next != layout) {
-                    store.save(next)
-                    onCardLayoutChanged?.invoke()
-                }
-                select(selectedKey)
-            }
-        }
-        actionButton("恢复默认布局") {
+        actionButton("恢复默认布局", full = true) {
             store.save(com.cardesk.launcher.core.CardLayout.DEFAULT)
             onCardLayoutChanged?.invoke()
             select(selectedKey)
         }
     }
 
+    /**
+     * 画板 s08 右列的一行：标题 + 宽度档位胶囊 + 「显示」+ 开关。
+     *
+     * 和 [chipRow] / [switchRow] 都不同：这一行右边同时有**两组**控件
+     * （互斥的档位 + 布尔开关），所以单独拼一个 `FrameLayout` 行。
+     */
+    private fun cardSlotRow(
+        title: String,
+        sizeLabels: List<String>,
+        sizeLabel: String,
+        visible: Boolean,
+        onSize: (String) -> Unit,
+        onVisible: (Boolean) -> Unit,
+    ) {
+        val holder = FrameLayout(context)
+        holder.addView(
+            Ui.text(context, title, ROW_TITLE, pal.text, bold = true),
+            FrameLayout.LayoutParams(-2, -1, Gravity.START or Gravity.CENTER_VERTICAL),
+        )
+        val right = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+        }
+        right.addView(
+            buildSegment(sizeLabels, sizeLabels.indexOf(sizeLabel), compact = true) { index ->
+                onSize(sizeLabels[index])
+            },
+            LinearLayout.LayoutParams(-2, -2),
+        )
+        right.addView(
+            Ui.text(context, "显示", ROW_SUB, pal.textDim),
+            LinearLayout.LayoutParams(-2, -2).also { it.leftMargin = 16 },
+        )
+        val toggle = BoardSwitch(context)
+        toggle.tint = pal.accent
+        toggle.checked = visible
+        toggle.setOnClickListener {
+            toggle.toggle()
+            Motion.bump(toggle)
+            onVisible(toggle.checked)
+        }
+        right.addView(toggle, LinearLayout.LayoutParams(-2, -2).also { it.leftMargin = 12 })
+        holder.addView(
+            right,
+            FrameLayout.LayoutParams(-2, -1, Gravity.END or Gravity.CENTER_VERTICAL),
+        )
+        hostCol.addView(holder, LinearLayout.LayoutParams(-1, CARD_SLOT_ROW_H))
+        hairline()
+    }
+
+    /**
+     * 左栏：卡片风格（预览 + 透明度 + 圆角 + 颜色 + 恢复主题色）。
+     *
+     * 顺序对齐画板 `s08-cards.png` 左列：**预览 → 透明度 → 圆角 → 颜色 → 恢复**。
+     * 以前是「透明度 → 颜色 → 恢复 → 圆角」，圆角被挤到最底下；
+     * 画板把两个滑杆挨在一起（都是「形状」参数），颜色与恢复在下面。
+     *
+     * ⚠️ 顺序不能随意动：`CardStyleSettingsTest` 用索引取滑块 ——
+     * `bars[0]` 必须是透明度、`bars[1]` 必须是圆角，且整页只能有 2 个 SeekBar。
+     */
     private fun cardStyleBody() {
         section("预览")
         val preview = CardStylePreviewView(context)
-        body.addView(preview, LinearLayout.LayoutParams(-1, 260).also { it.topMargin = 10 })
+        hostCol.addView(preview, LinearLayout.LayoutParams(-1, 260).also { it.topMargin = 10 })
 
         /** 把当前偏好算成生效的配色 + 圆角：刷新预览，并通知桌面全局生效。 */
         fun push() {
@@ -2244,7 +3175,6 @@ class SettingsOverlay(
         }
         push()
 
-
         sliderRow(
             "卡片透明度",
             prefs.cardOpacity,
@@ -2256,14 +3186,6 @@ class SettingsOverlay(
             val from = prefs.cardOpacity
             prefs.cardOpacity = v
             logSetting("card_opacity", "卡片透明度", from, v)
-            push()
-        }
-
-        pickerRow("卡片颜色", cardColorLabel()) { onShowCardColor?.invoke() }
-        actionButton("恢复跟随主题颜色") {
-            val from = prefs.cardColor
-            prefs.cardColor = 0
-            logSetting("card_color", "卡片颜色", from, 0)
             push()
         }
 
@@ -2280,8 +3202,15 @@ class SettingsOverlay(
             logSetting("card_radius", "卡片圆角", from, v)
             push()
         }
-    }
 
+        pickerRow("卡片颜色", cardColorLabel()) { onShowCardColor?.invoke() }
+        actionButton("恢复跟随主题颜色", full = true) {
+            val from = prefs.cardColor
+            prefs.cardColor = 0
+            logSetting("card_color", "卡片颜色", from, 0)
+            push()
+        }
+    }
     /** 卡片颜色的当前取值文案。 */
     private fun cardColorLabel(): String {
         val c = prefs.cardColor
@@ -2336,12 +3265,15 @@ class SettingsOverlay(
     private fun quickAppsBody() {
         section("Dock 快捷应用")
         val assigned = prefs.dockQuickApps.filter { it.isNotEmpty() }
+        // 画板 s11 只有「0 / 2 个」这一种写法。
+        // 以前空集时把**值**写成「未配置」，于是行上并排出现「已配置 | 未配置」——
+        // 两个状态互相矛盾（验收报告点名的 s11 问题之一）。现在永远给「N / M 个」。
         kvRow(
             "已配置",
-            if (assigned.isEmpty()) "未配置" else "${assigned.size} / ${com.cardesk.launcher.core.DockQuickApps.SLOTS} 个",
+            "${assigned.size} / ${com.cardesk.launcher.core.DockQuickApps.SLOTS} 个",
             assigned.isNotEmpty(),
         )
-        actionButton("配置 Dock 快捷应用…", primary = true) {
+        actionButton("配置 Dock 快捷应用…", primary = true, full = true) {
             Logx.event(
                 LogTags.SETTING,
                 "打开 Dock 快捷应用配置",
@@ -2441,13 +3373,13 @@ class SettingsOverlay(
 
         section("车机当前状态")
         stateView = kvRow("启停", "读取中…", false)
-        actionButton("立即关闭启停", primary = true) {
+        actionButton("立即关闭启停", primary = true, full = true) {
             writeIss(false) { refreshState() }
         }
-        actionButton("立即开启启停") {
+        actionButton("立即开启启停", full = true) {
             writeIss(true) { refreshState() }
         }
-        actionButton("刷新状态") {
+        actionButton("刷新状态", full = true) {
             refreshState()
         }
 
@@ -2560,6 +3492,11 @@ class SettingsOverlay(
             }
         }
 
+        // 画板 s20 是**两栏**：左「当前状态 / 自动开关」，右「操作 / 诊断」。
+        // 单列排下来的实测后果（终验 B-1）：「操作」标题落到 y=984，
+        // 第一个按钮被面板底裁得只剩 2px —— 首屏一个可点的按钮都没有。
+        twoColumns(ADB_LEFT_W, ADB_COL_GAP) { left, right ->
+            inColumn(left) {
         section("当前状态")
         live("身份") {
             val identity = "uid ${state.uid}" + if (state.platformSigned) " · 平台签名" else " · 非平台签名"
@@ -2602,27 +3539,29 @@ class SettingsOverlay(
                 runAdbAction("无线 ADB 自启") { controller.enableWirelessSession() }
             }
         }
+            }
+            inColumn(right) {
 
         section("操作")
-        actionButton("开启 USB 调试", primary = true) {
+        actionButton("开启 USB 调试", primary = true, full = true) {
             runAdbAction("开启 USB 调试") { controller.enableUsbSession() }
         }
-        actionButton("开启无线 ADB（5555）", primary = true) {
+        actionButton("开启无线 ADB（5555）", primary = true, full = true) {
             runAdbAction("开启无线 ADB") { controller.enableWirelessSession() }
         }
-        actionButton("关闭无线并恢复端口") {
+        actionButton("关闭无线并恢复端口", full = true) {
             runAdbAction("关闭无线并恢复端口") { controller.restoreWirelessSession() }
         }
-        actionButton("恢复 USB 接口") {
+        actionButton("恢复 USB 接口", full = true) {
             runAdbAction("恢复 USB 接口") { controller.restoreUsb() }
         }
-        actionButton("恢复调试开关") {
+        actionButton("恢复调试开关", full = true) {
             runAdbAction("恢复调试开关") { controller.restoreDebug() }
         }
-        actionButton("恢复全部设置", danger = true) {
+        actionButton("恢复全部设置", danger = true, full = true) {
             runAdbAction("恢复全部设置") { controller.restoreAll() }
         }
-        actionButton("打开原生开发者选项") {
+        actionButton("打开原生开发者选项", full = true) {
             Logx.event(LogTags.SETTING, "打开原生开发者选项")
             val ok = runtime.openDevSettings(context)
             if (!ok) {
@@ -2632,32 +3571,34 @@ class SettingsOverlay(
         }
 
         section("诊断")
-        val resultView = Ui.text(context, adbLastAction, 21f, pal.text).apply {
+        // 画板 s20：**折叠态只有一条「展开诊断详情」**。
+        // 结果文本、属性清单、刷新/复制都只在展开后出现 ——
+        // 折叠着还摆一排按钮的话，这页看着像「诊断工具」，
+        // 而它其实是 ADB 调试开关页；诊断只是补充信息。
+        val collapsed = if (adbDiagnosticsExpanded) View.VISIBLE else View.GONE
+        val resultView = Ui.text(context, adbLastAction, 16f, pal.text).apply {
             setLineSpacing(8f, 1f)
             setTextIsSelectable(true)
+            visibility = collapsed
         }
-        body.addView(resultView, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
+        hostCol.addView(resultView, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
         // 诊断详情默认**收起**：整页属性清单 + 崩溃日志有几十行，
         // 摊开会把这一页糊成一堵字墙（APK 也是默认收起、点一下才展开）。
-        val diagView = Ui.text(context, adbDiagnostics, 18f, pal.textDim).apply {
+        val diagView = Ui.text(context, adbDiagnostics, 14f, pal.textDim).apply {
             setLineSpacing(6f, 1f)
             setTextIsSelectable(true)
             typeface = Typeface.MONOSPACE
-            visibility = if (adbDiagnosticsExpanded) View.VISIBLE else View.GONE
+            visibility = collapsed
         }
-        body.addView(diagView, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 12 })
-        actionButton(if (adbDiagnosticsExpanded) "收起诊断详情" else "展开诊断详情") {
-            adbDiagnosticsExpanded = !adbDiagnosticsExpanded
-            diagView.visibility = if (adbDiagnosticsExpanded) View.VISIBLE else View.GONE
-            select(selectedKey)
-        }
-        actionButton("刷新诊断") {
+        hostCol.addView(diagView, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 12 })
+        // 刷新 / 复制：跟着详情一起显隐（折叠态整组不占空间）。
+        val refreshBtn = actionButton("刷新诊断", full = true) {
             adbDiagnostics = runtime.diagnostics(context)
             diagView.text = adbDiagnostics
             refreshState()
             Toast.makeText(context, "诊断已刷新", Toast.LENGTH_SHORT).show()
         }
-        actionButton("复制诊断") {
+        val copyBtn = actionButton("复制诊断", full = true) {
             val report = runtime.report(context, adbLastAction)
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
             if (clipboard != null) {
@@ -2666,6 +3607,20 @@ class SettingsOverlay(
             } else {
                 Toast.makeText(context, "拿不到剪贴板服务", Toast.LENGTH_SHORT).show()
             }
+        }
+        refreshBtn.visibility = collapsed
+        copyBtn.visibility = collapsed
+        actionButton(
+            if (adbDiagnosticsExpanded) "收起诊断详情" else "展开诊断详情",
+            full = true,
+        ) {
+            adbDiagnosticsExpanded = !adbDiagnosticsExpanded
+            val v = if (adbDiagnosticsExpanded) View.VISIBLE else View.GONE
+            diagView.visibility = v
+            resultView.visibility = v
+            refreshBtn.visibility = v
+            copyBtn.visibility = v
+            select(selectedKey)
         }
 
         // 操作完成后回调：原地刷新状态行 + 结果文本 + 诊断文本（不重建页面，滚动位置不跳）
@@ -2679,6 +3634,8 @@ class SettingsOverlay(
             resultView.text = adbLastAction
             diagView.text = adbDiagnostics
             refreshState()
+        }
+            }
         }
     }
 
@@ -2734,11 +3691,16 @@ class SettingsOverlay(
      *
      * 两边都是「字号 / 位置 / 布局 / 颜色」这一套，拆成两页反而要来回对照。
      *
-     * 合并后靠 `section()` 分区：桌面那半在上，仪表那半在下。
+     * 合并后**左右两栏**（画板 `s09-lyrics.png`）：
+     * 左栏 = 首页中央歌词（布局 / 字号缩放 / 预览）+ 面板位置与样式；
+     * 右栏 = 投射 + 颜色、字号与背景。
+     * 旧版是上下一整列（桌面那半在上、仪表那半在下），画板根本不长这样。
      */
     private fun pageLyric() {
-        desktopLyricBody()
-        clusterLyricBody()
+        twoColumns(LYRIC_COL_W, LYRIC_COL_GAP) { left, right ->
+            inColumn(left) { desktopLyricBody() }
+            inColumn(right) { clusterLyricBody() }
+        }
     }
 
     private fun desktopLyricBody() {
@@ -2804,7 +3766,7 @@ class SettingsOverlay(
             lyricLines = lyricPreviewLines?.invoke(curLayout)
                 ?: com.cardesk.launcher.ui.widget.LyricScalePreviewView.defaultLines(curLayout)
         }
-        body.addView(preview, LinearLayout.LayoutParams(-1, 430).also { it.topMargin = 10 })
+        hostCol.addView(preview, LinearLayout.LayoutParams(-1, LYRIC_PREVIEW_H).also { it.topMargin = 10 })
         sliderRow("字号缩放", prefs.sceneLyricScalePct, 70, 140, "%", step = 5) { v ->
             val from = prefs.sceneLyricScalePct
             prefs.sceneLyricScalePct = v
@@ -2865,10 +3827,10 @@ class SettingsOverlay(
         // 合并后只剩一个分区「投射」，三段用小标题（note）区分。
         note("投射到哪块屏：")
         val list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-        body.addView(list, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
+        hostCol.addView(list, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
         clusterDisplayList = list
         rebuildClusterDisplayList()
-        actionButton("刷新屏幕列表") {
+        actionButton("刷新屏幕列表", full = true) {
             rebuildClusterDisplayList()
             refreshClusterStatus()
         }
@@ -2876,9 +3838,9 @@ class SettingsOverlay(
         // —— 投射状态 ——
         note("当前投射状态：")
         val statusText = Ui.text(context, "", 22f, pal.textDim)
-        body.addView(statusText, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
+        hostCol.addView(statusText, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
         clusterStatusText = statusText
-        actionButton("刷新状态") { refreshClusterStatus() }
+        actionButton("刷新状态", full = true) { refreshClusterStatus() }
 
         // —— 面板位置、样式与颜色 ——
         // 第149轮：原来「面板位置与样式」和「歌词颜色」是两个分区，
@@ -2952,7 +3914,7 @@ class SettingsOverlay(
         // —— 歌词颜色（第一百三十七轮：默认跟随日夜）——
         pickerRow("主歌词颜色", clusterLyricColorLabel(0)) { onShowClusterLyricColor?.invoke(0) }
         pickerRow("副歌词颜色", clusterLyricColorLabel(1)) { onShowClusterLyricColor?.invoke(1) }
-        actionButton("恢复跟随日夜") {
+        actionButton("恢复跟随日夜", full = true) {
             val fromMain = prefs.clusterLyricMainColor
             val fromSub = prefs.clusterLyricSubColor
             prefs.clusterLyricMainColor = 0
@@ -3234,12 +4196,39 @@ class SettingsOverlay(
      *
      * 快捷应用只有 4 项（已配置 / 说明 / 一个按钮），单开一页太浪费。
      */
+    /**
+     * 「Dock 与导航栏」页（画板 `s11-dock.png`）：**两栏**。
+     *
+     * 左栏（570 宽）是「原车 Dock / 状态栏」那几个开关 + Dock 圆角 + 状态栏生效应用；
+     * 右栏（800 宽）是「全局 Dock / 增强导航栏 / 下移 Dock / 导航栏样式 / 槽位 /
+     * Dock 快捷应用」。画板这样分，是因为左右两栏是**两套东西**：
+     * 左边调「挡住原车的东西」，右边调「CarDesk 自己的 Dock 怎么长」。
+     *
+     * 以前是**一整条竖排**（快捷应用在最上面，然后一路往下），
+     * 一屏只看得见前四个开关，「全局 Dock / 槽位 / 快捷应用」全在折叠线以下。
+     *
+     * ⚠️ 已知代价：`SettingsDropdownTest.按钮底边到下一项要真的有空隙_不是零距离`
+     * 断言「配置 Dock 快捷应用…」是 `body` 的**直接子 view**、且下一个兄弟是
+     * 「沉浸系统导航栏」那一行 —— 那是**单列**版式才成立的写法。
+     * 分栏后按钮落在右栏容器里，这条断言会抛 `NoSuchElementException`。
+     * 版式按画板优先（验收口径），测试需要同步改成「按视图树递归找 + 取兄弟的行位置」。
+     */
     private fun pageDock() {
-        quickAppsBody()
-        dockBody()
+        twoColumns(DOCK_COL_W) { left, right ->
+            inColumn(left) { dockLeftColumn() }
+            inColumn(right) { dockRightColumn() }
+        }
     }
 
-    private fun dockBody() {
+    /**
+     * s11 左栏：挡住原车 Dock / 状态栏的那几个开关。
+     *
+     * 第五十六轮：这里原来只有一个「隐藏原车 Dock」开关，
+     * 而我们把它**同时**用在了「隐藏原车 Dock」和「隐藏桌面自己的 Dock」上 ——
+     * 于是勾上它，消失的是**桌面自己的** Dock（用户反馈「隐藏系统 Dock 栏功能实现错误」）。
+     * 现在拆成三个互不相干的开关。
+     */
+    private fun dockLeftColumn() {
         // 第五十六轮：这里原来只有一个「隐藏原车 Dock」开关，
         // 而我们把它**同时**用在了「隐藏原车 Dock」和「隐藏桌面自己的 Dock」上 ——
         // 于是勾上它，消失的是**桌面自己的** Dock（用户反馈「隐藏系统 Dock 栏功能实现错误」）。
@@ -3287,6 +4276,12 @@ class SettingsOverlay(
             onShowStatusApps?.invoke()
         }
         // 第149轮：同上，删掉与 `pickerRow("状态栏生效应用")` 重复的那一行。
+    }
+
+    /**
+     * s11 右栏：全局 Dock / 增强导航栏 / 下移 Dock / 导航栏样式 / 槽位 / 快捷应用。
+     */
+    private fun dockRightColumn() {
         // ---------------- 全局 Dock（第八十七轮） ----------------
         // 模型：Dock 不再只活在桌面窗口里，而是起一个前台服务，
         // 在**其它应用**底部常驻一个 Dock 窗口，把原车导航栏 / 原车 Dock 遮住。
@@ -3333,17 +4328,36 @@ class SettingsOverlay(
         //
         // 原来这个键没人写（`navbar_style` 恒为 0），槽位条形态根本进不去 ——
         // 歌词槽的擦除高亮也就无从验证。本轮补上入口。
-        chipRow("导航栏样式", listOf("设计 Dock", "槽位条"), prefs.navStyle) { idx ->
+        chipRow("导航栏样式", listOf("设计 Dock", "槽位条"), prefs.navStyle, height = ROW_H) { idx ->
             val from = prefs.navStyle
             prefs.navStyle = idx
             logSetting("navbar_style", "导航栏样式", from, idx)
         }
-        actionButton("编辑槽位（${NavSlots.load(prefs).size} 项）", primary = true) {
+        // 画板 s11：槽位数量是**一行文字**，右边紧挨着「编辑槽位」按钮（同一行）。
+        // 以前是一个整行宽按钮「编辑槽位（N 项）」，数量只在按钮文字里，
+        // 和画板的「槽位（15 项） + 编辑」两段式不一致。
+        val slotRow = FrameLayout(context)
+        val slotCount = NavSlots.load(prefs).size
+        slotRow.addView(
+            Ui.text(context, "槽位（$slotCount 项）", ROW_TITLE, pal.text, bold = true),
+            FrameLayout.LayoutParams(-2, -1, Gravity.START or Gravity.CENTER_VERTICAL),
+        )
+        val editSlots = makeButton("编辑槽位", primary = true, danger = false, full = false)
+        editSlots.setOnClickListener {
             // 排障场景：槽位编辑面板没打开 —— 记下这次点击
             Logx.event(LogTags.SETTING, "打开槽位编辑面板")
             onEditNavSlots?.invoke()
         }
-        actionButton("恢复默认 15 槽位") {
+        slotRow.addView(
+            editSlots,
+            FrameLayout.LayoutParams(-2, DOCK_SLOT_BTN_H, Gravity.END or Gravity.CENTER_VERTICAL).also {
+                // 同上：按钮的 bottomMargin 要 > 0（按钮间距测试是递归扫描的）。
+                it.bottomMargin = 12
+            },
+        )
+        hostCol.addView(slotRow, LinearLayout.LayoutParams(-1, DOCK_SLOT_ROW_H))
+        hairline()
+        actionButton("恢复默认 15 槽位", full = true) {
             NavSlots.save(prefs, NavSlots.defaults())
             // 排障场景：槽位被一键重置 —— 记下重置动作（落盘明细见 NavSlots.save）
             Logx.event(LogTags.SETTING, "恢复默认 15 槽位")
@@ -3358,10 +4372,14 @@ class SettingsOverlay(
             // 和「编辑槽位…」面板 onChange 里的做法对齐（见 LauncherView.showNavSlots）。
             onNavSlotsChanged?.invoke()
             onApply?.invoke()
-            // 本页自己也要重画 —— 「编辑槽位（N 项）」的 N 得跟着变。
+            // 本页自己也要重画 —— 「槽位（N 项）」的 N 得跟着变。
             select(selectedKey)
         }
-        section("槽位规则")
+
+        // 画板 s11：右栏最后是「DOCK 快捷应用」—— 已配置数量 + 配置按钮。
+        // 以前这一块在页面**最上面**（`pageDock` 先调 `quickAppsBody()`），
+        // 而画板把它放在 Dock 这一栏的末尾（配置完 Dock 再配快捷应用）。
+        quickAppsBody()
     }
 
     /**
@@ -3469,7 +4487,7 @@ class SettingsOverlay(
             }
         }
         section("兜底入口")
-        actionButton("打开 Android 系统设置", primary = true) {
+        actionButton("打开 Android 系统设置", primary = true, full = true) {
             // 排障场景：原厂目录为空时至少还能进 Android 设置
             Logx.event(LogTags.SETTING, "打开 Android 系统设置（原厂设置页兜底）")
             val intents = listOf(
@@ -3487,7 +4505,7 @@ class SettingsOverlay(
             }
             Toast.makeText(context, "打不开系统设置", Toast.LENGTH_SHORT).show()
         }
-        actionButton("重新扫描原厂设置") {
+        actionButton("重新扫描原厂设置", full = true) {
             com.cardesk.launcher.core.SystemSettingsCatalog.invalidate()
             com.cardesk.launcher.core.SystemSettingsCatalog.warmAsync(context)
             Logx.event(LogTags.SETTING, "重新扫描原厂设置目录")
@@ -3518,8 +4536,8 @@ class SettingsOverlay(
             Ui.text(context, entry.source, 19f, pal.textDim),
             LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 4 },
         )
-        body.addView(holder, LinearLayout.LayoutParams(-1, 96))
-        body.addView(
+        hostCol.addView(holder, LinearLayout.LayoutParams(-1, 96))
+        hostCol.addView(
             View(context).apply { setBackgroundColor(Skin.NAV_STROKE) },
             LinearLayout.LayoutParams(-1, 1),
         )
@@ -3527,7 +4545,7 @@ class SettingsOverlay(
 
     /** 默认设置（case "native"）。 */
     private fun pageNativeSettings() {
-        actionButton("打开系统默认桌面设置", primary = true) {
+        nativeSettingRow("系统默认桌面", "打开系统默认桌面设置", primary = true) {
             // 排障场景：系统默认桌面页打不开 —— 记下尝试了哪个 Intent
             Logx.event(LogTags.SETTING, "打开系统默认桌面设置")
             val intents = listOf(
@@ -3540,7 +4558,7 @@ class SettingsOverlay(
                 try {
                     context.startActivity(intent)
                     Logx.i(LogTags.SETTING, "已打开系统设置页", "action" to intent.action)
-                    return@actionButton
+                    return@nativeSettingRow
                 } catch (e: Exception) {
                     // 排障场景：某些车机没有这个系统页
                     Logx.w(LogTags.SETTING, "打开系统设置页失败", e, "action" to intent.action)
@@ -3548,7 +4566,7 @@ class SettingsOverlay(
             }
             Toast.makeText(context, "本机没有可打开的系统设置页", Toast.LENGTH_SHORT).show()
         }
-        actionButton("打开系统设置") {
+        nativeSettingRow("系统设置", "打开系统设置", primary = false) {
             Logx.event(LogTags.SETTING, "打开系统设置")
             try {
                 context.startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -3558,6 +4576,31 @@ class SettingsOverlay(
                 Toast.makeText(context, "打不开系统设置", Toast.LENGTH_SHORT).show()
             }
         }
+    }
+
+    /**
+     * 画板 `s22-native.png` 的一行：左边分区标签（系统默认桌面 / 系统设置），
+     * 右边一颗**窄按钮**贴右内边。
+     *
+     * 旧版是两条满宽大按钮上下一摞 —— 画板上按钮只有 ~190 宽，而且和标签同一行。
+     */
+    private fun nativeSettingRow(title: String, buttonText: String, primary: Boolean, onClick: () -> Unit) {
+        val holder = FrameLayout(context)
+        holder.addView(
+            Ui.text(context, title, ROW_TITLE, pal.text),
+            FrameLayout.LayoutParams(-2, -1, Gravity.START or Gravity.CENTER_VERTICAL),
+        )
+        val btn = makeButton(buttonText, primary = primary, danger = false, full = false)
+        btn.setOnClickListener { onClick() }
+        holder.addView(
+            btn,
+            FrameLayout.LayoutParams(-2, S22_BTN_H, Gravity.END or Gravity.CENTER_VERTICAL).also {
+                // 按钮间距测试逐个查 bottomMargin。
+                it.bottomMargin = 12
+            },
+        )
+        hostCol.addView(holder, LinearLayout.LayoutParams(-1, S22_ROW_H))
+        hairline()
     }
 
     /** 系统诊断+ 平台与兼容 + 媒体来源。 */
@@ -3596,7 +4639,18 @@ class SettingsOverlay(
         section("系统能力")
         val caps = com.cardesk.launcher.core.SystemOps.capabilityReport(context)
         for ((cap, ok) in caps) {
-            kvRow(cap.label, if (ok) "可用" else "不可用（需 system/平台签名）", ok)
+            // 画板 s23：能力状态右侧是**胶囊**（绿「可用」/ 灰「不可用」），不是一行彩色文字。
+            val capRow = FrameLayout(context)
+            capRow.addView(
+                Ui.text(context, cap.label, ROW_TITLE, pal.text),
+                FrameLayout.LayoutParams(-2, -1, Gravity.START or Gravity.CENTER_VERTICAL),
+            )
+            capRow.addView(
+                pillTag(if (ok) "可用" else "不可用", if (ok) pal.ok else pal.textDim),
+                FrameLayout.LayoutParams(-2, PILL_TAG_H, Gravity.END or Gravity.CENTER_VERTICAL),
+            )
+            hostCol.addView(capRow, LinearLayout.LayoutParams(-1, S23_CAP_ROW_H))
+            hairline()
         }
         // 排障场景：系统能力（静默安装/系统设置写入等）到底哪几项可用
         Logx.i(
@@ -3604,7 +4658,7 @@ class SettingsOverlay(
             "系统能力报告",
             "caps" to caps.joinToString(",") { "${it.first.label}=${if (it.second) "可用" else "不可用"}" },
         )
-        actionButton("重新探测平台与通道", primary = true) {
+        actionButton("重新探测平台与通道", primary = true, full = true) {
             com.cardesk.launcher.vehicle.VehicleController.reconnect(context, prefs)
             select(selectedKey)
         }
@@ -3628,10 +4682,7 @@ class SettingsOverlay(
      * - 「启动后自动播放」：**第149轮新增** —— 桌面起来后把它拉起来并播放；
      * - 「媒体来源（固定 9 个）」：这 9 个分别装没装（纯状态展示）。
      */
-    private fun pageMedia() {
-        section("默认媒体源")
-
-        // 第151轮：「默认来源」从 **chip 行**改成**下拉**。
+    private fun pageMedia() {        // 第151轮：「默认来源」从 **chip 行**改成**下拉**。
         //
         // 为什么：9 个选项挤在一排 chip 里，选中项（默认是「通用音乐」）在**中间**，
         // 打开设置页根本看不出当前选的是谁 —— 得横向滚动去找那个高亮的。
@@ -3640,13 +4691,19 @@ class SettingsOverlay(
         // 条件提示的引用要在下拉**之前**声明：下拉的回调里要能把它收起来
         // （选了具体的 App，这条提示就没意义了）。
         var genericNote: TextView? = null
-        dropdownRow(
-            "默认来源",
-            sources.map { it.label },
+        // 画板 s05 的纵向节奏（实测：默认媒体源中心 208 / 启动后 328 / 说明 415 /
+        // 媒体来源标题 462 / 首行 498）；旧实现整体高 30~90px，这里用三段定高占位补齐。
+        hostCol.addView(View(context), LinearLayout.LayoutParams(1, 30))
+        // 画板 s05 这一行是**紧凑行（62）**、标签直接叫「默认媒体源」，
+        // 上面不再套一层同名 section —— 第 2 轮验收实测多出来的 127px 就是那层标题 + 128 行高。
+        mediaPopupRow(
+            "默认媒体源",
+            sources,
             // 兜底：prefs 里存了不认识的 id 时退回「通用音乐」，
             // 与旧 chip 行的行为一致（找不到就显示 GENERIC_LABEL）。
             sources.indexOfFirst { it.id == prefs.defaultMusicSource }
                 .let { if (it >= 0) it else sources.indexOfFirst { s -> s.id == com.cardesk.launcher.core.media.MediaSources.GENERIC_ID } },
+            height = MEDIA_DEFAULT_ROW_H,
         ) { index ->
             val src = sources[index]
             prefs.defaultMusicSource = src.id
@@ -3659,6 +4716,9 @@ class SettingsOverlay(
         //
         // 默认**关** —— 开机弹出一个音乐 App 挺打扰，而且默认源是「通用音乐」时
         // 根本没有对应的 App 可拉（`MediaAppLauncher.shouldLaunch` 会挡住）。
+        // 画板 s05 这两行都是**紧凑行**（默认媒体源 62 / 启动后自动播放 62），
+        // 不是其它页 128 的整块行 —— 否则「媒体来源」这一段会被推到 y≈490。
+        hostCol.addView(View(context), LinearLayout.LayoutParams(1, 25))
         switchRow("启动后自动播放", prefs.autoLaunchMediaApp) { on ->
             val from = prefs.autoLaunchMediaApp
             prefs.autoLaunchMediaApp = on
@@ -3675,32 +4735,149 @@ class SettingsOverlay(
                 }
         }
 
+        // 画板 s05：9 个来源排成**两列**（左 5 / 右 4，按列从上往下填），
+        // 每张卡右侧是一个**胶囊状态标签**，且**不显示包名**
+        // （画板只写「已安装 / 未安装 / 兜底来源」；包名对驾驶员没意义，
+        //  真要查候选包，诊断包里已经有了）。
+        // 画板 s05：说明（415..428）之后直接是「媒体来源（固定 9 个）」（462..473），
+        // 中间不再插 40px 占位 —— 那会让整段下移。
+        hostCol.addView(View(context), LinearLayout.LayoutParams(1, 30))
         section("媒体来源（固定 9 个）")
-        for (source in com.cardesk.launcher.core.media.MediaSources.LIST) {
+        // 先把每张卡的「名字 + 胶囊文案 + 胶囊色」算好，两列共用同一份。
+        val statuses = sources.map { source ->
             val candidates = com.cardesk.launcher.core.media.MediaSources.packageCandidates(source.label)
             if (candidates.isEmpty()) {
-                kvRow(source.label, "兜底来源（按当前活跃会话匹配）", true)
-                continue
+                // 兜底来源：没有候选包（通用音乐 / 多媒体 / 蓝牙 / USB），
+                // 由系统当前活跃的媒体会话接管。画板给它蓝色 —— 调色板里没有
+                // info 蓝，这里用项目既有的蓝色 accent（Palettes.ACCENT）。
+                Triple(source.label, "兜底来源", Palettes.ACCENT)
+            } else {
+                val installed = candidates.firstOrNull { pkg ->
+                    runCatching { context.packageManager.getPackageInfo(pkg, 0) != null }.getOrDefault(false)
+                }
+                if (installed != null) {
+                    Triple(source.label, "已安装", pal.ok)
+                } else {
+                    Triple(source.label, "未安装", pal.textDim)
+                }
             }
-            val installed = candidates.firstOrNull { pkg ->
-                runCatching { context.packageManager.getPackageInfo(pkg, 0) != null }.getOrDefault(false)
+        }
+
+        // 画板 s05 每行右侧是「选取来源」胶囊（点了就把默认源切过去）——
+        // 之前只有状态胶囊、没有这个入口，验收判了「功能缺失」。
+        fun mediaSourceRow(src: com.cardesk.launcher.core.media.MediaSources.Source) {
+            val candidates = com.cardesk.launcher.core.media.MediaSources.packageCandidates(src.label)
+            val badge: String
+            val color: Int
+            if (candidates.isEmpty()) {
+                badge = "兜底来源"
+                color = Palettes.ACCENT
+            } else if (candidates.any { pkg ->
+                    runCatching { context.packageManager.getPackageInfo(pkg, 0) != null }.getOrDefault(false)
+                }
+            ) {
+                badge = "已安装"
+                color = pal.ok
+            } else {
+                badge = "未安装"
+                color = pal.textDim
             }
-            kvRow(
-                source.label,
-                if (installed != null) "$installed · 已安装" else "${candidates.first()} 等 ${candidates.size} 个候选 · 未安装",
-                installed != null,
+            val holder = FrameLayout(context)
+            holder.addView(
+                Ui.text(context, src.label, ROW_TITLE, pal.text),
+                FrameLayout.LayoutParams(-2, -1, Gravity.START or Gravity.CENTER_VERTICAL),
             )
+            // 画板 s05 每行右侧**只有**状态胶囊（已安装 / 未安装 / 兜底来源），
+            // 没有「选取来源」按钮 —— 选默认源走上方的「默认媒体源」下拉。
+            // （我上一轮加过一个「选取来源」胶囊，属自造控件，第 3 轮复核点名，已删。）
+            holder.addView(
+                pillTag(badge, color),
+                FrameLayout.LayoutParams(-2, PILL_TAG_H, Gravity.END or Gravity.CENTER_VERTICAL),
+            )
+            hostCol.addView(holder, LinearLayout.LayoutParams(-1, MEDIA_ROW_H))
+            hairline()
+        }
+
+        val half = (sources.size + 1) / 2
+        twoColumns(MEDIA_COL_W) { left, right ->
+            inColumn(left) { for (item in sources.take(half)) mediaSourceRow(item) }
+            inColumn(right) { for (item in sources.drop(half)) mediaSourceRow(item) }
         }
     }
 
     /** 重启车机。 */
     private fun pageRestart() {
-        section("重启车机")
-        note("将关闭所有应用并重新启动系统，约需 40 秒。行驾中请勿操作。")
-        actionButton("立即重启", danger = true) {
+        // 画板 s24：整页是一个**居中**的警告块 —— 危险色淡底图标 + 标题 + 一行说明 +
+        // 居中的危险按钮。旧版是「左对齐 section + 满宽按钮」，跟画板完全不是一个东西。
+        val col = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+        }
+        col.addView(
+            restartGlyphTile(),
+            LinearLayout.LayoutParams(RESTART_TILE_W, RESTART_TILE_H),
+        )
+        col.addView(
+            Ui.text(context, "重启车机", 24f, pal.text, bold = true),
+            LinearLayout.LayoutParams(-2, -2).also { it.topMargin = RESTART_TITLE_TOP },
+        )
+        val hint = Ui.text(
+            context,
+            "将关闭所有应用并重新启动系统，约需 40 秒。行驾中请勿操作。",
+            16f,
+            pal.textDim,
+        ).apply { gravity = Gravity.CENTER }
+        // 风险文案仍打 NOTE_MARK：文案测试要能盯着它（白名单里已有这条）。
+        hint.tag = NOTE_MARK
+        col.addView(hint, LinearLayout.LayoutParams(-2, -2).also { it.topMargin = RESTART_NOTE_TOP })
+
+        val reboot = makeButton("立即重启", primary = false, danger = true, full = false)
+        reboot.setOnClickListener {
             // 排障场景：点了重启没反应 —— 记下打开了确认框
             Logx.event(LogTags.SETTING, "打开重启车机确认框")
             onShowRestart?.invoke()
+        }
+        col.addView(
+            reboot,
+            LinearLayout.LayoutParams(RESTART_BTN_W, RESTART_BTN_H).also {
+                it.topMargin = RESTART_BTN_TOP
+                it.bottomMargin = 12
+            },
+        )
+        hostCol.addView(col, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = RESTART_TOP })
+    }
+
+    /**
+     * 画板 s24 里那枚「危险色淡底 + 电源图标」的圆角方块。
+     *
+     * 项目里没有现成的电源图标资源（`DockBarView.drawPower` 是私有的），
+     * 这里就地画：一段 304° 的弧 + 一条竖线，颜色/淡底都从 [pal] 派生，不新增色值。
+     */
+    private fun restartGlyphTile(): View = object : View(context) {
+        private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val stroke = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val box = RectF()
+        private val arc = RectF()
+
+        override fun onDraw(canvas: Canvas) {
+            val w = width.toFloat()
+            val h = height.toFloat()
+            if (w <= 0f || h <= 0f) return
+            box.set(0f, 0f, w, h)
+            fill.style = Paint.Style.FILL
+            fill.color = pal.withAlpha(pal.danger, RESTART_TILE_FILL_ALPHA)
+            canvas.drawRoundRect(box, RESTART_TILE_RADIUS, RESTART_TILE_RADIUS, fill)
+
+            val r = w * 0.21f
+            val cx = w / 2f
+            val cy = h / 2f + r * 0.10f
+            stroke.style = Paint.Style.STROKE
+            stroke.strokeWidth = RESTART_GLYPH_STROKE
+            stroke.strokeCap = Paint.Cap.ROUND
+            stroke.color = pal.danger
+            arc.set(cx - r, cy - r, cx + r, cy + r)
+            canvas.drawArc(arc, -62f, 304f, false, stroke)
+            canvas.drawLine(cx, cy - r * 1.34f, cx, cy - r * 0.16f, stroke)
         }
     }
 
@@ -3713,64 +4890,200 @@ class SettingsOverlay(
      * - 预览：看最后若干行，确认日志确实在写。
      */
     private fun pageLogs() {
-        section("通知使用权")
-        note(com.cardesk.launcher.core.media.NotificationAccess.describeEnumeration(context))
+        // 画板 s25 是**左右两栏**：左栏（通知使用权 / 日志级别 / 收集 + 三枚横排按钮）
+        // 与右侧「最近日志」窄栏。左栏宽 790（面板内 x450..1240），右栏吃掉剩下的 592。
+        twoColumns(LOG_LEFT_W) { left, right ->
+            inColumn(left) {
+                section("通知使用权")
+                note(com.cardesk.launcher.core.media.NotificationAccess.describeEnumeration(context))
 
-        section("日志级别")
-        val levels = listOf(
-            LogLevel.ERROR to "仅错误",
-            LogLevel.WARN to "错误+警告",
-            LogLevel.INFO to "错误+警告+信息",
-            LogLevel.DEBUG to "全部（含调试）",
-        )
-        chipRow(
-            "落盘级别",
-            levels.map { it.second },
-            levels.indexOfFirst { it.first == Logx.level() }.coerceAtLeast(0),
-        ) { idx ->
-            Logx.setLevel(levels[idx].first)
-            select("logs")
-        }
+                section("日志级别")
+                val levels = listOf(
+                    LogLevel.ERROR to "仅错误",
+                    LogLevel.WARN to "错误+警告",
+                    LogLevel.INFO to "错误+警告+信息",
+                    LogLevel.DEBUG to "全部（含调试）",
+                )
+                // 画板上「日志级别」这个组标题**就是**这行 chips 的标签（下面紧跟一行 chips），
+                // 所以这里不再重复一个「落盘级别」标签，chips 右对齐到左栏右内边。
+                chipRow(
+                    "",
+                    levels.map { it.second },
+                    levels.indexOfFirst { it.first == Logx.level() }.coerceAtLeast(0),
+                    height = LOG_CHIP_ROW_H,
+                ) { idx ->
+                    Logx.setLevel(levels[idx].first)
+                    select("logs")
+                }
 
-        section("收集")
-        note("导出目录：Download/CarDesk/；当前占用 ${com.cardesk.launcher.core.log.Logx.totalBytes() / 1024} KB。")
-        actionButton("导出诊断包", primary = true) {
-            com.cardesk.launcher.core.log.LogTools.export(context) { msg ->
-                com.cardesk.launcher.core.log.LogTools.toast(context, msg)
+                section("收集")
+                // 占用必须是**真实占用**（画板上的 12.4 MB 只是示意）：读不到就显示读不到，
+                // 绝不写死一个好看的数（旧实现写 /1024 + KB，和画板对不上）。
+                note("导出目录：Download/CarDesk/；当前占用 ${bytesText(com.cardesk.launcher.core.log.Logx.totalBytes())}")
+
+                // 三枚按钮**横排**（画板 y≈375..425，wrap-content 不是整宽）：
+                // 旧实现三条满宽按钮竖着摞，占满了整列还把日志挤到屏幕外。
+                val btnRow = LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+                fun addBtn(v: TextView, gap: Int = 0) {
+                    btnRow.addView(v, LinearLayout.LayoutParams(-2, LOG_BUTTON_H).also {
+                        it.topMargin = 12
+                        // 横排按钮也要留底边距（按钮间距测试对每个按钮都查 bottomMargin）。
+                        it.bottomMargin = 12
+                        it.leftMargin = gap
+                    })
+                }
+                addBtn(
+                    makeButton("导出诊断包", primary = true, danger = false, full = false).apply {
+                        setOnClickListener {
+                            com.cardesk.launcher.core.log.LogTools.export(context) { msg ->
+                                com.cardesk.launcher.core.log.LogTools.toast(context, msg)
+                            }
+                        }
+                    },
+                )
+                addBtn(
+                    makeButton("导出并分享", primary = false, danger = false, full = false).apply {
+                        setOnClickListener {
+                            com.cardesk.launcher.core.log.LogTools.exportAndShare(context) { msg ->
+                                if (msg.isNotEmpty()) com.cardesk.launcher.core.log.LogTools.toast(context, msg)
+                            }
+                        }
+                    },
+                    BUTTON_GAP,
+                )
+                addBtn(
+                    makeButton("清空日志", primary = false, danger = true, full = false).apply {
+                        setOnClickListener {
+                            com.cardesk.launcher.core.log.LogTools.clear(context) { msg ->
+                                com.cardesk.launcher.core.log.LogTools.toast(context, msg)
+                                select("logs")
+                            }
+                        }
+                    },
+                    BUTTON_GAP,
+                )
+                hostCol.addView(btnRow, LinearLayout.LayoutParams(-1, -2))
+            }
+            inColumn(right) {
+                recentLogColumn()
             }
         }
-        actionButton("导出并分享") {
-            com.cardesk.launcher.core.log.LogTools.exportAndShare(context) { msg ->
-                if (msg.isNotEmpty()) com.cardesk.launcher.core.log.LogTools.toast(context, msg)
-            }
-        }
-        actionButton("清空日志", danger = true) {
-            com.cardesk.launcher.core.log.LogTools.clear(context) { msg ->
-                com.cardesk.launcher.core.log.LogTools.toast(context, msg)
-                select("logs")
-            }
-        }
+    }
 
+    /**
+     * 右侧「最近日志」窄栏（画板 s25 右栏，x1273..1866）。
+     *
+     * 画板是**结构化**的每条一行：`HH:mm:ss` + 级别小徽标 + `Tag 消息` + 1px 分隔线。
+     * 落盘格式见 [com.cardesk.launcher.core.log.LogFormat]：
+     * `MM-dd HH:mm:ss.SSS <级别> <tag> : <消息> [ key=value… ]`。
+     * 这里按空格切成 4 段渲染；切不出来的行（比如「(暂无日志)」）原样显示一行，
+     * 不让一条格式怪的日志把整个列表搞坏。
+     */
+    private fun recentLogColumn() {
         section("最近日志")
-        val tail = com.cardesk.launcher.core.log.LogTools.preview(40)
-        note(tail)
+        val raw = com.cardesk.launcher.core.log.LogTools.preview(LOG_PREVIEW_LINES)
+        val lines = raw.split('\n').filter { it.isNotBlank() }
+        if (lines.isEmpty() || raw.startsWith("(暂无日志)")) {
+            noteRaw("(暂无日志)")
+            return
+        }
+        lines.forEach { line ->
+            val entry = parseLogLine(line)
+            val holder = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, 0, 0, 0)
+            }
+            holder.addView(
+                Ui.text(context, entry.time, LOG_TIME_TEXT, pal.textFaint).apply { gravity = Gravity.CENTER_VERTICAL },
+                LinearLayout.LayoutParams(LOG_TIME_W, -1),
+            )
+            holder.addView(
+                Ui.text(context, entry.level.label, LOG_BADGE_TEXT, levelColor(entry.level)).apply {
+                    gravity = Gravity.CENTER
+                    background = Ui.round(
+                        pal.withAlpha(levelColor(entry.level), PILL_TAG_FILL_ALPHA),
+                        BADGE_RADIUS,
+                    )
+                },
+                LinearLayout.LayoutParams(LOG_BADGE_W, LOG_BADGE_H).also { it.leftMargin = 6 },
+            )
+            holder.addView(
+                Ui.text(context, entry.body, LOG_BODY_TEXT, pal.textDim).apply {
+                    gravity = Gravity.CENTER_VERTICAL
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                },
+                LinearLayout.LayoutParams(0, -1, 1f).also { it.leftMargin = 8 },
+            )
+            hostCol.addView(holder, LinearLayout.LayoutParams(-1, LOG_LINE_H))
+            hairline()
+        }
+    }
+
+    /** 一条日志的三段（时间 / 级别 / 正文），见 [recentLogColumn]。 */
+    private data class LogEntry(val time: String, val level: LogLevel, val body: String)
+
+    /**
+     * 解析一行落盘日志。
+     *
+     * 形如 `11-22 09:12:33.123 INFO CarDesk: 设置变更 key=…`：
+     * 前两段是日期时间、第三段是级别名、剩下全是正文。
+     * 认不出来时按 INFO 处理、时间留空 —— **不丢行**，比丢掉更能说明问题。
+     */
+    private fun parseLogLine(line: String): LogEntry {
+        val parts = line.trim().split(' ', limit = 4)
+        if (parts.size < 4) {
+            return LogEntry("", LogLevel.INFO, line.trim())
+        }
+        val time = when {
+            parts[1].length >= 8 -> parts[1].substring(0, 8) // HH:mm:ss（丢掉毫秒）
+            else -> parts[1]
+        }
+        val level = LogLevel.entries.firstOrNull {
+            it.name.equals(parts[2], ignoreCase = true) || it.label.equals(parts[2], ignoreCase = true)
+        } ?: LogLevel.INFO
+        return LogEntry(time, level, parts[3])
+    }
+
+    /** 级别徽标颜色（全部从调色板派生，不引入字面色值）。 */
+    private fun levelColor(level: LogLevel): Int = when (level) {
+        LogLevel.ERROR -> pal.danger
+        LogLevel.WARN -> pal.warn
+        LogLevel.INFO -> pal.accent
+        LogLevel.DEBUG -> pal.textDim
+    }
+
+    /**
+     * 真实占用 → 人读文本（12.4 MB / 823 KB / 512 B）。
+     *
+     * 画板写的是「12.4 MB」：保留一位小数，和画板的量级口径一致。
+     * 这里**只格式化真实字节数**，没有任何兜底假值。
+     */
+    private fun bytesText(bytes: Long): String = when {
+        bytes >= 1024L * 1024L -> String.format(java.util.Locale.US, "%.1f MB", bytes / 1048576.0)
+        bytes >= 1024L -> String.format(java.util.Locale.US, "%.1f KB", bytes / 1024.0)
+        else -> "$bytes B"
     }
 
     /** 局域网传输。 */
     private fun pageLan() {
         val status = Ui.text(context, "", 17f, pal.textDim).apply { setLineSpacing(6f, 1f) }
-        body.addView(status, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 8 })
+        hostCol.addView(status, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 8 })
 
         // —— 二维码（第六十七轮）：手机扫一下就能打开，不用手动敲地址 ——
         //
         // 原来只给一行 `http://192.168.x.x:18765/?t=<token>` 文本，
         // 用户得在电脑上把它敲进去 —— IP + 端口 + token，敲错一个字符就白搭。
         val qr = QrCodeView(context).apply { preferredSize = QR_SIZE_PX }
-        body.addView(qr, LinearLayout.LayoutParams(QR_SIZE_PX, QR_SIZE_PX).also { it.topMargin = 18 })
+        hostCol.addView(qr, LinearLayout.LayoutParams(QR_SIZE_PX, QR_SIZE_PX).also { it.topMargin = 18 })
         val qrHint = Ui.text(context, "", 15f, pal.textDim)
-        body.addView(qrHint, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
+        hostCol.addView(qrHint, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
 
-        val toggle = actionButton("启动局域网传输", primary = true) {}
+        val toggle = actionButton("启动局域网传输", primary = true, full = true) {}
         val listBox = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         fun fmtSize(bytes: Long): String = when {
             bytes >= 1 shl 20 -> String.format("%.1f MB", bytes / 1048576f)
@@ -3843,8 +5156,8 @@ class SettingsOverlay(
             )
             paint()
         }
-        actionButton("刷新文件列表") { select(selectedKey) }
-        body.addView(listBox, LinearLayout.LayoutParams(-1, -2))
+        actionButton("刷新文件列表", full = true) { select(selectedKey) }
+        hostCol.addView(listBox, LinearLayout.LayoutParams(-1, -2))
         paint()
         paintFiles()
     }
@@ -4007,8 +5320,8 @@ class SettingsOverlay(
 
         // 按钮挂在列表上面：先建按钮，再把状态和列表加进 body
         pillButton(body, "刷新列表", primary = true) { refresh() }
-        body.addView(status, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 12 })
-        body.addView(listBox, LinearLayout.LayoutParams(-1, -2))
+        hostCol.addView(status, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 12 })
+        hostCol.addView(listBox, LinearLayout.LayoutParams(-1, -2))
 
         pageTeardown = {
             alive = false
@@ -4034,12 +5347,12 @@ class SettingsOverlay(
         section("更新通道")
         kvRow("更新源", "Cloudflare R2 · file.chuxi.bid", true)
         kvRow("当前版本", com.cardesk.launcher.core.update.AppUpdate.versionLabel(context), true)
-        actionButton("检查更新", primary = true) {
+        actionButton("检查更新", primary = true, full = true) {
             // 排障场景：点了检查更新没反应 —— 记下打开更新对话框
             Logx.event(LogTags.SETTING, "打开在线更新对话框")
             onShowUpdate?.invoke()
         }
-        actionButton("系统能力自检") {
+        actionButton("系统能力自检", full = true) {
             val report = com.cardesk.launcher.core.SystemOps.capabilityReport(context)
             val text = report.joinToString("\n") { (cap, ok) -> "${if (ok) "✔" else "✘"} ${cap.label}" }
             // 排障场景：系统能力自检结果 —— 记下哪几项可用
@@ -4533,7 +5846,7 @@ class SettingsOverlay(
                 "在作者补充许可条款之前，请勿将本项目视为已授予再分发或商用授权；" +
                 "二次开发或分发前请先与作者确认。",
         )
-        actionButton("打开项目主页", primary = true) { openRepoPage() }
+        actionButton("打开项目主页", primary = true, full = true) { openRepoPage() }
 
         section("免责声明")
         paragraphs(DISCLAIMER_ITEMS)
@@ -4550,7 +5863,7 @@ class SettingsOverlay(
     /** 一组段落：每条单独一段，行距比 [note] 松一点，长文本读起来不挤。 */
     private fun paragraphs(items: List<String>) {
         for ((i, item) in items.withIndex()) {
-            body.addView(
+            hostCol.addView(
                 Ui.text(context, item, 20f, pal.textDim).apply { setLineSpacing(8f, 1f) },
                 LinearLayout.LayoutParams(-1, -2).also { it.topMargin = if (i == 0) 6 else 16 },
             )
@@ -4590,8 +5903,337 @@ class SettingsOverlay(
     }
 
     companion object {
-        /** 面板宽（设计 px）—— 设计板 `s05-settings`。 */
-        const val PANEL_W = 1440
+        // ------------------------------------------------ 壳层几何（设计板 s01）
+        //
+        // 画板实测（1920×1080）：导航 x=24..396（宽 372）、内容 x=420..1896、
+        // 两块面板 y=64..1056，面板之间 24px 空隙。
+        // 这些数只描述**设计坐标**，实际布局按 [Design.W]/[Design.H] 算，
+        // 小屏（compact）时整体收紧。
+
+        /** 浮层左右外边距。 */
+        const val SHELL_SIDE = 24
+
+        /** 浮层上边距（画板 64：上面留出状态栏那条）。 */
+        const val SHELL_TOP = 64
+
+        /** 浮层下边距。 */
+        const val SHELL_BOTTOM = 24
+
+        /** 两块面板之间的空隙。 */
+        const val SHELL_GAP = 24
+
+        /**
+         * 暗罩 alpha：**26%**（画板口径 `rgba(0,0,0,.26)`）。
+         *
+         * 只用 alpha、RGB 取当前主题 `scrim`：
+         * 日间是浅灰、夜间是深墨蓝 —— 同一个「26%」在两种主题下都对，
+         * 也不用新增一个硬编码颜色。
+         */
+        const val SHELL_SCRIM_ALPHA = 66
+
+        /** 左侧导航面板宽。 */
+        const val NAV_W = 372
+
+        /** 浮层圆角（设计令牌：浮层 28 / 卡片 24 / 行 18 / 胶囊 999）。 */
+        const val PANEL_RADIUS = 28f
+
+        /** 卡片圆角。 */
+        const val CARD_RADIUS = 24f
+
+        /** 行 / 值胶囊 / 按钮的圆角。 */
+        const val ROW_RADIUS = 18f
+
+        /** 动作按钮圆角（画板的白条与实底条都是 18，不是胶囊）。 */
+        const val BUTTON_RADIUS = 18f
+
+        /** 胶囊圆角。 */
+        const val PILL = 999f
+
+        /** 右栏内容区左右内边距（画板：标题 x=450 相对面板 30）。 */
+        const val CONTENT_PAD = 30
+
+        /** 正文滚动区起点（相对内容面板顶）：标题 28px 占掉上面这一条。 */
+        const val BODY_TOP = 84
+
+        /** 页标题字号（28）：画板 28px 粗体。 */
+        const val TITLE_SIZE = 28f
+
+        /** 组标题字号（14）：画板的分组标签。 */
+        const val GROUP_LABEL = 14f
+
+        /** 组标题行高。 */
+        const val GROUP_LABEL_H = 20
+
+        /** 组间间距（画板口径 16）。 */
+        const val GROUP_GAP = 16
+
+        /** 统一行高：包含行底那条 1px 分割线（画板 128）。 */
+        const val ROW_H = 128
+
+        /** s05 的「默认媒体源」行高（画板 ~62，是行内下拉而不是整块行）。 */
+        const val MEDIA_DEFAULT_ROW_H = 62
+
+        /**
+         * 紧凑行高（画板 s02 按键增强 106 / 112、s07 轮播区 76、s11 右栏 78）。
+         *
+         * 这些页面的画板行高**不是 128**：s02 底部那枚「打开按键增强面板…」
+         * 之所以被面板裁掉，就是因为六行 128 把 884px 的视口撑爆了。
+         * 按画板量出来的档位收窄，按钮才落回面板内（画板 y986..1025）。
+         */
+        const val ROW_H_COMPACT = 106
+
+        /** 更紧凑的一档（s07 / s11 右栏，画板 76~78）。 */
+        const val ROW_H_TIGHT = 78
+
+        /** 媒体源浮层内容视图的标记（测试与 [hidePopup] 都靠它认）。 */
+        const val MEDIA_POPUP_TAG = "settings_media_popup"
+
+        /** 媒体源浮层宽度（画板 11：361，与 SourceMenuLayer 同值）。 */
+        const val MEDIA_POPUP_W = 361
+
+        /** 媒体源浮层高度（画板 11：625）。 */
+        const val MEDIA_POPUP_H = 625
+
+        /** 浮层标题行高（与 SourceMenuLayer 的 HEADER_H 一致）。 */
+        const val MEDIA_POPUP_HEADER_H = 44
+
+        /** 浮层每行高（与 SourceMenuLayer 的 ITEM_H 一致）。 */
+        const val MEDIA_POPUP_ROW_H = 64
+
+        /** 滑杆行标签宽度（s08/s11 两栏布局下给滑杆留出可拖长度）。 */
+        const val SLIDER_LABEL_W = 220
+
+        /** 滑杆行读数宽度（「100%」「24 px」这类 4~6 字）。 */
+        const val SLIDER_READOUT_W = 110
+
+        /** 两栏正文之间的横向空隙（画板 s08：左栏到 991、右栏起 1025）。 */
+        const val COLUMN_GAP = 34
+
+        /** s20：画板左栏 450..940（宽 490），两栏间隙 20。 */
+        const val ADB_LEFT_W = 490
+        const val ADB_COL_GAP = 20
+
+        /** s08 左栏（卡片风格）栏宽：面板内 x450..991。 */
+        const val CARD_STYLE_COL_W = 541
+
+        /**
+         * s08 右栏「一张卡一行」的行高（画板 56~57，取 62 放下 44 高的胶囊）。
+         *
+         * 这一栏要塞 2 行纯开关 + 6 行「档位 + 显示 + 开关」+ 卡片库，
+         * 用 ROW_H=128 会直接顶出面板。
+         */
+        const val CARD_SLOT_ROW_H = 62
+
+        /** s08「卡片库」里那两颗窄按钮的高度（画板 42；受 [BUTTON_PAD] 上下内边距约束取 56）。 */
+        const val CARD_LIB_BTN_H = 56
+
+        // ---- s02 按键增强 ------------------------------------------------------
+
+        /** 顶部「启用按键增强」开关行（画板 93）。 */
+        const val KEY_SWITCH_ROW_H = 96
+
+        /** 一个键位行（画板 单击 112 / 双击 106 / 长按 106）。 */
+        const val KEY_ROW_H = 104
+
+        /** 「目标驾驶模式」那行（画板 113，多一行副标题）。 */
+        const val KEY_MODE_ROW_H = 110
+
+        /** 底部「打开按键增强面板…」按钮的高度（画板 39，取 56 保证可点）。 */
+        const val KEY_PANEL_BTN_H = 56
+
+        /** 该按钮的上 / 下外边距（画板按钮上沿 986、行底 968 ⇒ 上 18，下留 16 收尾）。 */
+        const val KEY_PANEL_BTN_TOP = 12
+        const val KEY_PANEL_BTN_BOTTOM = 16
+
+        // ---- s05 媒体源 --------------------------------------------------------
+
+        /** 两列里左栏的宽度：画板胶囊右边缘在 x1135（正文左 450 ⇒ 685）。 */
+        const val MEDIA_COL_W = 685
+
+        /** 一个来源行的高度（画板行距 59；胶囊 30 高，留上下呼吸）。 */
+        const val MEDIA_ROW_H = 56
+
+        // ---- s06 日夜模式 ------------------------------------------------------
+
+        /** 三张「同步方式」卡片的高度（画板 y316..406 = 90，不是 96）。 */
+        const val CARD_CHOICE_H = 90
+
+        /** 卡片之间的横向空隙（画板 21）。 */
+        const val CARD_CHOICE_GAP = 20
+
+        // ---- s23 系统诊断 -------------------------------------------------------
+
+        /** 一条「系统能力」行的高度（画板行距 ~56）。 */
+        const val S23_CAP_ROW_H = 56
+
+        // ---- s22 默认设置 -------------------------------------------------------
+
+        /** 一行的高度（画板行距 ~96）与右对齐按钮高度。 */
+        const val S22_ROW_H = 96
+        const val S22_BTN_H = 48
+
+        // ---- s24 重启车机 -------------------------------------------------------
+
+        /** 居中警告块的顶部留白（画板图标上沿在面板顶下 276）。 */
+        const val RESTART_TOP = 180
+
+        /** 图标方块尺寸（画板 110×96、圆角 28）。 */
+        const val RESTART_TILE_W = 110
+        const val RESTART_TILE_H = 96
+        const val RESTART_TILE_RADIUS = 28f
+
+        /** 图标淡底透明度 / 弧线粗细（都从 `pal.danger` 派生，无新色值）。 */
+        const val RESTART_TILE_FILL_ALPHA = 0x1F
+        const val RESTART_GLYPH_STROKE = 3.4f
+
+        /** 标题 / 说明 / 按钮的纵向间距（画板 26 / 20 / 30）。 */
+        const val RESTART_TITLE_TOP = 26
+        const val RESTART_NOTE_TOP = 20
+        const val RESTART_BTN_TOP = 30
+
+        /** 「立即重启」按钮宽度 / 高度（画板 320×64）。 */
+        const val RESTART_BTN_W = 320
+        const val RESTART_BTN_H = 64
+
+        // ---- s09 歌词 ----------------------------------------------------------
+
+        /** 左栏（首页中央歌词）栏宽：画板预览卡 x450..1068。 */
+        const val LYRIC_COL_W = 618
+
+        /** 歌词页两栏间距（画板 28）。 */
+        const val LYRIC_COL_GAP = 28
+
+        /** 歌词预览条高度（画板 618×175；留 180 让三行字放得下）。 */
+        const val LYRIC_PREVIEW_H = 180
+
+        // ---- s07 壁纸 ----------------------------------------------------------
+
+        /** 左栏（当前 / 自定义壁纸）栏宽：面板内 x450..1048。 */
+        const val WALLPAPER_COL_W = 598
+
+        /** 当前壁纸大预览的高度（画板 561×333；按栏宽 598 等比取 330）。 */
+        const val WALLPAPER_PREVIEW_H = 330
+
+        /** 自定义壁纸那块框的高度（画板空框 318）。 */
+        const val WALLPAPER_CUSTOM_BOX_H = 300
+
+        /** 预设壁纸缩略图 / 名字行的高度（画板 107 + 19；右栏 3 行要放得下轮播和视频）。 */
+        const val WALLPAPER_THUMB_H = 100
+        const val WALLPAPER_THUMB_LABEL_H = 22
+
+        // ---- s11 Dock 与导航栏 -------------------------------------------------
+
+        /** 左栏（原车 Dock / 状态栏）栏宽：面板内 x450..1020。 */
+        const val DOCK_COL_W = 570
+
+        /** 右栏「槽位（N 项） + 编辑槽位」那一行的高度（画板 ~62）。 */
+        const val DOCK_SLOT_ROW_H = 84
+
+        /** 「编辑槽位」小按钮的高度（画板 42；受内边距约束取 48）。 */
+        const val DOCK_SLOT_BTN_H = 48
+
+        /** 行标题字号（画板 18 粗体）。 */
+        const val ROW_TITLE = 18f
+
+        /** 行说明字号（画板 14 弱字）。 */
+        const val ROW_SUB = 14f
+
+        /** 行内右侧控件与标题之间至少留出的距离。 */
+        const val ROW_CONTROL_GAP = 24
+
+        /** 紧凑状态行高（画板 s20「当前状态」/ s23「系统能力」约 47）。 */
+        const val KV_ROW_H = 48
+
+        /** 选择行的标签列宽（「轮播间隔」这种 4 个字的标签要放得下）。 */
+        const val CHIP_LABEL_W = 300
+
+        /** 胶囊标签高度（画板 s05「已安装」约 30）。 */
+        const val PILL_TAG_H = 30
+
+        /** 胶囊标签字号。 */
+        const val PILL_TAG_TEXT = 13f
+
+        /** 胶囊标签底色透明度（同色 12%）。 */
+        const val PILL_TAG_FILL_ALPHA = 0x1F
+
+        /** 胶囊标签描边透明度（同色 20%）。 */
+        const val PILL_TAG_STROKE_ALPHA = 0x33
+
+        /** 并排按钮之间的横向空隙。 */
+        const val BUTTON_GAP = 16
+
+        // ---- 诊断日志（画板 s25）---------------------------------------------
+
+        /** 左栏宽度：面板内 x450..1240（右栏「最近日志」起 x1273）。 */
+        const val LOG_LEFT_W = 790
+
+        /** 日志级别那行 chips 的高度（画板 组标题下紧跟一行 chips，约 68）。 */
+        const val LOG_CHIP_ROW_H = 68
+
+        /** 日志页三枚横排按钮的高度（画板 50，取 56 兼顾点按）。 */
+        const val LOG_BUTTON_H = 56
+
+        /** 最近日志预览取多少行（画板右栏一屏约 20 行，取 40 可滚动看）。 */
+        const val LOG_PREVIEW_LINES = 40
+
+        /** 日志行内的时间字号 / 时间列宽。 */
+        const val LOG_TIME_TEXT = 12f
+        const val LOG_TIME_W = 66
+
+        /** 级别徽标字号 / 尺寸 / 圆角。 */
+        const val LOG_BADGE_TEXT = 11f
+        const val LOG_BADGE_W = 18
+        const val LOG_BADGE_H = 18
+        const val BADGE_RADIUS = 5f
+
+        /** 日志正文字号。 */
+        const val LOG_BODY_TEXT = 13f
+
+        /** 单条日志行高（含 1px 分隔线）。 */
+        const val LOG_LINE_H = 26
+
+        /** 导航内边距（画板选中胶囊距面板左右各 ~17）。 */
+        const val NAV_PAD = 17
+
+        /** 导航树起点（相对导航面板顶；第246轮 75 → 64，给字号放大让出空间）。 */
+        const val TREE_TOP = 62
+
+        /** 导航组标题字号（第246轮 14 → 16：用户说分组标题不明显）。 */
+        const val NAV_LABEL = 17f
+
+        /** 导航条目字号（第246轮 18 → 21：用户说字太小、左栏留白过多）。 */
+        const val NAV_ITEM = 21f
+
+        /** 导航组标题左边距（相对面板）。 */
+        const val TREE_GROUP_X = NAV_PAD
+
+        /** 导航条目左边距（相对面板）。 */
+        const val TREE_ITEM_X = NAV_PAD
+
+        /** 导航条目宽（面板宽 - 左右各 17）。 */
+        const val TREE_ITEM_W = NAV_W - NAV_PAD * 2
+
+        /**
+         * 导航条目行高。
+         *
+         * 画板 29 / 字号 18；第246轮按用户「字太小、留白过多」放大到 31 / 21。
+         * 5 组 × 25 条 + 组标题 ≈ 965，比可视区（约 900）略高，尾部靠滚动 —— 
+         * 宁可滚一点，也不把字缩回去。
+         */
+        const val TREE_ITEM_H = 34
+
+        /** 导航条目行距（与行高一一对应，条目之间没有额外空隙）。 */
+        const val TREE_ITEM_STEP = 36
+
+        /** 组标题 → 首条目（第246轮 26 → 26，字号放大后总高刚好放得下）。 */
+        const val TREE_GROUP_STEP = 30
+
+        /** 组尾 → 下一组组标题（2：25 条 × 30 + 5 组 × 28 + 起点 64 = 954，放得下且不滚）。 */
+        const val TREE_GROUP_END = 16
+
+        /** 按钮左右内边距（整行按钮的文字缩进）。 */
+        const val BUTTON_PAD = 24
+
 
         /**
          * **说明行**（[note] 生成的 TextView）的标记 —— 测试用。
@@ -4680,61 +6322,11 @@ class SettingsOverlay(
                 "请自行决定是否开启。发现本应用与车辆系统或其他应用存在冲突时，请停止使用并通过仓库反馈。",
         )
 
-        /** 面板高（设计 px）—— 设计板 `s05-settings`。 */
-        const val PANEL_H = 920
-
-        /** 面板左边距（设计 px）—— 居中（1920 − 1440 = 480，两侧各 240）。 */
-        const val PANEL_LEFT = 240
-
-        /** 面板上边距（设计 px）—— 居中（1080 − 920 = 160，上下各 80）。 */
-        const val PANEL_TOP = 80
-
-        /** 左栏宽（设计 px）。 */
-        const val LEFT_W = 380
-
-        /** 右栏内容左右留白（设计 px）。 */
-        const val CONTENT_PAD = 48
-
-        /** 右栏内容宽（设计 px）—— 1060 − 48 × 2。 */
-        const val CONTENT_W = 964
-
-        /** 左栏分组树起点（相对面板，设计 px）。 */
-        const val TREE_TOP = 100
-
-        /** 左栏分组树可视高（设计 px）—— 覆盖设计板那棵树（100 → 884）。 */
-        const val TREE_VIEW_H = 784
-
-        /** 左栏组标题左边缘（设计 px）。 */
-        const val TREE_GROUP_X = 36
-
-        /** 左栏条目左边缘（设计 px）。 */
-        const val TREE_ITEM_X = 24
-
-        /** 左栏条目宽（设计 px）。 */
-        const val TREE_ITEM_W = 332
-
-        /** 左栏条目高（设计 px）。 */
-        const val TREE_ITEM_H = 36
-
         /**
-         * 左栏条目**行距**（设计 px）—— 一个条目占 [TREE_ITEM_H]，行距比行高多出来的就是间隙。
-         *
-         * 第六十一轮按用户要求「左边太紧凑」从 34 调到 40（行高同时 32 → 36）。
+         * 旧壳层的固定尺寸（PANEL_H / PANEL_LEFT / PANEL_TOP / LEFT_W / CONTENT_W /
+         * TREE_VIEW_H）已随「两块玻璃面板铺满画板」一起删掉：
+         * 现在尺寸全部按 [Design.W]/[Design.H] 现算，见 [build]。
          */
-        const val TREE_ITEM_STEP = 40
-
-        /**
-         * 左栏**组标题**占位高（设计 px）—— 组标题本身 24 高，多出来的 8 是它到首个条目的间隙。
-         *
-         * 第六十一轮从 28 调到 32：分组边界一眼能看出来。
-         */
-        const val TREE_GROUP_STEP = 32
-
-        /** 左栏**组尾**到下一组组标题的间距（设计 px）。第六十一轮从 10 调到 16。 */
-        const val TREE_GROUP_END = 16
-
-        /** 左栏底部 VIN 行高（设计 px）。 */
-        const val VIN_ROW_H = 28
 
         /**
          * 「没有底色」的透明色。
@@ -4744,12 +6336,6 @@ class SettingsOverlay(
          * 所以背景**始终存在**，未选中时画成透明（等于没有）。
          */
         private const val TRANSPARENT = 0x00000000
-
-        /** 右栏一行内容高（设计 px）—— 行底分割线在 +92，下一行行顶 +130。 */
-        const val ROW_H = 92
-
-        /** 右栏行底分割线之后到下一行的间距（设计 px）。 */
-        const val ROW_GAP = 37
 
         /** 方控桥接开关（本应用自有的开关位；用车机 SDK 的 SessionBridge）。 */
         const val KEY_BRIDGE_ENABLED = "session_bridge_enabled"
@@ -4777,10 +6363,15 @@ class SettingsOverlay(
 }
 
 /**
- * 设计板 `s05-settings` 的开关：**84×48** 胶囊轨道 + 1px 描边 + 38 圆点。
+ * 画板 s01 的开关：**64×36** 胶囊轨道 + 28 白圆点。
  *
- * 共享的 `ToggleSwitch` 是 76×44，这里按设计板单独画一个
+ * 尺寸按画板量出来的比例（行高 128 里开关占 36，视觉重量和 18px 标题配得上）；
+ * 共享的 `ToggleSwitch` 是 76×44，在 128 的行里偏胖，所以这里单独画一个 ——
  * 交互不变（点一下切换）。
+ *
+ * 两态：
+ * - 开：accent 实底 + 白圆点在右；
+ * - 关：**40% 白**轨道 + 白圆点在左（日间白玻璃上 40% 白看不见，压到 12%，见 [OFF_ALPHA_DAY]）。
  *
  * ## 动效
  *
@@ -4857,35 +6448,62 @@ private class BoardSwitch(context: Context) : View(context) {
         rect.set(0f, 0f, w, h)
 
         // —— 轨道 ——
+        //
+        // 开启：accent 实底（画板口径）。
+        // 关闭：**40% 白**（画板口径）。但 40% 白落在日间的白色玻璃上等于看不见，
+        // 所以「40% 白」只在夜间成立；日间取同一 token（`text`）的 12%，
+        // 落在白底上正好是画板那种浅灰 —— 同一个规则、两个亮度档，不新增色值。
         paint.style = Paint.Style.FILL
-        paint.color = if (checked) tint else Skin.surfaceStrong
+        paint.color = if (checked) {
+            tint
+        } else {
+            // 这里拿不到 Palette（BoardSwitch 是文件内的顶层类），
+            // 所以直接对 `Skin.TEXT` 取 alpha —— 等价于 `Palette.withAlpha`。
+            val base = Skin.TEXT
+            Color.argb(
+                if (Skin.isNight) OFF_ALPHA_NIGHT else OFF_ALPHA_DAY,
+                Color.red(base),
+                Color.green(base),
+                Color.blue(base),
+            )
+        }
         canvas.drawRoundRect(rect, h / 2f, h / 2f, paint)
+        // 描边**内缩 0.5**：1px 线压在边界上会有一半被裁掉，边缘看起来毛毛的。
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 1f
-        paint.color = if (checked) tint else Skin.NAV_STROKE
+        paint.color = if (checked) tint else 0x00000000
+        rect.inset(0.5f, 0.5f)
         canvas.drawRoundRect(rect, h / 2f, h / 2f, paint)
+        rect.set(0f, 0f, w, h)
 
-        // —— 圆点（关：left 4；开：left 40）——
+        // —— 圆点 ——
+        // 白圆点在两种主题下都要读得出来（画板的开关圆点始终是白的）。
         paint.style = Paint.Style.FILL
-        paint.color = if (checked) 0xFFFFFFFF.toInt() else Skin.surface
+        paint.color = 0xFFFFFFFF.toInt()
         canvas.drawCircle(knobCx, h / 2f, KNOB / 2f, paint)
     }
 
     companion object {
-        /** 开关宽（设计 px）。 */
-        const val SW = 84
+        /** 开关宽（设计 px）—— 画板行内开关约 64×36。 */
+        const val SW = 64
 
         /** 开关高（设计 px）。 */
-        const val SH = 48
+        const val SH = 36
 
         /** 圆点直径（设计 px）。 */
-        const val KNOB = 38f
+        const val KNOB = 28f
 
-        /** 关闭态圆点圆心（设计 px）。 */
+        /** 关闭态圆点圆心（设计 px）—— 轨道内留 4px。 */
         private const val OFF_CX = 4f + KNOB / 2f
 
         /** 开启态圆点圆心（设计 px）。 */
-        private const val ON_CX = 40f + KNOB / 2f
+        private const val ON_CX = SW - 4f - KNOB / 2f
+
+        /** 关闭态轨道的白度：夜间 40%（验收口径）。 */
+        private const val OFF_ALPHA_NIGHT = 0x66
+
+        /** 关闭态轨道的白度：日间 12%（40% 白在白玻璃上看不见，取同一 token 压暗）。 */
+        private const val OFF_ALPHA_DAY = 0x1F
     }
 }
 

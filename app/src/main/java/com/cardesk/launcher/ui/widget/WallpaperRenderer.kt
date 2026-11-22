@@ -116,6 +116,28 @@ object WallpaperRenderer {
     }
 
     /**
+     * 把一张壁纸画进**给定的画布**，**不进缓存**（第222轮）。
+     *
+     * ## 用途：亮度采样的代理图
+     *
+     * 壁纸的几何全是按 w / h **等比**算的（山脊、沙脊、渐变、星空位置都是比例坐标），
+     * 所以用一张 192×108 的小图渲染出来的构图，和全屏那张**是同一张** ——
+     * 亮度采样拿它当代理，够准，而且**不会把全屏成品图挤出缓存**
+     * （`draw()` 的缓存只有 10 条 / 40 MB，代理图要是走缓存会把全屏那张顶掉，
+     * 下次重画全屏壁纸要多花几百毫秒）。
+     *
+     * @param canvas 目标画布
+     * @param spec 壁纸定义
+     * @param w 宽（px）
+     * @param h 高（px）
+     * @param night true = 夜间那套配色
+     */
+    fun drawDirect(canvas: Canvas, spec: WallpaperSpec, w: Float, h: Float, night: Boolean) {
+        if (w < 2f || h < 2f) return
+        drawScene(canvas, spec, w, h, night)
+    }
+
+    /**
      * 画**自定义壁纸**（第 105 轮：用户导入的照片）。
      *
      * 稳态路径和预设壁纸完全一样：只是 `drawBitmap`（居中裁切）+ 夜间一层 scrim；

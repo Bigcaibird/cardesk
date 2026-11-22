@@ -91,6 +91,89 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("design_wallpaper_custom", false)
         set(v) = sp.edit().putBoolean("design_wallpaper_custom", v).apply()
 
+    // ---------------------------------------------------------- 壁纸轮播（第207轮）
+
+    /**
+     * 是否开启**静态壁纸轮播**（第207轮）。
+     *
+     * 开启后桌面每隔 [wallpaperCarouselIntervalSec] 秒自动切到下一张静态壁纸，
+     * 轮播的是 [Wallpapers] 里那 9 张预设壁纸。
+     *
+     * 持久化键 `design_wallpaper_carousel`。
+     */
+    var wallpaperCarousel: Boolean
+        get() = sp.getBoolean("design_wallpaper_carousel", false)
+        set(v) = sp.edit().putBoolean("design_wallpaper_carousel", v).apply()
+
+    /**
+     * 壁纸轮播的**间隔秒数**（第207轮）。
+     *
+     * 可选值见 [WallpaperCarousel.INTERVAL_SECONDS]（15 / 30 / 60 / 300）。
+     * 落盘的值不在候选里时按「最接近的那个」归一（用户改过 ROM 偏好也不会跑飞）。
+     */
+    var wallpaperCarouselIntervalSec: Int
+        get() = WallpaperCarousel.normalizeInterval(
+            sp.getInt("design_wallpaper_carousel_interval", WallpaperCarousel.DEFAULT_INTERVAL_SEC),
+        )
+        set(v) = sp.edit()
+            .putInt("design_wallpaper_carousel_interval", WallpaperCarousel.normalizeInterval(v))
+            .apply()
+
+    /**
+     * 是否使用**导入的视频壁纸**（第207轮）。
+     *
+     * 持久化键 `design_video_wallpaper`。
+     */
+    var videoWallpaper: Boolean
+        get() = sp.getBoolean("design_video_wallpaper", false)
+        set(v) = sp.edit().putBoolean("design_video_wallpaper", v).apply()
+
+    /**
+     * 视频壁纸的**开关**：与 [videoWallpaper] 不同 —— 这个是「用户是否开启了视频壁纸播放」。
+     *
+     * 持久化键 `design_video_wallpaper_enabled`。
+     */
+    var videoWallpaperEnabled: Boolean
+        get() = sp.getBoolean("design_video_wallpaper_enabled", false)
+        set(v) = sp.edit().putBoolean("design_video_wallpaper_enabled", v).apply()
+
+    /**
+     * 视频壁纸的**合成后端**（第214轮加入；**第227轮默认值改回 `SurfaceView`**）。
+     *
+     * - [VideoWallpaper.BACKEND_SURFACE_VIEW]（默认）：`SurfaceView` 独立层 + **半透明窗口**，**HWC 直通**（省电、不掉帧）
+     * - [VideoWallpaper.BACKEND_TEXTURE_VIEW]：`TextureView`，**帧画进窗口 buffer 本身**
+     *
+     * ## 第227轮为什么把默认值**改回** `SurfaceView`
+     *
+     * 第225轮为了保画中画圆角，把默认值翻成了 `TextureView` ——
+     * 代价是每帧都要走一次纹理上传、没有 HWC 直通，**车机上掉帧严重**
+     * （这正是用户报的「现在的默认方案掉帧很严重」）。
+     *
+     * 第226轮把「半透明窗口 ⇒ 画中画圆角失效 / 切页残留黑卡」这个病根解掉了：
+     * 窗口透明时画中画改走「自建虚拟屏 + `TextureView` 镜像」
+     * （见 `core/PipRenderPlan.kt`），承载画面回到**窗口自己的缓冲**里画，
+     * 于是它又变回普通 View —— 圆角、随页隐藏、裁剪全部按 View 规则成立。
+     *
+     * ⇒ **`SurfaceView` + 半透明窗口这条路现在也是好的**，
+     * 默认值理应回到省电的 `SurfaceView`。
+     *
+     * ## ⚠️ 默认值必须与 `tools/notes-rNNN.md` 写的口径一致
+     *
+     * 第226轮的更新说明写的是「后端**保持 `0`（`SurfaceView`）**即可」，
+     * 而代码默认值还是 `1` —— 于是**默认配置下走的一直是掉帧那条路**，
+     * 用户报的问题并没有被修（`sp.getInt` 不会把默认值写回文件，
+     * 从没手动设过这项的用户拿到的就是默认值）。
+     *
+     * 持久化键 `design_video_wallpaper_backend`。
+     */
+    var videoWallpaperBackend: Int
+        get() = VideoWallpaper.normalizeBackend(
+            sp.getInt("design_video_wallpaper_backend", VideoWallpaper.BACKEND_SURFACE_VIEW),
+        )
+        set(v) = sp.edit()
+            .putInt("design_video_wallpaper_backend", VideoWallpaper.normalizeBackend(v))
+            .apply()
+
     /** 0=自动探测 1=强制模拟 2=强制真车 */
     var vehicleSource: Int
         get() = sp.getInt("vehicle_source", 0)

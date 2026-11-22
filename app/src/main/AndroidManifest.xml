@@ -7,6 +7,12 @@
     <uses-permission android:name="android.permission.CHANGE_COMPONENT_ENABLED_STATE" />
     <uses-permission android:name="android.permission.INTERNET" />
     <!--
+      第219轮：读共享存储（应用内视频库要列 Download/CarDesk 里的视频）。
+      车机上本包是 uid 1000 系统应用 ⇒ 这一层天然 granted；
+      普通安装（AVD / 侧载）才需要运行时申请（Permissions.ensureStoragePermission）。
+    -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <!--
       媒体会话枚举权限（也声明了它）。
       AOSP MediaSessionService.enforceMediaPermissions() 的判定是：
         持有 MEDIA_CONTENT_CONTROL 权限 **或** 传入的组件是已启用的通知监听器。

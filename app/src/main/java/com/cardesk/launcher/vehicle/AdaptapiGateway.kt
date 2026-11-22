@@ -1030,8 +1030,17 @@ class AdaptapiGateway(private val context: Context) : VehicleGateway {
                             }
                             on360State?.invoke(on)
                         } else {
-                            Logx.d(
+                            // 第220轮：**落盘按功能号节流**（Logcat 仍然全量）。
+                            //
+                            // 实车诊断包实测 21 行/秒 —— 全是氛围灯颜色写回去之后
+                            // 车端回显的同一个功能号（0x200A0900）。
+                            // 每一行的 value 都在变，所以 [Logx] 的「同内容去重」抓不住，
+                            // 只能按功能号限流：每个功能号落盘 1 行/秒，
+                            // 4MB 的日志预算才够用（以前 6.5 分钟就写满）。
+                            Logx.dThrottled(
                                 LogTags.VEHICLE,
+                                "vehicle-cb-$func",
+                                VEHICLE_CB_LOG_FILE_INTERVAL_MS,
                                 "属性变化回调",
                                 "func" to VehicleLog.hex(func),
                                 "name" to VehicleLog.funcName(func),
@@ -1113,6 +1122,15 @@ class AdaptapiGateway(private val context: Context) : VehicleGateway {
          * （第七十九轮 P0）。详见 [logWriteSuccess]。
          */
         private const val SUCCESS_LOG_INTERVAL_MS = 3000L
+
+        /**
+         * 「属性变化回调」这条 DEBUG 的**落盘**节流间隔（毫秒，每个功能号各一份）。
+         *
+         * 实车诊断包实测 21 行/秒 —— 全是氛围灯颜色写回去之后
+         * 车端回显的同一个功能号。value 每帧都变，
+         * 所以「同内容去重」抓不住，只能按功能号限流。
+         */
+        const val VEHICLE_CB_LOG_FILE_INTERVAL_MS = 1000L
 
         /** 当前设备是否存在 AdaptAPI（即是否运行在 ECARX 车机上）。 */
         fun probe(): Boolean = try {

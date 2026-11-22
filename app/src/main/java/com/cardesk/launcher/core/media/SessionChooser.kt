@@ -27,6 +27,15 @@ data class SessionCandidate(
     /** `isMediaCenter(pkg)`：mediacenter 包降权。 */
     val mediaCenter: Boolean = false,
     /**
+     * 是不是**真的在放**（第202轮，见 [SessionAudibility]）。
+     *
+     * 会话自报 PLAYING 但位置几秒没推进的「僵尸会话」不算 ——
+     * 它们**不允许抢占**已在显示的会话（真车诊断包里的 wecarflow 就是这种）。
+     *
+     * 默认取 [playing]，老调用方（只关心播放态的测试）行为不变。
+     */
+    val audible: Boolean = playing,
+    /**
      * 会话唯一标识。
      *
      * **必须是会话级、不是包级** —— 真机上同一个音乐 App 会同时发布两个
@@ -127,6 +136,7 @@ object SessionChooser {
             var fallback: SessionCandidate? = null
             for (c in candidates) {
                 if (c.pkg != lockedPkg) continue
+                // 用户显式选定的源：活跃就选它（即便位置没推进，这也是用户的选择）
                 if (c.active) return c
                 if (fallback == null && c.hasMetadata) fallback = c
             }
@@ -145,9 +155,12 @@ object SessionChooser {
         for (c in candidates) {
             val isLast = c.pkg == lastMusicPkg
             // 241-243 —— 上次记住的包正在活跃，直接选它
-            if (c.active && isLast) return c
-            if (c.active && !c.mediaCenter && activeNormal == null) activeNormal = c
-            if (c.active && c.mediaCenter && activeMedia == null) activeMedia = c
+            //
+            // 第202轮：「活跃」必须是**真的在放**（位置在推进），
+            // 僵尸会话不许靠「活跃」抢占已经在显示的会话。
+            if (c.audible && isLast) return c
+            if (c.audible && !c.mediaCenter && activeNormal == null) activeNormal = c
+            if (c.audible && c.mediaCenter && activeMedia == null) activeMedia = c
             // 251-254 —— 已选中的会话按 **token** 认定（不是包名）
             if (selectedTokenKey != null && selectedTokenKey == c.tokenKey) {
                 selected = c

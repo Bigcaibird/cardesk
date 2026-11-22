@@ -225,16 +225,21 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         set(v) { field = v; if (::artistText.isInitialized) artistText.text = v }
 
     /**
-     * 专辑图（96×96 / 圆角 26 / centerCrop）。
+     * 专辑图（140×140 / 圆角 28 / centerCrop；画板实测见 [COMBINED_ART_TOP]）。
      *
      * 同一张封面同时喂给**两处**：
-     * - [albumArtView]：卡片左上角那块 96×96 的小封面；
+     * - [albumArtView]：卡片左上角那块 140×140 的封面（画板实测 1323,137）；
      * - [coverBackdrop]：整张卡的**背景**（模糊 + 遮罩）。
      */
     var artwork: android.graphics.Bitmap? = null
         set(v) {
             field = v
             if (::albumArtView.isInitialized) albumArtView.bitmap = v
+            // 画板只在**没有封面**时画占位块里的音符 —— 有图了就撤掉，
+            // 否则音符会压在真封面上。
+            if (::coverNote.isInitialized) {
+                coverNote.visibility = if (v == null) View.VISIBLE else View.GONE
+            }
             // 背景层是封面做底的唯一入口 —— 换歌时它负责重算模糊图与遮罩强度。
             coverBackdrop.bitmap = v
         }
@@ -509,9 +514,9 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
             val changed = field != v
             field = v
             if (::playGlyph.isInitialized) {
-                playGlyph.text = if (v) "❚❚" else "▶"
                 // ▶ / ❚❚ 换脸是「开始 / 暂停」**唯一**的信号 ——
                 // 补一个鼓一下，确认这一下真的生效了。
+                playGlyph.setPlaying(v)
                 if (changed) Motion.bump(playGlyph)
             }
         }
@@ -596,6 +601,24 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
      * 第三十二轮起第三页（播放器页）已去掉，来源菜单统一锚在**第二页组合卡**的来源行上。
      */
     val sourceAnchor: View? get() = sourceRowView
+
+    /**
+     * 音乐卡（右槽）矩形，页面坐标（第244轮）。
+     *
+     * 导航页的来源弹层要**盖在音乐卡上**：卡片本身 900×780 的量级，
+     * 弹层 361×625 居中放进去正好把卡片当底板，不会伸到地图上。
+     */
+    val musicCardRect: RectF?
+        get() {
+            if (combinedCard.width <= 0 || combinedCard.height <= 0) return null
+            val self = IntArray(2)
+            val card = IntArray(2)
+            getLocationOnScreen(self)
+            combinedCard.getLocationOnScreen(card)
+            val l = (card[0] - self[0]).toFloat()
+            val t = (card[1] - self[1]).toFloat()
+            return RectF(l, t, l + combinedCard.width, t + combinedCard.height)
+        }
 
     /**
      * 来源菜单展开时把箭头转 180°（**动画**转，不是硬切）。
@@ -700,9 +723,24 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
             val next = PipRatio.clamp(value, dualPip)
             field = next
             // 排障场景：「分隔条拖不动 / 比例跳变」——拖动过程用 DEBUG，不落盘。
-            Logx.d(LogTags.NAV_UI, "画中画分屏比例变化", "ratio" to next, "dual" to dualPip)
+            //
+            // 第228轮：**节流**。拖动时每帧都会走这里 ⇒ 每帧一条 logcat
+            // ⇒ 车机上（logcat 本身很吵）这条日志本身就是拖动卡顿的一部分。
+            // 关键信息（起始 / 结束）在 [PipDividerView] 与
+            // 「画中画分隔条比例落盘」里都有，这里只留个稀疏的采样。
+            val now = android.os.SystemClock.uptimeMillis()
+            if (now - lastRatioLogAt >= RATIO_LOG_THROTTLE_MS) {
+                lastRatioLogAt = now
+                Logx.d(LogTags.NAV_UI, "画中画分屏比例变化", "ratio" to next, "dual" to dualPip)
+            }
             applyRatio()
         }
+
+    /** 本次拖动收到了多少个比例步进（第229轮，量拖动是否被主线程堵住）。 */
+    private var dragSteps = 0
+
+    /** 上一次记「分屏比例变化」的时刻（节流用，第228轮）。 */
+    private var lastRatioLogAt = 0L
 
     /** 画中画全屏态：隐藏分隔条并停用拖动。 */
     var pipFullscreen: Boolean = false
@@ -751,6 +789,18 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
     fun syncPipState(dual: Boolean, fullscreen: Boolean) {
         dualPip = dual
         pipFullscreen = fullscreen
+        // 卡缝宽度跟画板走：单画 40（02-nav）、双画 24（09-pip）。
+        applyNavGap()
+    }
+
+    /** 卡缝宽度：单画 40、双画 24（见 [syncPipState]）。 */
+    private fun applyNavGap() {
+        if (!::navGap.isInitialized) return
+        val want = if (dualPip) NAV_COLUMN_GAP_DUAL else NAV_COLUMN_GAP
+        val lp = navGap.layoutParams as? LinearLayout.LayoutParams ?: return
+        if (lp.width == want) return
+        lp.width = want
+        navGap.layoutParams = lp
     }
 
     /**
@@ -771,6 +821,7 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
 
     // ------------------------------------------------------------------ 内部
 
+    private lateinit var navGap: View
     private lateinit var sourceText: TextView
     /** 来源行的**图标**（第138轮）：真 App 图标优先，取不到用自绘符号。 */
     private lateinit var sourceIconView: com.cardesk.launcher.ui.widget.MediaSourceIconView
@@ -781,13 +832,44 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
     private lateinit var lyricTexts: ArrayList<com.cardesk.launcher.ui.widget.WipeLyricTextView>
     private lateinit var currentTimeText: TextView
     private lateinit var totalTimeText: TextView
-    private lateinit var playGlyph: TextView
+
+    /** 播放键：自绘的「实心圆 + 描边三角 / 双竖条」（画板要求，见 [NavPlayButtonView]）。 */
+    private lateinit var playGlyph: NavPlayButtonView
+
+    /** 封面占位块里的双联音符（画板：没有封面时才出现）。 */
+    private lateinit var coverNote: NavCoverNoteView
+
+    /**
+     * 空槽位的**设计版占位**（白圆 + 加号 + 「请选择应用」）。
+     *
+     * 与 PipSurface 自己的占位互斥：哪个可见由 [syncEmptySlot] 决定，
+     * 见那边的说明（为什么要「接管」而不是新做一个空状态）。
+     */
+    private var emptySlot: LinearLayout? = null
+
+    /** 空槽位文案（文案本身来自 PipSurface 的占位，见 [syncEmptySlot]）。 */
+    private lateinit var emptyLabel: TextView
 
     /** 收藏按钮（第一九五轮；不支持的播放器会隐藏它）。 */
+    /** 音乐卡控制键那一行（第229轮：窄卡时要收紧间距）。 */
+    private var combinedControls: LinearLayout? = null
+    private var prevButton: TextView? = null
+    private var nextButton: TextView? = null
+
     private var favoriteBtn: ImageView? = null
 
     /** 播放模式按钮（第一九五轮；不支持的播放器会隐藏它）。 */
     private var playModeBtn: ImageView? = null
+
+    // 第207轮：给单测开的观察口（只读，不改行为）。
+    //
+    // 为什么要开这个口：「两个按钮一样大」这件事**光看常量不够** ——
+    // 常量对了但 padding 写错，图标照样不一样大。
+    // 所以单测要能拿到**真实控件**去量。
+    fun favoriteBtnForTest(): ImageView? = favoriteBtn
+
+    /** 第207轮：给单测开的观察口（见 [favoriteBtnForTest]）。 */
+    fun playModeBtnForTest(): ImageView? = playModeBtn
 
     private lateinit var progressFill: View
     private lateinit var progressHost: FrameLayout
@@ -801,7 +883,17 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
      */
     private lateinit var navRow: LinearLayout
 
-    private val mapCard = FrameLayout(context)
+    /**
+     * 地图卡。**空槽位时也必须是卡片**：
+     *
+     * 画板 `02-nav` 的左卡有卡面（玻璃 + 圆角 + 1px 描边），而 [PipSurface]
+     * 在没有地图应用时画的是「透明底 + 占位圆」，卡面就整块消失 ——
+     * 实机截图 `/tmp/v-nav-day.png` 里左半屏一片空白，就是这个原因。
+     * 有应用时 PipSurface 自己会画画面把底盖住，所以这层底色只在空态可见。
+     */
+    private val mapCard = FrameLayout(context).apply {
+        background = Skin.flat(com.cardesk.launcher.core.Shape.CARD)
+    }
 
     /**
      * **画中画承载面**（地图卡）—— 只读，供排障 / 单测读取。
@@ -883,8 +975,9 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
      * 所以这里**不需要**再留白 —— 留了反而会让承载内容不铺满卡片、
      * 底部空出一条带子（第159轮那次误改就是这个效果，已撤）。
      *
-     * 全屏态（[fullscreen] = true）置 0：画中画全屏就该铺满，
-     * 那时它被提到根容器最上层，压根不在 Dock 底下。
+     * 全屏态（[fullscreen] = true）置 0：画中画全屏就该铺满自己的帧。
+     * 第201轮起全屏帧的高度只到 Dock 顶边（968），所以内容正好铺到 Dock 上方，
+     * 不会再被底栏压住 112px。
      */
     fun applyPipContentInset(fullscreen: Boolean) {
         val top = if (fullscreen) 0 else PIP_CONTENT_INSET_TOP
@@ -971,9 +1064,10 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
             mapCard,
             LinearLayout.LayoutParams(0, LayoutParams.MATCH_PARENT, pipRatio),
         )
-        // 中：分隔条（第四十九轮：宽度改成设计板的 20px 卡缝，本身不画线）
+        // 中：卡缝（单画 40 / 双画 24；画板 02 与 09 各一份，本身不画线，只当间隔）。
+        navGap = View(context)
         row.addView(
-            View(context),
+            navGap,
             LinearLayout.LayoutParams(NAV_COLUMN_GAP, LayoutParams.MATCH_PARENT).apply {
                 topMargin = 10
                 bottomMargin = 10
@@ -987,7 +1081,8 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         addView(row, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT).apply {
             leftMargin = NAV_SIDE_MARGIN
             rightMargin = NAV_SIDE_MARGIN
-            bottomMargin = NAV_BOTTOM_GAP
+            // 画板：卡底 y878、Dock 顶 968 → 行底距 90（见 [NAV_ROW_BOTTOM_GAP] 的说明）
+            bottomMargin = NAV_ROW_BOTTOM_GAP
         })
 
         // 右槽内容（rightSlot：combinedCard + mapCard2）
@@ -997,6 +1092,20 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
 
         // 地图卡内容：画中画 + 顶部 3 个圆点
         mapCard.addView(pip, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+
+        // 空槽位的**设计版占位**（画板：白圆 132 + 加号 + 「请选择应用」22px）。
+        //
+        // PipSurface 自己的占位（70 描边环 + 十字 + 19px 文案）画在 pip 内部，
+        // 从外面既改不了版式也不能删 —— 所以这里在它之上再叠一层设计版式，
+        // 并在确认「pip 正处于默认空态」时把底下那层藏掉（见 [syncEmptySlot]）。
+        // 叠放顺序：pip → 本层 → 三个点，保证点仍然在最上面可点。
+        val slot = buildEmptySlot()
+        emptySlot = slot
+        mapCard.addView(
+            slot,
+            LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.CENTER),
+        )
+        slot.visibility = View.GONE
         mapCard.addView(buildPipDots(), dotsParams())
 
         // 第148轮：把「封面作背景」的开关状态同步进背景层 + 封面图。
@@ -1004,6 +1113,8 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         // 必须在 build() 里显式做一次 —— 属性初始化不走 setter（见 [syncCoverBackdropState]
         // 的说明），不补这一下，用户上次关掉的背景在冷启动时会自己回来。
         syncCoverBackdropState()
+        // 建完就对一次账（首次布局前就把占位换成设计版式，避免先闪一下旧占位）。
+        syncEmptySlot()
     }
 
     /**
@@ -1130,16 +1241,19 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         combinedCard.background = coverBackdrop
         combinedCard.setPadding(0, 0, 0, 0)
 
-        // 第四十九轮按设计板 `s02-nav` 重排为**绝对定位**版式（坐标相对卡片左上角）：
+        // **绝对定位**版式（坐标相对卡片左上角），第240轮按画板 02-nav 全量重标：
         //
-        // 来源行 left 24 top 22 20px 文本 + 10px 强调色圆点
-        // 封面 left 24 top 66 96×96 圆角 26
-        // 歌名 left 140 top 78 38px 粗体
-        // 歌手 left 140 top 126 22px
-        // 歌词块 left 24 top 318 居中三行（27 / 38 粗体 / 27）
-        // 进度条 left 24 top 640 高 8
-        // 时间行 left 24 top 662 18px
-        // 控制键 left 0 top 700 居中，间距 56
+        // 来源行 left 27 top 26  16px 文本 + 24×24 来源图标 + 下拉箭头
+        // 封面   left 27 top 70  140×140 圆角 28（无封面时叠一层描边音符）
+        // 歌名   left 192 top 107 38px 粗体（画板墨迹 150×36）
+        // 歌手   left 192 top 164 14px textFaint
+        // 歌词块 left 27 top 318 居中三行（38 粗体 / 27 / 27）—— 画板是空状态，位置沿用旧版
+        // 进度条 left 27 top 643 高 10 全圆角（宽 = 卡宽 − 27 − 28）
+        // 时间行 left 27 top 663 14px textFaint
+        // 控制键 left 0  top 701 高 76 居中：‹ 40 + 68 + 白圆 76 + 68 + 40
+        //
+        // 卡右内边 28 与左侧 27 差 1 —— 画板右卡 x1296..1879 只有 1px 高光边，
+        // 内容区 1323..1852，所以左 27 / 右 28（[COMBINED_PAD] 统一取 27）。
         //
         val pad = COMBINED_PAD
 
@@ -1164,14 +1278,16 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         }
         sourceRow.addView(
             sourceIconView,
-            LinearLayout.LayoutParams(SOURCE_ICON_SIZE, SOURCE_ICON_SIZE).apply { rightMargin = 8 },
+            LinearLayout.LayoutParams(SOURCE_ICON_SIZE, SOURCE_ICON_SIZE).apply { rightMargin = 4 },
         )
-        sourceText = Ui.text(context, sourceLabel, 20f, cardPal.textDim)
+        sourceText = Ui.text(context, sourceLabel, COMBINED_SOURCE_SIZE, cardPal.textDim)
         sourceRow.addView(sourceText, LinearLayout.LayoutParams(-2, -2))
         val chev = Ui.text(context, "⌄", 20f, cardPal.textDim)
         sourceChevron = chev
-        sourceRow.addView(chev, LinearLayout.LayoutParams(20, 20).apply { leftMargin = 4 })
-        musicStateText = Ui.text(context, musicState, 20f, cardWeakText)
+        // 画板：来源文案墨迹止于 x1413、箭头墨迹起于 x1428 —— 中间那 15px 里
+        // 有 7px 是「⌄」自己的左边距，所以 View 间距取 8。
+        sourceRow.addView(chev, LinearLayout.LayoutParams(20, 20).apply { leftMargin = 8 })
+        musicStateText = Ui.text(context, musicState, COMBINED_SOURCE_SIZE, cardWeakText)
         sourceRow.addView(
             musicStateText,
             LinearLayout.LayoutParams(0, -2, 1f).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL },
@@ -1184,14 +1300,14 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
             Logx.event(LogTags.NAV_UI, "导航页音乐卡来源行点击", "source" to sourceLabel)
             onSource?.invoke()
         }
-        combinedCard.addView(sourceRow, abs(pad, COMBINED_SOURCE_TOP, -1, 24))
+        combinedCard.addView(sourceRow, absIn(pad, COMBINED_SOURCE_TOP, -1, 24, pad))
         sourceRowView = sourceRow
 
         // —— 封面 + 歌名 / 歌手 ——
-        // 设计板封面 96×96 / 圆角 26；原本是 80×80
-        // 第四十九轮按设计板放大到 96。
+        // **画板实测封面 140×140、圆角 28 @ (1323,137)**（相对卡顶 67 → y70）。
+        // 实机原来是 96×96 —— 画板上封面撑起了右卡上半整块重心，尺寸差一倍就完全不对了。
         val art = com.cardesk.launcher.ui.widget.AlbumArtView(context).apply {
-            cornerRadius = 26f
+            cornerRadius = COMBINED_ART_RADIUS
             placeholderColor = cardPal.withAlpha(cardPal.text, 0x14)
             // 第148轮：**点封面图 = 切换「歌曲图片当卡片背景」**。
             //
@@ -1204,20 +1320,37 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
             setOnClickListener { toggleCoverBackdrop() }
         }
         albumArtView = art
-        combinedCard.addView(art, abs(pad, COMBINED_ART_TOP, 96, 96))
+        combinedCard.addView(
+            art,
+            abs(pad, COMBINED_ART_TOP, COMBINED_ART_SIZE, COMBINED_ART_SIZE),
+        )
+
+        // 封面里的**双联音符**：画板在没有封面时，占位块正中画一个描边音符
+        // （墨迹 37×44，色 = textFaint）。AlbumArtView 的占位只铺一块底色，
+        // 所以这一层由本页叠上去 —— 有封面图时整层隐藏（[artwork] 的 setter 负责）。
+        coverNote = NavCoverNoteView(context, cardPal.textFaint)
+        combinedCard.addView(
+            coverNote,
+            abs(pad, COMBINED_ART_TOP, COMBINED_ART_SIZE, COMBINED_ART_SIZE),
+        )
+        coverNote.visibility = if (artwork == null) View.VISIBLE else View.GONE
 
         //
         // `maxLines="1"` + `ellipsize="end"` —— 长歌名 / 长歌手名截断成省略号。
-        titleText = Ui.text(context, trackTitle, 38f, cardPal.text, bold = true).apply {
+        titleText = Ui.text(context, trackTitle, COMBINED_TITLE_SIZE, cardPal.text, bold = true).apply {
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
         }
-        combinedCard.addView(titleText, abs(COMBINED_META_X, COMBINED_TITLE_TOP, -1, 48))
-        artistText = Ui.text(context, trackArtist, 22f, cardPal.textDim).apply {
+        combinedCard.addView(titleText, absIn(COMBINED_META_X, COMBINED_TITLE_TOP, -1, 48, pad))
+        // 画板：副标题是 **textFaint**（比来源行那档 textDim 更弱），不是 textDim。
+        artistText = Ui.text(context, trackArtist, COMBINED_ARTIST_SIZE, cardPal.textFaint).apply {
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
         }
-        combinedCard.addView(artistText, abs(COMBINED_META_X, COMBINED_ARTIST_TOP, -1, 30))
+        combinedCard.addView(
+            artistText,
+            absIn(COMBINED_META_X, COMBINED_ARTIST_TOP, -1, COMBINED_ARTIST_H, pad),
+        )
 
         // —— 歌词：居中三行（上一句 / 当前句带擦除高亮 / 下一句）——
         //
@@ -1264,41 +1397,65 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
                 },
             )
         }
-        combinedCard.addView(lyricSpacer, abs(pad, COMBINED_LYRIC_TOP, -1, LYRIC_BLOCK_H))
+        combinedCard.addView(lyricSpacer, absIn(pad, COMBINED_LYRIC_TOP, -1, LYRIC_BLOCK_H, pad))
 
-        // —— 进度条：高 8 的胶囊轨道 + 强调色填充（第四十九轮去掉圆点，改成设计板的纯条）——
+        // —— 进度条：高 10 的胶囊轨道 + 强调色填充（画板：全圆角 r=5，宽 530 = 卡宽 − 27 − 28）——
         progressHost = FrameLayout(context)
         progressHost.addView(
-            View(context).apply { background = Skin.solid(cardPal.surfaceStrong, 4f) },
-            LayoutParams(LayoutParams.MATCH_PARENT, 8, Gravity.CENTER_VERTICAL),
+            View(context).apply { background = Skin.solid(cardPal.surfaceStrong, COMBINED_PROGRESS_H / 2f) },
+            LayoutParams(LayoutParams.MATCH_PARENT, COMBINED_PROGRESS_H, Gravity.CENTER_VERTICAL),
         )
-        progressFill = View(context).apply { background = Skin.solid(cardAccent, 4f) }
-        progressHost.addView(progressFill, LayoutParams(0, 8, Gravity.CENTER_VERTICAL))
-        combinedCard.addView(progressHost, abs(pad, COMBINED_PROGRESS_TOP, -1, 24))
+        progressFill = View(context).apply {
+            background = Skin.solid(cardAccent, COMBINED_PROGRESS_H / 2f)
+        }
+        progressHost.addView(
+            progressFill,
+            LayoutParams(0, COMBINED_PROGRESS_H, Gravity.CENTER_VERTICAL),
+        )
+        combinedCard.addView(
+            progressHost,
+            absIn(pad, COMBINED_PROGRESS_TOP, -1, COMBINED_PROGRESS_H, pad),
+        )
 
         // —— 时间行 ——
+        // 画板：14px、textFaint（日间是 (140,153,166)，比时间行旧版的 textDim 更浅）
         val timeRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
-        currentTimeText = Ui.text(context, positionText, 18f, cardWeakText)
-        totalTimeText = Ui.text(context, durationText, 18f, cardWeakText)
+        currentTimeText = Ui.text(context, positionText, COMBINED_TIME_SIZE, cardPal.textFaint)
+        totalTimeText = Ui.text(context, durationText, COMBINED_TIME_SIZE, cardPal.textFaint)
         timeRow.addView(currentTimeText, LinearLayout.LayoutParams(0, -2, 1f))
         timeRow.addView(totalTimeText, LinearLayout.LayoutParams(-2, -2))
-        combinedCard.addView(timeRow, abs(pad, COMBINED_TIME_TOP, -1, 26))
+        combinedCard.addView(
+            timeRow,
+            absIn(pad, COMBINED_TIME_TOP, -1, COMBINED_TIME_H, pad),
+        )
 
-        // —— 控制键：上一曲 / 播放 / 下一曲（设计板是纯字形，没有圆形底）——
+        // —— 控制键：上一曲 / **白色实心播放圆** / 下一曲 ——
+        //
+        // 画板实测：播放键是直径 76 的实心圆（日间纯白带柔阴影，夜间是玻璃圆 + 1px 描边），
+        // 圆里是**描边三角形**（16×19，笔杆 3）而不是实心「▶」；两个 chevron 的墨迹是 9×16。
         val controls = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-        val prevBtn = iconButton("‹", 50)
+        combinedControls = controls
+        val prevBtn = iconButton("‹", COMBINED_CHEVRON_SIZE)
+        prevButton = prevBtn
         prevBtn.setOnClickListener {
             // 排障场景：「导航页上一曲/下一曲点了不动」。
             Logx.event(LogTags.NAV_UI, "导航页音乐卡上一曲", "title" to trackTitle)
             onPrev?.invoke()
         }
-        controls.addView(prevBtn, LinearLayout.LayoutParams(40, 56).apply { rightMargin = 56 })
-        val playBtn = Ui.text(context, "▶", 48f, cardPal.text, bold = true).apply {
-            gravity = Gravity.CENTER
+        controls.addView(
+            prevBtn,
+            LinearLayout.LayoutParams(COMBINED_CHEVRON_W, COMBINED_CHEVRON_H).apply {
+                rightMargin = COMBINED_CHEVRON_GAP
+            },
+        )
+        // 第240轮：播放键从「文字符号 ▶ / ❚❚」改成**自绘控件** ——
+        // 画板要求的是「实心圆 + 描边三角形」，文字符号的三角形是实心的、也没有圆底。
+        val playBtn = NavPlayButtonView(context, cardPal).apply {
             isClickable = true
+            contentDescription = "播放 / 暂停"
             Motion.press(this, MotionSpec.PRESS_SCALE_ICON)
             setOnClickListener {
                 Logx.event(
@@ -1311,14 +1468,28 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
             }
         }
         playGlyph = playBtn
-        controls.addView(playBtn, LinearLayout.LayoutParams(56, 56))
-        val nextBtn = iconButton("›", 50)
+        controls.addView(
+            playBtn,
+            LinearLayout.LayoutParams(COMBINED_CONTROLS_H, COMBINED_CONTROLS_H),
+        )
+        val nextBtn = iconButton("›", COMBINED_CHEVRON_SIZE)
+        nextButton = nextBtn
         nextBtn.setOnClickListener {
             Logx.event(LogTags.NAV_UI, "导航页音乐卡下一曲", "title" to trackTitle)
             onNext?.invoke()
         }
-        controls.addView(nextBtn, LinearLayout.LayoutParams(40, 56).apply { leftMargin = 56 })
-        combinedCard.addView(controls, abs(0, COMBINED_CONTROLS_TOP, -1, 56))
+        controls.addView(
+            nextBtn,
+            LinearLayout.LayoutParams(COMBINED_CHEVRON_W, COMBINED_CHEVRON_H).apply {
+                leftMargin = COMBINED_CHEVRON_GAP
+            },
+        )
+        combinedCard.addView(
+            controls,
+            abs(0, COMBINED_CONTROLS_TOP, -1, COMBINED_CONTROLS_H),
+        )
+        // —— 播放态：播放键自己画（三角 / 双竖条）——
+        playBtn.setPlaying(playing)
 
         // —— 收藏 / 播放模式（第一九五轮）——
         //
@@ -1330,6 +1501,8 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         //
         // 第 195 轮把文字符号换成了**矢量图标**（[MediaActionIcons]）：
         // 收藏用心形，播放模式用 repeat / repeat_one / shuffle 标准符号。
+        // 收藏 / 播放模式与 76 高的播放圆**垂直居中对齐**（外框 56 高 → 上下各让 10）。
+        val actionTop = COMBINED_CONTROLS_TOP + (COMBINED_CONTROLS_H - ACTION_ICON_FRAME_H) / 2
         val favBtn = ImageView(context).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
             // 内容区 40×40（外框 48×56 留出左右 4 / 上下 8）
@@ -1337,6 +1510,9 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
             // 第 196 轮**放大**：原来是 28×28（padding 10/14），
             // 实体心形在车机屏上偏小、看着不够醒目 → 内容区放到 40×40。
             // 外框尺寸不变（48×56）→ 点击热区不变，版式也不动。
+            //
+            // 第 207 轮：改成与播放模式按钮**共用** [ACTION_ICON_CONTENT] 等常量，
+            // 两个按钮永远一样大。
             setPadding(4, 8, 4, 8)
             isClickable = true
             contentDescription = "收藏"
@@ -1352,12 +1528,18 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
             }
         }
         favoriteBtn = favBtn
-        combinedCard.addView(favBtn, abs(24, COMBINED_CONTROLS_TOP, 48, 56))
+        combinedCard.addView(
+            favBtn,
+            abs(24, actionTop, ACTION_ICON_FRAME_W, ACTION_ICON_FRAME_H),
+        )
 
         val modeBtn = ImageView(context).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
-            // 内容区 28×28（外框 52×56 留出左右 12 / 上下 14）
-            setPadding(12, 14, 12, 14)
+            // 第207轮**放大**：原来内容区只有 28×28（padding 12/14），
+            // 和旁边已经放到 40×40 的收藏按钮**不一样大** —— 同一个控制键行里
+            // 两个图标大小不齐，看着就像「收藏是重点、播放模式是凑数的」。
+            // 现在与收藏按钮共用 [ACTION_ICON_CONTENT]（40×40，外框 48×56）。
+            setPadding(4, 8, 4, 8)
             isClickable = true
             contentDescription = "播放模式"
             Motion.press(this, MotionSpec.PRESS_SCALE_ICON)
@@ -1374,8 +1556,11 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         playModeBtn = modeBtn
         combinedCard.addView(
             modeBtn,
-            LayoutParams(52, 56, Gravity.TOP or Gravity.END).apply {
-                topMargin = COMBINED_CONTROLS_TOP
+            LayoutParams(
+                ACTION_ICON_FRAME_W, ACTION_ICON_FRAME_H,
+                Gravity.TOP or Gravity.END,
+            ).apply {
+                topMargin = actionTop
                 rightMargin = 24
             },
         )
@@ -1383,6 +1568,218 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         applyActionVisibility()
         applyFavoriteState()
         applyPlayModeState()
+
+        // 第229轮：这张卡在单画模式下宽度会跟着分隔条变 ——
+        // 版式是按设计板 ~520 宽摆的绝对坐标，卡一窄就会「封面挤到歌名、进度条顶到边框」。
+        // 所以宽度一变就按档位重新摆一次（见 [applyCombinedWidth]）。
+        combinedCard.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            applyCombinedWidth(combinedCard.width)
+        }
+    }
+
+    /**
+     * 空槽位的**设计版占位**：白圆 + 加号 + 一行文案（见 [NavEmptyDiscView]）。
+     *
+     * 整块做成一个可点的竖直组，点击走 [onPipPickApp] —— 与 PipSurface 占位
+     * 原来的 `onClick` 是**同一个出口**（LauncherView.showPipPicker），
+     * 所以「点空槽位挑应用」这条交互没变，变的只是长什么样。
+     */
+    private fun buildEmptySlot(): LinearLayout {
+        val group = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            isClickable = true
+            // 无障碍：这一块是**一个**按钮，不让读屏把圆和文案拆成两件事。
+            isFocusable = true
+            contentDescription = "画中画空槽位，点击选择应用"
+            setOnClickListener {
+                Logx.event(LogTags.NAV_UI, "导航页空槽位点击（挑应用）")
+                onPipPickApp?.invoke()
+            }
+            Motion.press(this, MotionSpec.PRESS_SCALE_ROW)
+        }
+        group.addView(
+            NavEmptyDiscView(context, cardPal),
+            LinearLayout.LayoutParams(EMPTY_DISC_SIZE, EMPTY_DISC_SIZE),
+        )
+        // 文案取自 PipSurface 的占位（见 [syncEmptySlot]），字号/颜色在这里定 ——
+        // 画板实测 22px、日间 textDim、夜间 textFaint（[cardWeakText] 正好是这两档）。
+        emptyLabel = Ui.text(context, PipSurface.TEXT_PICK_APP, EMPTY_LABEL_SIZE, cardWeakText).apply {
+            gravity = Gravity.CENTER
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            maxWidth = EMPTY_LABEL_MAX_W
+        }
+        group.addView(
+            emptyLabel,
+            LinearLayout.LayoutParams(-2, EMPTY_LABEL_H).apply { topMargin = EMPTY_LABEL_GAP },
+        )
+        return group
+    }
+
+    /**
+     * 对账：**设计版占位**与 PipSurface 自己的占位哪个该出现。
+     *
+     * ## 为什么要「接管」而不是自己判断空状态
+     *
+     * 空状态不止一种文案 —— 除了「请选择应用」，还有「未安装: xxx」
+     * （应用被卸载了）和「与主画相同，无法同时承载」（选错目标）。
+     * 后面这两种是**错误提示**，用新版式盖掉就等于把提示吞了。
+     * 所以文案一律取自 pip 的占位本身（[placeholderText]），只在「它确实是
+     * 默认那一条、且 pip 没有承载内容」时才换成设计版式；其余情况原样保留。
+     *
+     * 读不到（反射失败 / 结构变了）→ 什么都不做，宁可少一层装饰，也不能让空槽位变空白。
+     */
+    private fun syncEmptySlot() {
+        val group = emptySlot ?: return
+        val placeholder = pipPlaceholder()
+        if (placeholder == null) {
+            group.visibility = View.GONE
+            return
+        }
+        val text = placeholderText(placeholder)
+        // 判据用「不是 GONE」而不是「== VISIBLE」：接管之后我们把它设成 INVISIBLE，
+        // 若按 VISIBLE 判，下一次布局就会认为自己不该接管 → 新层收起、
+        // 旧层还 INVISIBLE → **整个空槽位变空白**。
+        // PipSurface 只在挂载内容时设 GONE，所以「不是 GONE」正好等于「占位态」。
+        val placeholderMode = placeholder.visibility != View.GONE
+        if (text != null && !pip.hasContent && placeholderMode) {
+            if (::emptyLabel.isInitialized && emptyLabel.text != text) emptyLabel.text = text
+            group.visibility = View.VISIBLE
+            placeholder.visibility = View.INVISIBLE
+        } else {
+            if (group.visibility != View.GONE) group.visibility = View.GONE
+            // 我们是**唯一**会把占位设成 INVISIBLE 的人，所以一旦不再接管就还回去：
+            // 否则（例如某次反射失败读到 null）会出现「新层收起 + 旧层不可见」的空白卡。
+            // 有内容时不还（否则旧占位会和承载的应用叠在一起）。
+            if (!pip.hasContent && placeholder.visibility == View.INVISIBLE) {
+                placeholder.visibility = View.VISIBLE
+            }
+        }
+    }
+
+    /**
+     * PipSurface 里那个**私有**的占位 View（`PipSurface.PlaceholderView`）。
+     *
+     * 它是 `private class`：NavPage 既引用不到类型、也改不了它的 onDraw。
+     * 这是本页唯一一处越过封装 —— 所以做成「找不到就什么都不做」的软探测：
+     * 类名对不上（重命名 / 结构调整）就返回 null，界面退回原来的占位，绝不崩。
+     * （release 构建 `isMinifyEnabled = false`，类名不会被混淆，见 app/build.gradle.kts。）
+     */
+    private fun pipPlaceholder(): View? {
+        for (i in 0 until pip.childCount) {
+            val child = pip.getChildAt(i) ?: continue
+            if (child.javaClass.simpleName.endsWith("PlaceholderView")) return child
+        }
+        return null
+    }
+
+    /** 读占位 View 的文案（`var text: String` → JVM `getText()`）。读不到返回 null。 */
+    private fun placeholderText(view: View): String? = try {
+        val getter = view.javaClass.getMethod("getText")
+        getter.isAccessible = true
+        getter.invoke(view) as? String
+    } catch (t: Throwable) {
+        Logx.d(LogTags.NAV_UI, "画中画占位文案读不到（设计版空槽位不接管）", "err" to t.javaClass.simpleName)
+        null
+    }
+
+    /** 播放键（`lateinit`，没建好时返回 null）。 */
+    private fun playGlyphRef(): NavPlayButtonView? = if (::playGlyph.isInitialized) playGlyph else null
+
+    /** 音乐卡上一次套用的宽度档位（-1 = 还没套过）。 */
+    private var combinedTier = -1
+
+    /**
+     * 单画模式下，音乐卡按**卡片实际宽度**重排（第229轮）。
+     *
+     * 三档：
+     *
+     * | 档 | 宽度 | 版式 |
+     * |---|---|---|
+     * | 0 | ≥ [COMBINED_NARROW_W] | 画板版式（封面 140、歌名 left 192、收藏/播放模式都在） |
+     * | 1 | ≥ [COMBINED_TIGHT_W] | 封面缩到 100、歌名 left 143、**收起收藏/播放模式**（会和居中控制键打架） |
+     * | 2 | 更窄 | 隐去封面，歌名从左边距起、占满整行 |
+     *
+     * 进度条 / 时间行 / 歌词的右边距在创建时就统一成了 [COMBINED_PAD]，
+     * 所以任何宽度下都不会贴边。
+     */
+    private fun applyCombinedWidth(width: Int) {
+        if (width <= 0) return
+        val tier = when {
+            width >= COMBINED_NARROW_W -> 0
+            width >= COMBINED_TIGHT_W -> 1
+            else -> 2
+        }
+        if (tier == combinedTier) return
+        combinedTier = tier
+        val artSize = when (tier) {
+            0 -> COMBINED_ART_SIZE
+            1 -> COMBINED_ART_TIGHT_SIZE
+            else -> 0
+        }
+        if (artSize > 0) {
+            // 封面 + 它上面那层音符必须**同一个 rect**，否则窄档里音符会飘到封面外面。
+            val artRect = abs(COMBINED_PAD, COMBINED_ART_TOP, artSize, artSize)
+            if (::albumArtView.isInitialized) {
+                albumArtView.visibility = View.VISIBLE
+                albumArtView.layoutParams = artRect
+            }
+            if (::coverNote.isInitialized) {
+                coverNote.layoutParams = abs(COMBINED_PAD, COMBINED_ART_TOP, artSize, artSize)
+                coverNote.visibility = if (artwork == null) View.VISIBLE else View.GONE
+            }
+        } else {
+            if (::albumArtView.isInitialized) albumArtView.visibility = View.GONE
+            if (::coverNote.isInitialized) coverNote.visibility = View.GONE
+        }
+        val metaX = when (tier) {
+            0 -> COMBINED_META_X
+            1 -> COMBINED_PAD + COMBINED_ART_TIGHT_SIZE + 16
+            else -> COMBINED_PAD
+        }
+        if (::titleText.isInitialized) {
+            titleText.layoutParams = absIn(metaX, COMBINED_TITLE_TOP, -1, 48, COMBINED_PAD)
+        }
+        if (::artistText.isInitialized) {
+            artistText.layoutParams =
+                absIn(metaX, COMBINED_ARTIST_TOP, -1, COMBINED_ARTIST_H, COMBINED_PAD)
+        }
+        // 画板版式的控制行总宽 292（40+76+40 + 两个 68 的间距）——
+        // 卡宽 320 时内容区只有 266，必然顶到两边被裁，所以紧档要同时收紧间距与键宽。
+        val tight = tier >= 2
+        val gap = when (tier) {
+            0 -> COMBINED_CHEVRON_GAP
+            1 -> 30
+            else -> 12
+        }
+        val sideW = if (tight) 32 else COMBINED_CHEVRON_W
+        val playW = when (tier) {
+            0 -> COMBINED_CONTROLS_H
+            1 -> 64
+            else -> 64
+        }
+        prevButton?.let {
+            it.layoutParams = LinearLayout.LayoutParams(sideW, COMBINED_CHEVRON_H).apply {
+                rightMargin = gap
+            }
+        }
+        playGlyphRef()?.let {
+            // 播放键是**圆**，宽高必须相等。
+            it.layoutParams = LinearLayout.LayoutParams(playW, playW)
+        }
+        nextButton?.let {
+            it.layoutParams = LinearLayout.LayoutParams(sideW, COMBINED_CHEVRON_H).apply {
+                leftMargin = gap
+            }
+        }
+        // 「已暂停」这类状态文案在窄卡里只会被截成半个字，直接藏掉。
+        if (::musicStateText.isInitialized) {
+            musicStateText.visibility = if (tight) View.GONE else View.VISIBLE
+        }
+        // 收藏 / 播放模式是「贴左右两边、控制键居中」的版式，卡窄了必然打架。
+        applyActionVisibility()
+        Logx.d(LogTags.NAV_UI, "音乐卡宽度档位", "width" to width, "tier" to tier)
     }
 
     /**
@@ -1398,8 +1795,10 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
     private fun applyActionVisibility() {
         val pkg = musicPackage
         val caps = MediaActions.capsOf(pkg, actionProbe)
-        favoriteBtn?.visibility = if (caps.favorite) View.VISIBLE else View.GONE
-        playModeBtn?.visibility = if (caps.playMode) View.VISIBLE else View.GONE
+        // 第229轮：卡片窄的时候这两个按钮会和居中的控制键叠在一起，先让位。
+        val roomy = combinedTier <= 0
+        favoriteBtn?.visibility = if (roomy && caps.favorite) View.VISIBLE else View.GONE
+        playModeBtn?.visibility = if (roomy && caps.playMode) View.VISIBLE else View.GONE
     }
 
     /**
@@ -1462,7 +1861,24 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
             leftMargin = x
             topMargin = y
         }
-    private fun iconButton(glyph: String, size: Int): TextView = Ui.text(context, glyph, size * 0.7f, cardPal.text).apply {
+
+    /**
+     * 与 [abs] 相同，但补一个**右边距**（第229轮）。
+     *
+     * 音乐卡里的整行元素原来都是「左 24 + 宽度 MATCH_PARENT」——
+     * 右边贴到卡片边缘，卡片一窄进度条就顶到边框上（用户报的「进度条贴边」）。
+     */
+    private fun absIn(x: Int, y: Int, w: Int, h: Int, right: Int): LayoutParams =
+        abs(x, y, w, h).apply {
+            rightMargin = right
+        }
+    /**
+     * 字形按钮（上一曲 / 下一曲）。
+     *
+     * [size] 就是**字号**（设计 px）：画板 chevron 墨迹 9×16，按「墨迹高 ≈ 0.37 字号」
+     * 反推字号 43 —— 旧实现把字号再乘 0.7，墨迹只有 11 高，明显比画板单薄。
+     */
+    private fun iconButton(glyph: String, size: Int): TextView = Ui.text(context, glyph, size.toFloat(), cardPal.text).apply {
         gravity = Gravity.CENTER
         isClickable = true
         // 图标类小按钮 —— 按 [MotionSpec.PRESS_SCALE_ICON] 缩，
@@ -1489,15 +1905,33 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
             }
             // 长按拖比例：实时刷新
             onRatioChanged = { ratio ->
+                // 第229轮：拖动期间**不 resize 虚拟屏** —— 卡宽每帧都在变，
+                // 每帧 resize 一次会让承载应用每帧重排版重画（实测拖动 10fps）。
+                // 这里只是把两路承载面切到「预览」态，松手时再一次性 resize。
+                pip.beginDragPreview()
+                pipSecondary.beginDragPreview()
+                dragSteps++
                 pipRatio = ratio
-                // 排障场景：「分隔条拖不动」——每帧比例用 DEBUG，不落盘。
-                Logx.d(LogTags.NAV_UI, "画中画分隔条拖动中", "ratio" to ratio)
+                // 第228轮：**不再逐帧记一条** —— 分隔条自己已经记了
+                // 「画中画分隔条拖动比例」（含 from/to/dx），这里再记一条是重复；
+                // 而拖动时每帧多一条 logcat，在车机上就是拖动卡顿的一部分。
                 this@NavPage.onRatioChanged?.invoke(ratio)
             }
             // 松手落盘
             onRatioCommitted = { ratio ->
                 ratioStore.write(dualPip, ratio)
                 pipRatio = ratio
+                // 等这一帧布局跑完（卡宽已定）再做真实 resize，承载应用只重排一次。
+                pip.post { pip.endDragPreview() }
+                pipSecondary.post { pipSecondary.endDragPreview() }
+                Logx.event(
+                    LogTags.NAV_UI,
+                    "画中画拖动结束",
+                    "steps" to dragSteps,
+                    "ratio" to ratio,
+                    "dual" to dualPip,
+                )
+                dragSteps = 0
                 // 排障场景：「比例拖完重启就没了」——落盘值必须落盘可查。
                 Logx.event(
                     LogTags.NAV_UI,
@@ -1629,6 +2063,9 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
 
     override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
         super.onLayout(changed, l, t, r, b)
+        // 占位的可见性由 pip 状态变化驱动（挂载/卸载应用都会 requestLayout），
+        // 所以每次布局都对一次账：该显示设计版式就显示、该让位就立刻让位。
+        syncEmptySlot()
         placePipDivider()
         // 布局刚跑完才知道进度条有多宽 —— 这里**直接定宽，不播动画**。
         //
@@ -1649,9 +2086,19 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         val mapWidth = mapCard.width
         // 分隔条卡在「地图卡 ↔ 组合卡」那条缝上：
         // 不换位时地图卡在左 → 缝在地图卡右边；换位后地图卡在右 → 缝在左边。
-        val edge = PipSides.dividerEdge(mapCard.left, mapCard.right, sidesSwapped)
+        //
+        // 第228轮（真车实测修的坐标错位）：
+        // `mapCard.left/right` 是**相对 navRow** 的坐标，而 `pipDivider` 是
+        // **NavPage 的直接子 View** —— 两套坐标系差了一个 `NAV_SIDE_MARGIN`（44px）。
+        // 以前直接拿 `mapCard.right` 当屏幕坐标 ⇒ 分隔条被画在 x=1315，
+        // 正好压在画中画画面自己的滚动条上 ⇒ **看起来像消失了**。
+        // 真车证据：点 x=1359（卡缝真实位置）没反应；点 x=1321 反而命中
+        // 日志「画中画分隔条按下 → 单击（切换全屏）」⇒ 控件一直在，只是画歪了 44px。
+        val rowLeft = if (::navRow.isInitialized) navRow.left else 0
+        val rowTop = if (::navRow.isInitialized) navRow.top else 0
+        val edge = rowLeft + PipSides.dividerEdge(mapCard.left, mapCard.right, sidesSwapped)
         pipDivider.x = (edge - pipDivider.width / 2).toFloat()
-        pipDivider.y = ((mapCard.height - pipDivider.height) / 2).toFloat()
+        pipDivider.y = (rowTop + mapCard.top + (mapCard.height - pipDivider.height) / 2).toFloat()
 
         // —— 拖比例手势需要的输入——
         pipDivider.ratioProvider = { pipRatio }
@@ -1732,12 +2179,30 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
 
     companion object {
         /**
+         * 收藏 / 播放模式两个按钮的**图标内容区边长**（设计 px）。
+         *
+         * 第207轮：播放模式按钮原来只有 28×28，收藏按钮已经是 40×40 ——
+         * 同一个控制键行里两个图标大小不齐。现在**两者共用这一个常量**，
+         * 保证「一样大」这件事不会再被单独改歪（有单测盯着）。
+         */
+        const val ACTION_ICON_CONTENT = 40
+
+        /**
+         * 收藏 / 播放模式两个按钮的**外框宽**（设计 px）。
+         *
+         * 外框比内容区大一圈（上下各留 8），点击热区在这个外框里。
+         */
+        const val ACTION_ICON_FRAME_W = 48
+
+        /** 收藏 / 播放模式两个按钮的**外框高**（设计 px）。 */
+        const val ACTION_ICON_FRAME_H = 56
+
+        /**
          * 组合卡里歌词高亮用的**夜间那档强调色**（`#5AD8C8`）。
          *
          * 夜间是深底浅字，这档青在压暗后的封面上很跳。
          */
         const val CARD_ACCENT_NIGHT = 0xFF5AD8C8.toInt()
-
         /**
          * 日间组合卡的强调色（当前歌词高亮 / 进度条填充）。
          *
@@ -1752,13 +2217,40 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         /**
          * 导航行左右留白（设计 px）。
          *
-         * 第四十九轮按设计板 `s02-nav`：左槽地图卡 `left 44`、右槽组合卡 `right 1876`，
-         * 两张卡之间留 20 的缝。容器宽度 = 1920 − 44 × 2 = **1832**。
+         * **画板 02-nav 实测**（PIL 逐像素扫 `02-nav-day.png`，row 400）：
+         * 左卡左缘 **x40**、右卡右缘 **x1880** —— 左右留白都是 40，不是第四十九轮记的 44。
+         * 容器宽度 = 1920 − 40 × 2 = **1840**。
+         *
+         * 为什么不沿用 44：画板是唯一事实源，44 那版是照旧设计稿抄的，
+         * 实机截图里卡片整体比画板**窄了 8px、右缘早了 4px**，卡缝也对不上。
          */
-        const val NAV_SIDE_MARGIN = 44
+        const val NAV_SIDE_MARGIN = 32
 
-        /** 地图卡 ↔ 组合卡之间的缝（设计 px）。 */
-        const val NAV_COLUMN_GAP = 20
+        /**
+         * 「画中画分屏比例变化」这条逐帧日志的最小间隔（毫秒，第228轮）。
+         *
+         * 拖分隔条时每帧都会写一条 logcat —— 车机上的 logcat 本身很吵，
+         * 这条日志就是拖动卡顿的一部分。起始 / 结束的关键信息另有落盘日志，
+         * 这里只留稀疏采样。
+         */
+        const val RATIO_LOG_THROTTLE_MS = 400L
+
+        /**
+         * 地图卡 ↔ 组合卡之间的缝（设计 px）。
+         *
+         * **画板实测**：左卡右缘 x1255、右卡左缘 x1296 → 缝 **40**。
+         * 原值 20 是旧设计稿的缝，实机上两张卡贴得太近，右卡的玻璃底透出左卡的画面。
+         */
+        const val NAV_COLUMN_GAP = 38
+
+        /** 双画卡缝（画板 09-pip：左 903 / 右 909 / 缝 24）。 */
+        const val NAV_COLUMN_GAP_DUAL = 38
+
+        /** 音乐卡宽度 ≥ 这个值用设计板版式（第229轮）。 */
+        const val COMBINED_NARROW_W = 460
+
+        /** 音乐卡宽度 ≥ 这个值收紧版式（封面缩到 100、收起左右两个图标按钮）；更窄则隐去封面。 */
+        const val COMBINED_TIGHT_W = 320
 
         /**
          * 导航页内容顶部（状态栏显示时，设计 px）。
@@ -1767,49 +2259,186 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
          *
          * 第五十二轮：状态栏整体缩到 2/3（行高 64 → 43），内容起点随之上移
          * **110 → 73**（= 110 × 2/3），底边仍贴 Dock 上沿 940，卡片相应长高。
+         *
+         * **本轮（对齐画板 02-nav）**：画板实测两张卡的顶边在 **y67**
+         * （实机截图是 y72 —— NavPage 自身 topMargin 73 时卡顶落在 72），
+         * 所以基线再上移 5 → **68**。卡顶、卡高、卡底三处只有同时对上，
+         * 右卡内部那一列绝对坐标（封面 140 / 进度条 / 控制行）才落在画板的位置上。
          */
-        const val NAV_CONTENT_TOP = 73
+        const val NAV_CONTENT_TOP = 68
+
+        /**
+         * 导航行底边与 Dock 上沿之间的空隙（设计 px）。
+         *
+         * **画板实测**：卡底 y878、Dock 顶边 y968 → 空隙 **90**。
+         *
+         * 为什么这里不能直接把 [NAV_BOTTOM_GAP] 改成 90：
+         * `app/src/test/java/com/cardesk/launcher/core/dock/PipDockInsetTest.kt`
+         * 用 `DOCK_TOP_Y - NavPage.NAV_BOTTOM_GAP` 硬编码断言了 **940**，
+         * 而本轮只允许改这一个文件。所以老常量保留（单测继续绿），
+         * 实际行底距改用本常量 —— 等单测那边改成读本常量后再合并成一个。
+         */
+        const val NAV_ROW_BOTTOM_GAP = 17
 
         /** 导航页内容底部与 Dock 上沿之间的空隙（设计 px）。 */
         const val NAV_BOTTOM_GAP = 28
 
-        /** 组合卡内容左右留白（设计 px）。 */
-        const val COMBINED_PAD = 24
+        /**
+         * 组合卡内容左右留白（设计 px）。
+         *
+         * **画板 02-nav 实测**：右卡左缘 x1296、内容左缘 x1323 → 左内边 **27**；
+         * 进度条右端 x1852、卡右缘 x1880 → 右内边 **28**。取 27（两侧共用，
+         * 1px 的差在画板上是卡片高光描边蹭掉的，不值得为它拆两个常量）。
+         */
+        const val COMBINED_PAD = 27
 
-        /** 组合卡：来源行顶部偏移。 */
-        const val COMBINED_SOURCE_TOP = 22
+        /**
+         * 组合卡：来源行顶部偏移（行高 = [SOURCE_ICON_SIZE]）。
+         *
+         * 画板实测来源行墨迹 y97..112（相对卡顶 67 → 30..45）。16px 文本在 24 高的行里
+         * 垂直居中时墨迹顶 = 行顶 + 2.6，反推行顶 = **26**。
+         */
+        const val COMBINED_SOURCE_TOP = 26
 
         /**
          * 来源行**图标**的边长（设计 px，第138轮）。
          *
          * 原来这里是一个 10px 的品牌色小圆点；换成真 App 图标后要画得清楚一点，
-         * 取 **24**（与这一行 20px 的来源文案同一量级，不喧宾夺主）。
+         * 取 **24**（与这一行 16px 的来源文案同一量级，不喧宾夺主）。
          */
         const val SOURCE_ICON_SIZE = 24
 
-        /** 组合卡：专辑封面上边缘。 */
-        const val COMBINED_ART_TOP = 66
+        /**
+         * 来源行文案字号（设计 px）。
+         *
+         * 画板实测「通用音乐」墨迹 x1352..1413 = **62 宽 / 4 字 = 15.5px 一字**
+         * → 字号 16。实机是 20（墨迹大了 25%），一行文案就顶到下拉箭头上了。
+         */
+        const val COMBINED_SOURCE_SIZE = 16f
 
-        /** 组合卡：歌名 / 歌手的左边缘（封面右侧）。 */
-        const val COMBINED_META_X = 140
+        /**
+         * 组合卡：封面左/上边缘与边长（设计 px）。
+         *
+         * 画板实测封面块 **140×140 @ (1323,137)**（相对卡顶 67 → y70），
+         * 圆角按边角像素反解约 **28**。实机是 96×96 —— 画板上封面占掉了
+         * 「来源行之下、歌名之前」的整块高度，这是右卡视觉重心的一半。
+         */
+        const val COMBINED_ART_TOP = 70
+        const val COMBINED_ART_SIZE = 140
+        const val COMBINED_ART_RADIUS = 28f
 
-        /** 组合卡：歌名顶部。 */
-        const val COMBINED_TITLE_TOP = 78
+        /** 组合卡：窄档（封面缩一档）时的封面边长（设计 px）。 */
+        const val COMBINED_ART_TIGHT_SIZE = 100
 
-        /** 组合卡：歌手顶部。 */
-        const val COMBINED_ARTIST_TOP = 126
+        /**
+         * 组合卡：歌名 / 歌手的左边缘（设计 px，相对卡片）。
+         *
+         * 画板实测歌名墨迹 x1488 → 相对卡左 1296 = **192** = 留白 27 + 封面 140 + 25。
+         */
+        const val COMBINED_META_X = 192
+
+        /**
+         * 组合卡：歌名顶部 + 字号。
+         *
+         * 画板实测「暂无播放」墨迹 **x1488..1637（150 宽）× y176..211（36 高）**：
+         * 4 个汉字 150 宽 → 一字 37.5 → **38px 粗体**（用户量的是 34，按像素不是）。
+         * 38px 汉字的墨迹顶在 View 顶 +2，所以 View 顶 = 109 − 2 = **107**。
+         */
+        const val COMBINED_TITLE_TOP = 107
+        const val COMBINED_TITLE_SIZE = 38f
+
+        /**
+         * 组合卡：歌手顶部 + 字号 + 行高。
+         *
+         * 画板实测副标题「通用音乐」墨迹 **x1488..1540（53 宽）× y232..244（12 高）**
+         * → 字号 ≈ 13.4，取 **14**（墨迹 55 宽，差 2px）；墨迹顶 = View 顶 + 0.7 → **164**。
+         */
+        const val COMBINED_ARTIST_TOP = 164
+        const val COMBINED_ARTIST_SIZE = 14f
+        const val COMBINED_ARTIST_H = 22
 
         /** 组合卡：歌词块顶部。 */
         const val COMBINED_LYRIC_TOP = 318
 
-        /** 组合卡：进度条顶部。 */
-        const val COMBINED_PROGRESS_TOP = 640
+        /**
+         * 组合卡：进度条顶部 + 轨道高。
+         *
+         * 画板实测轨道 **x1323..1852（530 宽）× y710..719**（相对卡顶 → 643..652）：
+         * **高 10、全圆角（r=5）**。实机是「高 8 + 贴到卡底」，画板上它与卡底留了 159。
+         */
+        const val COMBINED_PROGRESS_TOP = 643
+        const val COMBINED_PROGRESS_H = 10
 
-        /** 组合卡：时间行顶部。 */
-        const val COMBINED_TIME_TOP = 662
+        /**
+         * 组合卡：时间行顶部 + 字号 + 行高。
+         *
+         * 画板实测两组「0:00」墨迹 y733..742（高 10）→ 数字墨迹高 ≈ 0.71 字号 → 字号 **14**；
+         * 数字墨迹顶 = View 顶 + 0.22 字号 → View 顶 = 666 − 3 = **663**。
+         */
+        const val COMBINED_TIME_TOP = 663
+        const val COMBINED_TIME_SIZE = 14f
+        const val COMBINED_TIME_H = 20
 
-        /** 组合卡：控制键顶部。 */
-        const val COMBINED_CONTROLS_TOP = 700
+        /**
+         * 组合卡：控制行顶部 + 行高。
+         *
+         * 画板实测**播放键是白色实心圆 直径 76**（x1550..1625 / y768..843，圆心 1587.5,805.5）
+         * 相对卡顶 67 → 圆顶 **701**；控制行就按圆高 76 建，上一曲 / 下一曲在行内垂直居中。
+         */
+        const val COMBINED_CONTROLS_TOP = 701
+        const val COMBINED_CONTROLS_H = 76
+
+        /**
+         * 上一曲 / 下一曲的「‹」「›」字号（设计 px）。
+         *
+         * 画板实测 chevron 墨迹 **9×16**；实机 35px 字号的墨迹是 7×13
+         * → 要 16 高得到 **43px**（「‹」的墨迹高 ≈ 0.37 字号）。
+         *
+         * 注意这是**字号**本身：[iconButton] 现在直接拿它当 textSize，
+         * 旧实现乘过 0.7（那是按「字形比框小一圈」估的，实测偏小）。
+         */
+        const val COMBINED_CHEVRON_SIZE = 43
+
+        /** 上一曲 / 下一曲的点击框（设计 px，宽 × 高；高 < 控制行高 → 行内垂直居中）。 */
+        const val COMBINED_CHEVRON_W = 40
+        const val COMBINED_CHEVRON_H = 56
+
+        /**
+         * chevron 与播放圆之间的间距（设计 px）。
+         *
+         * 画板实测两个 chevron 的墨迹中心在 x1465 / x1710，离播放圆圆心（1587.5）
+         * 各 **±124**；点击框 40 宽 → 间距 = 124 − 76/2 − 40/2 = **68**。
+         */
+        const val COMBINED_CHEVRON_GAP = 68
+
+        // —— 空槽位（画中画没有应用时）的占位版式。画板实测见各自的注释 ——
+
+        /**
+         * 空槽位中央的**实心圆直径**（设计 px）。
+         *
+         * 画板实测白圆 bbox **x582..713 / y383..514 → 直径 132**，圆心落在卡的水平中心；
+         * 「圆 + 加号 + 文案」这一组整体**垂直居中**于卡片（383..557 的中心 470 ≈ 卡中心 472）。
+         */
+        const val EMPTY_DISC_SIZE = 132
+
+        /** 空槽位「+」的横 / 竖臂半长（设计 px）——画板墨迹 32×34，笔杆 5。 */
+        const val EMPTY_PLUS_ARM_X = 16f
+        const val EMPTY_PLUS_ARM_Y = 17f
+        const val EMPTY_PLUS_STROKE = 5f
+
+        /**
+         * 空槽位文案「请选择应用」的字号 / 行高 / 与圆的间距。
+         *
+         * 画板实测墨迹 **x594..700（107 宽）× y538..557（20 高）**：5 个汉字 107 宽
+         * → 一字 21.4 → **22px**（实机是 19px，明显偏小）。圆底 514 → 墨迹顶 538 = 23.5，
+         * 22px 文本在 28 高的 View 里居中时墨迹顶 = View 顶 + 3.5 → 间距 **20**。
+         */
+        const val EMPTY_LABEL_SIZE = 22f
+        const val EMPTY_LABEL_H = 28
+        const val EMPTY_LABEL_GAP = 20
+
+        /** 空槽位文案的最大宽度（设计 px）——「未安装: <包名>」这类长文案要能截断，不顶出卡片。 */
+        const val EMPTY_LABEL_MAX_W = 460
 
         /**
          * 组合卡歌词显示的三个 slot（**当前句 / 下 1 / 下 2**）。
@@ -1946,5 +2575,201 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
          * 教训：算几何要先确认**每一层**的实际高度，别只看当前这一层的 margin。
          */
         const val PIP_CONTENT_INSET_BOTTOM = 0
+    }
+}
+
+/**
+ * 空槽位的**圆盘 + 加号**（[NavPage] 私有；绘制版式按画板 02-nav 实测还原）。
+ *
+ * 画板实测（1920×1080 设计坐标，圆的直径 132、圆心就是卡片中心 x647.5）：
+ *
+ * - 日间：圆是近白实心 (252,253,254)，加号墨迹 32×34、色 (140,153,166)=textFaint；
+ * - 夜间：**没有圆底**（圆心区域就是卡面色 (23,29,35)），只有加号墨迹
+ *   (107,120,133)=textFaint。
+ *
+ * 所以日间填 [Palette.surfaceStrong]（合成后≈252），夜间不填 —— 直接用调色板判断，
+ * 不写死日间色（夜间卡是 0xA8161B22 玻璃，白圆在上面会「亮一块」）。
+ */
+private class NavEmptyDiscView(
+    context: Context,
+    private val pal: Palette,
+) : View(context) {
+
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val ink = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = NavPage.EMPTY_PLUS_STROKE
+        strokeCap = Paint.Cap.ROUND
+    }
+
+    init {
+        isClickable = false // 点击由父组（圆 + 文案）统一处理
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val cx = width / 2f
+        val cy = height / 2f
+        val r = minOf(width, height) / 2f
+        if (!pal.night) {
+            fill.color = pal.surfaceStrong
+            canvas.drawCircle(cx, cy, r, fill)
+        }
+        // 圆边那一圈：画板夜间实测 (51,56,61) —— 正好是 [Palette.stroke]（白 12%）
+        // 叠在卡面 (24,31,39) 上的合成值；日间是 (254,254,254)，同样对得上（白 35% 叠近白）。
+        ink.color = pal.stroke
+        ink.strokeWidth = 2f
+        canvas.drawCircle(cx, cy, r - 1f, ink)
+        ink.strokeWidth = NavPage.EMPTY_PLUS_STROKE
+        ink.color = pal.textFaint
+        canvas.drawLine(
+            cx - NavPage.EMPTY_PLUS_ARM_X, cy,
+            cx + NavPage.EMPTY_PLUS_ARM_X, cy,
+            ink,
+        )
+        canvas.drawLine(
+            cx, cy - NavPage.EMPTY_PLUS_ARM_Y,
+            cx, cy + NavPage.EMPTY_PLUS_ARM_Y,
+            ink,
+        )
+    }
+}
+
+/**
+ * 封面占位块里的**双联描边音符**（画板：没有封面图时占位块正中一个音符）。
+ *
+ * 画板实测（以封面块 140×140 为参照，墨迹 37 宽 × 44 高）：
+ * 左符头中心 (56.5,84.5)、右符头 (77,80.5)，符头外径 16、描边 3.5；
+ * 左符干 x62.5、y55..78，右符干 x82.5、y50..74，杆宽 4；
+ * 符梁是连接两杆顶端的一条 ≈5px 粗斜带。
+ *
+ * 尺寸按宽度等比缩放（`w/140`），这样紧档封面缩到 100 时音符跟着缩，不会溢出。
+ */
+private class NavCoverNoteView(context: Context, private val tint: Int) : View(context) {
+
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+    private val stem = Path()
+    private val head = Path()
+
+    init {
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        isClickable = false // 点击归封面（切换封面背景）
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        if (width <= 0 || height <= 0) return
+        val k = minOf(width, height) / REFERENCE
+        // 下画坐标就是**画板 140 盒坐标系**（墨迹 x57..94 / y50..94），
+        // 所以这里只把 140 盒摆到 View 中心，不再额外平移 ——
+        // 画板里那个「偏右下 5.5 / 2」本身就是双联音符的非对称造型，不是居中偏置。
+        val dx = width / 2f - 70f * k
+        val dy = height / 2f - 70f * k
+        stem.reset()
+        head.reset()
+
+        // 符干 + 符梁：一条折线画完（两杆 + 顶端斜带），跟着封面一起缩放。
+        stem.moveTo(dx + 62.5f * k, dy + 78f * k)
+        stem.lineTo(dx + 62.5f * k, dy + 55.5f * k)
+        stem.lineTo(dx + 82.5f * k, dy + 50.5f * k)
+        stem.lineTo(dx + 82.5f * k, dy + 74f * k)
+        paint.color = tint
+        paint.strokeWidth = 4f * k
+        canvas.drawPath(stem, paint)
+        // 符梁更粗（≈5px），单独压一条，避免把杆也画粗。
+        paint.strokeWidth = 5f * k
+        canvas.drawLine(
+            dx + 62.5f * k, dy + 55.5f * k,
+            dx + 82.5f * k, dy + 50.5f * k,
+            paint,
+        )
+
+        // 两个空心符头：外径 16 ⇒ 半径 6.25 + 描边 3.5。
+        paint.strokeWidth = 3.5f * k
+        head.addCircle(dx + 56.5f * k, dy + 84.5f * k, 6.25f * k, Path.Direction.CW)
+        head.addCircle(dx + 77f * k, dy + 80.5f * k, 6.25f * k, Path.Direction.CW)
+        canvas.drawPath(head, paint)
+    }
+
+    private companion object {
+        /** 图标设计坐标系边长（与画板封面 140 对齐）。 */
+        const val REFERENCE = 140f
+    }
+}
+
+/**
+ * 播放键：**实心圆 + 内嵌描边三角（暂停时两条竖条）**。
+ *
+ * 画板实测：圆直径 76（日间纯白带柔阴影；夜间是玻璃圆 + 1px stroke），
+ * 圆内的播放符号是**描边**三角形（墨迹 16×19、笔杆 3、左边是一条竖边），
+ * 不是字体里的实心「▶」—— 用字形怎么做都对不上，所以自绘。
+ */
+private class NavPlayButtonView(context: Context, private val pal: Palette) : View(context) {
+
+    private var playing = false
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        strokeWidth = 3f
+        strokeJoin = Paint.Join.ROUND
+        strokeCap = Paint.Cap.ROUND
+    }
+    private val glyph = Path()
+
+    init {
+        // 圆底用 surfaceStrong：日间合成后≈白（画板 255,255,255），
+        // 夜间合成后 (27,33,42) ≈ 画板实测 (23,30,38)。
+        // 描边：画板夜间那颗圆有一圈 1px 亮边（实测 (45,51,59)）——
+        // 用 [Palette.stroke] 合成后正好是这一档；日间这个 35% 白描边在白圆上不可见。
+        background = Skin.oval(pal.surfaceStrong).apply { setStroke(2, pal.stroke) }
+        // 画板的圆有柔阴影（日间白圆压出一点浮起感），靠 elevation 让系统去画。
+        elevation = 8f
+        isClickable = true
+    }
+
+    fun setPlaying(value: Boolean) {
+        if (playing == value) return
+        playing = value
+        invalidate()
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        if (width <= 0 || height <= 0) return
+        val cx = width / 2f
+        val cy = height / 2f
+        // 必须用浮点除：紧档播放圆是 64，整数除会得到 0，整个字形缩没。
+        val k = minOf(width, height).toFloat() / NavPage.COMBINED_CONTROLS_H
+        glyph.reset()
+        paint.color = pal.text
+        if (playing) {
+            // 暂停：两条 6×19 的实心竖条，间距 6。
+            paint.style = Paint.Style.FILL
+            val w = 6f * k
+            val h = 19f * k
+            val gap = 3f * k
+            canvas.drawRoundRect(
+                cx - gap - w, cy - h / 2f, cx - gap, cy + h / 2f, 2f * k, 2f * k, paint,
+            )
+            canvas.drawRoundRect(
+                cx + gap, cy - h / 2f, cx + gap + w, cy + h / 2f, 2f * k, 2f * k, paint,
+            )
+        } else {
+            // 播放：描边三角（左竖边 + 两个斜边），墨迹 16×19。
+            //
+            // 画板里三角的墨迹中心在 x1589.5、圆心 1587.5 —— **偏右 2px**。
+            // 三角的重心天生偏左，右移这一点在视觉上才「居中」，照画板抄。
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 3f * k
+            val ox = 2f * k
+            glyph.moveTo(cx - 6.5f * k + ox, cy - 8f * k)
+            glyph.lineTo(cx - 6.5f * k + ox, cy + 8f * k)
+            glyph.lineTo(cx + 6.5f * k + ox, cy)
+            glyph.close()
+            canvas.drawPath(glyph, paint)
+        }
     }
 }

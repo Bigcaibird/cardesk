@@ -41,6 +41,10 @@ import com.cardesk.launcher.core.log.Logx
  * 几何直接引用 [ShellStatusBar.ROW_TOP] / [ShellStatusBar.ROW_H]，
  * **不另写一份数值** —— 状态栏行高以后再改，圆点会自动跟着走，
  * 两处各写一个常量早晚会不同步。
+ *
+ * **第223轮：玻璃条跟着壁纸明暗走** —— 这条条子和状态栏那三个胶囊
+ * 是同一行、同一种材质（压在壁纸上的圆角底板），
+ * 壁纸暗的时候必须一起换成夜间那套深底（见 [Skin.overlayTop]）。
  */
 class PageDotsView(context: Context) : View(context) {
 
@@ -146,6 +150,15 @@ class PageDotsView(context: Context) : View(context) {
         val left = (Design.W - w) / 2f
         val top = barTop()
         val rect = RectF(left, top, left + w, top + h)
+
+        // 第223轮：这条玻璃条和状态栏那三个胶囊**是同一行、同一种材质**
+        // （都是压在壁纸上的圆角底板）——
+        // 壁纸暗的时候它也得换成夜间那套深底，否则正中还是留一块白疙瘩。
+        // 默认场景（夜间主题 + 深壁纸 / 日间主题 + 浅壁纸）**一个像素都不变**。
+        val ink = Skin.overlayTop
+        barPaint.color = ink.surface
+        barStroke.color = ink.stroke
+
         canvas.drawRoundRect(rect, h / 2f, h / 2f, barPaint)
         canvas.drawRoundRect(rect, h / 2f, h / 2f, barStroke)
 
@@ -162,7 +175,7 @@ class PageDotsView(context: Context) : View(context) {
             val slotLeft = left + padH + slotW * i
             hits.add(RectF(slotLeft, top + padV, slotLeft + slotW, top + padV + hitH))
             val dw = widths[i]
-            dotPaint.color = if (i == index) Skin.ACCENT else Skin.surfaceStrong
+            dotPaint.color = if (i == index) ink.accent else ink.surfaceStrong
             canvas.drawRoundRect(RectF(x, cy - dotH / 2f, x + dw, cy + dotH / 2f), dotH / 2f, dotH / 2f, dotPaint)
             x += dw + dotGap
         }

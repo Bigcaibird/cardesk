@@ -118,6 +118,16 @@ object NavInsets {
      * 读不到系统状态（没有 IOverlayManager）时才相信 prefs。
      */
     fun applied(context: Context): Boolean {
+        // 覆盖包都不在，预留区一定不可能生效 —— `nav_insets_applied` 只表示「曾经启用成功」，
+        // 包被卸载/系统回滚之后它就是过期状态。
+        // 实测（第245轮）：切换日夜会让策略重跑一遍、把那条记录重新写成 true，
+        // 于是 `LauncherView.applyDockVisibility()` 误判「该让位」，整条桌面 Dock 消失。
+        if (!installed(context)) {
+            if (runCatching { prefs(context).getBoolean(KEY_APPLIED, false) }.getOrDefault(false)) {
+                Logx.w(LogTags.SYS, "预留区：覆盖包已不在，忽略过期的 applied 记录")
+            }
+            return false
+        }
         val recorded = runCatching { prefs(context).getBoolean(KEY_APPLIED, false) }.getOrDefault(false)
         if (!recorded) return false
         val actual = runCatching { overlayManager()?.let { readEnabled(it, currentUser()) } }.getOrNull()

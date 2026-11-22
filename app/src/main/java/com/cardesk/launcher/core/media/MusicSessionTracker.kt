@@ -367,6 +367,56 @@ class MusicSessionTracker private constructor() {
         /** 最后一次 touch 的时刻（`Record.lastTouchElapsed`）。 */
         var lastTouchElapsed: Long = SystemClock.elapsedRealtime()
 
+        /**
+         * 「是不是真的在放」的采样（第202轮，见 [SessionAudibility]）。
+         *
+         * 会话自报 PLAYING、但位置一直不推进的僵尸会话（真车上的 wecarflow）
+         * 不能靠「活跃」抢卡片，也不能让 `nativeSourcePlaying` 变 true。
+         */
+        private var audibility = SessionAudibility.Sample()
+
+        /** 真的在放（位置在推进，或刚恢复播放的宽限期内）。 */
+        val audible: Boolean get() = audibility.audible
+
+        /**
+         * 这个会话所属 App 的 uid（第203轮，喂 [AudioOutputProbe]）。
+         *
+         * 查不到就 -1，探测层会把 -1 当「不在出声」，从而只走位置判据。
+         */
+        private val uid: Int by lazy {
+            val ctx = appContext ?: return@lazy -1
+            runCatching { ctx.packageManager.getPackageUid(pkg, 0) }.getOrDefault(-1)
+        }
+
+        /** 重新采样一次（状态变化时、以及每轮 reconcile 时调）。 */
+        fun sampleAudibility(now: Long = SystemClock.elapsedRealtime()) {
+            val s = state
+            val before = audibility.audible
+            // 第203轮：音频输出是地面真相，探测就绪后优先用它；
+            // 没就绪（回调还没到 / 反射被拦）时传 null，回落位置判据。
+            val outputting = if (uid > 0 && AudioOutputProbe.isReady()) AudioOutputProbe.isOutputting(uid) else null
+            audibility = SessionAudibility.next(
+                playing = s?.state == PlaybackState.STATE_PLAYING,
+                positionMs = s?.position ?: -1L,
+                prev = audibility,
+                nowMs = now,
+                outputting = outputting,
+            )
+            // 排障场景：「卡片为什么没跟这个会话」时，一眼看出它是不是被判成僵尸会话。
+            if (audibility.audible != before) {
+                Logx.i(
+                    LogTags.MEDIA, "会话可听性变化",
+                    "pkg" to pkg,
+                    "token" to tokenKey,
+                    "audible" to audibility.audible,
+                    "state" to (s?.state ?: -1),
+                    "positionMs" to (s?.position ?: -1L),
+                    "uid" to uid,
+                    "outputting" to outputting,
+                )
+            }
+        }
+
         fun canRetainPause(): Boolean = PauseRetention.canRetainPause(
             pkg = pkg,
             state = state?.state,
@@ -411,6 +461,7 @@ class MusicSessionTracker private constructor() {
 
         fun updateState(s: PlaybackState?) {
             state = s
+            sampleAudibility()
             val r = PauseRetention.onStateChanged(
                 state = s?.state,
                 userPauseRequested = userPauseRequested,
@@ -531,6 +582,12 @@ class MusicSessionTracker private constructor() {
     /** 上一次对外播报的播放态（用于只在播放/暂停切换时打日志）。 */
     private var lastReportedPlaying: Boolean? = null
 
+    /**
+     * 播放态「暂停迟滞」（第201轮）：会话自己每 ~4s 在 PLAYING/PAUSED 之间翻时，
+     * 界面上的播放键不再跟着一跳一跳（见 [PlaybackStateHold]）。
+     */
+    private val playingHold = PlaybackStateHold()
+
     fun addListener(l: Listener) {
         listeners.add(l)
         l.onTrackChanged(current)
@@ -585,6 +642,8 @@ class MusicSessionTracker private constructor() {
         if (started) return
         started = true
         appContext = context.applicationContext
+        // 第203轮：注册音频输出探测（uid 级「谁真的在出声」），失败会自己降级。
+        AudioOutputProbe.ensure(context.applicationContext)
         manager = context.getSystemService(Context.MEDIA_SESSION_SERVICE) as? MediaSessionManager
         val ctx = appContext
         val granted = ctx != null && NotificationAccess.isGranted(ctx)
@@ -977,9 +1036,11 @@ class MusicSessionTracker private constructor() {
      * `candidatePkgs: com.android.bluetooth(meta=false)` 这种非三方来源。
      */
     private fun nativeSourcePlaying(): Boolean {
+        // 第202轮：只看**真的在放**的会话（位置在推进）。
+        // 僵尸会话（自报 PLAYING、位置不动）不该让我们放弃 claim。
         val playing = records.values
-            .filter { it.state?.state == PlaybackState.STATE_PLAYING }
-            .mapNotNull { it.pkg }
+            .filter { it.audible }
+            .map { it.pkg }
         return MediaBridgePolicy.hasNativeSourcePlaying(playing)
     }
 
@@ -1018,6 +1079,9 @@ class MusicSessionTracker private constructor() {
                 "durationMs" to metaSnapshot(c.metadata).durationMs,
             )
         }
+        // 第202轮：每轮重扫都重新采样「是不是真的在放」——
+        // 位置推进可能不伴随回调（有些播放器只更新 position 不重发 state）。
+        for (rec in records.values) rec.sampleAudibility(now)
         val gone = records.keys.filter { it !in live }
         for (tokenKey in gone) {
             val rec = records.remove(tokenKey) ?: continue
@@ -1039,7 +1103,15 @@ class MusicSessionTracker private constructor() {
         val candidates = buildCandidates()
         // —— 候选是**会话级**的
         // 已选中会话用 **token** 比对（用）。
-        val best = SessionChooser.choose(candidates, lockedPkg, now, selectedTokenKey, lastMusicPkg)
+        // 第202轮：不再把「设置里的来源」当**持久**优先项。
+        //
+        // 曾经的做法是把它当锁传给 chooser，想压住「谁活跃跟谁」——真机上代价是：
+        // 设置里选的是 QQ、实际出声的是网易云，卡片却一直追 QQ（还会把网易云的歌
+        // 标成 QQ 音乐）。现在只保留切来源那一瞬的临时锁（lockedPkg），之后完全按
+        // 「谁真的在放」（候选里的 audible）选；设置里的来源只在没有播放时当默认。
+        val best = SessionChooser.choose(
+            candidates, lockedPkg, now, selectedTokenKey, lastMusicPkg,
+        )
         if (best == null) {
             // —— 暂停态保留（第六十七轮）：会话没了，但歌名 / 歌词要留着
             //
@@ -1070,7 +1142,8 @@ class MusicSessionTracker private constructor() {
                 "candidates" to candidates.size,
                 "locked" to (lockedPkg ?: ""),
                 "detail" to candidates.joinToString("; ") {
-                    "${it.pkg}/${it.tokenKey} meta=${it.hasMetadata} active=${it.active} play=${it.playing}"
+                    "${it.pkg}/${it.tokenKey} meta=${it.hasMetadata} active=${it.active}" +
+                        " play=${it.playing} audible=${it.audible}"
                 },
             )
             // notifyListeners(null,...) —— 上层据此清空「暂无播放」界面
@@ -1107,6 +1180,7 @@ class MusicSessionTracker private constructor() {
             artist = snapshot.artist,
             active = isActiveState(rec.state),
             mediaCenter = SessionChooser.isMediaCenter(rec.pkg),
+            audible = rec.audible,
         )
     }
 
@@ -1203,6 +1277,8 @@ class MusicSessionTracker private constructor() {
         selectedTokenKey = null
         // 第三十三轮：换会话要把位置锚点一起复位，否则新会话的位置会接着旧会话外推。
         positionTracker.reset()
+        // 第201轮：换会话后播放态重新按第一拍采纳，别把上一个 App 的迟滞带过来。
+        playingHold.reset()
         lastObservedPosition = 0L
         lastObservedPlaying = false
         lastPositionAt = 0L
@@ -1720,7 +1796,14 @@ class MusicSessionTracker private constructor() {
         // 老逻辑会让播放键在播放/暂停之间来回跳。
         val stalled = isStalled(observedPlaying, observed, now)
         val stalledMs = if (stalled) now - lastObservedMediaPosAt else 0L
-        val playing = resolvePlaying(PlaybackUiPolicy.uiPlaying(observedPlaying, stalledMs), observedPaused)
+        // 第201轮：先算「用户刚操作过吗」——
+        // 用户意图必须立刻生效，不能被下面的暂停迟滞拖住（resolvePlaying 会消费意图）。
+        val hadIntent = hasUserTransportIntent()
+        val playing = playingHold.hold(
+            resolvePlaying(PlaybackUiPolicy.uiPlaying(observedPlaying, stalledMs), observedPaused),
+            now,
+            immediate = hadIntent,
+        )
         // 播放 / 暂停切换：只在切换时落盘（200ms 一次 tick 不打 INFO）
         if (lastReportedPlaying != playing) {
             lastReportedPlaying = playing
@@ -2016,6 +2099,8 @@ class MusicSessionTracker private constructor() {
         // 都会走「保留暂停态」分支，重复推 false 会让界面反复重绘播放键。
         if (cur.playing == playing) return
         current = cur.copy(playing = playing)
+        // 乐观 UI 一旦展示出去，迟滞器的内部态必须对齐，否则下一拍采样会把它翻回去。
+        playingHold.force(playing)
         listeners.forEach { it.onPlaybackChanged(playing, cur.positionMs) }
     }
 

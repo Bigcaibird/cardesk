@@ -4,8 +4,11 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.view.View
 import android.widget.FrameLayout
+import com.cardesk.launcher.core.GlassDrawable
 import com.cardesk.launcher.core.Palettes
 import com.cardesk.launcher.core.Prefs
+import com.cardesk.launcher.core.Skin
+import com.cardesk.launcher.ui.widget.BackgroundView
 import com.cardesk.launcher.ui.widget.OverlayBackdrop
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -70,31 +73,54 @@ class SettingsSeeThroughTest {
     }
 
     @Test
-    fun `面板主体是不透明的_桌面透不过去`() {
-        val bmp = renderWithPanel(seeThrough = true)
-        // 面板盖在 (300..600, 300..400) —— 那里应该只有面板自己的颜色。
-        val p = bmp.getPixel(450, 350)
-        val r = (p shr 16) and 0xFF
-        val g = (p shr 8) and 0xFF
-        val b = p and 0xFF
-        // 面板底色 = palette.surface = 0x1F232D（夜间），偏冷、亮度低。
-        // 底下那块红要是透上来，r 会明显偏大。
-        assertTrue(
-            "面板主体应该挡住桌面，实际像素 rgb=($r,$g,$b)",
-            r < 60 && r <= g,
+    fun `面板主体是半透明玻璃_桌面只透一点点`() {
+        // 第242轮设计改造：面板主体从「不透明 palette.surface」改成
+        // `surfaceStrong` 玻璃（夜间 0xCC ≈ 80%、日间 0xC7 ≈ 78%），
+        // 桌面透出一点点 —— 所以这条从「完全看不见」改成「半透明但压得住」。
+        val activity = Robolectric.buildActivity(com.cardesk.launcher.MainActivity::class.java).setup().get()
+        val overlay = SettingsOverlay(activity, Prefs(activity), Palettes.night)
+
+        val panelField = SettingsOverlay::class.java.getDeclaredField("panelView").apply { isAccessible = true }
+        val panel = panelField.get(overlay) as View
+        val bg = panel.background
+        assertTrue("面板背景应该是玻璃 Drawable，实际是 $bg", bg is GlassDrawable)
+
+        // 直接读 Drawable 的填充色：断言素材本身，而不是「某个像素碰巧像」。
+        val fillField = GlassDrawable::class.java.getDeclaredField("fill").apply { isAccessible = true }
+        val fill = fillField.getInt(bg)
+        assertEquals(
+            "面板填充必须是日/夜 palette 的 surfaceStrong",
+            Palettes.night.surfaceStrong,
+            fill,
+        )
+        val alpha = (fill ushr 24) and 0xFF
+        assertTrue("面板主体要有玻璃的通透感（alpha < 255），实际 $alpha", alpha < 255)
+        assertTrue("面板主体要压得住桌面（alpha 在 0xC0 附近），实际 $alpha", alpha >= 0xC0)
+        // 与 Skin 的那一档一致：Skin.surfaceStrong 就是 palette.surfaceStrong。
+        assertEquals(
+            "面板这一档必须和 Skin.surfaceStrong 同源",
+            (Skin.surfaceStrong ushr 24) and 0xFF,
+            alpha,
         )
     }
 
     @Test
-    fun `设置页的背景板确实开了透出`() {
-        // 防回退：以后谁把 seeThrough 关掉，这里会红。
+    fun `设置页的背景板确实铺了首页同一张L0`() {
+        // 第242轮设计改造：背景板从 `OverlayBackdrop`（自己压一层 scrim）
+        // 改成 `BackgroundView`（画的就是首页那张 L0：壁纸 + 设计底色 + 柔光），
+        // 画板要求设置页与首页是同一张背景，不再靠「把桌面压暗 26%」近似。
         val activity = Robolectric.buildActivity(com.cardesk.launcher.MainActivity::class.java).setup().get()
         val overlay = SettingsOverlay(activity, Prefs(activity), Palettes.night)
         val f = SettingsOverlay::class.java.getDeclaredField("scrimView")
         f.isAccessible = true
         val scrim = f.get(overlay)
-        assertTrue("背景板应该是 OverlayBackdrop，实际是 $scrim", scrim is OverlayBackdrop)
-        assertTrue("设置页背景板应该透出桌面", (scrim as OverlayBackdrop).seeThrough)
+        assertTrue("背景板应该是 BackgroundView（L0 同一张），实际是 $scrim", scrim is BackgroundView)
+        assertTrue("背景板不该再是 OverlayBackdrop", scrim !is OverlayBackdrop)
+        assertEquals(
+            "背景板的 palette 必须跟宿主一致（否则日夜切换时背景不跟着换）",
+            Palettes.night,
+            (scrim as BackgroundView).palette,
+        )
     }
 
     @Test

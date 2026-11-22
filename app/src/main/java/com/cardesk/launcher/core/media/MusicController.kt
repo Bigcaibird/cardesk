@@ -558,6 +558,14 @@ class MusicController private constructor() {
     private var nullClearGeneration = 0
     private var pendingClearGeneration = 0
 
+    /**
+     * 连续收到多少次「没有会话」的通知（第202轮）。
+     *
+     * 用来判断会话是不是**真的**没了：追一次 null 可能只是重扫的空档，
+     * 连续两次（约 5s）就是真没了。
+     */
+    private var consecutiveNullNotifies = 0
+
     private val ticker = object : Runnable {
         override fun run() {
             if (!tickerRunning) return
@@ -659,8 +667,30 @@ class MusicController private constructor() {
 
         override fun onTrackChanged(t: TrackInfo?) {
             if (t == null) {
+                consecutiveNullNotifies++
                 // —— 会话消失后延迟 NULL_SESSION_CLEAR_MS 再清空
                 // 排障场景：界面突然变成「暂无播放」时，这里能看到会话是被谁收回的
+                //
+                // 第202轮：追踪器是 2.5s 一轮，而延迟是 3s —— 只要它**持续**发 null，
+                // 这颗延迟 Runnable 就永远被重排，清空**从来不会发生**：
+                // 之前绑定的那个会话曲目会一直挂在卡片上（选定来源被僵尸会话占住时，
+                // 广播那份也被它挡着）。所以这里加两条立即清空的出口：
+                // - 广播那份还在（QQ 音乐车机版就靠它）：会话该让位就让位；
+                // - 连续两次 null（约 5s）：会话确实没有了，别再挂着旧曲目。
+                val hasBroadcast = broadcastTrack != null
+                val needClear = sessionTrack != null &&
+                    (hasBroadcast || consecutiveNullNotifies >= NULL_CLEAR_AFTER_NOTIFIES)
+                if (needClear) {
+                    Logx.i(
+                        LogTags.MEDIA, "会话让位（立即清空）",
+                        "broadcast" to hasBroadcast,
+                        "nullNotifies" to consecutiveNullNotifies,
+                    )
+                    nullClearGeneration++
+                    main.removeCallbacks(nullClearRunnable)
+                    clearToIdle()
+                    return
+                }
                 Logx.i(LogTags.MEDIA, "会话消失（延迟清空）", "delayMs" to NULL_SESSION_CLEAR_MS)
                 nullClearGeneration++
                 pendingClearGeneration = nullClearGeneration
@@ -668,6 +698,7 @@ class MusicController private constructor() {
                 main.postDelayed(nullClearRunnable, NULL_SESSION_CLEAR_MS)
                 return
             }
+            consecutiveNullNotifies = 0
             nullClearGeneration++
             main.removeCallbacks(nullClearRunnable)
             val prev = track
@@ -2004,6 +2035,9 @@ class MusicController private constructor() {
         // 第九十七轮：会话短暂消失（音乐 App 暂停/缓冲时会把会话销毁几秒）不再 600ms 就清屏，
         // 否则界面会在「暂无播放」和歌名之间来回跳；3s 覆盖 2.5s 周扫的空窗。
         const val NULL_SESSION_CLEAR_MS = 3_000L
+
+        /** 连续收到这么多次「没有会话」就直接清空（第202轮，约 5s）。 */
+        const val NULL_CLEAR_AFTER_NOTIFIES = 2
 
         const val LYRIC_IDLE = "等待播放"
 

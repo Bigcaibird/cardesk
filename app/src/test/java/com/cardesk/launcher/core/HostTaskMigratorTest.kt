@@ -229,4 +229,31 @@ class HostTaskMigratorTest {
     fun `尝试次数有上限`() {
         assertTrue("必须有上限，不能无限空转", HostTaskMigrator.MAX_ATTEMPTS in 1..10)
     }
+
+    // ------------------------------------------------------------------ 搬稳后的守护窗口（第225轮）
+
+    @Test
+    fun `搬稳之后还要继续复查若干轮`() {
+        // 首轮不能为 0：刚搬完那一刻任务确实还在，立刻复查会白跑一轮。
+        assertEquals(600L, HostTaskMigrator.verifyDelayMsForAttempt(0))
+        assertTrue("越往后拉长", HostTaskMigrator.verifyDelayMsForAttempt(3)!! >
+            HostTaskMigrator.verifyDelayMsForAttempt(1)!!)
+    }
+
+    @Test
+    fun `守护窗口有上限且足够覆盖应用自己起活动`() {
+        // 实测高德在「搬稳」之后约 400ms 自己再起一个活动把 task 拉回主屏，
+        // 所以守护窗口必须明显长于 1 秒，又不能无限拖。
+        var total = 0L
+        var round = 0
+        while (true) {
+            val d = HostTaskMigrator.verifyDelayMsForAttempt(round) ?: break
+            total += d
+            round++
+            if (round > 20) break
+        }
+        assertTrue("守护窗口至少 3 秒，否则盖不住应用自己起活动", total >= 3_000L)
+        assertTrue("守护窗口不能无限长（会一直占着搬移通道）", total <= 10_000L)
+        assertNull("必须有终点", HostTaskMigrator.verifyDelayMsForAttempt(round))
+    }
 }

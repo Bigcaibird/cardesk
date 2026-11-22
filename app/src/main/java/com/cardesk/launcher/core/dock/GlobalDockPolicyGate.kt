@@ -189,6 +189,15 @@ object GlobalDockPolicyGate {
                 navInsets = true,
                 // 第193轮：预留带路径**禁止**写 immersive.navigation=*。
                 hideNavigation = false,
+                // 第204轮：改成按 App 写 immersive.navigation=<包名>。
+                //
+                // 这些 App 在前台时 [GlobalDockService] 会让位（Dock 隐藏），
+                // 原车 CarNavigationBar 就靠这条策略一起藏住 —— 真车 A/B 实测
+                // `immersive.navigation=<包>` 能让它 mPolicyVisibility=false。
+                // 只列具体包，不写 `*`：预留带对其它 App 仍然有效。
+                immersiveNavigationPackages = OemDockPolicy.IMMERSIVE_MEDIA_APPS,
+                // 别人写的 immersive.full 段（真车上的 hywebview）原样保留。
+                preserveForeignImmersiveFull = true,
             )
         }
         // 没有预留区：让原车导航栏整体让位（B 方案，Lead 已在模拟器验过）。
@@ -202,7 +211,8 @@ object GlobalDockPolicyGate {
             "全局 Dock：覆盖原车 Dock 路径（immersive.navigation=*）",
             "policy" to value,
         )
-        return SystemOps.applyPolicyControl(context, value)
+        // 第204轮：不再整条写死，别人的 immersive.full / 非沉浸段要留着。
+        return SystemNavigationPolicy.overwriteOwned(context, value)
     }
 
     /**
@@ -228,6 +238,7 @@ object GlobalDockPolicyGate {
             "policy" to value,
             "hideDock" to prefs.hideDock,
         )
-        return SystemOps.applyPolicyControl(context, value)
+        // 第204轮：同样走合并写入，别把用户其它 App 的沉浸策略清空。
+        return SystemNavigationPolicy.overwriteOwned(context, value)
     }
 }

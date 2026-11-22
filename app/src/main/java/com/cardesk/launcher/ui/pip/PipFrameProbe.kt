@@ -6,6 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.PixelCopy
 import android.view.View
+import com.cardesk.launcher.core.PipSampleGate
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.ui.embed.ActivityEmbed
@@ -101,6 +102,26 @@ import com.cardesk.launcher.ui.embed.ActivityEmbed
  *    现在限定采样矩形到承载面（见 [hostRect]）。
  * 5. **判黑只看「有没有亮像素」** → 我们自己叠在画面上的控件会洗掉黑屏。
  *    现在改用「亮像素**占比**」（见 [BRIGHT_RATIO_MIN]）。
+ *
+ * ## 第224轮：`sawContent` 还不够，补 **alpha 闸门**
+ *
+ * 用户报「导入视频壁纸后，画中画的高德跑回首页」。实车日志里：
+ *
+ * ```
+ * 画中画画面采样：状态变化 black=true maxLuma=0 avgLuma=0 brightPct=0 streak=1
+ * ```
+ *
+ * 而同一时刻高德明明在画地图 —— 又是那个「透明的洞」，只是这次**换了触发路径**：
+ *
+ * 1. 视频壁纸把 cardesk 窗口切成 `PixelFormat.TRANSLUCENT`
+ *    （`LauncherView.applyVideoWindowFormat()`）；
+ * 2. 承载面位置重新变成透明的洞 → 采样恒 0；
+ * 3. 第130轮的 [sawContent] 是**粘性**的（见过一次画面就一直为 true），
+ *    它只能挡住「一开始就看不见」，挡不住「先看得见、后来变半透明」；
+ * 4. 连续 3 帧 → 重建承载面 → 重启高德 → 落回首页。
+ *
+ * 现在每帧先算**不透明像素占比**（[PipSampleGate]）：低于 [OPAQUE_RATIO_MIN]
+ * 判「采样不可用」—— 既不算黑、也**清零**连续黑帧。真黑屏（窗口不透明）照常自愈。
  */
 class PipFrameProbe(private val view: View) {
 
@@ -117,6 +138,32 @@ class PipFrameProbe(private val view: View) {
     /** 有没有见过**非黑**画面 —— 防误判的第一道闸。 */
     @Volatile
     var sawContent: Boolean = false
+        private set
+
+    /**
+     * 最近一帧是不是**采样不可用**（看不见承载面）—— 第224轮新增。
+     *
+     * 「采样不可用」≠「黑」：半透明窗口（视频壁纸）下窗口缓冲在承载面位置
+     * 是一片透明的洞，像素数据与纯黑完全一样，但应用画面其实好好的。
+     * 判据见 [PipSampleGate]。
+     */
+    @Volatile
+    var blind: Boolean = false
+        private set
+
+    /** 连续「采样不可用」的帧数（诊断用，不影响判黑）。 */
+    @Volatile
+    var consecutiveBlind: Int = 0
+        private set
+
+    /**
+     * 最近一帧的**不透明像素占比**（百分比 0..100；-1 = 还没采到）。
+     *
+     * 诊断关键值：视频壁纸下应接近 0，正常承载面下应接近 100。
+     * 有了它，真车日志里一眼就能分辨「看不见」和「黑」。
+     */
+    @Volatile
+    var opaquePct: Int = -1
         private set
 
     /** 采样次数（诊断用）。 */
@@ -277,6 +324,10 @@ class PipFrameProbe(private val view: View) {
         black = null
         consecutiveBlack = 0
         sawContent = false
+        // 第224轮：换承载应用 / 换壁纸后，看不见的状态不能带过来。
+        blind = false
+        consecutiveBlind = 0
+        opaquePct = -1
         samples = 0
         consecutiveUnsampleable = 0
         lastLoggedUnsampleable = 0
@@ -366,35 +417,86 @@ class PipFrameProbe(private val view: View) {
         }
         val avgLuma = (sumLuma / pixels.size).toInt()
         val brightRatio = bright.toDouble() / pixels.size
-        val isBlack = isBlackFrame(maxLuma, avgLuma, brightRatio)
+
+        // —— 第224轮：**alpha 闸门** ——
+        //
+        // 只算 RGB 亮度是不够的：`ActivityView` 内部的 `SurfaceView` 画在独立图层上，
+        // 窗口缓冲在承载面位置是**透明的洞**（alpha=0、RGB=0）——
+        // 与「纯黑」在 RGB 上完全同数据。视频壁纸把窗口切成 TRANSLUCENT 之后
+        // 这个洞更稳定，于是 `black=true` 恒成立 → 连续 3 帧 → 重建承载面 → 重启高德。
+        //
+        // 闸门规则见 [PipSampleGate]：不透明像素占比太低 ⇒ 这一帧「采样不可用」。
+        val opaqueRatio = PipSampleGate.opaqueRatio(pixels)
+        opaquePct = (opaqueRatio * 100).toInt()
+        val frame = PipSampleGate.classify(
+            opaqueRatio = opaqueRatio,
+            blackByPixels = isBlackFrame(maxLuma, avgLuma, brightRatio),
+        )
+
+        if (frame == PipSampleGate.Frame.BLIND) {
+            // 「看不见」不是「黑」：不判黑、**不累加连续黑帧**，并且清零 ——
+            // 中间夹了一帧「看不见」就不该继续往 3 帧上累。
+            val wasBlind = blind
+            blind = true
+            consecutiveBlind++
+            consecutiveBlack = 0
+            if (!wasBlind) {
+                // 状态翻转 → WARN，真车诊断包里能看到「为什么这一轮不判黑」。
+                Logx.w(
+                    LogTags.NAV_UI,
+                    "画中画画面采样：看不见承载面（半透明窗口/透明洞），不判黑",
+                    "opaquePct" to opaquePct,
+                    "maxLuma" to maxLuma,
+                    "avgLuma" to avgLuma,
+                    "blind" to consecutiveBlind,
+                    "rect" to lastSampleRect,
+                    "note" to "窗口缓冲在该位置是透明洞，像素与纯黑同数据，不代表应用画面是黑的",
+                )
+            } else if (samples % LOG_EVERY_N_FRAMES == 0) {
+                Logx.d(
+                    LogTags.NAV_UI,
+                    "画中画画面采样：仍然看不见承载面",
+                    "opaquePct" to opaquePct,
+                    "blind" to consecutiveBlind,
+                    "rect" to lastSampleRect,
+                )
+            }
+            return
+        }
+        if (blind) {
+            // 从「看不见」恢复（窗口切回不透明）：记一条，方便对照视频壁纸开关。
+            Logx.w(
+                LogTags.NAV_UI,
+                "画中画画面采样：重新看得见承载面",
+                "opaquePct" to opaquePct,
+                "blind" to consecutiveBlind,
+                "rect" to lastSampleRect,
+            )
+        }
+        blind = false
+        consecutiveBlind = 0
+
+        val isBlack = frame == PipSampleGate.Frame.BLACK
         val wasBlack = black
         black = isBlack
-        if (isBlack) {
-            consecutiveBlack++
-        } else {
-            consecutiveBlack = 0
-            sawContent = true
-        }
+        consecutiveBlack = PipSampleGate.nextBlackStreak(consecutiveBlack, frame)
+        sawContent = PipSampleGate.nextSawContent(sawContent, frame)
         // —— 限频：只在「黑白状态翻转」或每 [LOG_EVERY_N_FRAMES] 帧记一条 ——
         // 看门狗 3s 一帧，每帧都记会把车机磁盘刷爆（第 N 轮踩过的坑）。
         val flipped = wasBlack != isBlack
         if (flipped) {
             // 状态翻转是**关键诊断信息** → 提到 WARN，真车诊断包里能看到。
-            //
-            // 注意：实测（模拟器 API 29）窗口拷贝在 ActivityView 那个位置是
-            // **透明的洞**，所以这里**永远**是 black=true ——
-            // 这不代表画面是黑的，只代表「我们看不见 ActivityView 的画面」。
-            // 判黑请用 [PipBlackHeal] 的 task display 判据。
             Logx.w(
                 LogTags.NAV_UI,
                 "画中画画面采样：状态变化",
                 "black" to isBlack,
+                "opaquePct" to opaquePct,
                 "maxLuma" to maxLuma,
                 "avgLuma" to avgLuma,
                 "brightPct" to (brightRatio * 100).toInt(),
                 "streak" to consecutiveBlack,
                 "rect" to lastSampleRect,
-                "note" to "窗口拷贝看不到 ActivityView 画面（SurfaceView 独立图层）",
+                "note" to "已通过 alpha 闸门：这一帧确实能看见承载面",
             )
         } else if (samples % LOG_EVERY_N_FRAMES == 0) {
             Logx.d(
@@ -404,6 +506,7 @@ class PipFrameProbe(private val view: View) {
                 "avgLuma" to avgLuma,
                 "brightPct" to (brightRatio * 100).toInt(),
                 "black" to isBlack,
+                "opaquePct" to opaquePct,
                 "streak" to consecutiveBlack,
                 "rect" to lastSampleRect,
             )
@@ -500,6 +603,20 @@ class PipFrameProbe(private val view: View) {
          * 看门狗 3s 一轮 → 约 9s。避开地图加载中的短暂黑帧。
          */
         const val BLACK_STREAK_LIMIT = 3
+
+        /**
+         * alpha 闸门：不透明像素的 alpha 下限（第224轮，实现见 [PipSampleGate]）。
+         *
+         * 抽到 core 是为了能在 JVM 单测里逐条钉死「看不见 ≠ 黑」这条契约。
+         */
+        const val OPAQUE_ALPHA_MIN = PipSampleGate.OPAQUE_ALPHA_MIN
+
+        /**
+         * alpha 闸门：不透明像素**占比**低于它 ⇒ 这一帧采样不可用（不算黑）。
+         *
+         * 0.02 = 2%：64×36 = 2304 像素 → 约 46 个。透明洞整片 alpha=0，远低于这条线。
+         */
+        const val OPAQUE_RATIO_MIN = PipSampleGate.OPAQUE_RATIO_MIN
 
         /**
          * 把承载面的矩形**往里缩**（**纯函数**，可单测）。

@@ -164,17 +164,31 @@ class NavCoverBackdropDayModeTest {
     }
 
     @Test
-    fun 日间模式下组合卡的卡面跟日间其它卡一样白() {
+    fun 日间模式下组合卡的卡面跟日间其它卡一样() {
         val nav = navOf(night = false)
+        // 第242轮设计改造：卡片底改为 62% 白（`#9EFFFFFF`），
+        // 不再是纯白 —— 但组合卡必须和同一个宿主里的其它卡用**同一张面**。
         assertEquals(
-            "前置条件变了：日间默认卡片色应该还是纯白，这条用例的前提不成立",
-            0xFFFFFFFF.toInt(),
+            "前置条件变了：日间默认卡片色应该还是 palette 的 surface，这条用例的前提不成立",
+            Palettes.day.surface,
             Skin.surface,
         )
         assertEquals(
-            "日间组合卡应该跟日间其它卡一样是白卡",
-            0xFFFFFFFF.toInt(),
+            "日间组合卡应该跟日间其它卡用同一张卡面",
+            Palettes.day.surface,
             nav.cardSurfaceColor,
+        )
+        // 62% 白是半透明的：叠在浅青 L0 上约 0xF7FAFC，不再是 0xFFFFFFFF。
+        assertTrue(
+            "日间卡面应该是 62% 白（alpha<255），实测 #${Integer.toHexString(nav.cardSurfaceColor)}",
+            ((nav.cardSurfaceColor ushr 24) and 0xFF) < 255,
+        )
+        // 「跟其它卡一致」的实质是**比夜间亮**：同一套排版在两种主题下的相对关系不能反。
+        val nightNav = navOf(night = true)
+        assertTrue(
+            "日间卡面必须比夜间卡面亮",
+            CoverBackdrop.relativeLuminance(nav.cardSurfaceColor and 0xFFFFFF) >
+                CoverBackdrop.relativeLuminance(nightNav.cardSurfaceColor and 0xFFFFFF),
         )
     }
 
@@ -197,13 +211,15 @@ class NavCoverBackdropDayModeTest {
     fun 日间模式下组合卡的次要文字也是深的() {
         val nav = navOf(night = false)
 
+        // 第242轮：歌手这一档在卡面上落到 palette 的**第三档**（`textFaint`）——
+        // 产品里由 `artistText = Ui.text(..., cardPal.textFaint)` 直接决定。
         assertEquals(
-            "歌手那一档也应该是日间的深色",
-            Palettes.day.textDim,
+            "歌手那一档应该是日间 palette 的 textFaint",
+            Palettes.day.textFaint,
             nav.cardArtistColor,
         )
         val l = CoverBackdrop.relativeLuminance(nav.cardArtistColor and 0xFFFFFF)
-        assertTrue("次要文字亮度 $l 太高了", l < 0.2)
+        assertTrue("次要文字亮度 $l 太高了（深色字的日间档应该 < 0.35）", l < 0.35)
     }
 
     // ------------------------------------------------------------------ ③ 区间是下限且够淡
@@ -309,9 +325,10 @@ class NavCoverBackdropDayModeTest {
             Palettes.night.text,
             nav.cardTextColor,
         )
+        // 第242轮：歌手这一档跟着 palette 的第三档走（夜间 `textFaint` = `#6B7885`）。
         assertEquals(
-            "夜间次要文字色应该还是夜间那档",
-            Palettes.night.textDim,
+            "夜间次要文字色应该是夜间 palette 的 textFaint",
+            Palettes.night.textFaint,
             nav.cardArtistColor,
         )
     }

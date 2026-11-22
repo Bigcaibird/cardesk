@@ -151,4 +151,72 @@ class PageGestureTest {
         assertEquals(0, PageGesture.wrapIndex(1, 1, 0))
         assertEquals(0, PageGesture.wrapIndex(1, -1, -3))
     }
+
+    // ---------------------------------------------------------------- 第206轮：双指横滑
+
+    // 第207轮：`twoFingerStep` 的判定口径改了 ——
+    // 间距用**绝对距离**（span0 / span）而不是「比例」，
+    // 纵向位移也参与判定（与横向同源，都取两指中位点）。
+
+    @Test
+    fun `双指左滑翻到下一页`() {
+        assertEquals(1, PageGesture.twoFingerStep(-200f, 0f, 200f, 200f))
+    }
+
+    @Test
+    fun `双指右滑翻到上一页`() {
+        assertEquals(-1, PageGesture.twoFingerStep(200f, 0f, 200f, 200f))
+    }
+
+    @Test
+    fun `双指位移不够时不翻页`() {
+        assertEquals(0, PageGesture.twoFingerStep(-120f, 0f, 200f, 200f))
+    }
+
+    @Test
+    fun `捏合缩放不当作翻页`() {
+        // 间距 200 → 120（缩了 80px，40%）
+        assertEquals(0, PageGesture.twoFingerStep(-400f, 0f, 200f, 120f))
+        // 间距 200 → 500（放大了 300px）
+        assertEquals(0, PageGesture.twoFingerStep(-400f, 0f, 200f, 500f))
+    }
+
+    @Test
+    fun `两指间距轻微变化仍可翻页`() {
+        // 200 → 215（变化 15px，远小于 60px 的绝对容差）
+        assertEquals(1, PageGesture.twoFingerStep(-200f, 0f, 200f, 215f))
+    }
+
+    @Test
+    fun `两指靠得近时轻微抖动仍可翻页`() {
+        // 第207轮：初始间距只有 30px，手指抖 6px 就是 **20%**——
+        // 纯相对判定（18% 线）会误杀成捏合，绝对容差（60px）兜住这种场景。
+        // 这组数值是**能区分新旧实现**的：旧口径（`delta > span0 * 0.18`）
+        // 在这里会返回 0（误判成捏合），新口径返回 1。
+        assertEquals(1, PageGesture.twoFingerStep(-200f, 0f, 30f, 36f))
+        // 抖动更小也一样能翻页
+        assertEquals(1, PageGesture.twoFingerStep(-200f, 0f, 30f, 35f))
+    }
+
+    @Test
+    fun `两指靠得近但明显张开仍是捏合`() {
+        // 30 → 120：张开了 90px，超过绝对容差，也超过 30% 的相对量
+        assertEquals(0, PageGesture.twoFingerStep(-400f, 0f, 30f, 120f))
+    }
+
+    @Test
+    fun `纵向为主的滑动不翻页`() {
+        // 横向 200px、纵向 300px —— 纵向压倒横向，不算横滑
+        assertEquals(0, PageGesture.twoFingerStep(-200f, 300f, 200f, 200f))
+    }
+
+    @Test
+    fun `捏合判定线`() {
+        // 变化不超过绝对容差（60px）→ 不是捏合
+        assertEquals(false, PageGesture.isTwoFingerPinch(200f, 250f))
+        // 变化超过绝对容差，且超过 30% 相对量 → 是捏合
+        assertEquals(true, PageGesture.isTwoFingerPinch(200f, 120f))
+        // 变化超过绝对容差，但相对量不到 30%（初始间距很大）→ 不是捏合
+        assertEquals(false, PageGesture.isTwoFingerPinch(1000f, 900f))
+    }
 }

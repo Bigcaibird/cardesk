@@ -32,7 +32,12 @@ object StatusSnapshot {
         sb.append("日志：级别 ").append(Logx.level().label)
             .append("，文件 ").append(Logx.logDirectory()?.listFiles()?.size ?: 0).append(" 份")
             .append("，占用 ").append(Logx.totalBytes() / 1024).append(" KB")
-            .append("（上限 ").append(FileLogSink.MAX_TOTAL_BYTES / 1024).append(" KB）\n")
+            .append("（上限 ").append(FileLogSink.MAX_TOTAL_BYTES / 1024).append(" KB）")
+            // 第220轮：落盘平均耗时 —— 旧写法每行要「开→seek→写→关」，
+            // 实车上一次 2~5ms；现在是常驻句柄 + 一次 write()。
+            .append("，落盘 ").append(Logx.avgWriteMicros()).append(" µs/行")
+            .append("（已写 ").append(Logx.writtenLines()).append(" 行）")
+            .append('\n')
         // 落盘降级 = 车机存储不够了，日志只剩 Logcat —— 要让用户一眼看到
         if (Logx.degraded()) {
             sb.append("⚠ 日志落盘已降级：磁盘剩余空间不足，只写 Logcat\n")

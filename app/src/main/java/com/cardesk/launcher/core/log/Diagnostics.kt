@@ -14,6 +14,7 @@ import com.cardesk.launcher.vehicle.VehicleController
 import java.io.File
 import java.io.FileOutputStream
 import java.io.OutputStream
+import java.io.RandomAccessFile
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -127,28 +128,57 @@ object Diagnostics {
         val stamp = SimpleDateFormat(STAMP_FMT, Locale.CHINA).format(Date())
         val name = "cardesk-logs-$stamp.zip"
         return try {
-            // 从**最新**的文件往回装，装满 PACK_LOG_BYTES 就停
+            // 落盘是后台线程做的（第220轮）—— 先等队列排空，
+            // 否则包里会少最后几行（尤其是刚刚触发的异常）。
+            Logx.flush(2000L)
+            // 从**最新**的文件往回装，装满 PACK_LOG_BYTES 就停。
+            //
+            // 第221轮（验收 P1-1）：**最新的文件永远要进包**。
+            //
+            // 旧逻辑是「装不下就 `continue` 跳过这个文件」——
+            // 于是当当前会话的日志文件本身超过 PACK_LOG_BYTES（2MB）时，
+            // 它被跳过，包里只剩**更老的**小文件：
+            // 实车排障最需要的「刚刚发生了什么」反而不在包里。
+            // （第220轮的单文件轮换失效把当前文件撑到 2.8MB，才把这个老问题顶出来。）
+            //
+            // 现在：装不下时**取该文件的尾部**（保留最近的内容），
+            // 而不是跳过它 —— 「最近的日志」永远拿得到。
             val all = Logx.logDirectory()?.listFiles().orEmpty().sortedBy { it.lastModified() }
-            val picked = ArrayList<File>()
+            val picked = ArrayList<Picked>()
             var pickedBytes = 0L
+            var tailCutBytes = 0L
             for (f in all.asReversed()) {
-                if (pickedBytes + f.length() > PACK_LOG_BYTES) continue
-                picked.add(f)
-                pickedBytes += f.length()
+                val remain = PACK_LOG_BYTES - pickedBytes
+                if (remain <= 0L) break
+                val len = f.length()
+                if (len <= remain) {
+                    picked.add(Picked(f, -1L))
+                    pickedBytes += len
+                } else {
+                    // 装不下 ⇒ 取**尾部** remain 字节（最新的一段），并就此停下
+                    picked.add(Picked(f, remain))
+                    tailCutBytes = remain
+                    pickedBytes += remain
+                    break
+                }
             }
-            val logs = picked.sortedBy { it.name }
-            val truncated = logs.size < all.size
-            val summary = summary(app, truncated, all.size - logs.size)
+            val logs = picked.map { it.file }
+            val droppedFiles = all.size - picked.size
+            val summary = summary(app, droppedFiles > 0, droppedFiles, tailCutBytes)
             val cacheZip = File(app.cacheDir, name)
             var bytes = 0L
             ZipOutputStream(FileOutputStream(cacheZip)).use { zos ->
                 zos.putNextEntry(ZipEntry("summary.txt"))
                 zos.write(summary.toByteArray(Charsets.UTF_8))
                 zos.closeEntry()
-                for (file in logs) {
-                    val entryName = "logs/${file.name}"
+                for (item in picked) {
+                    val entryName = "logs/${item.file.name}"
                     zos.putNextEntry(ZipEntry(entryName))
-                    file.inputStream().use { it.copyTo(zos) }
+                    if (item.bytes < 0L || item.file.length() <= item.bytes) {
+                        item.file.inputStream().use { it.copyTo(zos) }
+                    } else {
+                        copyTail(zos, item.file, item.bytes)
+                    }
                     zos.closeEntry()
                 }
             }
@@ -178,6 +208,72 @@ object Diagnostics {
             Result.Fail(t.message ?: t.javaClass.simpleName)
         }
     }
+
+    /**
+     * 装进诊断包的一个日志文件。
+     *
+     * @param file 文件
+     * @param bytes 要装多少字节；`-1` = 整份装
+     *   （第221轮：装不下时取**尾部**，而不是把整个文件跳过）
+     */
+    private data class Picked(val file: File, val bytes: Long)
+
+    /**
+     * 把一个文件的**尾部** [maxBytes] 字节写进 zip（纯逻辑，好单测）。
+     *
+     * ## 为什么需要
+     *
+     * 当前会话的日志文件可能比整个包体上限还大（车机上一次诊断包就能到 3MB+）。
+     * 旧逻辑是「装不下就跳过这个文件」⇒ **当前会话整个不在包里**，
+     * 实车排障最需要的那段反而没有。
+     *
+     * 现在取尾部 ⇒ 「最近的日志」永远拿得到。
+     *
+     * ## 为什么还要对齐行边界
+     *
+     * 切点大概率落在某一行中间 ⇒ 写进包里的第一行是**半行**，
+     * grep 时会很别扭。所以先丢掉被切断的那半行，从下一个换行开始写。
+     */
+    private fun copyTail(out: OutputStream, file: File, maxBytes: Long) {
+        val len = file.length()
+        if (len <= maxBytes) {
+            file.inputStream().use { it.copyTo(out) }
+            return
+        }
+        val start = (len - maxBytes).coerceAtLeast(0L)
+        RandomAccessFile(file, "r").use { raf ->
+            raf.seek(start)
+            val buf = ByteArray(16 * 1024)
+            var written = 0L
+            var skipping = true // 还在丢弃被切断的那半行
+            while (written < maxBytes) {
+                val n = raf.read(buf)
+                if (n <= 0) break
+                if (skipping) {
+                    val idx = buf.indexOf('\n'.code.toByte())
+                    if (idx < 0) continue
+                    skipping = false
+                    val from = idx + 1
+                    if (from >= n) continue
+                    val can = minOf((n - from).toLong(), maxBytes - written)
+                    out.write(buf, from, can.toInt())
+                    written += can
+                } else {
+                    val can = minOf(n.toLong(), maxBytes - written)
+                    out.write(buf, 0, can.toInt())
+                    written += can
+                }
+            }
+        }
+    }
+
+    /**
+     * 测试入口：把文件尾部 [maxBytes] 字节写进 [out]（[copyTail] 的对外壳）。
+     *
+     * 纯逻辑（不碰 Android），可以直接在 JVM 单测里验。
+     */
+    internal fun copyTailForTest(out: OutputStream, file: File, maxBytes: Long) =
+        copyTail(out, file, maxBytes)
 
     /** 分享诊断包（需要先 [export] 拿到 Uri）。 */
     fun shareIntent(uri: Uri, subject: String = "CarDesk 诊断日志"): Intent =
@@ -269,9 +365,15 @@ object Diagnostics {
      * 不需要为了打日志去改 `Prefs`。
      *
      * @param truncated 是否因为超出包体上限而截断了日志
-     * @param droppedCount 被截掉的文件数
+     * @param droppedCount **最老的**、没能进包的文件数（第221轮：方向纠正）
+     * @param tailCutBytes 当前日志被裁成尾部时保留的字节数（0 = 没裁）
      */
-    fun summary(context: Context, truncated: Boolean = false, droppedCount: Int = 0): String {
+    fun summary(
+        context: Context,
+        truncated: Boolean = false,
+        droppedCount: Int = 0,
+        tailCutBytes: Long = 0L,
+    ): String {
         val app = context.applicationContext
         val sb = StringBuilder()
         sb.append("==== CarDesk 诊断快照 ====\n")
@@ -313,6 +415,13 @@ object Diagnostics {
             runCatching { VehicleController.gateway.lastError() }
                 .onSuccess { sb.append("网关最近错误: ").append(it ?: "无").append('\n') }
         }.onFailure { sb.append("车控状态读取失败: ").append(it.message).append('\n') }
+        // 第220轮：车控信号采样在**后台线程**上做（主线程不再碰车控）。
+        // 这一行让「卡顿是不是还在」一眼可见：采样耗时就是原来每轮主线程被堵的量。
+        runCatching {
+            sb.append("车控信号采样: ")
+                .append(com.cardesk.launcher.vehicle.VehicleSignalSampler.stats())
+                .append('\n')
+        }.onFailure { sb.append("车控信号采样读取失败: ").append(it.message).append('\n') }
         // 第135轮：开机自动切换驾驶模式。
         //
         // 用户报「自动切换驾驶模式功能无效」时，光看「空调状态」看不出任何东西 ——
@@ -586,17 +695,48 @@ object Diagnostics {
             sb.append("合计: ").append(total).append(" bytes（上限 ")
                 .append(FileLogSink.MAX_TOTAL_BYTES).append(" bytes / ")
                 .append(FileLogSink.MAX_FILES).append(" 份）\n")
+            // 第220轮：落盘耗时与行数 ——
+            // 旧写法每行都要「开文件→lseek→write→关文件」，实车上一次 2~5ms；
+            // 现在是常驻句柄 + 一次 write()，这个数字能直接看出差多少。
+            sb.append("落盘: 已写 ").append(Logx.writtenLines()).append(" 行，平均 ")
+                .append(Logx.avgWriteMicros()).append(" µs/行\n")
             // 落盘降级 = 车机存储不够了，日志只剩 Logcat —— 这时要明确写出来，
             // 否则用户看到「日志很少」会以为是 App 的问题。
             if (Logx.degraded()) {
                 sb.append("⚠ 日志落盘已降级：磁盘剩余空间不足，只写 Logcat 不写文件\n")
             }
             if (truncated) {
-                sb.append("⚠ 诊断包内日志已截断（超出包体上限，丢弃了最老的 ")
-                    .append(droppedCount).append(" 个文件）\n")
+                // 第221轮：**文案必须与实际行为一致**。
+                //
+                // 旧文案写「丢弃了最老的 N 个文件」，但实际丢的可能是**最新**的文件
+                // （旧逻辑装不下就 `continue` 跳过 ⇒ 当前会话整个不在包里），
+                // 方向是反的，看的人会以为「包里的是最新的」。
+                sb.append("⚠ 诊断包内日志已截断（超出包体上限 ").append(humanBytes(PACK_LOG_BYTES))
+                    .append("）：最老的 ").append(droppedCount).append(" 个文件未包含\n")
+            }
+            if (tailCutBytes > 0L) {
+                sb.append("⚠ 当前日志文件过大，已只保留**最后 ")
+                    .append(humanBytes(tailCutBytes)).append("**（最近的内容都在里面）\n")
             }
         }
         return sb.toString()
+    }
+
+    /**
+     * 截断文案里的字节数（人看得懂的单位）。
+     *
+     * 第221轮**设备实测**踩到的坑：尾部保留量常常**小于 1MB** ——
+     * 包体上限 2MB 会被前面几个整文件先占掉大半，
+     * 留给最老那个文件的尾部只剩几百 KB。
+     * 这时如果照抄 `bytes / 1024 / 1024` 就会打印成「已只保留**最后 0 MB**」，
+     * 看的人只会以为「什么都没保留」—— 比不写还糟。
+     *
+     * 所以：**小于 1MB 按 KB 打印**，再小按 B。
+     */
+    internal fun humanBytes(bytes: Long): String = when {
+        bytes >= 1024L * 1024L -> "${bytes / (1024L * 1024L)} MB"
+        bytes >= 1024L -> "${bytes / 1024L} KB"
+        else -> "$bytes B"
     }
 
     private fun truncate(s: String?): String {

@@ -145,4 +145,41 @@ class SessionChooserTest {
     fun choose_emptyReturnsNull() {
         assertNull(SessionChooser.choose(emptyList(), null, 0L))
     }
+
+    // ------------------------------------------- 僵尸会话不许抢占（第202轮）
+
+    /** 自报 PLAYING 但位置不推进的会话（audible=false）不许靠「活跃」胜出。 */
+    @Test
+    fun choose_inaudibleActiveSession_doesNotPreempt() {
+        val shown = SessionCandidate("com.a", playing = false, hasMetadata = true, updatedAt = 100, tokenKey = "tokA")
+        val zombie = SessionCandidate(
+            "com.tencent.wecarflow", playing = true, hasMetadata = false, updatedAt = 500,
+            tokenKey = "tokZ", audible = false,
+        )
+        assertEquals(
+            "com.a",
+            SessionChooser.choose(listOf(zombie, shown), null, 600, selectedTokenKey = "tokA")?.pkg,
+        )
+    }
+
+    /** 真的在放（位置在推进）时，仍然按老规则「活跃即胜出」。 */
+    @Test
+    fun choose_audibleActiveSession_stillWins() {
+        val idle = SessionCandidate("com.a", playing = false, hasMetadata = true, updatedAt = 100)
+        val live = SessionCandidate("com.b", playing = true, hasMetadata = false, updatedAt = 50, audible = true)
+        assertEquals("com.b", SessionChooser.choose(listOf(idle, live), null, 600)?.pkg)
+    }
+
+    /** `last_music_package` 的加权也不能让僵尸会话翻盘。 */
+    @Test
+    fun choose_lastMusicInaudible_doesNotWin() {
+        val meta = SessionCandidate("com.a", playing = false, hasMetadata = true, updatedAt = 400)
+        val zombie = SessionCandidate(
+            "com.b", playing = true, hasMetadata = false, updatedAt = 500, audible = false,
+        )
+        assertEquals(
+            "com.a",
+            SessionChooser.choose(listOf(meta, zombie), null, 600, lastMusicPkg = "com.b")?.pkg,
+        )
+    }
 }

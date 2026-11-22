@@ -1,5 +1,7 @@
 package com.cardesk.launcher.ui.pip
 
+import com.cardesk.launcher.core.HostTaskDisplay
+
 /**
  * 画中画**黑屏自愈**的判据与分级决策 —— 纯逻辑（不碰 View，可 JVM 单测）。
  *
@@ -138,11 +140,15 @@ object PipBlackHeal {
      * @param taskDisplayIds 承载应用那些 task 各自的 displayId（空 = 没找到 task）
      * @return true = **不在**我们的 display 上（= 黑屏）；false = 在 / 判断不了
      */
-    fun isTaskOffDisplay(ourDisplayId: Int?, taskDisplayIds: List<Int>): Boolean {
-        if (ourDisplayId == null) return false
-        if (taskDisplayIds.isEmpty()) return false
-        return taskDisplayIds.none { it == ourDisplayId }
-    }
+    fun isTaskOffDisplay(ourDisplayId: Int?, taskDisplayIds: List<Int>): Boolean =
+        // 第224轮：判据下沉到 [HostTaskDisplay]（`ReadyStarter` 也要用同一份判断），
+        // 这里改为**委托**，保证整条链路上只有一份实现、不会分叉。
+        //
+        // 语义完全一致：ourDisplayId == null → UNKNOWN → false；
+        // 没有 task → NOT_FOUND → false；其余看是否有匹配。
+        HostTaskDisplay.isOffScreenForBlackHeal(
+            HostTaskDisplay.stateOf(ourDisplayId, taskDisplayIds),
+        )
 
     /**
      * 这一轮该做什么动作。

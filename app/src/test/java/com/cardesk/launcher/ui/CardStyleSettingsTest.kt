@@ -154,9 +154,13 @@ class CardStyleSettingsTest {
 
         assertEquals("卡片圆角要生效", 12f, Shape.CARD, 0.01f)
         assertEquals("内嵌块圆角要等比缩放", 12f * 18f / 28f, Shape.INNER, 0.01f)
+        // 第242轮设计改造：卡片底改为 62% 白（夜间 66%），`surface` 自带 alpha，
+        // 60% 透明度是在这个自带 alpha 上再乘 0.6，而不是固定压到 0x99。
+        val baseSurface = if (Skin.isNight) Palettes.night.surface else Palettes.day.surface
+        val expectedAlpha = (((baseSurface ushr 24) and 0xFF) * 60 + 50) / 100
         assertEquals(
             "卡片面的 alpha 要按透明度缩放",
-            0x99,
+            expectedAlpha,
             (Skin.surface ushr 24) and 0xFF,
         )
     }

@@ -132,6 +132,60 @@ object AmbientLightController {
     private val main = Handler(Looper.getMainLooper())
 
     /**
+     * 氛围灯的**渲染线程**（第220轮）。
+     *
+     * ## 为什么要有它
+     *
+     * 以前 60Hz 的渲染 tick 挂在**主线程**上（`main.postDelayed(renderTicker, 16)`）。
+     * 主线程因此每秒被唤醒 **60 次**，每次做几十微秒的数学运算
+     * （运动层积分 + OKLCH 换算 + ΔE00 限速），然后把逐帧日志也写在这条线程上。
+     *
+     * 车机是**高通 820A（4 核 A53）**，主线程上还跑着整个桌面、
+     * 画中画、导航浮层、媒体会话…… 每秒 60 次额外唤醒挤的是**交互延迟**：
+     * 触摸事件到达时如果主线程正好在做别的事，就要多等一轮。
+     *
+     * ## 现在的分工
+     *
+     * | 线程 | 干什么 |
+     * | --- | --- |
+     * | **渲染线程**（本线程） | 频谱回调、60Hz 积分、颜色计算、逐帧日志、分区编排 |
+     * | **主线程** | 只接收「推给界面的预览色」（20Hz 节流） |
+     * | **写入线程** | 写车机（同步 binder） |
+     *
+     * 渲染线程是**氛围灯状态唯一的拥有者** ——
+     * 频谱回调也 post 到这里，所以状态不需要加锁。
+     */
+    @Volatile
+    private var renderThread: HandlerThread? = null
+
+    @Volatile
+    private var render: Handler? = null
+
+    /** 渲染线程（懒创建；线程优先级压到后台 —— 氛围灯不能跟界面抢 CPU）。 */
+    private fun renderHandler(): Handler {
+        render?.let { return it }
+        synchronized(this) {
+            render?.let { return it }
+            val t = HandlerThread("cardesk-ambient-render", Process.THREAD_PRIORITY_BACKGROUND)
+            t.start()
+            renderThread = t
+            val h = Handler(t.looper)
+            render = h
+            return h
+        }
+    }
+
+    /** 在渲染线程上跑一段（氛围灯状态的唯一入口）。 */
+    private fun onRender(block: () -> Unit) {
+        renderHandler().post(block)
+    }
+
+    /** 在主线程上跑一段（界面回调必须回主线程）。 */
+    private fun onMain(block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) block() else main.post(block)
+    }
+
+    /**
      * 车控写入线程（第七十九轮 P0 新增）。
      *
      * **所有**对车机的同步调用都在这里，主线程不碰。
@@ -146,9 +200,7 @@ object AmbientLightController {
 
     @Volatile
     private var api: AmbientLightApi = NullAmbientLightApi
-    private var lastColor: AmbientColor? = null
     private var running = false
-
     // ------------------------------------------------------------------ 感知层
 
     /**
@@ -266,6 +318,7 @@ object AmbientLightController {
      * 车机那边的亮度只有 HIGH / LOW / OFF 三档，写进去的是这个值，
      * 不是频谱算出来的折算值 —— 用户拖到 80 就是 80（折算成 HIGH/LOW）。
      */
+    @Volatile
     private var absoluteBrightness = 100
 
     /** 待写入的绝对亮度（写成功才清掉；写失败由 [stateWriter] 重试）。 */
@@ -279,6 +332,11 @@ object AmbientLightController {
     /** 已经**写成功**的开关状态（null = 还没写成功过）。 */
     @Volatile
     private var writtenEnabled: Boolean? = null
+
+    /** 当前算出来的颜色（设置页显示用）。 */
+    @Volatile
+    var lastColor: AmbientColor? = null
+        private set
 
     /** 当前算出来的颜色（设置页显示用）。 */
     val color: AmbientColor? get() = lastColor
@@ -302,7 +360,8 @@ object AmbientLightController {
     /** 订阅（主线程回调）。 */
     fun addListener(l: Listener) {
         listeners.add(l)
-        l.onAmbientStatus(statusText())
+        // 第220轮：界面回调统一回主线程。
+        onMain { l.onAmbientStatus(statusText()) }
     }
 
     /** 退订。 */
@@ -344,28 +403,31 @@ object AmbientLightController {
         appContext = app
         desiredEnabled = true
         writtenEnabled = null
-        if (!running) {
-            running = true
-            // 绝对亮度的初值取用户设的上限（滑杆一动就会被覆盖）
-            absoluteBrightness = Prefs(app).ambientMaxBrightness
-            pendingBrightness = absoluteBrightness
-            // 感知层重新学一遍参考电平（换歌 / 重开都不该沿用上一首的）
-            perception.reset()
-            motionState = AmbientMotion.State()
-            legacyState = AmbientMotionLegacy.State()
-            // 自转相位重新从 0 开始（开灯/重开是一次新会话）
-            rotationPhaseDeg = 0f
-            // ΔE00 限速的基准也要重置 —— 否则第一帧会拿「上次关灯前」的颜色当基准
-            lastRenderedColor = null
-            // 分区编排重新开始（开灯序列会把三个区都点亮，巡游从第一区重新起）
-            zoneIndex = -1
-            zoneLitCount = AmbientLightApi.ZONE_COUNT
-            rebuildMotion(Prefs(app))
-            SpectrumAnalyzer.get().addListener(spectrumListener)
-            SpectrumAnalyzer.get().start(app)
-            // 渲染时钟（60Hz）—— 与频谱回调**解耦**
-            main.removeCallbacks(renderTicker)
-            main.post(renderTicker)
+        // 第220轮：**状态变更全在渲染线程上做**（它是氛围灯状态唯一的拥有者）。
+        onRender {
+            if (!running) {
+                running = true
+                // 绝对亮度的初值取用户设的上限（滑杆一动就会被覆盖）
+                absoluteBrightness = Prefs(app).ambientMaxBrightness
+                pendingBrightness = absoluteBrightness
+                // 感知层重新学一遍参考电平（换歌 / 重开都不该沿用上一首的）
+                perception.reset()
+                motionState = AmbientMotion.State()
+                legacyState = AmbientMotionLegacy.State()
+                // 自转相位重新从 0 开始（开灯/重开是一次新会话）
+                rotationPhaseDeg = 0f
+                // ΔE00 限速的基准也要重置 —— 否则第一帧会拿「上次关灯前」的颜色当基准
+                lastRenderedColor = null
+                // 分区编排重新开始（开灯序列会把三个区都点亮，巡游从第一区重新起）
+                zoneIndex = -1
+                zoneLitCount = AmbientLightApi.ZONE_COUNT
+                rebuildMotion(Prefs(app))
+                SpectrumAnalyzer.get().addListener(spectrumListener)
+                SpectrumAnalyzer.get().start(app)
+                // 渲染时钟（60Hz）—— 与频谱回调**解耦**
+                renderHandler().removeCallbacks(renderTicker)
+                renderHandler().post(renderTicker)
+            }
         }
         // 开灯序列要重试（通道是异步就绪的）—— 见 stateWriter
         scheduleStateWrite()
@@ -377,16 +439,18 @@ object AmbientLightController {
     fun stop(context: Context) {
         desiredEnabled = false
         writtenEnabled = null
-        main.removeCallbacks(renderTicker)
-        if (!running) {
-            // 没在跑也要把「关灯」写出去（上次开灯可能没写成功）
+        onRender {
+            renderHandler().removeCallbacks(renderTicker)
+            if (!running) {
+                // 没在跑也要把「关灯」写出去（上次开灯可能没写成功）
+                writeStateAsync()
+                return@onRender
+            }
+            running = false
+            SpectrumAnalyzer.get().removeListener(spectrumListener)
+            SpectrumAnalyzer.get().stop()
             writeStateAsync()
-            return
         }
-        running = false
-        SpectrumAnalyzer.get().removeListener(spectrumListener)
-        SpectrumAnalyzer.get().stop()
-        writeStateAsync()
         notifyStatus()
     }
 
@@ -421,19 +485,21 @@ object AmbientLightController {
     fun applySettings(context: Context, reason: String) {
         val app = context.applicationContext
         appContext = app
-        val prefs = Prefs(app)
-        // 参数变了 → 运动层要按新参数重建（顺带刷新引擎与分区缓存）
-        rebuildMotion(prefs)
-        if (rawBands.isEmpty()) {
-            // 还没采到频谱 → 没有颜色可写，但亮度要写下去
-            writeStateAsync()
-            notifyStatus()
-            return
+        // 第220轮：状态重建与重算都在**渲染线程**上做（它是氛围灯状态的唯一拥有者）。
+        onRender {
+            val prefs = Prefs(app)
+            // 参数变了 → 运动层要按新参数重建（顺带刷新引擎与分区缓存）
+            rebuildMotion(prefs)
+            if (rawBands.isEmpty()) {
+                // 还没采到频谱 → 没有颜色可写，但亮度要写下去
+                writeStateAsync()
+                return@onRender
+            }
+            Logx.d(LogTags.AMBIENT, "设置项变更，重算颜色", "reason" to reason)
+            computeTargets(prefs)
+            // 立刻渲染一帧（不等 tick）
+            renderFrame(force = true)
         }
-        Logx.d(LogTags.AMBIENT, "设置项变更，重算颜色", "reason" to reason)
-        computeTargets(prefs)
-        // 立刻渲染一帧（不等 tick）
-        renderFrame(force = true)
         notifyStatus()
     }
 
@@ -616,16 +682,21 @@ object AmbientLightController {
      */
     private fun onSpectrumFrame(bands: FloatArray, level: Float) {
         val ctx = appContext ?: return
-        val prefs = Prefs(ctx)
-        rawBands = bands
-        rawLevel = level
-        // 感知层：绝对 dB → 相对电平（每段自适应参考 + 静音门）
-        val perceived = perception.process(bands, SPECTRUM_FRAME_MS)
-        perceivedBands = perceived
-        computeTargets(prefs)
-        spectrumDirty = true
-        // 频谱条给界面（设置页画频谱条用）
-        listeners.forEach { it.onAmbientSpectrum(bands, level) }
+        // 第220轮：频谱回调**也** post 到渲染线程 ——
+        // 于是「频谱目标」与「60Hz 积分」在同一个线程上，状态不需要加锁。
+        onRender {
+            val prefs = Prefs(ctx)
+            rawBands = bands
+            rawLevel = level
+            // 感知层：绝对 dB → 相对电平（每段自适应参考 + 静音门）
+            val perceived = perception.process(bands, SPECTRUM_FRAME_MS)
+            perceivedBands = perceived
+            computeTargets(prefs)
+            spectrumDirty = true
+            // 频谱条给界面（设置页画频谱条用）—— 界面回调回主线程
+            val snapshot = bands.copyOf()
+            onMain { listeners.forEach { it.onAmbientSpectrum(snapshot, level) } }
+        }
     }
 
     /**
@@ -693,7 +764,7 @@ object AmbientLightController {
     private val renderTicker = object : Runnable {
         override fun run() {
             renderFrame(force = false)
-            if (running) main.postDelayed(this, RENDER_INTERVAL_MS)
+            if (running) renderHandler().postDelayed(this, RENDER_INTERVAL_MS)
         }
     }
 
@@ -817,10 +888,11 @@ object AmbientLightController {
         val adjusted = if (legacyMode || jumpMode) compensated else limitDeltaE(compensated)
         lastColor = adjusted
         logFrame(now, adjusted)
-        // 界面预览节流到 20Hz —— 预览不需要 60Hz，再快也看不出来
+        // 界面预览节流到 20Hz —— 预览不需要 60Hz，再快也看不出来。
+        // 第220轮：预览回调回**主线程**（渲染线程不是 UI 线程）。
         if (now - lastPublishAt >= PUBLISH_INTERVAL_MS) {
             lastPublishAt = now
-            listeners.forEach { it.onAmbientColor(adjusted) }
+            onMain { listeners.forEach { it.onAmbientColor(adjusted) } }
         }
         // 颜色与亮度分开下发（车机氛围灯是「一组灯珠 + 一个统一亮度」）。
         // 通道自己会节流：亮度按三档折算后比较，颜色按间隔 + 变化幅度比较。
@@ -1050,12 +1122,23 @@ object AmbientLightController {
      *
      * V2 渲染是 60Hz，每帧都记的话一天能写几十兆日志。
      * 50ms 一次（= 写入频率）既看得出「在动」，又压得住日志量。
+     *
+     * ## 第220轮：**落盘再节流一层**（Logcat 仍然 50ms 全量）
+     *
+     * 这一行的内容每帧都变（hue / level 在动），
+     * 所以 [com.cardesk.launcher.core.log.Logx] 的「同内容去重」抓不住它 ——
+     * 落盘仍然是 20 行/秒，4MB 的预算 **2 分钟**就写满，
+     * 诊断包只能看到最近两分钟。
+     *
+     * 现在：**落盘每 250ms 最多一条**（4 行/秒），
+     * 照样看得出「在动」；Logcat 里仍是 50ms 全量，要看细节随时能查。
      */
     private fun logFrame(now: Long, color: AmbientColor) {
         if (now - lastFrameLogAt < FRAME_LOG_INTERVAL_MS) return
         lastFrameLogAt = now
-        Logx.d(
-            LogTags.AMBIENT, "氛围灯帧",
+        Logx.dThrottled(
+            LogTags.AMBIENT, "ambient-frame", FRAME_LOG_FILE_INTERVAL_MS,
+            "氛围灯帧",
             "engine" to if (legacyMode) "旧版" else "新版",
             "targetHue" to targetHue,
             "hue" to motionState.hue,
@@ -1133,7 +1216,8 @@ object AmbientLightController {
 
     private fun notifyStatus() {
         val text = statusText()
-        listeners.forEach { it.onAmbientStatus(text) }
+        // 第220轮：界面回调回主线程（可能从渲染线程调过来）。
+        onMain { listeners.forEach { it.onAmbientStatus(text) } }
     }
 
     /**
@@ -1226,6 +1310,16 @@ object AmbientLightController {
      * 逐帧日志的间隔（毫秒）—— 50ms（= 写入频率）。
      */
     const val FRAME_LOG_INTERVAL_MS = 50L
+
+    /**
+     * 逐帧日志的**落盘**间隔（毫秒）—— 250ms（第220轮）。
+     *
+     * Logcat 里仍是 [FRAME_LOG_INTERVAL_MS]（50ms），
+     * 落盘放宽到 250ms —— 内容每帧都变，去重抓不住，
+     * 只能按频率压。4 行/秒足够看出「在动」，
+     * 而 4MB 的日志预算能撑 40 分钟而不是 2 分钟。
+     */
+    const val FRAME_LOG_FILE_INTERVAL_MS = 250L
 
     /**
      * 「没有声音」的判定阈值（相对电平）。

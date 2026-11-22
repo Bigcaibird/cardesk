@@ -1,9 +1,19 @@
 # CarDesk 模拟器验证记录
 
-环境：macOS arm64 + Android SDK（本仓库 `toolchain/sdk`），AVD `cardesk` = android-34 / google_apis / arm64-v8a，
+环境：macOS arm64 + Android SDK（本仓库 `toolchain/sdk`），AVD `cardesk28` = API 28 / `default`(AOSP, 平台签名) / arm64-v8a，
 1920×1080 @160dpi（正好命中对标 App 的 820A 判定），headless（`-no-window -gpu swiftshader_indirect`）。
 
 判定标准：截图 + logcat（FATAL/Exception 计数）+ `dumpsys`/`pm`/`settings` 实际状态，任一失败即记为 ❌。
+
+> **⚠️ 验证基准 = cardesk 自己的 `cardesk28`（API 28）**（用户要求，2026-11-19）：
+>
+> - 基准环境 = AVD `cardesk28`（`system-images;android-28;default;arm64-v8a`，
+>   AOSP 平台签名，与实车同版本 API 28 / 1920×1080@160 / 4 核 4GB），端口 **5560**，
+>   起停：`bash tools/emu28.sh start|wait|status|stop`。
+> - **任何修改都必须在 `cardesk28` 里实测通过才算完成**；完整约定见工作区根规则 `../AGENTS.md` §1。
+> - 领克 AAOS 820A 镜像（AVD `Lynkco_AAOS28_820A` / `Lynkco_AAOS28_820A_arm64`，端口 **5570**，
+>   `bash ../Lynkco-AAOS28-820A-share-202611161049/emu-macos.sh start|wait|status|stop`）
+>   **不再是强制验证环境**，仅在用户明确要求时作对照使用。
 
 ## 0.0 模拟器版本：**统一用 API 28**（用户要求，第140轮起）
 
@@ -776,3 +786,74 @@ I 媒体/HUD/360 视频/真车通道需真车或系统权限，模拟器不可�
 
 注意：模拟器默认 HOME 是预装的旧包 `com.ecarx.qq.tool`（4354），测 `com.ecarx.cardesk`
 必须显式 `am start -n com.ecarx.cardesk/com.cardesk.launcher.MainActivity`。
+
+---
+
+## 第220轮 · 车机体感卡顿（主线程不许碰文件 I/O 与车控）
+
+被测包：`com.ecarx.cardesk` **4296 / 1.0.1200-system**（平台签名，`sharedUserId=android.uid.system`）。
+环境：**`cardesk28`（API 28 / arm64-v8a / 1920×1080@160）**，端口 5560
+（`bash cardesk/tools/emu28.sh start|wait|status|stop`）。
+
+| # | 项 | 操作 | 期望 | 结果 |
+|---|---|---|---|---|
+| R1 | 装机 | `adb -s emulator-5560 install -r -d app-system.apk` | versionCode 4296 | ✅ `versionCode=4296 versionName=1.0.1200-system` |
+| R2 | 冷启动 | `am start com.ecarx.cardesk/com.cardesk.launcher.MainActivity` | 桌面出图、FATAL 0 | ✅ FATAL **0**，`mCurrentFocus=com.ecarx.cardesk/…MainActivity` |
+| R3 | 桌面渲染 | 截图 | 续航/胎压/行程/车况/音乐卡/中央歌词/Dock 齐全 | ✅ `shots-r220/final-4296.png` |
+| R4 | **线程分离** | `cat /proc/<pid>/task/*/comm` | 落盘 / 车控采样 / 氛围灯渲染各自独立线程 | ✅ `cardesk-log-wri` / `cardesk-vehicle` / `cardesk-ambient` |
+| R5 | **逐帧日志不在主线程** | logcat 看「氛围灯帧」的 TID | ≠ 主线程 TID | ✅ TID **1435** ≠ 主线程 **1301** |
+| R6 | **落盘写法 A/B** | 设备内临时基准（测完已删） | 新写法显著快于旧写法 | ✅ 旧 **29 µs/行** vs 新 **3 µs/行**（7 倍） |
+| R7 | **落盘速率** | 开氛围灯 + 落盘级别「全部（含调试）」，量文件增长 | 远低于 Logcat 全量 | ✅ Logcat 4,748 B/秒 → 落盘 **738 B/秒（15.5%）**；4MB 预算 14.7 → **94.7 分钟** |
+| R8 | **主线程心跳** | logcat 量「状态栏时钟刷新」间隔 | 不比基线差 | ✅ 1002~1010ms（基线 1002~1006ms，无回归） |
+| R9 | **帧统计** | 连续 12 次翻页后 `dumpsys gfxinfo` | 无长帧 / 无丢 vsync | ✅ 93 帧，jank 3.23%，p99 20ms，最大帧 20ms，Missed Vsync **0**，High input latency **0** |
+| R10 | 交互 | 左右翻页 12 次后截图 | 页面与卡片正常 | ✅ `shots-r220/desktop-after-swipe.png` |
+| R11 | 设置页 | 点左上齿轮 | 设置面板正常 | ✅ `shots-r220/settings-diagnostics.png` |
+| R12 | **诊断包导出** | 设置 → 诊断日志 → 导出诊断包 | 导出成功且 summary 含新性能字段 | ✅ 68,922 B；`车控信号采样: 采样 93 轮 · 最近 0ms · 峰值 6ms`、`落盘: 已写 695 行，平均 31 µs/行` |
+| R13 | 单测 | `gradle testSystemUnitTest` | 全绿 | ✅ BUILD SUCCESSFUL |
+| R14 | 崩溃缓冲 | `logcat -b crash` | 无 FATAL | ✅ **0** |
+
+证据：`emu-verify/REPORT-r220.md`、`emu-verify/shots-r220/`。
+
+> ⚠️ 模拟器**没有**车控通道、存储也快 ⇒ 实车的两个收益点（每轮 30~60 次同步 binder、
+> 每行 4 次系统调用）在模拟器上量不出来。装车后请拉一份新诊断包看：
+> ①「状态栏时钟刷新」相邻间隔（原来 1089~1153ms）；
+> ② `summary.txt` 里的 `车控信号采样` 峰值与 `落盘 … µs/行`。
+
+---
+
+## 第221轮 · 修第220轮验收的两个 P1（诊断包含当前会话 / 512KB 单文件轮换）
+
+被测包：`com.ecarx.cardesk` **4298 / 1.0.1202-system**（平台签名，`sharedUserId=android.uid.system`）。
+环境：**`cardesk28`（API 28 / arm64-v8a / 1920×1080@160）**，端口 5560。
+验收依据：`emu-verify/REPORT-r220-acceptance.md` 的 P1-1 / P1-2。
+
+| # | 项 | 操作 | 期望 | 结果 |
+|---|---|---|---|---|
+| S1 | 装机 | `adb -s emulator-5560 install -r -d app-system.apk` | versionCode 4298 | ✅ `versionCode=4298 versionName=1.0.1202-system` |
+| S2 | 冷启动 | `am start com.ecarx.cardesk/com.cardesk.launcher.MainActivity` | 桌面出图 | ✅ `shots-r221/desktop.png`，续航/胎压/行程/车况/音乐卡/Dock 齐全 |
+| S3 | 设置页 | 点左上齿轮 | 设置面板正常 | ✅ `shots-r221/settings.png`、`shots-r221/settings-menu-scrolled.png` |
+| S4 | 诊断日志页 | 设置 → 诊断日志 | 落盘级别=全部（含调试） | ✅ `shots-r221/diagnostics-page.png`、`shots-r221/diagnostics-page-4298.png` |
+| S5 | **P1-2 单文件轮换** | 清空日志后跑 10 分钟，看 `files/logs/` | 写满 512KB 自动换新文件，旧文件停在 512KB+一行 | ✅ `-0.txt` 停在 **524,513 B（512KB+一行）**，`-1.txt` 已开且持续增长 |
+| S6 | **轮换边界** | 比对两文件首尾行 | 不丢行、不重复 | ✅ `-0.txt` 末行与 `-1.txt` 首行**同为 `18:14:36.608`** |
+| S7 | **P1-1 诊断包含当前会话** | 导出诊断包 | 当前会话日志在包里 | ✅ 1,455 行，18:05:10 → 18:08:47，首行=本次会话起点 |
+| S8 | 诊断包内容 | `unzip` 后看 `summary.txt` | 版本对、两行性能字段在 | ✅ `1.0.1202-system (code 4298)`、`车控信号采样: 采样 N 轮 · 最近 0ms`、`落盘: 已写 N 行，平均 N µs/行` |
+| S9 | 线程分离 | `cat /proc/<pid>/task/*/comm` | 落盘/车控/氛围灯/频谱各自独立 | ✅ `cardesk-log-wri` / `cardesk-vehicle` / `cardesk-ambient` / `cardesk-spectru` |
+| S10 | **同口径翻页 A/B** | 同一脚本 `/data/local/tmp/swipe12.sh`，4295↔4297 **交替**三轮 | 不出现可感知卡顿回归 | ✅ Missed Vsync **两包全程 0**，最长帧均 ≤32ms；jank 中位 6.38% → **1.08%** |
+| S11 | 崩溃缓冲 | `logcat -b crash` | CarDesk 无 FATAL | ✅ CarDesk **0**（唯一一条 FATAL 属 `xyz.i4o.uni.launcher`） |
+| S12 | 新增回归测试 | `gradle testSystemUnitTest` | 全绿 | ✅ BUILD SUCCESSFUL（`FileLogSinkRotationTest` **5 例**，共 2,579 例） |
+| S13 | **变异检查** | 去掉轮换检查再跑 | 测试必须失败 | ✅ `写满 512KB 之后轮换到新文件` FAILED（测试真锁得住） |
+| S14 | **日志跑满 2MB 后导出** | 跑到 2.1MB 再导出诊断包 | 最老文件**取尾部**，不整个跳过 | ✅ 设备端 524,513 B → 包内 **486,524 B**；包内首行是**完整行**、末行与设备端**逐字相同** |
+| S15 | **截断文案单位** | 看摘要里的截断说明 | 不许出现「0 MB」 | ✅ 4297 打出「最后 **0 MB**」（❌ 自测发现）⇒ 修后 4298 打出「最后 **171 KB**」 |
+| S16 | 4298 帧统计 | 同口径翻页 12 次 | 无回归 | ✅ 88 帧 / **0 janky（0.00%）** / 最长帧 **14ms** / Missed Vsync **0** |
+| S17 | 出包一致性 | 设备 `base.apk` 的 SHA-256 vs `dist/` 的包 | 逐字节相同 | ✅ 两边都是 `ff1b344d…9ddce` |
+
+证据：`emu-verify/REPORT-r221.md`、`emu-verify/shots-r221/`。
+
+> ⚠️ 测量环境的坑：第一次 A/B 噪声极大（同一包能跑出 0%~18%），查出四个噪声源 ——
+> 领克 5570 占 **188% 宿主 CPU**、`basetest28`(5562) **内部全空闲却占 181%**、
+> AVD 上跑着高德地图(259M)与 uni-launcher、`surfaceflinger` 吃 2.1GB。
+> 全部清掉后交替 A/B 才有可比性（见 REPORT-r221 §4.1）。
+>
+> ⚠️ 出包纪律：同一份源码两次构建出来的 APK **SHA 与体积都可能不同**
+> （本轮实测差 376,972 B）⇒ 必须归档**装机验证过的那一份**，
+> 再拿设备 `base.apk` 跟 `dist/` 逐字节对 SHA，不能拿 `release.sh` 重出的那份顶替。

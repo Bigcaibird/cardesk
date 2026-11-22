@@ -123,6 +123,24 @@ object MediaSources {
 
     fun byId(id: String): Source? = LIST.firstOrNull { it.id == id }
 
+    /**
+     * 卡片该显示哪个来源（第202轮）。
+     *
+     * **实际在放的那路优先**：卡面显示的曲目来自哪路（会话的包 / QQ 广播合成的曲目），
+     * 来源文案和图标就跟着哪路走；设置里的「音乐来源」**只在没有播放时**当默认。
+     *
+     * 之前的规则是「用户显式选过来源就以选择为准」，真机上的后果是：
+     * 设置里选的是 QQ 音乐、实际出声的是网易云，卡片却把网易云的歌标成「QQ音乐」——
+     * 用户看到的来源和耳朵听到的对不上。
+     */
+    fun resolveSourceId(trackSourceId: String?, selectedId: String?): String {
+        val trackSource = byId(trackSourceId.orEmpty())
+        if (trackSource != null && trackSource.id != GENERIC_ID) return trackSource.id
+        val selected = byId(selectedId.orEmpty())
+        if (selected != null && selected.id != GENERIC_ID) return selected.id
+        return GENERIC_ID
+    }
+
     /** 按文案找来源（统一以文案作为匹配键）。 */
     fun byLabel(label: String): Source? = LIST.firstOrNull { it.label == label }
 

@@ -138,4 +138,32 @@ class MediaSourcesTest {
         assertEquals("cn.kuwo.kwmusiccar", MediaSources.DEFAULT_MUSIC_PACKAGES[2])
         assertEquals("cn.kuwo.kwmusiccarclone", MediaSources.DEFAULT_MUSIC_PACKAGES[3])
     }
+
+    // ---------------------------------------------------------- 第202轮：卡片来源跟随实际播放
+
+    @Test
+    fun resolveSourceId_trackSourceWinsOverSelectedSource() {
+        // 设置里选的是 QQ，实际在放的是网易云 → 卡片标网易云
+        assertEquals("netease", MediaSources.resolveSourceId("netease", "qq"))
+    }
+
+    @Test
+    fun resolveSourceId_fallsBackToSelectedWhenNothingPlays() {
+        assertEquals("qq", MediaSources.resolveSourceId(null, "qq"))
+        assertEquals("qq", MediaSources.resolveSourceId("", "qq"))
+    }
+
+    @Test
+    fun resolveSourceId_ignoresGenericOnBothSides() {
+        // 通用音乐只是个占位来源，不能盖掉另一侧的确定来源
+        assertEquals("netease", MediaSources.resolveSourceId("generic", "netease"))
+        assertEquals("netease", MediaSources.resolveSourceId("netease", "generic"))
+        assertEquals("generic", MediaSources.resolveSourceId("generic", "generic"))
+        assertEquals("generic", MediaSources.resolveSourceId(null, null))
+    }
+
+    @Test
+    fun resolveSourceId_unknownTrackSourceFallsBackToSelected() {
+        assertEquals("qq", MediaSources.resolveSourceId("not.a.real.source", "qq"))
+    }
 }

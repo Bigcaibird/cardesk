@@ -19,18 +19,21 @@ class CardStyleTest {
     @Test
     fun 默认值是原样不透明() {
         assertEquals(100, CardStyle.DEFAULT_OPACITY)
-        assertEquals(28, CardStyle.DEFAULT_RADIUS)
+        assertEquals(24, CardStyle.DEFAULT_RADIUS)
         assertEquals("卡片风格默认不该改主题", Palettes.night, CardStyle.apply(Palettes.night, 0, 100, 28))
     }
 
     @Test
     fun 透明度只缩放alpha不动rgb() {
+        // 第242轮设计改造：卡片底改为 62% 白（夜间 66%），`surface` 本身就带 alpha，
+        // 所以透明度的口径是「在底色自带的 alpha 上再乘一档」，不再是固定 0xFF×50%。
+        fun halfAlpha(c: Int) = (((c ushr 24) and 0xFF) * 50 + 50) / 100
         val out = CardStyle.apply(Palettes.night, 0, 50, 28)
-        assertEquals(0x80, (out.surface ushr 24) and 0xFF)
+        assertEquals(halfAlpha(Palettes.night.surface), (out.surface ushr 24) and 0xFF)
         assertEquals(Palettes.night.surface and 0x00FFFFFF, out.surface and 0x00FFFFFF)
-        // 卡内两层也要跟着一起透明
-        assertEquals(0x80, (out.surfaceStrong ushr 24) and 0xFF)
-        assertEquals(0x80, (out.surfaceSoft ushr 24) and 0xFF)
+        // 卡内两层也要跟着一起透明（各自的底色 alpha 不同，各乘各的）
+        assertEquals(halfAlpha(Palettes.night.surfaceStrong), (out.surfaceStrong ushr 24) and 0xFF)
+        assertEquals(halfAlpha(Palettes.night.surfaceSoft), (out.surfaceSoft ushr 24) and 0xFF)
     }
 
     @Test
@@ -80,10 +83,11 @@ class CardStyleTest {
         // 胶囊永远是胶囊
         assertEquals(999f, Shape.PILL, 0.01f)
         // 复位回默认值，后面的用例不受影响
+        // 第242轮设计改造：卡片圆角 28 → 24，内嵌块按同一比例派生。
         CardStyle.applyRadius(CardStyle.DEFAULT_RADIUS)
-        assertEquals(28f, Shape.CARD, 0.01f)
-        assertEquals(18f, Shape.INNER, 0.01f)
-        assertEquals(16f, Shape.TILE, 0.01f)
+        assertEquals(24f, Shape.CARD, 0.01f)
+        assertEquals(24f * 18f / 28f, Shape.INNER, 0.01f)
+        assertEquals(24f * 16f / 28f, Shape.TILE, 0.01f)
     }
 
     @Test
@@ -93,9 +97,14 @@ class CardStyleTest {
         assertEquals(CardStyle.MAX_OPACITY, CardStyle.clampOpacity(180))
         assertEquals(CardStyle.MIN_RADIUS, CardStyle.clampRadius(-5))
         assertEquals(CardStyle.MAX_RADIUS, CardStyle.clampRadius(999))
-        // 夹过之后套用也不能出意外
+        // 夹过之后套用也不能出意外。
+        // 第242轮设计改造：卡片底改为 62% 白（夜间 66%），100% 透明度 =
+        // 不再额外压 alpha ⇒ 卡面保持底色自带的 alpha，而不是 0xFF。
         val out = CardStyle.apply(Palettes.night, 0, 999, -3)
-        assertEquals(0xFF, (out.surface ushr 24) and 0xFF)
+        assertEquals(
+            (Palettes.night.surface ushr 24) and 0xFF,
+            (out.surface ushr 24) and 0xFF,
+        )
     }
 
     @Test

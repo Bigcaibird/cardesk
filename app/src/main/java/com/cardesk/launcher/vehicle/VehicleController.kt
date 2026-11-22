@@ -48,6 +48,17 @@ object VehicleController {
     var on360State: ((Boolean) -> Unit)? = null
 
     /**
+     * **当前 360 是否开着**（第218轮：按键增强要「切换」360，得知道当前值）。
+     *
+     * 两条来源：
+     * - 车端 PAC 回调（[on360State] 收到 true/false）；
+     * - 本进程自己写出去的 [set360] 结果。
+     */
+    @Volatile
+    var is360On: Boolean = false
+        private set
+
+    /**
      * 车身状态（车门 / 引擎盖 / 后备箱）变化的回调。
      *
      * 是**事件驱动**的：BCM_DOOR_POS 的函数值一变
@@ -561,6 +572,8 @@ object VehicleController {
                 "reason" to reason,
             )
         } else {
+            // 第218轮：写成功了就把状态记住 —— 按键增强要「切换」360，得知道当前值。
+            is360On = on
             Logx.event(
                 LogTags.CAM360,
                 if (on) "打开 360" else "关闭 360",
@@ -925,7 +938,7 @@ object VehicleController {
         Logx.i(LogTags.VEHICLE, "切换车控通道实现", "from" to previous, "to" to gw.id, "impl" to gw.displayName)
         gw.on360State = { on ->
             Logx.i(LogTags.CAM360, "360 状态通知", "on" to on, "channel" to gw.id)
-            main.post { on360State?.invoke(on) }
+            main.post { is360On = on; on360State?.invoke(on) }
         }
         logic = HvacLogic(
             clock = { SystemClock.elapsedRealtime() },

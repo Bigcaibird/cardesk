@@ -30,6 +30,23 @@ class ChipButton(context: Context, private val palette: Palette, textPx: Float =
     var active: Boolean = false
         private set
 
+    /**
+     * 档位指示（第248轮）：`showLevel = true` 时在**右上角**画三根竖条，
+     * 点亮到 [level] 根。座椅加热/通风是 0~3 档，胶囊只表达「开没开」，
+     * 用户看不出「第几档」，所以在按钮上补一个档位条 —— 与首页快捷车控的
+     * 档位条同一套画法（右上角，不压文字）。
+     *
+     * 默认 `showLevel = false`：绝大多数 [ChipButton] 是开关/单选，没有档位，
+     * 不画就不会多出三根无意义的点。
+     */
+    var showLevel: Boolean = false
+        set(value) { field = value; invalidate() }
+
+    var level: Int = 0
+        set(value) { field = value.coerceIn(0, LEVEL_MAX); invalidate() }
+
+    private val levelPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+
     private var label: String = ""
 
     /**
@@ -91,6 +108,30 @@ class ChipButton(context: Context, private val palette: Palette, textPx: Float =
      * @param animate true = 颜色渐变过去（状态切换）；
      *                false = 直接画好（首次绑定）。
      */
+    override fun onDraw(canvas: android.graphics.Canvas) {
+        super.onDraw(canvas)
+        if (!showLevel) return
+        // 第249轮：用户要求「档位放到按钮底部，改成 --- 这种形式」。
+        // 三根横杠（不是右上角的竖条），点亮几档就亮几根：
+        //   横杠宽 11dp、高 2.5dp、间距 4dp，整组水平居中、离底边 8dp。
+        // 底部留白足够，横杠不会压到「加热 / 通风」两个字。
+        val density = resources.displayMetrics.density
+        val dashW = 12f * density
+        val dashH = 3.2f * density
+        val gap = 4f * density
+        val totalW = LEVEL_MAX * dashW + (LEVEL_MAX - 1) * gap
+        val left0 = (width - totalW) / 2f
+        val cy = height - 10f * density
+        val lit = if (active) palette.accent else palette.textDim
+        val dim = (palette.textDim and 0x00FFFFFF) or (0x73 shl 24)
+        for (i in 0 until LEVEL_MAX) {
+            levelPaint.color = if (i < level) lit else dim
+            val left = left0 + i * (dashW + gap)
+            canvas.drawRoundRect(left, cy - dashH / 2f, left + dashW, cy + dashH / 2f,
+                dashH / 2f, dashH / 2f, levelPaint)
+        }
+    }
+
     private fun refresh(animate: Boolean) {
         // 第四十九轮「浮屿」：激活态 = 强调色软底 + 强调色描边 + 强调色文字；
         // 未激活 = 内嵌块底 + 1px 描边 + 弱化文字。
@@ -134,6 +175,9 @@ class ChipButton(context: Context, private val palette: Palette, textPx: Float =
     }
 
     companion object {
+        /** 座椅加热/通风是 0~3 档。 */
+        private const val LEVEL_MAX = 3
+
         fun make(context: Context, palette: Palette, text: String, active: Boolean = false): ChipButton =
             ChipButton(context, palette).apply { bind(text, active) }
     }

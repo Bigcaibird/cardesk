@@ -91,7 +91,12 @@ class DriveModePanelTest {
             onMoreSettings = {},
         )
         layout(dialog)
-        find(dialog, "运动模式")?.performClick()
+        // 第242轮：三张模式卡是 FrameLayout，点击监听挂在**卡片**上
+        // （`card.setOnClickListener { request(...) }`），标签只是卡片里的一行字；
+        // 点标签本身不会冒泡，所以要点标签的父卡片。
+        val label = find(dialog, "运动模式")
+        assertTrue("面板里应该找得到「运动模式」这张卡", label != null)
+        (label!!.parent as View).performClick()
         assertEquals(DriveMode.SELECTION_SPORT, picked)
         assertTrue(texts(dialog).any { it.contains("正在切换") })
 

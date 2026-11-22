@@ -95,9 +95,8 @@ class MediaSourceIconRenderTest {
         val anchor = page.sourceAnchorRect
         assertNotNull("应该有来源行的命中区", anchor)
         val box = anchor!!
-        // 图标几何随音乐卡宽度缩放：`k = (w/338).coerceIn(0.62, 1.15)`
-        // （见 `ScenePage.drawMusicCard`）。第179轮胎压卡下线后卡片行重新分配宽度，
-        // 音乐卡变宽 → k 变化，所以这里按真实卡宽算 k，而不是写死偏移。
+        // 图标几何随音乐卡宽度缩放：`k = (w/666).coerceIn(0.55, 1)`
+        // （见 `ScenePage.drawMusicCard`，第243轮基准宽度改成测试板实测的 666）。
         val musicRect = run {
             val f = ScenePage::class.java.getDeclaredField("cardRects").apply { isAccessible = true }
             @Suppress("UNCHECKED_CAST")
@@ -105,23 +104,24 @@ class MediaSourceIconRenderTest {
             m["music"]
         }
         assertNotNull("音乐卡应该在排布结果里", musicRect)
-        val k = (musicRect!!.width() / 338f).coerceIn(0.62f, 1.15f)
-        val iconCy = musicRect.top + 10f + 12f
-        val iconCx = musicRect.left + 22f * k
-        val iconR = 16f * k / 2f
+        val k = (musicRect!!.width() / ScenePage.MUSIC_CARD_W).coerceIn(0.55f, 1f)
+        // 来源行左边距 26k、图标 18k（第243轮把图标从 16 提到 18），
+        // 来源行顶部 = 卡片顶部 + 8。
+        val iconCx = musicRect.left + 26f * k
+        val iconCy = musicRect.top + 8f + 12f
+        val iconR = 18f * k / 2f
 
-        // 图标框：命中区左缘就是图标左缘（两者共用 x+14k），
-        // 垂直方向以命中区顶部往下 2~22 为准（k≈1，误差留足）。
+        // 图标框：以图标圆心为中心、边长 18k 的方框（留 1px 给抗锯齿）。
         val brand = MediaSources.brandColor("通用音乐")
         var brandInIcon = 0
-        for (y in (box.top + 2).toInt()..(box.top + 22).toInt()) {
-            for (x in box.left.toInt()..(box.left + 18).toInt()) {
+        for (y in (iconCy - iconR - 1f).toInt()..(iconCy + iconR + 1f).toInt()) {
+            for (x in (iconCx - iconR - 1f).toInt()..(iconCx + iconR + 1f).toInt()) {
                 if (isBrandInk(bmp, x, y, brand)) brandInIcon++
             }
         }
         assertTrue(
             "来源行的图标区域应该有图标（实际只有 $brandInIcon 个品牌色像素）",
-            brandInIcon >= 10,
+            brandInIcon >= 20,
         )
 
         // 关键区分点：**音符的符干**在图标框的右上（圆心右 0.28r、往上 0.88r）。

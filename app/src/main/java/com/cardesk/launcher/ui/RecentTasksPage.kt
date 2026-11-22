@@ -12,6 +12,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import com.cardesk.launcher.core.Palette
+import com.cardesk.launcher.core.Shape as CoreShape
 import com.cardesk.launcher.core.Prefs
 import com.cardesk.launcher.core.RecentTasks
 import com.cardesk.launcher.core.Shape
@@ -44,6 +45,9 @@ class RecentTasksPage(
     private lateinit var grid: GridLayout
     private lateinit var hint: TextView
     private lateinit var clear: TextView
+    private lateinit var countBadge: TextView
+    private lateinit var memValue: TextView
+    private lateinit var memBar: MemoryBar
 
     private var panelView: View? = null
     private var scrimView: View? = null
@@ -86,6 +90,24 @@ class RecentTasksPage(
         val title = Ui.text(context, "最近任务", 40f, Skin.TEXT, bold = true)
         panel.addView(title, abs(PANEL_PAD, TITLE_TOP, -1, 52))
 
+        // 标题旁的任务数量徽标（画板 v6：「最近任务 8 个」）。
+        countBadge = Ui.text(context, "0 个", 16f, Skin.TEXT_SOFT).apply {
+            gravity = Gravity.CENTER
+            setPadding(14, 0, 14, 0)
+            background = Ui.round(pal.withAlpha(Skin.TEXT, 0x14), CoreShape.PILL)
+        }
+        panel.addView(countBadge, abs(PANEL_PAD + TITLE_TEXT_W, TITLE_TOP + 14, 86, 30))
+
+        // 右上「运行内存 3.2 / 4.0 GB」+ 进度条（画板 v6 新增）。
+        val memLabel = Ui.text(context, "运行内存", 14f, Skin.TEXT_DIM)
+        panel.addView(memLabel, abs(MEM_LEFT, TITLE_TOP + 12, 120, 24))
+        memValue = Ui.text(context, "-- / -- GB", 18f, Skin.TEXT_SOFT, bold = true).apply {
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+        }
+        panel.addView(memValue, abs(MEM_LEFT, TITLE_TOP + 8, MEM_W, 30))
+        memBar = MemoryBar(context)
+        panel.addView(memBar, abs(MEM_LEFT, TITLE_TOP + MEM_BAR_TOP, MEM_W, 6))
+
         // 右侧：清空 + 关闭
         val actions = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -102,8 +124,8 @@ class RecentTasksPage(
         panel.addView(
             actions,
             LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply {
-                topMargin = 36
-                rightMargin = PANEL_PAD
+                topMargin = 30
+                rightMargin = 8
             },
         )
 
@@ -141,6 +163,8 @@ class RecentTasksPage(
             return
         }
         val apps = tasks.list()
+        countBadge.text = "${apps.size} 个"
+        bindMemory()
         hint.visibility = if (apps.isEmpty()) View.VISIBLE else View.GONE
         hint.text = "暂无最近任务"
         clear.visibility = if (apps.isEmpty()) View.GONE else View.VISIBLE
@@ -158,7 +182,7 @@ class RecentTasksPage(
         val cell = FrameLayout(context)
         val box = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            background = Skin.flat(Shape.INNER, fill = Skin.surfaceSoft)
+            background = Skin.flat(Shape.CARD, strong = true)
             setPadding(18, 16, 18, 14)
             isClickable = true
             pressFeedback()
@@ -196,12 +220,22 @@ class RecentTasksPage(
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = 2 },
         )
         head.addView(texts, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = 14 })
+        // 「占用 N MB」徽标（画板 v6 新增）：拿不到进程 PSS 时显示 `--`，不编造数字。
+        val usedMb = ProcMemory.pssMb(context, app.pkg)
+        head.addView(
+            Ui.text(context, if (usedMb == null) "占用 --" else "占用 $usedMb MB", 12f, Skin.TEXT_SOFT).apply {
+                gravity = Gravity.CENTER
+                setPadding(12, 0, 12, 0)
+                background = Ui.round(pal.withAlpha(Skin.TEXT, 0x10), CoreShape.PILL)
+            },
+            LinearLayout.LayoutParams(-2, 26).apply { leftMargin = 10 },
+        )
         box.addView(head, LinearLayout.LayoutParams(-1, -2))
 
         // 底行：锁定 / 关闭
         val foot = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL or Gravity.END
+            gravity = Gravity.CENTER_VERTICAL
         }
         val locked = tasks.isLocked(app.pkg)
         val lock = pill(if (locked) "已锁定" else "锁定", locked) {
@@ -215,7 +249,11 @@ class RecentTasksPage(
         }
         foot.addView(lock, LinearLayout.LayoutParams(-2, 44).apply { rightMargin = 10 })
         foot.addView(remove, LinearLayout.LayoutParams(-2, 44))
-        box.addView(foot, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 8 })
+        // 画板按钮在卡片底部（y≈355 绝对 / 卡内 158），压到底部而不是紧跟标题。
+        // 中间必须有一根 weight=1 的弹簧：否则 foot 会紧贴 head（实机 y≈285），
+        // 卡片下半截留白、按钮悬在中间。
+        box.addView(View(context), LinearLayout.LayoutParams(1, 0, 1f))
+        box.addView(foot, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 10 })
 
         cell.addView(box, FrameLayout.LayoutParams(-1, -1))
         cell.layoutParams = GridLayout.LayoutParams().apply {
@@ -225,6 +263,48 @@ class RecentTasksPage(
             bottomMargin = CELL_GAP
         }
         return cell
+    }
+
+    /**
+     * 右上「运行内存」：已用 = total - avail（`ActivityManager.MemoryInfo`）。
+     *
+     * 进度条按已用/总量填色。取不到时显示 `-- / -- GB` 并把进度条清空 ——
+     * 不编造数字（画板注释也写明数据来自 `ActivityManager.MemoryInfo`）。
+     */
+    private fun bindMemory() {
+        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+        val info = android.app.ActivityManager.MemoryInfo()
+        val ok = runCatching { am?.getMemoryInfo(info) }.isSuccess && info.totalMem > 0
+        if (!ok) {
+            memValue.text = "-- / -- GB"
+            memBar.fill = 0f
+            return
+        }
+        val totalGb = info.totalMem / 1024.0 / 1024.0 / 1024.0
+        val usedGb = (info.totalMem - info.availMem) / 1024.0 / 1024.0 / 1024.0
+        memValue.text = String.format(java.util.Locale.US, "%.1f / %.1f GB", usedGb, totalGb)
+        memBar.fill = (usedGb / totalGb).toFloat().coerceIn(0f, 1f)
+    }
+
+    /** 6px 运行内存进度条（画板右上，青绿填充 + 浅底槽）。 */
+    private inner class MemoryBar(ctx: Context) : View(ctx) {
+        var fill: Float = 0f
+            set(value) {
+                field = value
+                invalidate()
+            }
+
+        private val track = Ui.round(pal.withAlpha(Skin.TEXT, 0x14), 3f)
+        private val bar = Ui.round(Skin.ACCENT, 3f)
+
+        override fun onDraw(canvas: android.graphics.Canvas) {
+            track.setBounds(0, 0, width, height)
+            track.draw(canvas)
+            if (fill > 0f) {
+                bar.setBounds(0, 0, (width * fill).toInt().coerceAtLeast(6), height)
+                bar.draw(canvas)
+            }
+        }
     }
 
     private fun pill(text: String, active: Boolean, onClick: () -> Unit): TextView =
@@ -256,9 +336,60 @@ class RecentTasksPage(
         private const val GRID_H = 700
         private const val GRID_W = PANEL_W - PANEL_PAD * 2
         private const val COLUMNS = 4
-        private const val CELL_W = 428
-        private const val CELL_H = 200
-        private const val CELL_GAP = 20
-        private const val ICON = 72
+        private const val CELL_W = 422
+        private const val CELL_H = 193
+        private const val CELL_GAP = 24
+        private const val ICON = 64
+
+        /** 标题「最近任务」40px bold 的宽度（画板实测徽标从 250 起始 → 相对 206）。 */
+        private const val TITLE_TEXT_W = 176
+
+        /** 右上运行内存块（画板 10-recent：x1418..1730 → 相对面板 1374..1686）。 */
+        private const val MEM_LEFT = 1371
+        private const val MEM_W = 230
+        private const val MEM_BAR_TOP = 56
+    }
+
+    /**
+     * 进程内存（画板 v6 的每卡「占用 N MB」）。
+     *
+     * Android 9 的 `ActivityManager.getProcessMemoryInfo` 只对本进程有效，
+     * `getRunningAppProcesses` 也已经只回自己的进程；这里退一步读 `/proc`：
+     * 按 `cmdline` 匹配包名 → `statm` 第 2 字段（常驻页数）× 页大小。
+     * **读不到就返回 null**（调用方显示「占用 --」），不猜数字。
+     */
+    private object ProcMemory {
+        private val pageKb = android.system.Os.sysconf(android.system.OsConstants._SC_PAGESIZE) / 1024
+
+        fun pssMb(context: android.content.Context, pkg: String): Int? {
+            // ① 先走 ActivityManager：本应用是 `android.uid.system`，
+            //    `getRunningAppProcesses()` / `getProcessMemoryInfo()` 能拿到别的进程
+            //    （/proc/<pid>/statm 对 uid1000 是 `-r--r----- root radio`，读不到）。
+            val am = context.getSystemService(android.content.Context.ACTIVITY_SERVICE)
+                as? android.app.ActivityManager
+            val pid = runCatching {
+                am?.runningAppProcesses?.firstOrNull { it.processName == pkg }?.pid
+            }.getOrNull()
+            if (pid != null && pid > 0) {
+                val kb = runCatching {
+                    am?.getProcessMemoryInfo(intArrayOf(pid))?.firstOrNull()?.totalPss ?: 0
+                }.getOrNull() ?: 0
+                if (kb > 0) return (kb / 1024).coerceAtLeast(1)
+            }
+            val dirs = runCatching { java.io.File("/proc").listFiles() }.getOrNull() ?: return null
+            for (dir in dirs) {
+                val pid = dir.name.toIntOrNull() ?: continue
+                val cmdline = runCatching {
+                    java.io.File("/proc/$pid/cmdline").readText().trimEnd('\u0000')
+                }.getOrNull() ?: continue
+                if (cmdline != pkg) continue
+                val statm = runCatching {
+                    java.io.File("/proc/$pid/statm").readText().trim().split(' ')
+                }.getOrNull() ?: return null
+                val rssPages = statm.getOrNull(1)?.toLongOrNull() ?: return null
+                return (rssPages * pageKb / 1024).toInt()
+            }
+            return null
+        }
     }
 }

@@ -25,8 +25,15 @@ import kotlin.math.min
  */
 object PipRatio {
 
-    /** 单画默认比例。 */
-    const val DEFAULT_NORMAL = 0.71030045f
+    /**
+     * 单画默认比例。
+     *
+     * 画板 `02-nav-day` 实测（第 2 轮验收按 1920 宽复核）：
+     * 左右内边 32 / 左卡 1166 / 卡缝 38 / 右卡 652 →
+     * 1166 / (1166 + 652) = **0.6414**。
+     * 老值 0.7103 来自更早的 `05` 版式；0.6748 是拿旧画板的 1212/584 推的，两者都被判偏。
+     */
+    const val DEFAULT_NORMAL = 0.6414f
 
     /** 双画默认比例。 */
     const val DEFAULT_DUAL = 0.5f
@@ -84,6 +91,30 @@ object PipRatio {
         if (totalWidth <= 0f) return clamp(startRatio, dual)
         val dx = if (swapped) -dxDesign else dxDesign
         return clamp(dx / totalWidth + startRatio, dual)
+    }
+
+    /**
+     * 把比例**吸附**到「卡片宽度变化 N 像素」一格（第228轮）。
+     *
+     * ## 为什么
+     *
+     * 拖分隔条时，卡片宽度每变一点，承载面就要跟着换尺寸 ——
+     * 镜像路线下这会让承载应用**按新尺寸重新排版并重画整张地图**
+     * （真车实测：每个中间尺寸都重画一次 ⇒ 拖动只有 ~10fps）。
+     *
+     * 量化成 N 像素一格 ⇒ 一次 200px 的拖动只触发 **~200/N 次**重画 ⇒ 拖动跟手得多，
+     * 而 N 足够小（12px）时肉眼看不出跳动（跟窗口吸附是一个道理）。
+     *
+     * @param ratio 原始比例
+     * @param totalWidth 可拖动总宽度（设计 px）—— 卡片宽度 = `ratio × totalWidth`
+     * @param stepPx 吸附格（卡片宽度的像素数）
+     * @return 吸附后的比例
+     */
+    fun quantize(ratio: Float, totalWidth: Float, stepPx: Float): Float {
+        if (totalWidth <= 0f || stepPx <= 0f) return ratio
+        val step = stepPx / totalWidth
+        if (step <= 0f) return ratio
+        return Math.round(ratio / step) * step
     }
 }
 

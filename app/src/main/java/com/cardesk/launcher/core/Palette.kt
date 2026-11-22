@@ -53,6 +53,14 @@ data class Palette(
     // —— 「浮屿 Flat Isle」新增 token（第四十九轮）——
     /** 强调色上的文字色（accent 底上的字）。 */
     val accentInk: Int = 0xFFFFFFFF.toInt(),
+    /**
+     * 强调色的「**提亮一档**」版本（同一色相，只提亮 —— 见 [Skin.ACCENT_LIGHT]）。
+     *
+     * 第222轮：从 [Skin] 里写死的字面量搬进来 ——
+     * 浮层墨色要按壁纸亮度整套切换，这两档强调色也得跟着成套走，
+     * 写死在 [Skin] 里就没法成套引用了。
+     */
+    val accentLight: Int = 0xFF5AD8C8.toInt(),
     /** Dock / 底栏底色（不透明）。 */
     val dock: Int = 0xFF1C2029.toInt(),
     /** 弹层遮罩色。 */
@@ -126,58 +134,59 @@ object Palettes {
 
     val night = Palette(
         night = true,
-        // 第四十九轮「浮屿」：**纯色底 + 极淡径向渐变**（不再是拟物山峦的冷调渐变）
-        bgTop = 0xFF0F1116.toInt(),
-        bgBottom = 0xFF0F1116.toInt(),
-        bgGlow = 0xFF191D26.toInt(),
-        // 卡片面：全部**不透明**，层次靠明度差 + 1px 描边（不再有玻璃拟态）
-        surface = 0xFF1F232D.toInt(),
-        surfaceStrong = 0xFF2A2F3B.toInt(),
-        surfaceSoft = 0xFF171A22.toInt(),
-        stroke = 0xFF333947.toInt(),
-        text = 0xFFEDEFF3.toInt(),
-        textDim = 0xFFA2AAB8.toInt(),
-        textFaint = 0xFF757E8E.toInt(),
-        accent = 0xFF33C6B4.toInt(),
-        accentSoft = 0x2933C6B4,
-        ok = 0xFF4CC38A.toInt(),
-        warn = 0xFFE0A340.toInt(),
-        danger = 0xFFE2574C.toInt(),
+        // 第242轮「液态玻璃」：底色是**深墨蓝黑**，卡片是压在模糊壁纸上的 66% 墨玻璃。
+        bgTop = 0xFF0B0F14.toInt(),
+        bgBottom = 0xFF0B0F14.toInt(),
+        bgGlow = 0xFF12212A.toInt(),
+        // L1 卡 / L2 浮层 / 内嵌块：全部半透明（真实观感由 [com.cardesk.launcher.core.Glass] 补模糊）
+        surface = 0xA8161B22.toInt(),
+        surfaceStrong = 0xCC1B212A.toInt(),
+        surfaceSoft = 0x5C161B22.toInt(),
+        // 1px 白描边 12%
+        stroke = 0x1FFFFFFF,
+        text = 0xFFEAF0F5.toInt(),
+        textDim = 0xFF9AA7B4.toInt(),
+        textFaint = 0xFF6B7885.toInt(),
+        accent = 0xFF16C2B2.toInt(),
+        accentSoft = 0x2E16C2B2,
+        accentLight = 0xFF3FD8C8.toInt(),
+        ok = 0xFF34D399.toInt(),
+        warn = 0xFFF5A623.toInt(),
+        danger = 0xFFFF6B6B.toInt(),
         windowOpen = 0xFFF5C542.toInt(),
-        carStateWarn = 0xFFFF9F43.toInt(),
-        accentInk = 0xFF0B1413.toInt(),
-        dock = 0xFF1C2029.toInt(),
-        scrim = 0xA808090C.toInt(),
-        carBody = 0xFF3D465E.toInt(),
-        road = 0xFF181B23.toInt(),
+        carStateWarn = 0xFFFFB020.toInt(),
+        accentInk = 0xFF06201D.toInt(),
+        dock = 0xB3161B22.toInt(),
+        scrim = 0x9906090C.toInt(),
+        carBody = 0xFF8FA0B8.toInt(),
+        road = 0xFF1B2530.toInt(),
     )
 
     val day = Palette(
         night = false,
-        // 第五十六轮：日间「背景 vs 卡片」原来太接近（#F1F3F7 vs #FFFFFF），
-        // 白卡片浮不出来、看着像一块糊在一起的底。
-        // 现在把**背景压深一档**、卡片保持纯白，卡内嵌块再单独提一档，
-        // 四层（背景 / 内嵌 / 卡片 / 选中槽）各自能一眼分开。
-        bgTop = 0xFFE9EDF4.toInt(),
-        bgBottom = 0xFFE9EDF4.toInt(),
-        bgGlow = 0xFFF8FAFD.toInt(),
-        surface = 0xFFFFFFFF.toInt(),
-        surfaceStrong = 0xFFDDE2EB.toInt(),
-        surfaceSoft = 0xFFF2F5F9.toInt(),
-        stroke = 0xFFD5DBE5.toInt(),
-        text = 0xFF191C23.toInt(),
-        textDim = 0xFF565D6B.toInt(),
-        textFaint = 0xFF8B92A0.toInt(),
-        accent = 0xFF0F9C8E.toInt(),
-        accentSoft = 0x1F0F9C8E,
-        ok = 0xFF1F9D5F.toInt(),
-        warn = 0xFFB7791F.toInt(),
-        danger = 0xFFC8413A.toInt(),
+        // L0：冷调浅灰蓝底，柔和光斑由 WallpaperRenderer 画。
+        bgTop = 0xFFF3F7FA.toInt(),
+        bgBottom = 0xFFE6EDF5.toInt(),
+        bgGlow = 0xFFD3EEF0.toInt(),
+        // L1 = rgba(255,255,255,.62) / L2 = .78 / 内嵌块 = .42
+        surface = 0x9EFFFFFF.toInt(),
+        surfaceStrong = 0xC7FFFFFF.toInt(),
+        surfaceSoft = 0x6BFFFFFF.toInt(),
+        stroke = 0x59FFFFFF,
+        text = 0xFF101418.toInt(),
+        textDim = 0xFF5A6672.toInt(),
+        textFaint = 0xFF8C99A6.toInt(),
+        accent = 0xFF00A9A0.toInt(),
+        accentSoft = 0x1F00A9A0,
+        accentLight = 0xFF2FD0C4.toInt(),
+        ok = 0xFF2FBF71.toInt(),
+        warn = 0xFFF5A623.toInt(),
+        danger = 0xFFE5484D.toInt(),
         windowOpen = 0xFFB07A00.toInt(),
-        carStateWarn = 0xFFB7791F.toInt(),
+        carStateWarn = 0xFFE08700.toInt(),
         accentInk = 0xFFFFFFFF.toInt(),
-        dock = 0xFFFFFFFF.toInt(),
-        scrim = 0x61181A20.toInt(),
+        dock = 0x9EFFFFFF.toInt(),
+        scrim = 0x42000000,
         carBody = 0xFF8C97B0.toInt(),
         road = 0xFFE6E9EF.toInt(),
     )

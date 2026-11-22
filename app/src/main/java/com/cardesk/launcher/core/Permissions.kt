@@ -61,6 +61,19 @@ object Permissions {
     const val REQUEST_RECORD_AUDIO = 4402
 
     /**
+     * 请求存储权限（应用内视频库用）的 requestCode（第219轮）。
+     *
+     * 车机上本包是 **uid 1000 系统应用** ⇒ 权限天然可用，
+     * 这条主要是给普通安装（AVD、侧载）兜底。
+     */
+    const val REQUEST_STORAGE = 4403
+
+    /** 读共享存储需要的权限。 */
+    val STORAGE_PERMISSIONS = arrayOf(
+        Manifest.permission.READ_EXTERNAL_STORAGE,
+    )
+
+    /**
      * 定位相关的 AppOps op 名（**公开 API 用的是字符串**，int 常量 `OP_FINE_LOCATION` 是 @hide 的）。
      */
     const val OP_FINE = "android:fine_location"
@@ -97,6 +110,39 @@ object Permissions {
         LOCATION_PERMISSIONS.any {
             context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED
         }
+
+    /**
+     * 存储权限（读共享存储）是否已授予。
+     *
+     * 车机上本包是 uid 1000 系统应用 ⇒ 这一层天然就是 granted。
+     */
+    fun hasStoragePermission(context: Context): Boolean =
+        STORAGE_PERMISSIONS.any {
+            context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED
+        }
+
+    /**
+     * 确保存储权限可用：已授予就什么都不做；没授予就发起运行时授权。
+     *
+     * @return true = 已有权限（可以列视频了）
+     */
+    fun ensureStoragePermission(activity: Activity): Boolean {
+        if (hasStoragePermission(activity)) return true
+        if (storageRequested) return false
+        try {
+            storageRequested = true
+            activity.requestPermissions(STORAGE_PERMISSIONS, REQUEST_STORAGE)
+            Logx.i(
+                LogTags.SETTING,
+                "已发起存储权限申请",
+                "requestCode" to REQUEST_STORAGE,
+                "perms" to STORAGE_PERMISSIONS.joinToString(","),
+            )
+        } catch (t: Throwable) {
+            Logx.w(LogTags.SETTING, "发起存储权限申请失败", t)
+        }
+        return false
+    }
 
     /**
      * 确保定位权限可用：已授予就什么都不做；没授予就发起运行时授权。
@@ -280,6 +326,14 @@ object Permissions {
      */
     @Volatile
     private var recordAudioRequested = false
+
+    /**
+     * 存储权限是不是已经申请过（第219轮）。
+     *
+     * 同一个道理：用户拒绝后系统不再弹窗，别把日志刷满。
+     */
+    @Volatile
+    private var storageRequested = false
 
     /**
      * 确保录音权限可用：已授予就什么都不做；没授予就发起运行时授权。

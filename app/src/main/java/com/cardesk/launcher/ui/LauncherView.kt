@@ -18,7 +18,9 @@ import android.view.animation.PathInterpolator
 import android.widget.FrameLayout
 import android.widget.Toast
 import com.cardesk.launcher.core.Design
+import com.cardesk.launcher.core.HomeForeground
 import com.cardesk.launcher.core.DockQuickApps
+import com.cardesk.launcher.MainActivity
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.core.Palette
@@ -26,6 +28,7 @@ import com.cardesk.launcher.core.Palettes
 import com.cardesk.launcher.core.NavSlot
 import com.cardesk.launcher.core.NavSlots
 import com.cardesk.launcher.core.PageGesture
+import com.cardesk.launcher.core.PageLayoutRect
 import com.cardesk.launcher.core.Prefs
 import com.cardesk.launcher.core.Skin
 import com.cardesk.launcher.core.dock.GlobalDockService
@@ -71,6 +74,14 @@ class LauncherView(context: Context) : FrameLayout(context) {
 
     companion object {
         /**
+         * 收起副画后延迟多久去要前台。
+         *
+         * 400ms 是实测值：VirtualDisplay.release → AMS 迁移 task → 窗口切换，
+         * 模拟器上这段 200~350ms 走完；取 400ms 留余量，肉眼仍算「立刻」。
+         */
+        const val PIP_COLLAPSE_RECLAIM_MS = 400L
+
+        /**
          * 页面编号。
          *
          * 是三页（：0=场景页、1=导航页、2=音乐页）。
@@ -102,11 +113,22 @@ class LauncherView(context: Context) : FrameLayout(context) {
         /** 驾驶模式切换成功后，快捷面板停留一下再自动关闭。 */
         const val DRIVE_MODE_CLOSE_DELAY_MS = 700L
 
+        /**
+         * 视频壁纸亮度的采样间隔（毫秒，第222轮）。
+         *
+         * 一次 1920×1080 的 `PixelCopy` 不便宜，而视频一直在动 ——
+         * 3 秒采一次，浮层墨色的切换肉眼跟得上，也不白烧 CPU。
+         */
+        const val VIDEO_BACKDROP_INTERVAL_MS = 3_000L
+
         /** 右缘竖滑命中区宽度。 */
         private const val EDGE_WIDTH = 120f
 
         /** Dock 距屏幕底的设计像素（设计板 s01：底边 1072 → 距底 8）。 */
         private const val DOCK_BOTTOM_MARGIN = 0
+
+        /** 原厂设置包（画板 05「快捷入口 · 原厂设置」）。 */
+        private const val NATIVE_SETTINGS_PACKAGE = "com.ecarx.settings"
 
         /**
          * 全局 Dock 的**顶边**（设计坐标 px）= 968（1080 − 112，第192轮）。
@@ -154,6 +176,9 @@ class LauncherView(context: Context) : FrameLayout(context) {
          */
         private const val SINGLE_FINGER_SLOP = 24f
 
+    /** 双指横滑接管阈值（设计坐标 px）：先抢到事件，最终是否翻页看抬手时的位移。 */
+    private const val TWO_FINGER_SLOP = 60f
+
         /** 滚轮翻页的冷却时间（700ms）。 */
         private const val SCROLL_LOCK_MS = 700L
     }
@@ -161,6 +186,289 @@ class LauncherView(context: Context) : FrameLayout(context) {
     private val prefs = Prefs(context.applicationContext)
     private var pal: Palette = resolvePalette().also { Skin.apply(it) }
     private val background = BackgroundView(context)
+
+    /**
+     * 当前壁纸在浮层区的平均颜色（第222轮）。
+     *
+     * - 顶部：状态栏右侧的裸元素 + 右上天气块；
+     * - 中部：中心歌词。
+     *
+     * null = 还不知道 ⇒ 浮层跟着主题走（= 本轮之前的行为）。
+     */
+    private var backdropTop: Int? = null
+    private var backdropCenter: Int? = null
+
+    /**
+     * **视频壁纸**的播放层（第207/208/214/225轮）。
+     *
+     * ## 第225轮：默认后端改回 `TextureView`（第213轮的「不通」结论是错的）
+     *
+     * 第213轮观察到「解码 53.4 帧/s、日志有第一帧、画面一个像素都没上屏」，
+     * 当时归因为「`TextureView` 合成路径不通」。**真实原因是这里自己挖的坑**：
+     * 为了诊断，代码给 `TextureView` 自己的 `SurfaceTexture` 装了
+     * `setOnFrameAvailableListener` —— 那会把 `TextureView` **内部**的帧到达监听
+     * 覆盖掉（它就是靠那个回调去 `updateTexImage()`），于是帧永远不上屏。
+     * 「`SurfaceFlinger` 里没有 TextureView 层」是正常现象：
+     * `TextureView` 画进窗口 buffer，本来就不该有独立层。
+     *
+     * 第225轮去掉那个监听（诊断改用 `onSurfaceTextureUpdated`），
+     * 实测**画面正常上屏**，并把默认后端翻回 `TextureView`：窗口可以保持**不透明**，
+     * 画中画的承载层重新按圆角裁（见 `PipSurface` 的圆角问题）。
+     *
+     * ## `SurfaceView` 这条路的代价（仍保留为备选，pref 可切）
+     *
+     * ## 为什么 `SurfaceView` 能「夹在壁纸与桌面卡片之间」
+     *
+     * `SurfaceView` 是**推模式**：它有自己独立的 SurfaceFlinger 层，默认 z 序在
+     * **窗口 buffer 之下**。于是层级天然就是：
+     *
+     * ```
+     * 系统壁纸层
+     *   └─ cardesk 窗口 buffer   ← 桌面卡片 / 状态栏 / Dock 画在这里
+     *        └─ SurfaceView 层    ← 视频在这（窗口 buffer 同一块区域被“挖空”）
+     * ```
+     *
+     * 代价是**窗口 buffer 在视频那块区域必须透明** ⇒ 窗口要 `PixelFormat.TRANSLUCENT`，
+     * 壁纸层要让路、桌面底色要透明（见 [applyVideoWindowFormat] / [applyDesktopBackground]）。
+     *
+     * 额外好处：视频能进 HWC 硬件叠加平面，**比 `TextureView` 每帧上传纹理省得多**。
+     *
+     * ## ⚠️ 两个必须绕开的坑（`SurfaceView` 侧）
+     *
+     * 1. **别设 `setZOrderOnTop(true)` / `setZOrderMediaOverlay(true)`** ——
+     *    那两种会让视频盖在窗口 buffer 之上，桌面卡片全被遮住。
+     *    就要默认 z 序（surface 在窗口之下）。
+     * 2. **窗口 format 变化会重建 Surface** —— 半透明切换会让 `surfaceDestroyed` 到来，
+     *    这时播放器必须放掉，等新 surface 再起播（见 [videoHolderCallback]）。
+     *
+     * 第225轮：这条路**半透明窗口**的副作用曾被证实 —— 窗口一旦 `TRANSLUCENT`，
+     * 画中画承载层的四角会变直角、切页后还残留黑块。
+     *
+     * 第226轮把这两条都解掉了（窗口透明时画中画改走「自建虚拟屏 + `TextureView` 镜像」，
+     * 承载画面回到窗口自己的缓冲里画 ⇒ 圆角、随页隐藏、裁剪全按 View 规则成立），
+     * 第227轮因此把默认后端**改回** `SurfaceView`（HWC 直通、省电、不掉帧）。
+     */
+    private val videoSurfaceView = android.view.SurfaceView(context)
+
+    /** 第208轮的老路径：`TextureView`（保留备选，见 [videoBackend]）。 */
+    private val videoTextureView = android.view.TextureView(context)
+
+    /**
+     * 第214轮：视频壁纸的**合成后端**。
+     *
+     * 第227轮：默认值改回 `SurfaceView`（见 [core.Prefs.videoWallpaperBackend]），
+     * 这里**只在启动时读一次** —— 后端是「装一次就不动」的设置，
+     * 要换得改 `shared_prefs` 再重启桌面。
+     */
+    private val videoBackend: Int = prefs.videoWallpaperBackend
+
+    /**
+     * 第214轮：`SurfaceView` 的 Surface 是不是已经就绪。
+     *
+     * 必须在 [init] 之前声明 —— init 块里要用它。
+     */
+    private var videoSurfaceReady = false
+
+    /**
+     * 当前实际使用的视频层视图（按 [videoBackend] 选，启动时定死）。
+     */
+    private val videoWallpaperView: android.view.View =
+        if (videoBackend == com.cardesk.launcher.core.VideoWallpaper.BACKEND_SURFACE_VIEW) {
+            videoSurfaceView
+        } else {
+            videoTextureView
+        }
+
+    init {
+        // 第214轮：`SurfaceView` 的 Surface 生命周期。
+        //
+        // ⚠️ `surfaceDestroyed` 一定要把播放器放掉：切半透明窗口会让窗口
+        // 重建、Surface 跟着重建，旧播放器还攥着已经失效的 surface。
+        //
+        // 第227轮：**两条路的回调都装上**（不再按当前后端二选一）——
+        // 设置页可以运行时切后端，切过去时那一路的回调必须已经在位。
+        // 没被选中的那一路不会 attach（它不在视图树里），
+        // 它的回调自然也不会触发（`TextureView` 没 attach 就没有 SurfaceTexture；
+        // `SurfaceView` 没 attach 就没有 surface）。
+        videoSurfaceView.holder.addCallback(
+            object : android.view.SurfaceHolder.Callback {
+                override fun surfaceCreated(holder: android.view.SurfaceHolder) {
+                    videoSurfaceReady = true
+                    maybeStartVideoWallpaper()
+                }
+
+                override fun surfaceChanged(
+                    holder: android.view.SurfaceHolder,
+                    format: Int,
+                    width: Int,
+                    height: Int,
+                ) {
+                    videoSurfaceReady = true
+                    maybeStartVideoWallpaper()
+                }
+
+                override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {
+                    videoSurfaceReady = false
+                    videoStarted = false
+                    // 第227轮：**记下当前播放位置**，重建后接着播。
+                    //
+                    // 为什么 surface 会被换掉：
+                    // 画中画那条「自建虚拟屏」路线建虚拟屏时，系统会给那块虚拟屏
+                    // 下一份**配置覆盖**（`ActivityManager: Override config changes=… for displayId=NN`），
+                    // 连带把**我们自己的窗口 surface** 重建一次
+                    // （系统侧可见 `BufferQueueProducer: [SurfaceView - …] detachBuffer`）。
+                    //
+                    // 以前这里是直接 `releaseVideoPlayer()` ⇒ 新播放器**从第一帧开始**
+                    // ⇒ 用户看到「开机后视频跳回开头」。
+                    // 现在先把位置存下来，重建后 `seekTo` 回去 ⇒ 视频**接着播**。
+                    //
+                    // （试过「同一个播放器 `setSurface` 换输出」——
+                    //  实测在模拟器上**画面会黑**（解码器没有真的换输出面），
+                    //  那条路作废。）
+                    videoResumePositionMs = runCatching {
+                        (videoPlayer?.currentPosition ?: 0).toLong()
+                    }.getOrDefault(0L)
+                    releaseVideoPlayer()
+                    videoSurfaceLost = true
+                }
+            },
+        )
+        videoTextureView.surfaceTextureListener = object :
+            android.view.TextureView.SurfaceTextureListener {
+            override fun onSurfaceTextureAvailable(
+                surface: android.graphics.SurfaceTexture,
+                width: Int,
+                height: Int,
+            ) {
+                // 第208轮：**只记下来，不在这里起播**。
+                // `onSurfaceTextureAvailable` 是在 attach 阶段就回调的，
+                // 那时 View 还没 layout、SurfaceTexture 的 buffer 尺寸还是 0×0 ——
+                // 解码器配不出输出 buffer，`prepareAsync()` 必然失败
+                // （`IOException: Prepare Async failed.: status=0x80000000`）。
+                // 真正的起播条件是「SurfaceTexture 有了 **且** View 拿到真实尺寸」。
+                videoSurfaceTexture = surface
+                // 第225轮：**不要**给 TextureView 自己的 SurfaceTexture 装
+                // `setOnFrameAvailableListener` —— 那会把 `TextureView` **内部**
+                // 的帧到达监听覆盖掉（它正是靠那个回调去 `updateTexImage()`），
+                // 结果就是「解码器一直在出帧、日志也打了『收到第一帧』，
+                // 但屏幕上永远是黑的」。第213轮把这条路判成「TextureView 合成不通」，
+                // 真正原因是这里（SurfaceFlinger 里没有 TextureView 层是正常的：
+                // TextureView 画进窗口 buffer，本来就不该有独立层）。
+                // 现在改用 [onSurfaceTextureUpdated] 做「帧真的画上去了」的诊断。
+                maybeStartVideoWallpaper()
+            }
+
+            override fun onSurfaceTextureSizeChanged(
+                surface: android.graphics.SurfaceTexture,
+                width: Int,
+                height: Int,
+            ) = Unit
+
+            override fun onSurfaceTextureDestroyed(surface: android.graphics.SurfaceTexture): Boolean = true
+
+            override fun onSurfaceTextureUpdated(surface: android.graphics.SurfaceTexture) {
+                // 第225轮：`onSurfaceTextureUpdated` 是「这一帧真的被
+                // `TextureView.updateTexImage()` 取走并画进窗口」的信号 ——
+                // 比「解码器出帧」更能证明画面到底上没上屏。
+                if (!videoFrameSeen) {
+                    videoFrameSeen = true
+                    com.cardesk.launcher.core.log.Logx.i(
+                        com.cardesk.launcher.core.log.LogTags.SETTING,
+                        "视频壁纸：第一帧已上屏（TextureView）",
+                    )
+                }
+            }
+        }
+    }
+
+    /** 视频壁纸播放器（null = 没在播）。 */
+    private var videoPlayer: android.media.MediaPlayer? = null
+
+    /** 第208轮：视频壁纸层是不是已经挂进窗口了。 */
+    private var videoLayerAttached = false
+
+    /** 第208轮：视频层拿到的 `SurfaceTexture`（attach 之后才会有）。 */
+    private var videoSurfaceTexture: android.graphics.SurfaceTexture? = null
+
+    /**
+     * 第208轮：**必须持有** `Surface` 对象的引用。
+     *
+     * `Surface(surfaceTexture)` 如果只是当临时值用（`mp.setSurface(Surface(st))`），
+     * 它会被 GC 掉 → 析构函数里 `IGraphicBufferProducer::disconnect()`
+     * → 生产者被断开 → 解码器再连这个 surface 直接 EPIPE：
+     * ```
+     * E/SurfaceUtils: Failed to connect to surface 0x..., err -32
+     * W/NuPlayerDecoder: [c2.android.avc.decoder] failed to connect to native window, error=-32
+     * ```
+     * 表现是「播放器 state=STARTED、解码器也在跑，但一帧都出不来」。
+     */
+    private var videoSurface: android.view.Surface? = null
+
+    /** 第208轮：视频层布局就绪（拿到真实宽高）了吗。 */
+    private var videoLayoutReady = false
+
+    /** 第208轮：视频层已经起播了吗（避免重复 prepare）。 */
+    private var videoStarted = false
+
+    /** 第208轮：有没有收到过视频帧（诊断用：区分「没解码」与「帧没进 TextureView」）。 */
+    private var videoFrameSeen = false
+
+    /**
+     * 第208轮：**视频壁纸的 SurfaceTexture 还没就绪时，先把起播请求记下来**。
+     *
+     * `TextureView.surfaceTexture` 只有在 View attach 且完成布局之后才非 null；
+     * 冷启动恢复视频壁纸时（`build()` 里 `post { startVideoWallpaper() }`）
+     * 这个 Runnable 很可能**跑在 TextureView 拿到 SurfaceTexture 之前**，
+     * 于是 `Surface(null)` 直接抛异常 → 视频壁纸起不来，还把开关自己关掉了。
+     *
+     * 改成：Surface 没就绪就挂起，等 [android.view.TextureView.SurfaceTextureListener]
+     * 回调 `onSurfaceTextureAvailable` + 布局就绪之后再真的起播。
+     */
+    private var pendingVideoWallpaperStart = false
+
+    /**
+     * **静态壁纸轮播**的检查句柄（第207轮）。
+     *
+     * 每秒查一次「够不够时间切了」（见 [com.cardesk.launcher.core.WallpaperCarousel]）——
+     * 用 1 秒的心跳而不是按间隔起定时器，改间隔时不用重建定时器。
+     *
+     * ## 第211轮：必须挂在**类里的 [handler]** 上
+     *
+     * 原来这里每次 `run()` 都 `new` 一个 `Handler(Looper.getMainLooper())`，
+     * 带来两个问题：
+     *
+     * 1. `onDetachedFromWindow()` 里只有 `handler.removeCallbacksAndMessages(null)`
+     *    （[handler] 是另一个实例）→ **清不掉这条心跳**，视图 detach 后它还在跑；
+     * 2. `build()` 里 `postDelayed(carouselTicker, 1000)` **前面没有 `removeCallbacks`**，
+     *    而 `build()` 在换肤（[applyTheme]）和改底栏形态（[onSettingsApplied]）时都会重跑
+     *    → **每重建一次就多挂一条链**，1 秒检查跑 N 份。
+     *
+     * 现在统一走类里的 [handler]：post 前先 `removeCallbacks` 去重，
+     * detach 时也被 `removeCallbacksAndMessages(null)` 一起收掉，
+     * 重新 attach 时在 [onAttachedToWindow] 里再挂上。
+     */
+    private val carouselTicker = object : Runnable {
+        override fun run() {
+            carouselTickCount++
+            checkWallpaperCarousel()
+            handler.postDelayed(this, 1000L)
+        }
+    }
+
+    /**
+     * 第211轮：轮播心跳**执行过多少次**（只给单测看）。
+     *
+     * 用它来盯两件事：
+     * 1. `build()` 重跑（换肤 / 改底栏形态）之后，心跳**不能叠加**；
+     * 2. 视图 detach 之后，心跳**必须停**。
+     */
+    private var carouselTickCount = 0
+
+    /** 轮播心跳的执行次数（单测观察口）。 */
+    fun carouselTickCountForTest(): Int = carouselTickCount
+
+    /** 距上次切壁纸过了多久（毫秒）。 */
+    private var wallpaperSwitchedAtMs = 0L
 
     /** 自定义壁纸是否正在后台解码（避免重复起线程）。 */
     private var customLoading = false
@@ -253,6 +561,9 @@ class LauncherView(context: Context) : FrameLayout(context) {
 
     /** 「车辆状态」面板（第166轮 C 版车况卡点开）。 */
     private var vehicleStatusDialog: com.cardesk.launcher.ui.dialogs.VehicleStatusDialog? = null
+
+    /** 车辆页（画板 05 / n04）；null = 没打开。 */
+    private var vehiclePage: com.cardesk.launcher.ui.pages.VehiclePage? = null
 
     /** 最近一次的车况快照（面板打开时先用它，避免等下一轮 ticker）。 */
     private var lastVehicleInfo: com.cardesk.launcher.vehicle.VehicleInfo? = null
@@ -352,6 +663,32 @@ class LauncherView(context: Context) : FrameLayout(context) {
 
     /** 最后一次 MOVE 时的三指中位点 X（设计坐标）——位移的终点。 */
     private var threeFingerMid = 0f
+
+    // 双指横滑换页（第206轮：单指改成双指 —— 单指要留给画中画拖地图）
+    private var twoFinger = false
+    /** 双指按下时的中位点 X（设计坐标）——位移起点。 */
+    private var twoFingerX = 0f
+    /** 双指按下时的中位点 Y（设计坐标）——位移起点。 */
+    private var twoFingerY = 0f
+    /** 最新一次 MOVE 的两指中位点 X（设计坐标）——位移终点。 */
+    private var twoFingerMid = 0f
+    /**
+     * 最新一次 MOVE 的两指中位点 Y（设计坐标）。
+     *
+     * 第207轮补：抬手那一刻（`ACTION_UP`）只剩**一根**手指，
+     * 这时再算中位点就只剩单指的 Y，与按下时的中位点 Y 不同源 →
+     * `dy` 虚高 → 本该判成横滑的手势被卡掉。
+     * 所以纵向位移的终点必须在 **MOVE（两指都在）** 时就记下来。
+     */
+    private var twoFingerMidY = 0f
+    /** 双指按下时的间距（设计坐标）。 */
+    private var twoFingerSpan0 = 0f
+    /** 当前间距 / 按下时的间距（1.0 = 没缩放）。 */
+    private var twoFingerRatio = 1f
+    private var twoFingerIntercepted = false
+
+    /** 双指横滑是否已经接管（接管后子树收 CANCEL，后续事件由自己吞掉）。 */
+    private var twoFingerTaken = false
 
     // 滚轮翻页冷却
     private var scrollLockUntil = 0L
@@ -473,12 +810,26 @@ class LauncherView(context: Context) : FrameLayout(context) {
     private val iconHandler = Handler(Looper.getMainLooper())
 
     init {
+        // 第208轮：视频壁纸的 Surface 就绪回调 ——
+        // 冷启动恢复视频壁纸时 SurfaceTexture 可能还没建好，先挂起，等回调再起播。
         // 第五十八轮：卡片圆角是**全局可变 token**，启动时先按偏好摆好。
         com.cardesk.launcher.core.CardStyle.applyRadius(prefs.cardRadius)
         // 第163轮：写实车模（car3d）开关也按偏好摆好 —— 进程内副本，绘制时只读一个 boolean。
         com.cardesk.launcher.core.car3d.Car3dSettings.load(context, prefs)
-        setBackgroundColor(0xFF05080F.toInt())
+        applyDesktopBackground(0xFF05080F.toInt())
         addView(background, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        // 第208轮：视频壁纸层**不常驻** —— 播的时候才挂进来（见 [attachVideoWallpaperLayer]）。
+        //
+        // 踩过的坑（都试过，别再犯）：
+        // ① 常驻 + `visibility = GONE` → TextureView 的 SurfaceTexture 被销毁，
+        //    重新 VISIBLE 时不一定重建 → 视频再也起不来；
+        // ② 常驻 + `alpha = 0` → alpha=0 的 View 不参与渲染，SurfaceTexture 压根不
+        //    创不出来，`MediaPlayer` 连不上（prepare 失败）；
+        // ③ `setOpaque(false)` → SurfaceTexture 的 buffer 格式变 RGBA_8888，
+        //    视频解码器输出的 YUV 协商不上格式 → prepare 失败。
+        //
+        // 所以：**要播就 attach（attach 必然重建 SurfaceTexture + 回调 available），
+        // 不播就 remove（完全不参与渲染，静态壁纸照常）**。
         content.layoutParams = LayoutParams(Design.W.toInt(), Design.H.toInt())
         addView(content, content.layoutParams)
 
@@ -888,7 +1239,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
 
     private fun build() {
         mark("build:enter")
-        setBackgroundColor(pal.bgTop)
+        applyDesktopBackground(pal.bgTop)
         background.palette = pal
         background.wallpaper = prefs.wallpaper
         // 自定义壁纸（第 105 轮）：有照片且选中时优先显示；位图异步解，先出底色。
@@ -897,11 +1248,30 @@ class LauncherView(context: Context) : FrameLayout(context) {
         background.customBitmap =
             if (background.custom) com.cardesk.launcher.core.CustomWallpaper.cachedBitmap() else null
         if (background.custom) ensureCustomWallpaperLoaded()
+        // 第207轮：**视频壁纸**（导入的视频）。
+        //
+        // 视频壁纸要等 TextureView 的 SurfaceTexture 准备好才能播，
+        // 所以这里只是把状态摆好，真正的播放交给 [startVideoWallpaper]。
+        if (prefs.videoWallpaperEnabled && com.cardesk.launcher.core.VideoWallpaper.has(context)) {
+            // TextureView 的 Surface 要等布局完才有 → 延后一拍再起播。
+            post { startVideoWallpaper() }
+        }
+        // 轮播心跳（第207轮）：每秒查一次「够不够时间切」。
+        //
+        // 第211轮：**post 前先 removeCallbacks** ——
+        // `build()` 在换肤 / 改底栏形态时会重跑，不去重就会一条条叠起来，
+        // 1 秒检查会跑 N 份。
+        wallpaperSwitchedAtMs = android.os.SystemClock.uptimeMillis()
+        handler.removeCallbacks(carouselTicker)
+        handler.postDelayed(carouselTicker, 1000L)
         // 壁纸被拖拽切到上一张 / 下一张时落盘
         background.onWallpaperChanged = { index ->
             prefs.wallpaper = index
             scenePage.showWallpaperHint()
         }
+        // 第222轮：**壁纸亮度变了 → 重算浮层墨色**（状态栏 / 天气块 / 中心歌词
+        // 这些直接压在壁纸上的元素，颜色跟着壁纸明暗走）。
+        background.onBackdropChanged = { applyWallpaperBackdrop() }
         // 第139轮：换肤重建时，旧的画中画承载面**不拆** —— 先「摘」下来，交给新的承载面接着用。
         //
         // 第十二轮的修法是「重建前先 `release` 旧承载面」，它解决的是两件事：
@@ -937,6 +1307,15 @@ class LauncherView(context: Context) : FrameLayout(context) {
         // 不清的话：切日夜主题（`onSettingsApplied` → `applyTheme` → `build`）之后，
         // `settings` 还指着那个已经被摘掉的视图， 的
         // `if (settings != null) return` 会让**设置页再也打不开**。
+        // ⚠️ 这里必须先「结束全局 Dock 的让位」再清引用：
+        // 设置页会让全局 Dock 窗口隐藏（`setSuppressed(true)`），而 `settings = null`
+        // 只是把引用丢掉、没有任何路径再去恢复它 —— 全局 Dock 会永远停在
+        // 「窗口在、却 NO_SURFACE」，整屏底部一条 Dock 都没有。
+        // 实测（第245轮）：切一次日夜 → `applyTheme()` → `build()` → 桌面 Dock 消失、
+        // 全局 Dock 也不出，只有重开一次设置再关掉才恢复。
+        if (settings != null) {
+            com.cardesk.launcher.core.dock.GlobalDockService.setSuppressed(false)
+        }
         settings = null
         climate = null
         hvac = null
@@ -972,13 +1351,25 @@ class LauncherView(context: Context) : FrameLayout(context) {
                 if (!showFloat(pkg, label)) launchFullscreen(pkg, label)
             }
             onPlayPause = { MusicController.get().playPause(); refresh() }
+            // 第207轮：**首页音乐卡也加收藏按钮**（原来只有导航页组合卡有）。
+            //
+            // 与导航页同一个数据源、同一个下发通道（`MusicController.toggleFavorite`），
+            // 所以两处的收藏态永远一致，点哪边都是同一个效果。
+            onFavoriteToggle = {
+                val ok = MusicController.get().toggleFavorite()
+                if (!ok) toast("当前播放器不支持收藏")
+                refresh()
+            }
             onSeatHeat = { VehicleController.cycleSeat(HvacIds.ZONE_DRIVER, true) }
             onSeatVent = { VehicleController.cycleSeat(HvacIds.ZONE_DRIVER, false) }
             onMaxFan = { VehicleController.toggleMaxFan() }
             onOpenHvac = { showClimate() }
             onOpen360 = { showCam() }
             onWallpaperDot = wallpaper
-            onOpenSourceMenu = { openSourceMenu(scenePage.sourceAnchorRect) }
+            // 首页：弹层在媒体卡**上方**（用户第10条）。
+            onOpenSourceMenu = {
+                openSourceMenu(scenePage.musicCardRect, SourceMenuLayer.Placement.ABOVE)
+            }
             // 底部卡片布局（顺序 + 尺寸 + 显隐）的持久化（键 scene_card_layout_v2）
             layoutStore = com.cardesk.launcher.core.CardLayout.PrefsStore(prefs)
             // 第111轮：右侧固定「车况卡」的显隐（键 scene_car_status_card_visible）。
@@ -986,7 +1377,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
             // 免得 build() 之后到 refresh() 之前闪一下。
             showCarStatusCard = prefs.carStatusCardVisible
             // 第166轮 C 版：车况卡整卡点击 → 车辆状态面板。
-            onOpenVehicleStatus = { openVehicleStatus() }
+            onOpenVehicleStatus = { openVehiclePage() }
             onToggleWindow = { closed ->
                 // 模拟通道自己消化车窗开闭（这样桌面上的状态会跟着变）；
                 // 真车通道走原厂的 VfmiscManager，车窗只有下发、没有车况回读。
@@ -1010,7 +1401,8 @@ class LauncherView(context: Context) : FrameLayout(context) {
             onPlayToggle = { MusicController.get().playPause(); refresh() }
             onPrev = { MusicController.get().previous() }
             onNext = { MusicController.get().next() }
-            onSource = { openSourceMenu(navPage.sourceAnchor) }
+            // 组合页：弹层**盖在音乐卡上**（用户第10条）。
+            onSource = { openSourceMenu(navPage.musicCardRect, SourceMenuLayer.Placement.OVER) }
             // 第195轮：**收藏** / **播放模式**两个按钮。
             //
             // 下发失败（播放器不支持 / 通道不通）时返回 false —— 这时**不**改界面，
@@ -1052,10 +1444,10 @@ class LauncherView(context: Context) : FrameLayout(context) {
         // 交给新承载面之后，末尾的 `refreshPip()` 会看到「这个包名已经承载着」→ 直接复用，
         // 不会再走一遍「新建 VirtualDisplay + 重新启动应用」。
         carried.main?.let { carried ->
-            navPage.pip.adoptContent(carried.view, carried.pkg)
+            navPage.pip.adoptContent(carried.view, carried.pkg, carried.host)
         }
         carried.secondary?.let { carried ->
-            navPage.pipSecondary.adoptContent(carried.view, carried.pkg)
+            navPage.pipSecondary.adoptContent(carried.view, carried.pkg, carried.host)
         }
         // 抽屉是**浮层**，不是整页
         mark("build:navPage")
@@ -1218,6 +1610,30 @@ class LauncherView(context: Context) : FrameLayout(context) {
     }
 
     /**
+     * 窗口**实际**是不是半透明（第228轮）。
+     *
+     * ## 为什么不看 prefs
+     *
+     * prefs 说的是「**应该**透明」（视频壁纸开 + SurfaceView 后端），
+     * 窗口**实际**的 format 是另一回事 ——
+     * 视频壁纸的开关会在**运行中**改窗口 format（`applyVideoWindowFormat`），
+     * 而承载面是「同包名复用」的 ⇒ 判据一变，承载面还挂着旧路线的内容。
+     *
+     * 真车实测（第228轮）：关掉视频壁纸 ⇒ 窗口不透明，
+     * 但画中画还是镜像路线 ⇒ 全屏右侧缺一块、拖动很卡
+     * ⇒ 用户反馈「以前不用视频壁纸一切正常」。
+     *
+     * ⇒ 路线判据只能问窗口本身。
+     */
+    private fun isWindowTranslucent(): Boolean {
+        val win = (context as? android.app.Activity)?.window ?: return false
+        val fmt = win.attributes?.format ?: return false
+        // `PixelFormat.TRANSLUCENT` 与 `PixelFormat.TRANSPARENT` 是同一个值（-3）。
+        return fmt == android.graphics.PixelFormat.TRANSLUCENT ||
+            fmt == android.graphics.PixelFormat.TRANSPARENT
+    }
+
+    /**
      * 按设置刷新画中画：主画 / 副画各一个承载面。
      *
      * 画中画挂在导航页的地图卡里（主画 `mapCard` / 副画），
@@ -1248,6 +1664,25 @@ class LauncherView(context: Context) : FrameLayout(context) {
         // 桌面首帧之后 3 秒还没等到就绪信号，就自己开始承载。
         // （之前这里只有正常路径，而那条路径曾经静默断过 → 画中画永远停在占位。）
         if (!pipHostingGate.isStarted()) return
+        // 第226/228轮：先告诉承载面「窗口是不是半透明的」，它据此选渲染路线。
+        //
+        // 半透明 = 视频壁纸走 SurfaceView（硬件图层在窗口之下，必须挖洞透出视频）。
+        // 这种情况下承载层的图层不再被窗口裁剪（圆角失效/错位/切页残留），
+        // 承载面会改走「自建虚拟屏 + TextureView 镜像」（见 core/PipRenderPlan.kt）。
+        //
+        // 第228轮：**按窗口的实际 format 判**，不再看 prefs ——
+        //
+        // prefs 说的是「**应该**透明」，窗口**实际**是不是透明是另一回事：
+        // 视频壁纸的开关会**在运行中**改窗口 format（`applyVideoWindowFormat`），
+        // 而 prefs 与窗口 format 可能短暂对不上。
+        // 真车实测（第228轮）：用户在设置里关掉视频壁纸 ⇒ 窗口变不透明，
+        // 但承载面还挂着**镜像路线**的内容 ⇒ 全屏 / 拖动跟「不用视频壁纸」时不一样
+        // ⇒ 用户反馈「以前不用视频壁纸一切正常，现在有问题了」。
+        //
+        // ⇒ 判据必须是**窗口实际的 format**（唯一的真相）。
+        val translucent = isWindowTranslucent()
+        navPage.pip.translucentWindow = translucent
+        navPage.pipSecondary.translucentWindow = translucent
         val dual = prefs.dualPip
         val mainPkg = prefs.pipApp
         val subPkg = prefs.pip2App
@@ -1261,6 +1696,10 @@ class LauncherView(context: Context) : FrameLayout(context) {
         // （我们之前多了一个自造的可见开关，导致选完应用画中画不显示。）
         if (mainPkg.isNotBlank()) {
             navPage.pip.show(mainPkg)
+            // 第225轮：切到**非导航页**时把承载层藏起来（不拆）。
+            // 导航页被置 GONE 之后，承载层的 SurfaceView 图层仍会被合成，
+            // 首页/空调页那个位置就残留一块黑卡（实测 22:17）。
+            navPage.pip.setContentVisible(page == PAGE_NAV)
         } else {
             // 没选应用 → 显示占位图，不是一块黑屏
             navPage.pip.hide()
@@ -1284,7 +1723,11 @@ class LauncherView(context: Context) : FrameLayout(context) {
                 )
                 navPage.pipSecondary.showPlaceholder(PipSurface.TEXT_SAME_AS_MAIN)
             }
-            else -> navPage.pipSecondary.show(subPkg)
+            else -> {
+                navPage.pipSecondary.show(subPkg)
+                // 第225轮：与主画一样，非导航页时藏起承载层（不拆）
+                navPage.pipSecondary.setContentVisible(page == PAGE_NAV)
+            }
         }
     }
 
@@ -1329,7 +1772,10 @@ class LauncherView(context: Context) : FrameLayout(context) {
         (navPage.pip.parent as? android.view.ViewGroup)?.removeView(navPage.pip)
         content.addView(
             navPage.pip,
-            Ui.frame(Design.W.toInt(), Design.H.toInt(), Gravity.TOP or Gravity.START),
+            // 第201轮：高度只铺到 Dock 顶边（968），不再用整块 1080 画布 ——
+            // 否则底部 112px 正好压在 Dock 底下，高德全屏时那一截永远看不到
+            // （用户反馈「切全屏没避让 Dock」）。
+            Ui.frame(Design.W.toInt(), DOCK_TOP_Y, Gravity.TOP or Gravity.START),
         )
         content.bringChildToFront(navPage.pip)
         // 玻璃条一起提到最上层 —— 全屏时它就是「还原」按钮
@@ -1526,6 +1972,36 @@ class LauncherView(context: Context) : FrameLayout(context) {
         // 双画开关会决定副画承载面建不建（MainActivity 的 applyDesktopLayout）
         refreshPip()
         toast(if (prefs.dualPip) "已切换双画中画" else "已切换单画中画")
+        if (!nextDual) reclaimHomeAfterPipCollapse()
+    }
+
+    /**
+     * 双画 → 单画之后，把桌面重新拉回前台。
+     *
+     * ## 为什么需要这一步（终验 B-2）
+     *
+     * 收起副画 = 拆掉它那块 VirtualDisplay（`PipSurface.hide()` 里 release）。
+     * 被托管的 task 一旦失去 display，系统会把它**迁回默认屏并抬到前台** ——
+     * 实测：双画里副画是日历，长按分屏键切回单画后，日历整屏盖住桌面，
+     * 只剩系统状态栏和全局 Dock，用户必须按 HOME 才回得去。
+     *
+     * 桌面是 HOME，收起画中画之后前台本来就该是桌面，所以这里在迁移完成后
+     * 再要一次前台。**为什么要延迟**：task 迁移是 AMS 异步做的，
+     * 立刻 `startActivity` 会在迁移前抢到前台、随后又被日历顶掉。
+     */
+    private fun reclaimHomeAfterPipCollapse() {
+        handler.postDelayed({
+            if (HomeForeground.isForeground) return@postDelayed
+            Logx.event(LogTags.NAV_UI, "收起副画后要回桌面")
+            val intent = android.content.Intent(context, MainActivity::class.java).apply {
+                addFlags(
+                    android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                        android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                        android.content.Intent.FLAG_ACTIVITY_NEW_TASK,
+                )
+            }
+            runCatching { context.startActivity(intent) }
+        }, PIP_COLLAPSE_RECLAIM_MS)
     }
 
     // --------------------------------------------------------------- 抽屉浮层
@@ -1692,9 +2168,25 @@ class LauncherView(context: Context) : FrameLayout(context) {
      * 诊断包 11-16 11:27~11:37 点了 12 次 home 全部无反馈）。
      */
     fun handleExternalHome() {
-        if (!pipFullscreen) return
-        Logx.event(LogTags.DOCK, "外部 HOME：先还原画中画全屏", "pkg" to prefs.pipApp)
-        goHome()
+        // 画中画全屏优先还原：全屏层是独立图层，盖在整个屏幕之上，
+        // 光切页面用户眼前什么都不会变。
+        if (pipFullscreen) {
+            Logx.event(LogTags.DOCK, "外部 HOME：先还原画中画全屏", "pkg" to prefs.pipApp)
+            goHome()
+            return
+        }
+        // 非全屏：**真的回首页**。
+        //
+        // 老行为是「不动页号」，理由是「用户可能就停在画中画页」。但全局 Dock 的
+        // 首页键（以及系统 HOME）在用户心里的语义就是「回首页」—— 独立验收里
+        // 这条被判为 P0：在抽屉 / 分屏 / 导航页点首页键，画面逐字节不变。
+        // 所以这里改成：先把所有浮层收掉，再切回 [PAGE_SCENE]。
+        Logx.event(LogTags.DOCK, "外部 HOME：回首页", "page" to page, "settings" to (settings != null))
+        if (drawerShowing()) closeDrawer()
+        if (vehiclePage != null) closeVehiclePage()
+        if (settings != null) closeSettings()
+        if (climate != null) closeClimate()
+        showPage(PAGE_SCENE)
     }
 
     /**
@@ -1904,8 +2396,17 @@ class LauncherView(context: Context) : FrameLayout(context) {
      * - 打开后按 `daynight_mode` 选来源：0=跟随高德（默认）/ 1=跟随时间 / 2=跟随光感；
      * - 每个来源读不到时按优先级回落到下一个。
      */
+    /**
+     * 「立即切换」按下的**强制日夜**（null = 不强制，按设置推导）。
+     *
+     * 画板 s06 的「立即切换」是一个**动作**：立刻把桌面切到另一个明暗。
+     * 老实现只重放 `resolvePalette()` —— 跟随时间模式下当前是日间，重放还是日间，
+     * 按钮看起来「点了没反应」（第 2 轮验收 N-1 实测三次点击画面逐字节不变）。
+     */
+    private var forcedNight: Boolean? = null
+
     private fun resolvePalette(): Palette {
-        val night = resolveNight()
+        val night = forcedNight ?: resolveNight()
         val base = if (night) Palettes.night else Palettes.day
         val accent = prefs.accentColor
         val themed = if (accent == 0) base else base.copy(
@@ -1919,6 +2420,19 @@ class LauncherView(context: Context) : FrameLayout(context) {
             prefs.cardOpacity,
             prefs.cardRadius,
         )
+    }
+
+    /**
+     * 「立即切换」：强制切到**当前明暗的反面**，并记住这次强制。
+     *
+     * 下一次「跟随时间 / 光感 / 高德」的信号变化（[resolveNight] 变化）会把
+     * [forcedNight] 清掉，回到正常跟随 —— 画板没有常驻「手动锁定」态。
+     */
+    private fun toggleDayNightNow() {
+        val next = !pal.night
+        forcedNight = next
+        Logx.event(LogTags.THEME, "立即切换日夜", "night" to next)
+        applyTheme()
     }
 
     private fun applyTheme() {
@@ -2006,22 +2520,34 @@ class LauncherView(context: Context) : FrameLayout(context) {
 
     // --------------------------------------------------------------- 媒体来源
 
-    /** 打开来源菜单（锚点是真实 View，如音乐页的来源行）。 */
+    /** 打开来源菜单（锚点是真实 View：取它在窗口里的矩形，按「盖在锚点上方」的矩形弹）。 */
     private fun openSourceMenu(anchor: View?) {
         if (anchor == null) {
             toast("来源菜单暂不可用")
             return
         }
-        sourceMenu.toggle(anchor)
+        val loc = IntArray(2)
+        anchor.getLocationInWindow(loc)
+        val rect = android.graphics.RectF(
+            loc[0].toFloat(),
+            loc[1].toFloat(),
+            (loc[0] + anchor.width).toFloat(),
+            (loc[1] + anchor.height).toFloat(),
+        )
+        openSourceMenu(rect, SourceMenuLayer.Placement.ABOVE)
     }
 
-    /** 打开来源菜单（锚点是设计坐标矩形，如自绘的场景页来源行）。 */
-    private fun openSourceMenu(rect: android.graphics.RectF?) {
+    /** 打开来源菜单（锚点 = 设计坐标矩形，如自绘的场景页/导航页媒体卡）。 */
+    private fun openSourceMenu(
+        rect: android.graphics.RectF?,
+        placement: SourceMenuLayer.Placement = SourceMenuLayer.Placement.FIXED,
+    ) {
         if (rect == null) {
             toast("来源菜单暂不可用")
             return
         }
-        sourceMenu.toggle(rect)
+        sourceMenu.currentId = prefs.musicSource ?: ""
+        sourceMenu.toggle(rect, placement)
     }
 
     /**
@@ -2048,33 +2574,29 @@ class LauncherView(context: Context) : FrameLayout(context) {
     }
 
     /**
-     * 当前显示的来源文案。
+     * 当前显示的来源文案（第202轮改规则）。
      *
-     * 规则：用户显式选过来源就以选择为准
-     * **只有**停在「通用音乐」时才跟随当前会话自动变化。
+     * **实际在放的那路优先**：卡面曲目来自哪路就标哪路，设置里的来源只在没有播放时当默认
+     * （见 [com.cardesk.launcher.core.media.MediaSources.resolveSourceId]）。
      */
     private fun currentSourceLabel(track: com.cardesk.launcher.core.media.TrackInfo?): String {
-        val selected = com.cardesk.launcher.core.media.MediaSources.byId(prefs.musicSource)
-        if (selected != null && selected.id != com.cardesk.launcher.core.media.MediaSources.GENERIC_ID) {
-            return selected.label
-        }
-        return com.cardesk.launcher.core.media.MediaSources.byId(track?.sourceId.orEmpty())?.label
-            ?: com.cardesk.launcher.core.media.MediaSources.byId("generic")!!.label
+        val id = com.cardesk.launcher.core.media.MediaSources.resolveSourceId(
+            track?.sourceId, prefs.musicSource,
+        )
+        return com.cardesk.launcher.core.media.MediaSources.byId(id)?.label
+            ?: com.cardesk.launcher.core.media.MediaSources.GENERIC_LABEL
     }
 
     /**
-     * 当前生效的**来源 id**（第 125 轮）。
+     * 当前生效的**来源 id**（第 125 轮 / 第202轮改规则）。
      *
-     * 与 [currentSourceLabel] 同一套规则，只是返回 id 而不是文案 ——
-     * 卡片上要画哪个图标得按 id 查，画布上拿不到 id。
+     * 与 [currentSourceLabel] 同一套规则（实际在放的那路优先），
+     * 只是返回 id 而不是文案 —— 卡片上要画哪个图标得按 id 查。
      */
     private fun currentSourceId(track: com.cardesk.launcher.core.media.TrackInfo?): String {
-        val selected = com.cardesk.launcher.core.media.MediaSources.byId(prefs.musicSource)
-        if (selected != null && selected.id != com.cardesk.launcher.core.media.MediaSources.GENERIC_ID) {
-            return selected.id
-        }
-        return com.cardesk.launcher.core.media.MediaSources.byId(track?.sourceId.orEmpty())?.id
-            ?: com.cardesk.launcher.core.media.MediaSources.GENERIC_ID
+        return com.cardesk.launcher.core.media.MediaSources.resolveSourceId(
+            track?.sourceId, prefs.musicSource,
+        )
     }
 
     // --------------------------------------------------------------- 媒体源图标（第125轮）
@@ -2252,17 +2774,35 @@ class LauncherView(context: Context) : FrameLayout(context) {
      * 跟 `ViewGroup` 自己做的事一样，只是提前了一帧。
      * 下一帧正常的布局流程会再算一遍，结果一致。
      *
+     * ## 第201轮修正：必须尊重页面自己的 LayoutParams
+     *
+     * 以前无条件按 `pageHost` 的整块 1920×1080 去量 / 摆。导航页的
+     * LayoutParams 其实是 `topMargin=navTop`、`height=968-navTop`（避让状态栏和
+     * Dock），手动一摆就变成 1080 高 —— 画中画承载面的 SurfaceView 高度
+     * 跟着 1052 ↔ 867 跳一次，VirtualDisplay 的 resize 跟不上，
+     * 底部就留下一条黑块（诊断包 2026-11-17 里 1052→867 的连续两次同步）。
+     *
+     * 所以这里按页面自己的 width/height/margins 算矩形，与父布局下一帧的结果一致。
+     *
      * @return true = 量到了，可以演动画
      */
     private fun layoutPageForAnimation(page: View): Boolean {
-        val w = pageHost.width
-        val h = pageHost.height
-        if (w <= 0 || h <= 0) return false
+        val lp = page.layoutParams as? ViewGroup.MarginLayoutParams
+        val box = PageLayoutRect.of(
+            hostW = pageHost.width,
+            hostH = pageHost.height,
+            lpWidth = lp?.width ?: ViewGroup.LayoutParams.MATCH_PARENT,
+            lpHeight = lp?.height ?: ViewGroup.LayoutParams.MATCH_PARENT,
+            leftMargin = lp?.leftMargin ?: 0,
+            topMargin = lp?.topMargin ?: 0,
+            rightMargin = lp?.rightMargin ?: 0,
+            bottomMargin = lp?.bottomMargin ?: 0,
+        ) ?: return false
         page.measure(
-            View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(box.width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(box.height, View.MeasureSpec.EXACTLY),
         )
-        page.layout(0, 0, w, h)
+        page.layout(box.left, box.top, box.left + box.width, box.top + box.height)
         return page.width > 0 && page.height > 0
     }
 
@@ -2408,7 +2948,14 @@ class LauncherView(context: Context) : FrameLayout(context) {
      * 并在面板底部保留「打开原厂驾驶模式页」兜底。
      */
     private fun showDriveMode() {
-        val info = runCatching { currentVehicleInfo() }.getOrNull()
+        // 第220轮：用后台采样线程的快照，**不再在主线程上同步读一遍车控**。
+        //
+        // 以前这里一次 `currentVehicleInfo()` 要 30~60 次同步 binder 往返 ——
+        // 点一下状态栏的驾驶模式胶囊，卡 100ms 以上。
+        // 快照最多旧 1 秒，对「当前是哪个模式」这个语义完全够用。
+        val info = runCatching {
+            com.cardesk.launcher.vehicle.VehicleSignalSampler.ensureSnapshot()
+        }.getOrNull()
         val label = info?.driveModeLabel ?: com.cardesk.launcher.vehicle.DriveMode.UNKNOWN_LABEL
         Logx.event(LogTags.DOCK, "状态栏驾驶模式胶囊点击", "mode" to label, "raw" to (info?.driveModeRaw ?: -1))
         if (overlayDialog is com.cardesk.launcher.ui.dialogs.DriveModeDialog) return
@@ -2487,6 +3034,21 @@ private fun showCam() {
         return
     }
     VehicleController.schedule360View(view, prefs.camera360DelayMs)
+}
+
+/**
+ * **切换** 360 环影（第218轮：按键增强的「360环影(开关)」动作）。
+ *
+ * 与 [showCam] 的区别：那个是「打开」（顺带按设置切视角），
+ * 这个是「开↔关」—— 关的时候直接写 `set360(false)`，不再切视角。
+ */
+fun toggleCam360() {
+    if (VehicleController.is360On) {
+        Logx.event(LogTags.CAM360, "关闭 360 环影（按键增强）")
+        VehicleController.set360(false)
+        return
+    }
+    showCam()
 }
 
     /**
@@ -2631,11 +3193,84 @@ private fun showCam() {
         doorAlertDialog = created
     }
 
+    /**
+     * 车况卡「详情 ›」：打开**车辆页**（画板 `05-vehicle-day` / `n04-vehicle-night`）。
+     *
+     * 为什么换成整页而不是原来的 10 项状态弹窗：
+     * 画板 05 是「续航与电量 / 胎压监测 / 车门与车窗 / 快捷入口」四块的真实信息架构，
+     * 而旧弹窗只是 10 条状态文字的列表 —— 两者不是同一个东西，画板才是这一版的准绳。
+     * 旧弹窗类 `VehicleStatusDialog` 保留（其它入口仍可能用到），这里只是不再从车况卡进来。
+     *
+     * 插在状态栏**之前**：画板里状态栏与 Dock 都可见。
+     */
+    private fun openVehiclePage() {
+        if (vehiclePage != null) return
+        val info = lastVehicleInfo
+            ?: runCatching {
+                com.cardesk.launcher.vehicle.VehicleSignalSampler.ensureSnapshot()
+            }.getOrNull()
+            ?: return
+        val page = com.cardesk.launcher.ui.pages.VehiclePage(context, pal)
+        // 车型和首页/车况卡保持一致（车辆页用同一套 cardtop 车模图）。
+        page.carModel = prefs.carModel
+        page.onOpenClimate = {
+            closeVehiclePage()
+            showClimate()
+        }
+        page.onOpen360 = {
+            closeVehiclePage()
+            showCam()
+        }
+        page.onOpenOem = {
+            closeVehiclePage()
+            openNativeSettings()
+        }
+        page.bind(info)
+        val index = if (::statusBar.isInitialized) content.indexOfChild(statusBar) else content.childCount
+        content.addView(
+            page,
+            index,
+            LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
+        )
+        vehiclePage = page
+        Logx.event(LogTags.SCENE, "打开车辆页")
+    }
+
+    private fun closeVehiclePage() {
+        val page = vehiclePage ?: return
+        vehiclePage = null
+        content.removeView(page)
+    }
+
+    /**
+     * 「快捷入口 · 原厂设置」：优先拉起**原厂**设置包（`com.ecarx.settings`）。
+     *
+     * 模拟器/简陋车机上没有这个包 —— 画板副标题写的就是「原厂设置包存在时」，
+     * 所以拿不到就退回桌面自己的原厂设置页，并如实提示，不假装成功。
+     */
+    private fun openNativeSettings() {
+        val intent = context.packageManager
+            .getLaunchIntentForPackage(NATIVE_SETTINGS_PACKAGE)
+        val launched = runCatching {
+            if (intent == null) false else {
+                context.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                true
+            }
+        }.getOrDefault(false)
+        if (launched) return
+        showSettings()
+        settings?.showPageKey("oemsettings")
+        toast("这台车机没有原厂设置包，已打开 CarDesk 的原厂设置页")
+    }
+
     /** 车况卡点击：打开「车辆状态」面板（10 项逐项状态 + 3/4 车模）。 */
     private fun openVehicleStatus() {
         if (vehicleStatusDialog != null) return
         if (overlayDialog != null) return
-        val info = lastVehicleInfo ?: runCatching { currentVehicleInfo() }.getOrNull() ?: return
+        // 第220轮：优先用后台采样线程的快照（不再在主线程同步读一轮车控）。
+        val info = lastVehicleInfo
+            ?: runCatching { com.cardesk.launcher.vehicle.VehicleSignalSampler.ensureSnapshot() }.getOrNull()
+            ?: return
         val created = com.cardesk.launcher.ui.dialogs.VehicleStatusDialog(
             context,
             pal,
@@ -3108,10 +3743,17 @@ private fun showCam() {
     /**
      * 换肤重建时**摘出来**的承载内容（第139轮）。
      *
-     * @param view 承载面（`ActivityView`）本身 —— 带着它的 `VirtualDisplay`
+     * @param view 承载面（`ActivityView` / 镜像路线的 `TextureView`）本身 —— 带着它的 `VirtualDisplay`
      * @param pkg 它承载的应用包名
+     * @param host 镜像路线的宿主（`ActivityView` 路线是 null）—— 第228轮：
+     *   镜像宿主也必须一起搬家，否则旧承载面 `release` 时会把虚拟屏销毁
+     *   （承载应用的 task 被推回主屏 + 应用被重启一遍）。
      */
-    private class CarriedPip(val view: View, val pkg: String)
+    private class CarriedPip(
+        val view: View,
+        val pkg: String,
+        val host: com.cardesk.launcher.ui.pip.PipMirrorHost? = null,
+    )
 
     /** 换肤重建时摘出来的主画 + 副画（没有的那块是 null）。 */
     private class CarriedPips(val main: CarriedPip?, val secondary: CarriedPip?)
@@ -3140,7 +3782,9 @@ private fun showCam() {
         if (action == com.cardesk.launcher.core.PipRebuildPolicy.Action.RELEASE) return null
         val pkg = surface.currentPackage
         val view = surface.detachContent() ?: return null
-        return CarriedPip(view, pkg)
+        // 第228轮：镜像宿主一起摘（不释放虚拟屏）。
+        val host = surface.detachMirrorHost()
+        return CarriedPip(view, pkg, host)
     }
 
     /**
@@ -3186,9 +3830,17 @@ private fun showCam() {
     private fun showSettings() {
         if (settings != null) return
         Logx.event(LogTags.SETTING, "打开设置页")
+        // 画板 `s01..s25` 全是「设置覆盖整屏」：底部**没有 Dock**（只有状态栏）。
+        // 之前 Dock 一直露在设置面板下面，面板底边与 Dock 之间还压着一条桌面内容。
+        dock.visibility = View.GONE
+        // 画板里设置页底部没有 Dock：桌面自己的 Dock 设 GONE 还不够，
+        // 屏幕上那条是**另一个窗口**（`GlobalDockService`）画出来的，必须让它一起让位。
+        com.cardesk.launcher.core.dock.GlobalDockService.setSuppressed(true)
         val overlay = SettingsOverlay(context, prefs, pal)
         overlay.onClose = { closeSettings() }
         overlay.onApply = { onSettingsApplied() }
+        // 画板 s06「立即切换」：真的把当前明暗翻过来（不是重放当前 palette）。
+        overlay.onToggleDayNight = { toggleDayNightNow() }
         overlay.onCardLayoutChanged = { reloadSceneCardLayout() }
         // 第125轮：默认媒体源 —— 设置里选了立刻锁定对应包，卡片上也切过去。
         overlay.onDefaultMediaSource = { id ->
@@ -3264,11 +3916,42 @@ private fun showCam() {
         overlay.onImportWallpaper = { requestWallpaperImport() }
         overlay.onUseCustomWallpaper = { applyCustomWallpaper() }
         overlay.onDeleteCustomWallpaper = { deleteCustomWallpaper() }
+        // 第207轮：壁纸轮播 / 视频壁纸。
+        overlay.onWallpaperCarouselChange = { on ->
+            // 开启时立刻重置计时，让用户马上看到第一轮切换的节奏。
+            wallpaperSwitchedAtMs = android.os.SystemClock.uptimeMillis()
+            if (on) toast("壁纸轮播已开启") else toast("壁纸轮播已关闭")
+        }
+        overlay.onVideoWallpaperChange = { on ->
+            if (on) {
+                startVideoWallpaper()
+                toast("视频壁纸已启用")
+            } else {
+                stopVideoWallpaper()
+                toast("视频壁纸已关闭")
+            }
+        }
+        overlay.onImportVideoWallpaper = { requestVideoWallpaperImport() }
+        overlay.onPickVideoWallpaper = { openVideoPicker() }
+        overlay.onDeleteVideoWallpaper = { deleteVideoWallpaper() }
         // 卡片风格（第五十八轮）：透明度 / 颜色 / 圆角 → 桌面重算 token 并刷新。
         overlay.onCardStyleChange = { applyCardStyle() }
         overlay.onShowCardColor = { showCardColorPicker() }
         settings = overlay
-        content.addView(overlay, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        // 画板 `s01..s25` 的状态栏**可见**、Dock **不可见**。
+        //
+        // 状态栏是 `content` 里的兄弟 View，设置层要是 add 在末尾（= 最上层）就会把它盖掉
+        // （实测：不透明背景铺上去之后，顶部那一行齿轮/天气/时间全没了）。
+        // 所以跟抽屉页同一套做法 —— 插在状态栏**之前**，让状态栏压在设置层上面。
+        val index = if (::statusBar.isInitialized) content.indexOfChild(statusBar) else content.childCount
+        content.addView(
+            overlay,
+            index,
+            LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
+        )
+        // Dock 的显隐由 `applyDockVisibility()` 统一决定（`hide` 里已经并进 `settings != null`）。
+        // 这里必须**显式**调一次：打开设置不会触发 refresh()，否则 Dock 会一直留在屏幕上。
+        applyDockVisibility()
         // 面板上滑 + 遮罩淡入（200ms / 180ms）。
         overlay.playOpen()
     }
@@ -3276,6 +3959,10 @@ private fun showCam() {
     private fun closeSettings() {
         val overlay = settings ?: return
         settings = null
+        // 全局 Dock 让位结束（窗口一直在，这里只是恢复可见）。
+        com.cardesk.launcher.core.dock.GlobalDockService.setSuppressed(false)
+        // 交给统一入口恢复（它同时管 `dock` 与增强导航的 `bottomBar`）。
+        applyDockVisibility()
         // 面板下滑 56px + 淡出（240ms），结束后摘掉这层。
         overlay.playClose { content.removeView(overlay) }
     }
@@ -3296,10 +3983,634 @@ private fun showCam() {
         background.custom = false
         background.customBitmap = null
         background.wallpaper = next
+        stopVideoWallpaper()
+        wallpaperSwitchedAtMs = android.os.SystemClock.uptimeMillis()
         if (::scenePage.isInitialized) {
             scenePage.invalidate()
             scenePage.showWallpaperHint()
         }
+    }
+
+    // ---------------------------------------------------------- 壁纸轮播（第207轮）
+
+    /**
+     * 每秒检查一次「够不够时间切壁纸了」。
+     *
+     * 判据全在 [com.cardesk.launcher.core.WallpaperCarousel] 里（纯逻辑，可单测）：
+     * 轮播开着 + 距上次切换够间隔 + 当前没有在拖壁纸。
+     */
+    private fun checkWallpaperCarousel() {
+        val enabled = prefs.wallpaperCarousel
+        // 视频壁纸开着时**不轮播**：一边放视频一边换静态纸没有意义，
+        // 而且视频壁纸时静态壁纸根本不画。
+        val video = prefs.videoWallpaperEnabled && isVideoWallpaperPlaying()
+        if (!enabled || video) return
+        val elapsed = android.os.SystemClock.uptimeMillis() - wallpaperSwitchedAtMs
+        val should = com.cardesk.launcher.core.WallpaperCarousel.shouldSwitch(
+            enabled = enabled,
+            elapsedMs = elapsed,
+            intervalSec = prefs.wallpaperCarouselIntervalSec,
+            dragging = false,
+        )
+        if (!should) return
+        // 自定义壁纸（一张照片）没有「下一张」可切 —— 直接跳过这一轮。
+        if (background.custom) {
+            wallpaperSwitchedAtMs = android.os.SystemClock.uptimeMillis()
+            return
+        }
+        val next = com.cardesk.launcher.core.WallpaperCarousel.nextIndex(
+            background.wallpaper,
+            com.cardesk.launcher.core.Wallpapers.COUNT,
+        )
+        com.cardesk.launcher.core.log.Logx.event(
+            com.cardesk.launcher.core.log.LogTags.SCENE,
+            "壁纸轮播切换",
+            "from" to background.wallpaper,
+            "to" to next,
+            "intervalSec" to prefs.wallpaperCarouselIntervalSec,
+        )
+        applyWallpaper(next)
+    }
+
+    // ---------------------------------------------------------- 视频壁纸（第207轮）
+
+    /** 视频壁纸是不是正在播。 */
+    private fun isVideoWallpaperPlaying(): Boolean = videoPlayer?.isPlaying == true
+
+    /**
+     * 第208轮：给单测开的观察口 ——
+     * 「视频壁纸起播请求是不是正挂在等 TextureView 的 Surface 就绪」。
+     */
+    fun pendingVideoWallpaperStartForTest(): Boolean = pendingVideoWallpaperStart
+
+    /**
+     * 播放**视频壁纸**。
+     *
+     * 播不了（文件没了 / 解码失败）就静默退回静态壁纸 —— 桌面不能因为一段坏视频就黑屏。
+     */
+    fun startVideoWallpaper() {
+        // 第208轮：旧版本把视频存在 `filesDir`（媒体服务读不到），先尝试迁移。
+        com.cardesk.launcher.core.VideoWallpaper.migrateLegacyFile(context.applicationContext)
+        val file = com.cardesk.launcher.core.VideoWallpaper.file(context.applicationContext)
+        if (!file.isFile || file.length() <= 0L) {
+            com.cardesk.launcher.core.log.Logx.w(
+                com.cardesk.launcher.core.log.LogTags.SETTING,
+                "视频壁纸：文件不存在，退回静态壁纸",
+            )
+            prefs.videoWallpaperEnabled = false
+            prefs.videoWallpaper = false
+            detachVideoWallpaperLayer()
+            return
+        }
+        // 第208轮：先把上一个播放器释放掉（层先留着 —— 下面还要用它起播）。
+        releaseVideoPlayer()
+        // 第214轮：**先**把窗口切成半透明，再挂视频层。
+        //
+        // 顺序很关键：切 format 会重建窗口 Surface，`SurfaceView` 的 surface
+        // 跟着重建；先挂层再切 format 会白起播一轮（surface 被换掉）。
+        // 先切 format 再挂层，`surfaceCreated` 回调时窗口已经是半透明的了。
+        //
+        // 第227轮：
+        // - 目标 format 由**当前后端**决定（`SurfaceView` ⇒ 半透明；`TextureView` ⇒ 不透明）；
+        // - format 已经是对的时候 [applyVideoWindowFormat] 直接返回 ⇒ 不会重建窗口 surface
+        //   ⇒ 视频**只起播一次**（修掉「开机后视频跳回开头」）。
+        applyVideoWindowFormat(
+            com.cardesk.launcher.core.VideoWallpaper.needsTranslucentWindow(videoBackend),
+        )
+        // 第208轮：视频层**按需挂进窗口**。
+        // `TextureView` 只有 attach 之后才会创建 SurfaceTexture，
+        // 也只有那时候才会回调 `onSurfaceTextureAvailable` ——
+        // 所以「要播视频」= 「把层挂上」，「不播」= 「把层摘掉」。
+        pendingVideoWallpaperStart = true
+        attachVideoWallpaperLayer()
+        // 第228轮：窗口已经切成半透明 ⇒ 画中画要换到**镜像**路线。
+        // 不换的话，承载面还挂着 `ActivityView` 路线的内容 ⇒ 半透明窗口下圆角失效、
+        // 画面与窗口坐标错位、切页残留黑卡（这正是第226轮引入镜像路线要解决的问题）。
+        refreshPip()
+    }
+
+    /**
+     * 第208轮：把视频壁纸层挂进窗口（夹在「壁纸」与「桌面内容」之间）。
+     *
+     * ## 挂层的时机很关键
+     *
+     * `TextureView` 在**拿到尺寸之前**被 draw 会直接崩：
+     * `TextureView.draw()` → `getTextureLayer()` → `mLayer` 还是 null → NPE。
+     * 所以视频层**不能**在布局阶段挂上去，要推到下一帧（`post`），
+     * 让它先被 layout 一次、拿到 1920×1080，再被 draw。
+     */
+    private fun attachVideoWallpaperLayer() {
+        if (videoLayerAttached) {
+            maybeStartVideoWallpaper()
+            return
+        }
+        // 推到下一帧再挂：这一帧的布局已经跑完了，新挂上去的子 View 拿不到尺寸，
+        // 下一帧才会 layout，而「先 layout 再 draw」是 TextureView 不崩的前提。
+        post {
+            if (!pendingVideoWallpaperStart) return@post
+            // 视频层挂在**壁纸与桌面内容之间**：
+            // 视频在卡片下面、壁纸上面，桌面卡片照常可见。
+            val idx = indexOfChild(content)
+            if (idx >= 0) {
+                addView(videoWallpaperView, idx, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+            } else {
+                addView(videoWallpaperView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+            }
+            videoLayerAttached = true
+            videoWallpaperView.addOnLayoutChangeListener(
+                object : View.OnLayoutChangeListener {
+                    override fun onLayoutChange(
+                        v: View,
+                        left: Int,
+                        top: Int,
+                        right: Int,
+                        bottom: Int,
+                        oldLeft: Int,
+                        oldTop: Int,
+                        oldRight: Int,
+                        oldBottom: Int,
+                    ) {
+                        if (right - left <= 0 || bottom - top <= 0) return
+                        v.removeOnLayoutChangeListener(this)
+                        videoLayoutReady = true
+                        maybeStartVideoWallpaper()
+                    }
+                },
+            )
+            maybeStartVideoWallpaper()
+        }
+    }
+
+    /**
+     * 第208/214轮：兜底层的起播闸口。
+     *
+     * 必须同时满足：
+     * 1. **Surface 已经就绪**
+     *    - `SurfaceView` 后端：`holder.surface` 有效（`surfaceCreated`/`surfaceChanged` 回调过）；
+     *    - `TextureView` 后端：`SurfaceTexture` 已经拿到（`onSurfaceTextureAvailable`）。
+     * 2. **View 已经 layout 过**、拿到真实宽高（输出 buffer 尺寸要按它来）。
+     *
+     * 少任何一个，解码器都配不出输出 buffer，`prepareAsync()` 必失败。
+     */
+    private fun maybeStartVideoWallpaper() {
+        if (videoStarted) return
+        if (!videoLayoutReady) return
+        val w = videoWallpaperView.width
+        val h = videoWallpaperView.height
+        if (w <= 0 || h <= 0) return
+        if (videoBackend == com.cardesk.launcher.core.VideoWallpaper.BACKEND_SURFACE_VIEW) {
+            if (!videoSurfaceReady) return
+            if (!videoSurfaceView.holder.surface.isValid) return
+        } else {
+            val st = videoSurfaceTexture ?: return
+            runCatching { st.setDefaultBufferSize(w, h) }
+        }
+        videoStarted = true
+        pendingVideoWallpaperStart = false
+        // 再推迟一帧：确保视频层真的被画过一次（消费端接上生产者了），
+        // 否则解码器推帧过去也没有去处。
+        post { prepareVideoWallpaper() }
+    }
+
+    /**
+     * 第227轮：surface 被换掉时**记下当前播放位置**，重建后接着播。
+     *
+     * 见 [videoSurfaceView] 的 `surfaceDestroyed` 回调的说明。
+     */
+    private var videoResumePositionMs = 0L
+
+    /**
+     * 第227轮：surface 刚被换掉、还没接上新的那段窗口期。
+     *
+     * 这段时间里解码器可能报错（输出 surface 没了）。
+     * 那时候**不能**按「播放失败」处理 —— 否则会把视频壁纸整个关掉。
+     */
+    private var videoSurfaceLost = false
+
+    /**
+     * 第214轮：视频壁纸的播放器启动。
+     *
+     * 两种后端给解码器的东西不一样：
+     * - `SurfaceView`：`holder.surface`（**独立层**，解码器直接推到那个 SF 层）；
+     * - `TextureView`：`Surface(surfaceTexture)`（**拉模式**，帧被画进窗口 buffer）。
+     */
+    private fun prepareVideoWallpaper() {
+        val file = com.cardesk.launcher.core.VideoWallpaper.file(context.applicationContext)
+        if (!file.isFile || file.length() <= 0L) {
+            detachVideoWallpaperLayer()
+            return
+        }
+        releaseVideoPlayer()
+        var mp: android.media.MediaPlayer? = null
+        try {
+            mp = android.media.MediaPlayer()
+            // 第208轮：直接给路径 —— 视频文件放在**外部应用目录**
+            // （标签 sdcardfs），媒体服务读得到。
+            // 放在 `filesDir` 的话，平台签名包的目录标签是 `system_app_data_file`，
+            // SELinux 不允许 mediaserver 读 → prepare 直接失败（status=0x80000000）。
+            mp.setDataSource(file.absolutePath)
+            if (videoBackend == com.cardesk.launcher.core.VideoWallpaper.BACKEND_SURFACE_VIEW) {
+                // 第214轮：`SurfaceView` 后端 —— 直接用 holder 的 surface。
+                mp.setSurface(videoSurfaceView.holder.surface)
+            } else {
+                // 第208轮：Surface 要**持有住**（不能是临时值），原因见 [videoSurface] 的注释。
+                val st = videoSurfaceTexture
+                if (st == null) {
+                    // SurfaceTexture 没了（层被摘掉/重建）→ 起不了播。
+                    // ⚠️ 这里必须把播放器放掉：`MediaPlayer` 已经建好、setDataSource 也做过了，
+                    // 直接 return 会把 native 资源一直占着。
+                    runCatching { mp.release() }
+                    detachVideoWallpaperLayer()
+                    return
+                }
+                videoSurface = android.view.Surface(st)
+                mp.setSurface(videoSurface!!)
+            }
+            // 第208轮：视频分辨率多半不是 1920×1080，让它按比例铺满壁纸区。
+            runCatching {
+                mp.setVideoScalingMode(android.media.MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT)
+            }
+            // 第208轮：`setLooping` 挪到 prepare 成功之后。
+            mp.setOnPreparedListener {
+                videoWallpaperView.visibility = View.VISIBLE
+                it.isLooping = true
+                // 第227轮：**接着上次的位置播**（surface 换过之后重建播放器时）。
+                // 不 seek 回去的话，视频会「跳回开头」重播一遍。
+                val resume = videoResumePositionMs
+                if (resume > 0L) {
+                    runCatching {
+                        it.seekTo(resume, android.media.MediaPlayer.SEEK_CLOSEST)
+                    }
+                    com.cardesk.launcher.core.log.Logx.i(
+                        com.cardesk.launcher.core.log.LogTags.SETTING,
+                        "视频壁纸：surface 换新，从原位置接着播",
+                        "positionMs" to resume,
+                    )
+                }
+                videoResumePositionMs = 0L
+                videoSurfaceLost = false
+                // 第208轮：视频层在「壁纸」之上、「桌面内容」之下 ——
+                // 壁纸层不用画（让路），桌面卡片照常画在视频之上。
+                // 第214轮：`videoPassthrough` 的 setter 自带 `invalidate()`，
+                // 改完这一帧就会真的把壁纸擦掉（原来留着旧壁纸，画面透不出来）。
+                background.videoPassthrough = true
+                // 第214轮：`SurfaceView` 后端下，窗口 buffer 在视频那块区域必须透明，
+                // 视频才能从「窗口之下」透上来（详见 [applyVideoWindowFormat]）。
+                videoWallpaperActive = true
+                applyDesktopBackground(android.graphics.Color.TRANSPARENT)
+                it.start()
+                // 第231轮：起播就立刻采一次亮度，别等下一个 3 秒窗口 ——
+                // 那 3 秒里日间主题的深字会直接压在暗色视频上。
+                videoBackdropAtMs = 0L
+                handler.post { sampleVideoBackdropIfNeeded() }
+                // 第225轮（临时诊断，验证完就删）：视频层到底有没有挂上、窗口是不是不透明。
+                com.cardesk.launcher.core.log.Logx.i(
+                    com.cardesk.launcher.core.log.LogTags.SETTING,
+                    "视频壁纸诊断",
+                    "view" to videoWallpaperView.javaClass.simpleName,
+                    "vis" to videoWallpaperView.visibility,
+                    "size" to "${videoWallpaperView.width}x${videoWallpaperView.height}",
+                    "parent" to (videoWallpaperView.parent?.javaClass?.simpleName ?: "null"),
+                    "index" to ((videoWallpaperView.parent as? android.view.ViewGroup)
+                        ?.indexOfChild(videoWallpaperView) ?: -1),
+                    "alpha" to videoWallpaperView.alpha,
+                    "winFmt" to ((context as? android.app.Activity)?.window?.attributes?.format ?: -1),
+                    "passthrough" to background.videoPassthrough,
+                )
+                com.cardesk.launcher.core.log.Logx.i(
+                    com.cardesk.launcher.core.log.LogTags.SETTING,
+                    "视频壁纸已开始播放",
+                    "bytes" to file.length(),
+                    "size" to "${videoWallpaperView.width}x${videoWallpaperView.height}",
+                    "backend" to videoBackendName(),
+                )
+            }
+            mp.setOnErrorListener { _, what, extra ->
+                // 第227轮：surface 刚被换掉、还没接上新的那段窗口期里，
+                // 解码器可能报错（输出 surface 没了）。
+                // 那**不是**「视频播不了」⇒ 不能把视频壁纸整个关掉
+                // （等新 surface 到位就接回去了）。
+                if (videoSurfaceLost) {
+                    com.cardesk.launcher.core.log.Logx.w(
+                        com.cardesk.launcher.core.log.LogTags.SETTING,
+                        "视频壁纸：surface 丢失期间的报错，等新 surface 接上",
+                        "what" to what,
+                        "extra" to extra,
+                    )
+                    return@setOnErrorListener true
+                }
+                com.cardesk.launcher.core.log.Logx.w(
+                    com.cardesk.launcher.core.log.LogTags.SETTING,
+                    "视频壁纸播放出错，退回静态壁纸",
+                    "what" to what,
+                    "extra" to extra,
+                )
+                prefs.videoWallpaperEnabled = false
+                prefs.videoWallpaper = false
+                detachVideoWallpaperLayer()
+                background.videoPassthrough = false
+                applyVideoWindowFormat(false)
+                applyDesktopBackground(0xFF05080F.toInt())
+                true
+            }
+            mp.prepareAsync()
+            videoPlayer = mp
+            prefs.videoWallpaper = true
+            prefs.videoWallpaperEnabled = true
+            background.custom = false
+            background.customBitmap = null
+            wallpaperSwitchedAtMs = android.os.SystemClock.uptimeMillis()
+        } catch (e: Throwable) {
+            com.cardesk.launcher.core.log.Logx.w(
+                com.cardesk.launcher.core.log.LogTags.SETTING,
+                "视频壁纸启动失败，退回静态壁纸",
+                e,
+                "size" to "${videoWallpaperView.width}x${videoWallpaperView.height}",
+            )
+            // 失败的这个播放器必须释放，否则 native 资源一直被占着。
+            runCatching { mp?.release() }
+            videoPlayer = null
+            runCatching { videoSurface?.release() }
+            videoSurface = null
+            videoStarted = false
+            prefs.videoWallpaperEnabled = false
+            prefs.videoWallpaper = false
+            detachVideoWallpaperLayer()
+            background.videoPassthrough = false
+            applyVideoWindowFormat(false)
+            applyDesktopBackground(0xFF05080F.toInt())
+        }
+    }
+
+    /** 第214轮：后端名字（写进日志，方便实车复测时确认走的哪条路）。 */
+    private fun videoBackendName(): String =
+        if (videoBackend == com.cardesk.launcher.core.VideoWallpaper.BACKEND_SURFACE_VIEW) {
+            "SurfaceView"
+        } else {
+            "TextureView"
+        }
+
+    /**
+     * 第214轮：把 Activity 窗口在「半透明」与「不透明」之间切。
+     *
+     * ## 为什么 `SurfaceView` 后端必须要半透明窗口
+     *
+     * `SurfaceView` 的 surface 在**窗口 buffer 之下**（默认 z 序）。
+     * 窗口 buffer 是不透明的话，它会把下层的视频**整块盖住** ——
+     * 所以那一块区域必须是**透明像素**，视频才能透上来。
+     *
+     * ⇒ 窗口格式设成 `PixelFormat.TRANSLUCENT`。
+     *
+     * ## 为什么 `TextureView` 后端不用
+     *
+     * `TextureView` 是**拉模式**：帧被 `updateTexImage()` 画进窗口 buffer 本身，
+     * 不需要窗口透明。
+     *
+     * ## ⚠️ 切 format 会重建窗口 Surface
+     *
+     * `SurfaceView` 的 surface 跟着一起重建 ⇒ 会来一轮
+     * `surfaceDestroyed` → `surfaceCreated`。起播闸口会扛住这一轮
+     * （见 [videoSurfaceReady] / `maybeStartVideoWallpaper`）。
+     *
+     * ## 第227轮：**format 已经对的时候不要再动它**
+     *
+     * 窗口 format 变了 ⇒ 窗口 surface 重建 ⇒ `SurfaceView` 的 surface 跟着重建
+     * ⇒ 播放器被放掉再起一次 ⇒ **视频从第一帧重新开始**
+     * （实测每次冷启动起播两次，间隔 652ms）。
+     *
+     * 所以：目标 format == 当前 format ⇒ **直接返回，什么都不做**。
+     * 冷启动那次的 format 由 `MainActivity.applyWindowFormatBeforeCreate()`
+     * 在**建窗之前**定好 ⇒ 这里每次都命中「已经对」⇒ **一次都不会重建**。
+     */
+    private fun applyVideoWindowFormat(transparent: Boolean) {
+        val win = (context as? android.app.Activity)?.window ?: return
+        val target = if (transparent) {
+            android.graphics.PixelFormat.TRANSLUCENT
+        } else {
+            android.graphics.PixelFormat.OPAQUE
+        }
+        // 第227轮：已经是对的就别动（动了会重建窗口 surface ⇒ 视频重头再播一遍）。
+        val current = win.attributes?.format ?: android.graphics.PixelFormat.OPAQUE
+        if (current == target) return
+        runCatching {
+            win.setFormat(target)
+            // 半透明窗口不能有窗口级的背景色，否则整屏都是那块底色。
+            win.setBackgroundDrawable(null)
+        }.onFailure {
+            com.cardesk.launcher.core.log.Logx.w(
+                com.cardesk.launcher.core.log.LogTags.SETTING,
+                "切换窗口 format 失败",
+                it,
+                "target" to target,
+            )
+        }
+    }
+
+    /**
+     * 第214轮：桌面底色。
+     *
+     * 视频壁纸播放时，桌面底色必须**透明** ——
+     * 它画在窗口 buffer 上，不透明就会盖住下层的视频。
+     *
+     * 其它时候照常上色（换肤、改设置都会走到这里）。
+     */
+    private fun applyDesktopBackground(color: Int) {
+        val transparent = videoWallpaperActive &&
+            com.cardesk.launcher.core.VideoWallpaper.needsTranslucentWindow(videoBackend)
+        setBackgroundColor(if (transparent) android.graphics.Color.TRANSPARENT else color)
+    }
+
+    /**
+     * 第214轮：视频壁纸是不是正在播（用来决定桌面底色透不透明）。
+     *
+     * 不用 `prefs.videoWallpaperEnabled` —— 那个 pref 在起播成功之前就被置真了，
+     * 而此时窗口还没切成半透明，底色反而应该照常画。
+     */
+    private var videoWallpaperActive = false
+
+    /** 第208轮：把视频壁纸层摘掉（完全不参与渲染）。 */
+    private fun detachVideoWallpaperLayer() {
+        pendingVideoWallpaperStart = false
+        if (!videoLayerAttached) return
+        videoLayerAttached = false
+        videoSurfaceTexture = null
+        videoLayoutReady = false
+        videoStarted = false
+        // 第214轮：`SurfaceView` 的 surface 也要标记成不可用，
+        // 否则下次挂层时闸口会被旧状态放行。
+        videoSurfaceReady = false
+        // 第208轮：摘层要**推到下一帧**。
+        // 在当前这一帧的绘制过程中把 `TextureView` 摘掉，
+        // 它下一帧还可能被 draw 到 → `getTextureLayer()` 里 `mLayer` 为 null → NPE 崩溃。
+        //
+        // 第227轮：**先把要摘的那个视图抓住** ——
+        // 摘层是下一帧才执行的，先取一份引用再 `post`，
+        // 免得回调执行时字段已经被别处改过（摘错视图：新的留下、旧的漏掉）。
+        val target = videoWallpaperView
+        post {
+            runCatching {
+                removeView(target)
+                target.visibility = View.GONE
+            }
+        }
+    }
+
+    /** 停掉视频壁纸。 */
+    fun stopVideoWallpaper() {
+        // 第208轮：连同「等 Surface 就绪再起播」的挂起请求一起取消 ——
+        // 否则用户关了视频壁纸，Surface 稍后就绪时又自己播起来。
+        pendingVideoWallpaperStart = false
+        releaseVideoPlayer()
+        detachVideoWallpaperLayer()
+        // 恢复壁纸层与桌面底色（视频走的时候它们要让路）
+        background.videoPassthrough = false
+        // 第214轮：窗口恢复不透明、底色恢复上色。
+        videoWallpaperActive = false
+        applyVideoWindowFormat(false)
+        applyDesktopBackground(0xFF05080F.toInt())
+        prefs.videoWallpaperEnabled = false
+        prefs.videoWallpaper = false
+        // 第228轮：窗口已经变回**不透明** ⇒ 画中画要换回 `ActivityView` 路线。
+        // 不换的话，承载面还挂着镜像路线的内容 ⇒ 全屏右侧缺一块、拖动很卡
+        // （真车实测：用户关掉视频壁纸后画中画行为与「不用视频壁纸」时不一致）。
+        refreshPip()
+    }
+
+    /**
+     * 第208轮：只释放播放器，**不动视频壁纸层的 visibility**。
+     *
+     * `GONE` 会让 `TextureView` 销毁 SurfaceTexture ——
+     * 起播流程里「先把旧播放器放掉、再拿 SurfaceTexture 起新播放器」，
+     * 如果这里顺手把层关掉，SurfaceTexture 刚建好就被销毁，起播必然失败。
+     */
+    private fun releaseVideoPlayer() {
+        videoPlayer?.let {
+            runCatching { it.stop() }
+            runCatching { it.release() }
+        }
+        videoPlayer = null
+        // 第208轮：播放器放掉之后，Surface 才能放 ——
+        // 顺序反了会让解码器正在用的 surface 提前断开。
+        runCatching { videoSurface?.release() }
+        videoSurface = null
+        // 第227轮：播放器都没了 ⇒ 不存在「等新 surface 接上」这回事了。
+        videoSurfaceLost = false
+        // 第231轮：播放器没了 ⇒ 视频亮度分布作废（墨色回到静态壁纸 / 主题那套）。
+        videoBackdropSampler?.release()
+        videoBackdropSampler = null
+        videoBackdropTopTone = null
+        videoBackdropCenterTone = null
+        videoBackdropAtMs = 0L
+        videoBackdropFailures = 0
+    }
+
+    /** 视频壁纸选完后的结果：后台拷贝 + 落盘。 */
+    fun onVideoWallpaperPicked(uri: android.net.Uri?) {
+        com.cardesk.launcher.core.log.Logx.i(
+            com.cardesk.launcher.core.log.LogTags.SETTING,
+            "视频壁纸：进入导入处理",
+            "uri" to (uri?.toString() ?: "null"),
+        )
+        if (uri == null) {
+            toast("已取消导入视频壁纸")
+            return
+        }
+        toast("正在导入视频壁纸…")
+        // 注意：Kotlin 的 `Thread { … }` 只是 **SAM 构造**，**不会自动 start()**
+        // （自动启动的是 `kotlin.concurrent.thread { … }`）。
+        // 以前漏了 `.start()`，导入线程从来没跑过 —— 选完视频毫无反应。
+        Thread {
+            val ok = com.cardesk.launcher.core.VideoWallpaper
+                .importFromUri(context.applicationContext, uri)
+            post {
+                if (ok) {
+                    startVideoWallpaper()
+                    toast("视频壁纸已启用")
+                    refreshSettingsWallpaper()
+                } else {
+                    toast("视频壁纸导入失败")
+                }
+            }
+        }.start()
+    }
+
+    /** 打开系统相册选视频（第218轮的降级链，仍保留作**备选**）。 */
+    private fun requestVideoWallpaperImport() {
+        (context as? com.cardesk.launcher.MainActivity)?.startVideoWallpaperImport()
+    }
+
+    // ---------------------------------------------------------- 应用内视频库（第219轮）
+
+    /** 应用内视频选择器（开着的时候只会有一个）。 */
+    private var videoPicker: VideoPickerOverlay? = null
+
+    /**
+     * 打开**应用内**的视频选择器（第219轮）。
+     *
+     * ## 为什么不是系统选择器
+     *
+     * 实车（领克 AAOS 820A）上系统选择器秒退且不带 uri
+     * （诊断包：`收到选视频结果 resultCode=0 uri=null`），
+     * 系统里也查不到 `documentsui` ⇒ 这条路在车机上不可靠。
+     *
+     * ⇒ 我们自己列共享存储里的视频文件。
+     *
+     * ## 权限
+     *
+     * 读共享存储要 `READ_EXTERNAL_STORAGE`。
+     * 车机上本包是 **uid 1000 系统应用** ⇒ 权限天然可用；
+     * 普通安装（AVD 上就是这样）则要**运行时**申请。
+     */
+    fun openVideoPicker() {
+        if (videoPicker?.isOpen == true) return
+        // 设置页先关掉，避免两层浮层叠着。
+        closeSettings()
+
+        val activity = context as? com.cardesk.launcher.MainActivity
+        if (activity != null && !activity.hasStoragePermission()) {
+            activity.requestStoragePermission()
+            toast("需要存储权限才能列出车机里的视频")
+            return
+        }
+
+        val overlay = videoPicker ?: VideoPickerOverlay(context).also { videoPicker = it }
+        overlay.onPick = { item -> importVideoFromLibrary(item) }
+        overlay.onUseSystemPicker = { requestVideoWallpaperImport() }
+        if (overlay.parent == null) {
+            content.addView(overlay, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        }
+        overlay.show()
+    }
+
+    /**
+     * 从应用内视频列表导入（后台拷贝 + 落盘）。
+     *
+     * 与 [onVideoWallpaperPicked] 是同一套流程，只是数据来源是**文件**而不是 content Uri。
+     */
+    private fun importVideoFromLibrary(item: com.cardesk.launcher.core.VideoLibrary.Item) {
+        toast("正在导入视频壁纸…")
+        val path = item.path
+        Thread {
+            val ok = com.cardesk.launcher.core.VideoWallpaper
+                .importFromFile(context.applicationContext, java.io.File(path))
+            post {
+                if (ok) {
+                    startVideoWallpaper()
+                    toast("视频壁纸已启用")
+                    refreshSettingsWallpaper()
+                } else {
+                    toast("视频壁纸导入失败")
+                }
+            }
+        }.start()
+    }
+
+    /** 删除已导入的视频壁纸（并停播）。 */
+    private fun deleteVideoWallpaper() {
+        stopVideoWallpaper()
+        com.cardesk.launcher.core.VideoWallpaper.delete(context.applicationContext)
+        toast("视频壁纸已删除")
+        refreshSettingsWallpaper()
     }
 
     // ---------------------------------------------------------- 自定义壁纸（第 105 轮）
@@ -3372,6 +4683,227 @@ private fun showCam() {
     private fun requestWallpaperImport() {
         (context as? com.cardesk.launcher.MainActivity)?.startWallpaperImport()
     }
+
+    // ---------------------------------------------------------- 应用内图片库（第230轮）
+
+    /** 应用内图片选择器（开着的时候只会有一个）。 */
+    private var imagePicker: ImagePickerOverlay? = null
+
+    /**
+     * 打开**应用内**的图片选择器（第230轮）。
+     *
+     * ## 为什么不是系统选择器
+     *
+     * 用户反馈真车点「导入壁纸」只弹「没有可用的图片选择器」：
+     * 车机没有相册 / DocumentsUI 接管 `ACTION_OPEN_DOCUMENT`。
+     * 视频壁纸第219轮就是靠应用内列表解决的，图片照同一套做。
+     *
+     * ## 权限
+     *
+     * 读共享存储要 `READ_EXTERNAL_STORAGE`；车机上本包是 uid 1000 系统应用，
+     * 权限天然可用；普通安装（AVD）则要运行时申请。
+     */
+    fun openImagePicker() {
+        if (imagePicker?.isOpen == true) return
+        // 设置页先关掉，避免两层浮层叠着。
+        closeSettings()
+
+        val activity = context as? com.cardesk.launcher.MainActivity
+        if (activity != null && !activity.hasStoragePermission()) {
+            activity.requestStoragePermission()
+            toast("需要存储权限才能列出车机里的图片")
+            return
+        }
+
+        val overlay = imagePicker ?: ImagePickerOverlay(context).also { imagePicker = it }
+        overlay.onPick = { item -> importWallpaperFromLibrary(item) }
+        overlay.onUseSystemPicker = { requestWallpaperImport() }
+        if (overlay.parent == null) {
+            content.addView(overlay, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        }
+        overlay.show()
+    }
+
+    /**
+     * 从应用内图片列表导入壁纸。
+     *
+     * 直接复用 [onWallpaperPicked] 那条路（后台解码 + 落盘 + 切过去 + 刷新设置页），
+     * 只是 uri 从 content Uri 换成 `file://` ——
+     * `CustomWallpaper.importFromUri` 内部走 `contentResolver.openInputStream`，
+     * 对 `file://` 同样有效。
+     */
+    private fun importWallpaperFromLibrary(item: com.cardesk.launcher.core.ImageLibrary.Item) {
+        onWallpaperPicked(android.net.Uri.fromFile(java.io.File(item.path)))
+    }
+
+    /**
+     * 把壁纸亮度交给主题层（第222轮）。
+     *
+     * ## 谁受影响
+     *
+     * 只有**直接压在壁纸上**的那两处：
+     * - 状态栏右侧的裸元素（时钟 / 油量 / 连接图标）；
+     * - 场景页右上角的天气块 + 屏幕中部的中心歌词。
+     *
+     * 带底板的（胶囊 / 卡片 / Dock）**不受影响** ——
+     * 它们的底色是主题定的，跟壁纸明暗无关。
+     */
+    private fun applyWallpaperBackdrop() {
+        // 第231轮：视频壁纸播放期间，`BackgroundView` 这一层是「让路」的
+        // （`videoPassthrough` ⇒ 它抛 null,null）。但**日夜主题切换 / 尺寸变化**
+        // 也会触发它 publish 一次 null,null —— 那一刻不能把视频采出来的墨色冲掉，
+        // 否则日间深字会压回暗色视频上（正是用户报的「颜色太近、看不清」）。
+        if (isVideoWallpaperPlaying() && videoBackdropTopTone != null) {
+            // 这一次静态那一路想接管的，是「视频采不到亮度」的兜底；
+            // 视频明明采到了 ⇒ 别让它冲掉（打一条日志，实车复测时能确认走到了这里）。
+            com.cardesk.launcher.core.log.Logx.event(
+                com.cardesk.launcher.core.log.LogTags.SCENE,
+                "视频壁纸墨色保持（忽略静态壁纸的兜底亮度）",
+                "top" to (videoBackdropTopTone?.average?.let {
+                    com.cardesk.launcher.core.WallpaperContrast.luma(it)
+                } ?: -1),
+                "static" to (background.backdropTop?.let {
+                    com.cardesk.launcher.core.WallpaperContrast.luma(it)
+                } ?: -1),
+            )
+            applyBackdropTones(videoBackdropTopTone, videoBackdropCenterTone)
+            return
+        }
+        applyBackdrop(background.backdropTop, background.backdropCenter)
+    }
+
+    /**
+     * 壁纸亮度的唯一入口（第222轮）。
+     *
+     * 静态 / 自定义壁纸由 [BackgroundView] 算完抛过来；
+     * 视频壁纸由 [sampleVideoBackdropIfNeeded] 单独采（画面在独立图层上）。
+     */
+    private fun applyBackdrop(top: Int?, center: Int?) {
+        if (top == backdropTop && center == backdropCenter) return
+        backdropTop = top
+        backdropCenter = center
+        com.cardesk.launcher.core.Skin.setBackdrop(top, center)
+        if (::statusBar.isInitialized) statusBar.invalidate()
+        // 第223轮：状态栏正中的翻页圆点条也压在壁纸上（跟胶囊同一材质），
+        // 壁纸明暗变了它得跟着重画。
+        if (::dots.isInitialized) dots.invalidate()
+        if (::scenePage.isInitialized) scenePage.invalidate()
+    }
+
+    /**
+     * 视频壁纸的**亮度分布**（第231轮；比平均色多带暗端 / 亮端两簇）。
+     *
+     * 存下来有两个用处：① `Skin.setVideoBackdrop` 要它算墨色；
+     * ② 日夜主题切换时 `BackgroundView` 会抛 null,null，
+     * 得拿它把视频那套墨色**顶回去**（不然会被主题墨色冲掉）。
+     */
+    private var videoBackdropTopTone: com.cardesk.launcher.core.WallpaperSampler.Tone? = null
+    private var videoBackdropCenterTone: com.cardesk.launcher.core.WallpaperSampler.Tone? = null
+
+    /** 视频亮度采样连续失败次数（诊断日志按 10 次一条打，免得刷屏）。 */
+    private var videoBackdropFailures = 0
+
+    /**
+     * 壁纸亮度的入口（视频版，第231轮）：给的是**亮度分布**而不是平均色。
+     *
+     * 走 `Skin.setVideoBackdrop` ⇒ `WallpaperContrast.inkForTone`
+     * （按「浅字对亮端、深字对暗端」的最坏情况拉够对比度）。
+     */
+    private fun applyBackdropTones(
+        top: com.cardesk.launcher.core.WallpaperSampler.Tone?,
+        center: com.cardesk.launcher.core.WallpaperSampler.Tone?,
+    ) {
+        if (top === videoBackdropTopTone && center === videoBackdropCenterTone) return
+        videoBackdropTopTone = top
+        videoBackdropCenterTone = center
+        backdropTop = top?.average
+        backdropCenter = center?.average
+        com.cardesk.launcher.core.Skin.setVideoBackdrop(top, center)
+        if (::statusBar.isInitialized) statusBar.invalidate()
+        if (::dots.isInitialized) dots.invalidate()
+        if (::scenePage.isInitialized) scenePage.invalidate()
+    }
+
+    /** 视频壁纸亮度采样器（第222轮；第231轮起先解文件、再拷图层）。 */
+    private var videoBackdropSampler: com.cardesk.launcher.ui.widget.VideoBackdropSampler? = null
+
+    /** 上次采样视频亮度的时间（毫秒）。 */
+    private var videoBackdropAtMs = 0L
+
+    /**
+     * 视频壁纸的亮度采样（第222轮）。
+     *
+     * 视频画面在**独立的 SurfaceFlinger 图层**上，窗口缓冲那块是透明的洞 ——
+     * ⇒ 只能直接拷视频自己的 Surface（见 `ui/widget/VideoBackdropSampler`）。
+     *
+     * **每 [VIDEO_BACKDROP_INTERVAL_MS] 采一次**：视频一直在动，
+     * 采太勤只是白费 CPU（一次 1920×1080 的拷贝不便宜）。
+     *
+     * 采不到（Surface 还没就绪 / 拷贝失败）⇒ 保持上一次的值，
+     * 第一次就采不到 ⇒ 浮层跟着主题走（= 今天的行为）。
+     */
+    private fun sampleVideoBackdropIfNeeded() {
+        if (!isVideoWallpaperPlaying()) return
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - videoBackdropAtMs < VIDEO_BACKDROP_INTERVAL_MS) return
+        videoBackdropAtMs = now
+        val position = videoCurrentPositionMs()
+        val sampler = videoBackdropSampler
+            ?: com.cardesk.launcher.ui.widget.VideoBackdropSampler(
+                videoWallpaperView,
+                videoBackend,
+                handler,
+                // 第231轮：先解**视频文件**当前帧（跟合成方式无关）。
+                // 真车上视频是硬件解码直通 HWC 图层，`PixelCopy` 读不到那块 Surface ——
+                // 采样一直失败 ⇒ 墨色回落主题 ⇒ 日间深字压暗视频（用户报的那个病）。
+                videoFile = {
+                    runCatching { com.cardesk.launcher.core.VideoWallpaper.file(context) }.getOrNull()
+                },
+                positionMs = { videoCurrentPositionMs() },
+            ).also { videoBackdropSampler = it }
+        sampler.sample { top, center ->
+            post {
+                // 采样是异步的 ⇒ 回来时视频可能已经停了 ⇒ 这时别把旧值盖上去。
+                if (!isVideoWallpaperPlaying()) {
+                    applyWallpaperBackdrop()
+                    return@post
+                }
+                if (top == null && center == null) {
+                    videoBackdropFailures++
+                    // 采不到 ⇒ 保持上一次的值（第一次就采不到 ⇒ 跟着主题走）。
+                    // 每 10 次记一条，免得每 3 秒刷一行。
+                    if (videoBackdropFailures % 10 == 1) {
+                        com.cardesk.launcher.core.log.Logx.w(
+                            com.cardesk.launcher.core.log.LogTags.SCENE,
+                            "视频壁纸亮度采样失败（保持上一次的墨色）",
+                            "failures" to videoBackdropFailures,
+                            "pos" to position,
+                            "backend" to videoBackendName(),
+                        )
+                    }
+                    return@post
+                }
+                videoBackdropFailures = 0
+                com.cardesk.launcher.core.log.Logx.event(
+                    com.cardesk.launcher.core.log.LogTags.SCENE,
+                    "视频壁纸亮度采样",
+                    "src" to (sampler.lastSource ?: "?"),
+                    "pos" to position,
+                    // 打 luma 而不是 ARGB：排障时一眼能比「背景亮不亮、字该用什么颜色」。
+                    "top" to (top?.let { com.cardesk.launcher.core.WallpaperContrast.luma(it.average) } ?: -1),
+                    "topBright" to (top?.let { com.cardesk.launcher.core.WallpaperContrast.luma(it.bright) } ?: -1),
+                    "center" to (center?.let { com.cardesk.launcher.core.WallpaperContrast.luma(it.average) } ?: -1),
+                    "centerBright" to (center?.let { com.cardesk.launcher.core.WallpaperContrast.luma(it.bright) } ?: -1),
+                )
+                applyBackdropTones(top, center)
+            }
+        }
+    }
+
+    /** 视频播放器的当前位置（毫秒）；没准备好 / 出异常时按 0 算。 */
+    private fun videoCurrentPositionMs(): Int = runCatching {
+        videoPlayer?.currentPosition ?: 0
+    }.getOrDefault(0)
 
     /**
      * 后台解码自定义壁纸（首帧之后，不阻塞启动）。
@@ -3542,11 +5074,24 @@ private fun showCam() {
         val globalReserved = prefs.globalDockEnabled && runCatching {
             com.cardesk.launcher.core.dock.NavInsets.applied(context)
         }.getOrDefault(false)
-        val hide = prefs.hideHomeDock || globalReserved
+        // 设置页（画板 s01..s25）是**整屏**覆盖：底部没有 Dock。
+        // 这里必须并进 `hide` —— 单在 showSettings() 里设 GONE 会被 refresh() 里的
+        // applyDockVisibility() 立刻改回 VISIBLE（实测两次都被覆盖）。
+        // 全局 Dock 只有在**它自己真的画出来**时才顶替桌面这一条。
+        // 它因「桌面在前台」/设置页/沉浸 App 收起时如果不画，桌面这条又让位，
+        // 整屏就一条 Dock 都没有（第245轮实机：点一次「立即切换」后底部全空）。
+        val globalCovering = globalReserved &&
+            runCatching { com.cardesk.launcher.core.dock.GlobalDockService.isShowing() }
+                .getOrDefault(false)
+        val hide = prefs.hideHomeDock || settings != null || globalCovering
         Logx.d(
             LogTags.DOCK,
             "Dock 可见性",
             "hideHomeDock" to hide,
+            "hideHomeSwitch" to prefs.hideHomeDock,
+            "globalReserved" to globalReserved,
+            "globalCovering" to globalCovering,
+            "settingsOpen" to (settings != null),
             "hideOemDock" to prefs.hideDock,
             "lowerDock" to prefs.lowerDock,
             "page" to page,
@@ -3664,8 +5209,20 @@ private fun showCam() {
     private fun refresh() {
         if (!::statusBar.isInitialized) return
         if (applyDayNightIfChanged()) return
+        // 第222轮：视频壁纸的亮度（画面在独立图层上，只能直接拷视频的 Surface）。
+        sampleVideoBackdropIfNeeded()
         val now = Date()
-        val info = currentVehicleInfo()
+        // 第220轮：**车控信号不再在主线程上读**。
+        //
+        // 这一行以前是 `currentVehicleInfo()` ——
+        // 它内部要走完 5 档车门降级链 + 3 档车窗降级链 + 行程 / 传感器 / 驾驶模式，
+        // 一轮 **30~60 次同步 binder 往返**，全在主线程上。
+        // 实车（高通 820A）一次往返 1~3ms ⇒ 主线程每秒被堵 50~150ms。
+        //
+        // 现在由 [com.cardesk.launcher.vehicle.VehicleSignalSampler] 在**后台线程**上采，
+        // 主线程只读一份算好的不可变快照 —— 一帧的活变成纳秒级。
+        // 口径完全不变：采样频率不变、读的通道不变、降级链顺序不变。
+        val info = com.cardesk.launcher.vehicle.VehicleSignalSampler.ensureSnapshot()
         val state = VehicleController.state
         // 时钟： `H:mm`（单小时不补零）
         statusBar.setClock(now)
@@ -3720,6 +5277,11 @@ private fun showCam() {
         lastVehicleInfo = info
         scenePage.bind(info, state, prefs.wallpaper)
         syncVehicleStatus(info)
+        // 车辆页开着时跟着每秒数据刷新（画板 05 的续航 / 胎压 / 门态都是活的）。
+        vehiclePage?.let {
+            it.carModel = prefs.carModel
+            it.bind(info)
+        }
         // 第136轮：车门 / 盖未关 → 桌面弹窗提示（全关自动关、可手动关）。
         syncDoorAlert(info)
         // 引导卡每秒重算一次 —— 红绿灯读秒要按秒往下走，
@@ -3769,6 +5331,11 @@ private fun showCam() {
         navPage.actionProbe = MusicController.get().actionProbe
         navPage.favoriteState = MusicController.get().favoriteState
         navPage.playModeState = MusicController.get().playModeState
+        // 第207轮：首页音乐卡也用**同一份**收藏态与能力判据，
+        // 两处显示必须一致（不然首页显示未收藏、导航页显示已收藏）。
+        scenePage.musicPackage = track?.pkg
+        scenePage.actionProbe = MusicController.get().actionProbe
+        scenePage.favoriteState = MusicController.get().favoriteState
         dock.bind(state)
         slotsBar?.let {
             it.state = state
@@ -3839,6 +5406,126 @@ private fun showCam() {
     /** 抽屉浮层是否正开着。 */
     private fun drawerShowing(): Boolean = ::drawerPage.isInitialized && drawerPage.parent != null
 
+    /**
+     * 第206轮：**双指横滑在 `dispatchTouchEvent` 这一层观察并接管**。
+     *
+     * 为什么不放在 [onInterceptTouchEvent]：模拟器实测（instrumentation）
+     * 双指事件派发到 decorView 时，`onInterceptTouchEvent` 只收到 DOWN，
+     * POINTER_DOWN/MOVE 被消费了按下的子视图（画中画承载面、地图卡…）
+     * 连同它自己的 `requestDisallowInterceptTouchEvent(true)` 一起截走，
+     * 手势状态永远是 `twoFinger=false` → 双指怎么滑都不翻页。
+     *
+     * `dispatchTouchEvent` 是整棵子树的入口，**每个事件都会经过这里**，
+     * 不管子视图是否 disallow-intercept。判定成立后：
+     * 1. 先给子树补一个 CANCEL（让地图/拖拽停在原地，不继续跟手）；
+     * 2. 本次及后续事件全部由自己吞掉，UP 时统一判定翻页。
+     *
+     * 返回 true 表示「这次事件已经被自己处理掉」，不再向下派发。
+     */
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (trackTwoFingerSwipe(ev)) return true
+        return super.dispatchTouchEvent(ev)
+    }
+
+    /**
+     * 双指手势跟踪。
+     *
+     * 第207轮修的三个问题（真机实测「双指滑不动」）：
+     *
+     * 1. **接管之后不再更新中位点** ——
+     *    以前 [MotionEvent.ACTION_MOVE] 分支开头就 `if (twoFingerTaken) return`，
+     *    于是接管那一刻之后的所有 MOVE 都被丢掉，`twoFingerMid` 永远停在
+     *    「刚刚越过 60px 接管线」的位置。抬手时算出来的位移最多也就 60 多 px，
+     *    够不到 [PageGesture.TWO_FINGER_PX]（140px）→ **双指怎么滑都不翻页**。
+     *    现在 MOVE 无论是否已接管都持续更新中位点/间距。
+     * 2. **捏合判定过严** ——
+     *    以前只看「间距变化比例 > 18%」，两指初始靠得近时，
+     *    手指抖动几个像素就是「20% 变化」→ 正常横滑被误判成捏合。
+     *    现在改成绝对量 + 相对量两条线（见 [PageGesture.isTwoFingerPinch]）。
+     * 3. **纵向位移用错了基准** ——
+     *    以前 `dy` 用的是 `ev.y`（**第一根手指**的 Y），而 `dx` 用的是两指中位点，
+     *    两者不同源；两指不在同一水平线上时 `dy` 会莫名很大，
+     *    把本该判为横滑的手势卡掉。现在 `dy` 也用中位点。
+     */
+    private fun trackTwoFingerSwipe(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                twoFingerTaken = false
+                twoFinger = false
+                // 不让父容器拦截；本视图自己的 onInterceptTouchEvent 不受影响。
+                parent?.requestDisallowInterceptTouchEvent(true)
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                if (ev.pointerCount == 2 && !twoFingerTaken) {
+                    twoFinger = true
+                    twoFingerIntercepted = false
+                    twoFingerX = midX(ev)
+                    twoFingerY = midY(ev)
+                    twoFingerMid = twoFingerX
+                    twoFingerMidY = twoFingerY
+                    twoFingerSpan0 = span(ev)
+                    twoFingerRatio = 1f
+                }
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!twoFinger) return twoFingerTaken
+                if (ev.pointerCount < 2) return twoFingerTaken
+                // ★ 第207轮：**接管之后也要继续更新**中位点与间距 ——
+                //   否则抬手时算出来的位移永远停在「刚过接管线」那一点。
+                twoFingerMid = midX(ev)
+                twoFingerMidY = midY(ev)
+                twoFingerRatio = if (twoFingerSpan0 > 1f) span(ev) / twoFingerSpan0 else 1f
+                if (twoFingerTaken) return true
+                val dx = twoFingerMid - twoFingerX
+                val dy = twoFingerMidY - twoFingerY
+                val horizontal = abs(dx) > TWO_FINGER_SLOP &&
+                    abs(dx) > abs(dy) * PageGesture.TWO_FINGER_AXIS_RATIO &&
+                    abs(twoFingerRatio - 1f) < PageGesture.TWO_FINGER_SCALE_TOLERANCE
+                if (!horizontal) return false
+                // 接管：先让子树收到 CANCEL（地图停止跟手），再吞掉后续事件。
+                twoFingerTaken = true
+                twoFingerIntercepted = true
+                val cancel = MotionEvent.obtain(ev)
+                cancel.action = MotionEvent.ACTION_CANCEL
+                super.dispatchTouchEvent(cancel)
+                cancel.recycle()
+                return true
+            }
+            MotionEvent.ACTION_UP -> {
+                if (!twoFinger) return false
+                val taken = twoFingerTaken
+                val dx = twoFingerMid - twoFingerX
+                // ★ 用 MOVE 时记下的两指中位点 Y，不是抬手这一刻的 midY(ev) ——
+                //   抬手时只剩一根手指，midY(ev) 会退化成单指的 Y，与起点不同源。
+                val dy = twoFingerMidY - twoFingerY
+                val span = if (twoFingerSpan0 > 1f) twoFingerSpan0 * twoFingerRatio else twoFingerSpan0
+                twoFinger = false
+                twoFingerTaken = false
+                twoFingerIntercepted = false
+                if (taken) {
+                    val step = PageGesture.twoFingerStep(dx, dy, twoFingerSpan0, span)
+                    if (step != 0) {
+                        Logx.event(
+                            LogTags.APP, "手势：双指横滑翻页",
+                            "dx" to dx, "dy" to dy, "span" to span,
+                        )
+                        swipePage(step)
+                    }
+                    return true
+                }
+                return false
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                val taken = twoFingerTaken
+                twoFinger = false
+                twoFingerTaken = false
+                twoFingerIntercepted = false
+                return taken
+            }
+        }
+        return twoFingerTaken
+    }
+
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -3848,8 +5535,9 @@ private fun showCam() {
                 edgeIntercepted = false
                 edgeDownY = designY(ev.y)
                 threeFinger = false
-                // 第三十七轮：单指横滑的起点
-                singleTracking = true
+                // 第206轮：**单指不再翻页**（单指留给画中画里拖地图），
+                // 翻页主手势改成双指横滑，见 twoFinger。
+                singleTracking = false
                 singleIntercepted = false
                 singleDownX = designX(ev.x)
                 singleDownY = designY(ev.y)
@@ -3865,6 +5553,7 @@ private fun showCam() {
                 // 一旦变成双指/三指，位移会跳变，容易误判成一次翻页。
                 singleTracking = false
                 if (ev.pointerCount >= 3) {
+                    twoFinger = false
                     threeFinger = true
                     threeFingerX = midX(ev)
                     threeFingerMid = threeFingerX
@@ -3934,7 +5623,8 @@ private fun showCam() {
             MotionEvent.ACTION_DOWN -> {
                 // 能收到 DOWN，说明**没有任何子视图消费了这次按下**
                 // （否则事件根本到不了根视图），这次横滑由自己从头到尾处理。
-                singleTracking = true
+                // 第206轮：单指不再翻页，翻页走双指（见 intercept 的 twoFinger）。
+                singleTracking = false
                 singleIntercepted = false
                 singleDownX = designX(ev.x)
                 singleDownY = designY(ev.y)
@@ -3944,6 +5634,22 @@ private fun showCam() {
             MotionEvent.ACTION_POINTER_DOWN -> {
                 // 多指一律作废单指判定（同 [onInterceptTouchEvent]）。
                 singleTracking = false
+                // 三指横滑换页的**布防点之二**。
+                //
+                // 为什么 [onInterceptTouchEvent] 里已经布防还要再写一遍：
+                // 当这一页没有任何子 View 消费 ACTION_DOWN 时，ViewGroup 的
+                // [ViewGroup.mFirstTouchTarget] 为 null，系统此后**不再回调**
+                // [onInterceptTouchEvent]（事件从一开始就直接进 onTouchEvent）。
+                // 实测：翻到第二页后在同一位置三指按下，intercept 分支完全没执行，
+                // threeFinger 恒为 false，三指右滑翻不回来。
+                // 这正是第 206 轮双指手势搬进 dispatchTouchEvent 时修过的同一个坑，
+                // 三指这条路径当时漏了。
+                if (ev.pointerCount >= 3) {
+                    twoFinger = false
+                    threeFinger = true
+                    threeFingerX = midX(ev)
+                    threeFingerMid = threeFingerX
+                }
             }
             MotionEvent.ACTION_MOVE -> {
                 // 三指横滑：持续记录三指中位点的当前位置。
@@ -4030,12 +5736,35 @@ private fun showCam() {
         showPage(if (step >= 0) nextPage(page) else prevPage(page))
     }
 
+    /** 两指间距（设计坐标 px）：两指之间的直线距离（捏合判定用）。 */
+    private fun span(ev: MotionEvent): Float {
+        if (ev.pointerCount < 2) return 0f
+        val dx = designX(ev.getX(1)) - designX(ev.getX(0))
+        val dy = designY(ev.getY(1)) - designY(ev.getY(0))
+        return kotlin.math.sqrt(dx * dx + dy * dy)
+    }
+
     /** 三指手势用的中间 X（第三十二轮：换页改成左右三指滑动）。 */
     private fun midX(ev: MotionEvent): Float {
         val n = ev.pointerCount.coerceAtMost(3)
         if (n <= 0) return designX(ev.x)
         var sum = 0f
         for (i in 0 until n) sum += designX(ev.getX(i))
+        return sum / n
+    }
+
+    /**
+     * 两指的中位点 Y（设计坐标）。
+     *
+     * 第207轮：纵向位移必须和横向位移**同源** ——
+     * 横向用两指中位点，纵向也用两指中位点；
+     * 以前纵向用的是第一根手指的 Y，两指不在同一水平线上时纵向分量会莫名很大。
+     */
+    private fun midY(ev: MotionEvent): Float {
+        val n = ev.pointerCount.coerceAtMost(3)
+        if (n <= 0) return designY(ev.y)
+        var sum = 0f
+        for (i in 0 until n) sum += designY(ev.getY(i))
         return sum / n
     }
 
@@ -4094,6 +5823,10 @@ private fun showCam() {
         }
         navSlotDialog?.let { dialog ->
             removeAnimated(dialog) { if (navSlotDialog === dialog) navSlotDialog = null }
+            return true
+        }
+        if (vehiclePage != null) {
+            closeVehiclePage()
             return true
         }
         if (settings != null) {
@@ -4197,6 +5930,8 @@ private fun showCam() {
         // 第138轮：状态栏连接类图标（蜂窝 / WiFi / 热点 / 蓝牙）按**真实状态**显示。
         // 采样器跟窗口生命周期起停 —— 后台时不用采（车机本来就在省电）。
         startSystemStatusSampling()
+        // 第220轮：**车控信号采样**也在后台线程上跑（主线程不再做 30~60 次同步 binder）。
+        com.cardesk.launcher.vehicle.VehicleSignalSampler.start(context)
         // 第九十三轮：窗口重建（后台回来 / 重新 addView）时把定时刷新重新挂上 ——
         // onDetachedFromWindow() 里 removeCallbacksAndMessages(null) 会把它清掉。
         if (servicesStarted) {
@@ -4204,6 +5939,12 @@ private fun showCam() {
             handler.post(ticker)
             refresh()
         }
+        // 第211轮：**壁纸轮播心跳**也跟窗口生命周期走 ——
+        // 它现在挂在类里的 `handler` 上，detach 时被 `removeCallbacksAndMessages(null)` 一起清掉了，
+        // 所以重新 attach 时要再挂上（否则桌面切到后台再回来，轮播就不动了）。
+        // 先 `removeCallbacks` 去重 —— attach 可能被调多次。
+        handler.removeCallbacks(carouselTicker)
+        handler.postDelayed(carouselTicker, 1000L)
         // 「向高德索要区域信息」也挪到 startServices()（第九十三轮冷启动修复）：
         // 这是要发广播去问车机/高德的跨进程动作，挂在 onAttachedToWindow 里
         // 就等于排在首帧前面。现在等桌面画出第一帧、服务启动时再要。
@@ -4212,12 +5953,17 @@ private fun showCam() {
     override fun onDetachedFromWindow() {
         MusicController.get().removeListener(mediaListener)
         MusicController.get().removeActionStateListener(actionStateListener)
+        // 第211轮：这一句会**连壁纸轮播心跳一起清掉** ——
+        // 心跳现在挂在类里的 `handler` 上（原来它自己 new Handler，清不掉）。
         handler.removeCallbacksAndMessages(null)
+        handler.removeCallbacks(carouselTicker)
         weatherDesk?.stop()
         navGuideSource?.stop()
         // 第138轮：连接状态采样一起停（后台线程 + 定时器都收掉）。
         systemStatusSampler?.stop()
         systemStatusSampler = null
+        // 第220轮：车控信号采样一起停（后台线程 + 定时器都收掉）。
+        com.cardesk.launcher.vehicle.VehicleSignalSampler.stop()
         // 车机昼夜回调不再往已销毁的视图派发
         com.cardesk.launcher.vehicle.AdaptapiDayNight.detach()
         VehicleController.removeObserver { }

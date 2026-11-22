@@ -271,4 +271,87 @@ class SystemNavigationPolicyTest {
             merge("immersive.navigation=*:foo=bar", hideStatus = false, navInsets = true, hideNavigation = true),
         )
     }
+
+    // ---------------------------------------------------------------- 第204轮：按 App 藏原车栏
+
+    @Test
+    fun `按 App 写 immersive navigation 包名`() {
+        val out = SystemNavigationPolicy.merge(
+            current = null,
+            hideStatus = false,
+            hideStatusPackages = emptySet(),
+            navInsets = true,
+            hideNavigation = false,
+            immersiveNavigationPackages = listOf("com.luna.music.car", "com.netease.cloudmusic.iot"),
+            preserveForeignImmersiveFull = true,
+        )
+        assertEquals("immersive.navigation=com.luna.music.car,com.netease.cloudmusic.iot", out)
+    }
+
+    @Test
+    fun `按 App 写导航栏时不会被 navInsets 规则拦住`() {
+        val out = SystemNavigationPolicy.merge(
+            current = null,
+            hideStatus = false,
+            hideStatusPackages = emptySet(),
+            navInsets = true,
+            immersiveNavigationPackages = listOf("com.netease.cloudmusic.iot"),
+        )
+        assertEquals("immersive.navigation=com.netease.cloudmusic.iot", out)
+    }
+
+    @Test
+    fun `保留别人写的 immersive full 段`() {
+        val out = SystemNavigationPolicy.merge(
+            current = "immersive.full=com.a,com.b:foo=bar",
+            hideStatus = false,
+            hideStatusPackages = emptySet(),
+            navInsets = true,
+            immersiveNavigationPackages = listOf("com.netease.cloudmusic.iot"),
+            preserveForeignImmersiveFull = true,
+        )
+        assertEquals("immersive.full=com.a,com.b:foo=bar:immersive.navigation=com.netease.cloudmusic.iot", out)
+    }
+
+    @Test
+    fun `不保留时旧 full 段仍然被剥掉`() {
+        val out = SystemNavigationPolicy.merge(
+            current = "immersive.full=com.a",
+            hideStatus = false,
+            hideStatusPackages = emptySet(),
+            navInsets = true,
+            immersiveNavigationPackages = listOf("com.netease.cloudmusic.iot"),
+        )
+        assertEquals("immersive.navigation=com.netease.cloudmusic.iot", out)
+    }
+
+    // ---------------------------------------------------------------- 第204轮：合并写入
+
+    @Test
+    fun `合并写入保留别人的 immersive full 段`() {
+        val out = SystemNavigationPolicy.mergePreserving(
+            "immersive.full=com.a,com.b:foo=bar",
+            "immersive.navigation=com.netease.cloudmusic.iot",
+        )
+        assertEquals("immersive.full=com.a,com.b:foo=bar:immersive.navigation=com.netease.cloudmusic.iot", out)
+    }
+
+    @Test
+    fun `合并写入替换旧的 navigation 与 status 段`() {
+        val out = SystemNavigationPolicy.mergePreserving(
+            "immersive.navigation=*:immersive.status=*:foo=bar",
+            "immersive.navigation=com.a",
+        )
+        assertEquals("foo=bar:immersive.navigation=com.a", out)
+    }
+
+    @Test
+    fun `合并写入在 owned 为空时只保留别人的段`() {
+        assertEquals("immersive.full=com.a", SystemNavigationPolicy.mergePreserving("immersive.full=com.a", null))
+    }
+
+    @Test
+    fun `合并写入在两边都空时返回 null`() {
+        assertNull(SystemNavigationPolicy.mergePreserving(null, null))
+    }
 }

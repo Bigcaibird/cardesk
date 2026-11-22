@@ -117,32 +117,6 @@ class GlobalDockService : Service() {
     /** 当前是不是可见（`root.visibility` 的缓存，避免重复 setVisibility）。 */
     private var showing = false
 
-    /**
-     * 第180轮：前台是沉浸型播放器（汽水音乐 / 网易云车机版）时为 true，
-     * 让全局 Dock 暂时让位 —— 它们自己 hideNavigationBars、画面铺到屏幕最底，
-     * 我们的悬浮窗会压住它们底部的内容（用户反馈）。
-     */
-    private var yieldToApp = false
-
-    /** 调试强制让位（null=按前台判断；见 [installDebugYieldHook]）。 */
-    private var debugYield: Boolean? = null
-
-    /**
-     * 让位状态下的「上滑唤出把手」（第181轮）。
-     *
-     * 用户要的是「Dock 让位但别彻底消失」：沉浸型播放器在前台时，
-     * Dock 收起，只在屏幕底部留一条 6px 细条；点一下/上滑 → Dock 临时弹出
-     * [HANDLE_REVEAL_MS] 毫秒，到点自动收回。
-     */
-    private var handle: View? = null
-    private var handleParams: WindowManager.LayoutParams? = null
-    private var temporaryReveal = false
-
-    private val collapseRunnable = Runnable {
-        temporaryReveal = false
-        updateVisibility()
-    }
-
     /** 这次窗口用的是不是 2024（导航栏面板）。 */
     private var nativeInsets = false
     private var insetsAttemptRunning = false
@@ -172,6 +146,8 @@ class GlobalDockService : Service() {
             if (root == null) return
             tick++
             dock?.refreshFromController()
+            // 第204轮：前台切到沉浸型 App 时让位（每 tick 判一次，getRunningTasks 很便宜）
+            refreshImmersiveForeground()
             // 空调状态平时靠 [hvacObserver] 推，但服务可能比 VehicleController
             // 先起来（开机广播先于桌面），那一次 observer 还没注册上 —— 低频再拉一遍兜底。
             if (tick % HVAC_REFRESH_TICKS == 0) bindHvac()
@@ -180,8 +156,6 @@ class GlobalDockService : Service() {
             // 第159轮：底部占位采样（**只读**，不改任何运行时行为）。
             // 诊断页在桌面进程、服务在服务进程，所以采样结果落盘给诊断页读。
             if (tick % BOTTOM_PROBE_TICKS == 0) writeBottomProbe()
-            // 第180轮：沉浸型播放器在前台时让位（每秒判一次，切前台/退出的延迟 ≤1s）。
-            if (tick % YIELD_CHECK_TICKS == 0) checkYieldToApp()
             main.postDelayed(this, TICK_MS)
         }
     }
@@ -229,28 +203,14 @@ class GlobalDockService : Service() {
     }.getOrNull()
 
     /**
-     * 第180轮：调试旁路 —— 强制让位 / 恢复。
+     * 调试旁路（仅 debuggable 变体注册）。
      *
-     * 真机上要验「汽水音乐 / 网易云被 Dock 挡住」必须真装那两个 App；
-     * 模拟器上没有，所以留这条广播给 QA 直接验显隐时序：
-     * `am broadcast -a com.cardesk.launcher.DEBUG_DOCK_YIELD --es on 1` / `--es on 0`。
-     * 仅 debuggable 变体注册。
+     * 第201轮起 Dock **不再让位**，原来的强制让位广播随让位逻辑一起删掉，
+     * 只剩 Dock 外观调试通道（圆角）。
      */
-    private fun installDebugYieldHook() {
+    private fun installDebugHooks() {
         val debuggable = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
         if (!debuggable) return
-        val r = object : android.content.BroadcastReceiver() {
-            override fun onReceive(ctx: Context?, intent: Intent?) {
-                val on = intent?.getStringExtra("on")
-                debugYield = on == "1" || on.equals("true", ignoreCase = true)
-                yieldToApp = debugYield == true
-                updateVisibility()
-                Logx.i(LogTags.DOCK, "全局 Dock 让位（调试注入）", "yield" to yieldToApp)
-            }
-        }
-        runCatching {
-            registerReceiver(r, android.content.IntentFilter("com.cardesk.launcher.DEBUG_DOCK_YIELD"))
-        }
 
         // 第183轮：Dock 外观调试通道（圆角）。设置页滑杆不方便脚本化验证时用它。
         val look = object : android.content.BroadcastReceiver() {
@@ -318,7 +278,7 @@ class GlobalDockService : Service() {
      * 建窗口：整棵视图只 `addView` 这一次。
      */
     private fun startWindow() {
-        installDebugYieldHook()
+        installDebugHooks()
         if (root != null) return
         nativeInsets = runCatching { NavInsets.applied(this) }.getOrDefault(false)
 
@@ -337,37 +297,15 @@ class GlobalDockService : Service() {
             },
         )
 
-        val host = object : FrameLayout(this) {
-            private var downY = 0f
-            private var downX = 0f
-
-            override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
-                // 第182轮：临时展开时「下滑收起」。
-                // 只在下滑超过 24px 且横向没怎么动时接管，避免误伤 Dock 按钮的点击。
-                when (ev.actionMasked) {
-                    android.view.MotionEvent.ACTION_DOWN -> {
-                        downY = ev.rawY
-                        downX = ev.rawX
-                    }
-
-                    android.view.MotionEvent.ACTION_MOVE -> {
-                        val dy = ev.rawY - downY
-                        val dx = kotlin.math.abs(ev.rawX - downX)
-                        if (temporaryReveal && dy > SWIPE_COLLAPSE_PX && dx < SWIPE_COLLAPSE_MAX_DX) {
-                            collapseNow()
-                            return true
-                        }
-                    }
-                }
-                return super.dispatchTouchEvent(ev)
-            }
-        }.apply {
+        val host = FrameLayout(this).apply {
             // 不透明底：原车 Dock / 系统导航栏还在窗口下面，
             // Dock 自带的玻璃底是半透明的（#6b162e2c），不铺不透明底会透出来，
             // 看起来就像「两个 Dock 叠在一起」。这里用同色系的不透明值。
             setBackgroundColor(OPAQUE_BAR_COLOR)
             addView(layer, FrameLayout.LayoutParams(DESIGN_WIDTH, DESIGN_BAR_HEIGHT))
         }
+
+        host.setOnTouchListener { _, ev -> handleCollapsedTouch(ev) }
 
         dock = bar
         designLayer = layer
@@ -392,97 +330,7 @@ class GlobalDockService : Service() {
         )
         bindHvac()
         bindQuickApps()
-        startHandleWindow()
         updateVisibility()
-    }
-
-    /**
-     * 让位把手（第181轮）：屏幕底部正中一条 6px 细条，点/上滑临时唤出 Dock。
-     *
-     * 为什么要单独一个窗口而不是把 Dock 窗口压扁：Dock 的内容是按 1920×112
-     * 设计稿等比缩放的，压到 6px 会把整条 Dock 压成一条乱线；单独窗口更干净，
-     * 也不影响 Dock 自己的可见性逻辑。
-     */
-    private fun startHandleWindow() {
-        if (handle != null) return
-        val (w, h) = realSize()
-        val handleH = (h * HANDLE_H_RATIO).roundToInt().coerceAtLeast(6)
-        val v = object : View(this) {
-            // 深色 + 浅描边：浅色 App（网易云的白底歌单页）上也看得见。
-            private val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-                color = 0x99000000.toInt()
-                style = android.graphics.Paint.Style.FILL
-            }
-            private val edge = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-                color = 0x88FFFFFF.toInt()
-                style = android.graphics.Paint.Style.STROKE
-                strokeWidth = 1f
-            }
-
-            override fun onDraw(canvas: android.graphics.Canvas) {
-                val cw = width.toFloat()
-                val ch = height.toFloat()
-                val halfW = cw * 0.22f
-                val barH = ch * 0.42f
-                val l = (cw - halfW) / 2f
-                val t = (ch - barH) / 2f
-                val r = (cw + halfW) / 2f
-                val b = (ch + barH) / 2f
-                canvas.drawRoundRect(l, t, r, b, barH / 2f, barH / 2f, p)
-                canvas.drawRoundRect(l, t, r, b, barH / 2f, barH / 2f, edge)
-            }
-        }
-        val lp = WindowManager.LayoutParams().apply {
-            type = if (nativeInsets) TYPE_NAVIGATION_BAR_PANEL else TYPE_APPLICATION_OVERLAY
-            format = PixelFormat.TRANSLUCENT
-            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            @Suppress("DEPRECATION")
-            setTitle("CarDesk Dock 让位把手")
-            flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
-            width = (w * HANDLE_W_RATIO).roundToInt().coerceAtLeast(60)
-            height = handleH
-            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
-        }
-        var downY = 0f
-        v.setOnTouchListener { _, e ->
-            when (e.actionMasked) {
-                android.view.MotionEvent.ACTION_DOWN -> downY = e.rawY
-                android.view.MotionEvent.ACTION_UP -> {
-                    // 点一下（|dy| 很小）或上滑（dy <= -8）都唤出；
-                    // 下滑不动它（收起草在 Dock 侧，避免误触）。
-                    val dy = e.rawY - downY
-                    if (dy <= SWIPE_REVEAL_PX || kotlin.math.abs(dy) < TAP_SLOP_PX) revealTemporarily()
-                }
-            }
-            true
-        }
-        v.visibility = View.GONE
-        if (addViewWithFallback(v, lp)) {
-            handle = v
-            handleParams = lp
-        }
-        Logx.i(LogTags.DOCK, "让位把手已创建", "w" to lp.width, "h" to lp.height)
-    }
-
-    /** 下滑收起（第182轮）：立即收回，不等 [HANDLE_REVEAL_MS]。 */
-    private fun collapseNow() {
-        if (!temporaryReveal) return
-        temporaryReveal = false
-        main.removeCallbacks(collapseRunnable)
-        updateVisibility()
-        Logx.i(LogTags.DOCK, "Dock 下滑收起")
-    }
-
-    /** 点/上滑把手后临时展开 Dock（[HANDLE_REVEAL_MS] 后自动收回）。 */
-    private fun revealTemporarily() {
-        temporaryReveal = true
-        updateVisibility()
-        main.removeCallbacks(collapseRunnable)
-        main.postDelayed(collapseRunnable, HANDLE_REVEAL_MS)
-        Logx.i(LogTags.DOCK, "Dock 临时展开", "ms" to HANDLE_REVEAL_MS)
     }
 
     /**
@@ -616,7 +464,6 @@ class GlobalDockService : Service() {
 
     /** 预留区生效后，把悬浮 Dock 换成导航栏面板窗口（正好占据系统预留的 112px）。 */
     private fun rebuildWindowWithInsets() {
-        removeHandleWindow()
         val view = root ?: return
         if (nativeInsets) return
         Logx.i(LogTags.DOCK, "预留区生效，按导航栏面板重建 Dock 窗口")
@@ -632,77 +479,181 @@ class GlobalDockService : Service() {
 
     private fun updateVisibility() {
         val view = root ?: return
+        // 第201轮：Dock **永不让位**。
+        //
+        // 原车 CarNavigationBar 与我们这个 2024 面板窗口占的是同一段
+        // [0,968][1920,1080]，且面板在它上面 —— 只要我们 INVISIBLE，
+        // 原车导航栏就会露出来（第193轮实测）。policy_control 的
+        // immersive.navigation/full 也压不住这台车的定制导航栏，
+        // 所以唯一可靠的做法是：Dock 始终在，用不透明底把它盖住。
+        //
+        // 代价：自己申请沉浸全屏的 App（网易云 / 汽水音乐）底部 112px
+        // 会被 Dock 压住，和原车导航栏本来的占位一样。
+        //
         // 预留区生效时，Dock 就是系统导航栏的替代品：桌面页也要保持可见，
         // 否则桌面自己会空出一条原车导航栏（或黑边）。
-        // 让位时：Dock 收起，只留把手；点把手后临时显示（§181）。
-        val want = (nativeInsets || !homeForeground) && (!yieldToApp || temporaryReveal)
-        val handleWant = yieldToApp && !temporaryReveal && !homeForeground
-        handle?.visibility = if (handleWant) View.VISIBLE else View.GONE
-        if (showing == want) return
+        //
+        // 第204轮：对沉浸名单里的 App 让位。原车栏这时由 policy_control 的
+        // `immersive.navigation=<包名>` 一起藏住（见 [GlobalDockPolicyGate]），
+        // 所以不会再出现「我们让位、原车栏冒出来」。
+        val want = !suppressed && DockVisibility.want(
+            nativeInsets = nativeInsets,
+            homeForeground = homeForeground,
+            immersiveAppForeground = immersiveAppForeground,
+        )
+        // 第205轮：沉浸 App 前台时不再彻底隐藏，而是「收起」——
+        // 窗口留着接上滑手势，内容藏起来、底透明，画面仍然全屏。
+        val collapseNow = !want && immersiveAppForeground && !homeForeground
+        if (want) {
+            applyDockVisible(true)
+        } else if (collapseNow) {
+            if (!collapsed) applyCollapsed()
+        } else {
+            applyDockVisible(false)
+        }
         showing = want
-        view.visibility = if (want) View.VISIBLE else View.INVISIBLE
         Logx.i(
             LogTags.DOCK,
             "全局 Dock 可见性",
             "visible" to want,
+            "collapsed" to collapsed,
             "homeForeground" to homeForeground,
+            "immersiveApp" to immersiveAppForeground,
         )
     }
 
+    /** 正常态：窗口 + 内容都显示，不透明底盖住原车栏。 */
+    private fun applyDockVisible(visible: Boolean) {
+        val view = root ?: return
+        val wasCollapsed = collapsed
+        cancelCollapse()
+        collapsed = false
+        if (wasCollapsed && visible) applyGeometry()
+        view.visibility = if (visible) View.VISIBLE else View.INVISIBLE
+        (view as? android.view.ViewGroup)?.setBackgroundColor(
+            if (visible) OPAQUE_BAR_COLOR else android.graphics.Color.TRANSPARENT,
+        )
+        dock?.visibility = if (visible) View.VISIBLE else View.GONE
+    }
+
     /**
-     * 第180轮：沉浸型播放器让位。
+     * 收起态：窗口缩成屏幕最底部的一条**窄透明条**，只用来接「上滑唤出」。
      *
-     * 为什么放在 1s ticker 里：全局 Dock 是**服务进程**里的悬浮窗，
-     * 拿不到别的 App 的窗口焦点回调；`getRunningTasks(1)` 是最便宜的前台探测
-     * （这个包是 system 变体，权限够）。判到变化才改窗口，平时只读一个字符串。
+     * 第205轮第一版把整条 112px 都留成透明窗口，结果 App 底部那 112px
+     * 看得见、摸不着（触摸全被我们吃掉）—— 用户实测反馈。现在只留
+     * [COLLAPSED_STRIP_PX] 高的一条，其余区域交还给 App。
      */
-    private fun checkYieldToApp() {
-        // 调试注入过就让它保持，别再被前台判断覆盖（否则 QA 一秒钟就被打回去）。
-        if (debugYield != null) return
-        val fg = foregroundPackage()
-        // 名单命中 → 立刻让位（不依赖探测）；
-        // 否则"运行时探测"：读系统窗口策略的 mLastSystemUiFlags，看当前焦点窗口
-        // 是否设置了 HIDE_NAVIGATION / IMMERSIVE（= 任意 App 自己 hideNavigationBars）。
-        // 探测不可用（没 shell 权限 / 解析失败）时回退 false，绝不乱让位。
-        val known = runCatching { OemDockPolicy.hidesGlobalDockFor(fg) }.getOrDefault(false)
-        // 桌面自己会隐藏状态栏（immersive.status），mLastSystemUiFlags 里有 IMMERSIVE 位，
-        // 直接探测会把"桌面"当成沉浸 App —— 桌面必须永远显示 Dock，所以桌面上只认名单。
-        //
-        // 第193轮：判定抽成纯函数 [DockYieldPolicy]，
-        // 其中「探测不可用（null）⇒ 不让位」是**保守规则**：
-        // 宁可多盖一点，也不要到处让位、把原车导航栏露出来。
-        val probe = if (known || homeForeground) {
-            null
-        } else {
-            runCatching { ImmersiveDetector.navBarHidden(this, fg) }.getOrNull()
+    private fun applyCollapsed() {
+        val view = root ?: return
+        val lp = params ?: return
+        collapsed = true
+        cancelCollapse()
+        view.visibility = View.VISIBLE
+        val (_, h) = realSize()
+        val strip = COLLAPSED_STRIP_PX
+        if (lp.height != strip || lp.y != h - strip) {
+            lp.height = strip
+            lp.y = h - strip
+            if (view.parent != null) {
+                runCatching { windowManager.updateViewLayout(view, lp) }
+                    .onFailure { Logx.w(LogTags.DOCK, "收起态窗口缩放失败", it) }
+            }
         }
-        val yield = DockYieldPolicy.decide(
-            knownImmersive = known,
-            desktopOnScreen = homeForeground,
-            probe = probe,
-        )
-        if (yield == yieldToApp) return
-        yieldToApp = yield
-        if (!yield) {
-            // 退出沉浸 App：把手/临时展开都清掉，回到常规 Dock。
-            temporaryReveal = false
-            main.removeCallbacks(collapseRunnable)
-            ImmersiveDetector.clear()
+        (view as? android.view.ViewGroup)?.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        dock?.visibility = View.GONE
+    }
+
+    /** 从底部上滑时展开我们自己的 Dock（几秒后自动收起）。 */
+    private fun revealFromCollapsed() {
+        val view = root ?: return
+        if (!collapsed) return
+        Logx.i(LogTags.DOCK, "Dock 从收起态展开（底部上滑）")
+        collapsed = false
+        view.visibility = View.VISIBLE
+        applyGeometry()
+        (view as? android.view.ViewGroup)?.setBackgroundColor(OPAQUE_BAR_COLOR)
+        dock?.visibility = View.VISIBLE
+        scheduleCollapse()
+    }
+
+    private fun scheduleCollapse() {
+        cancelCollapse()
+        val runnable = Runnable {
+            if (immersiveAppForeground && !homeForeground) {
+                Logx.i(LogTags.DOCK, "Dock 自动收起（沉浸 App 仍在前台）")
+                applyCollapsed()
+            }
         }
+        collapseRunnable = runnable
+        main.postDelayed(runnable, REVEAL_AUTO_COLLAPSE_MS)
+    }
+
+    private fun cancelCollapse() {
+        collapseRunnable?.let { main.removeCallbacks(it) }
+        collapseRunnable = null
+    }
+
+    /**
+     * 收起态下接管底部触摸：上滑 → 展开我们的 Dock。
+     *
+     * 这是第204轮「让位」之后的关键一环——让位让原车导航栏也有了被唤出的机会，
+     * 用户上滑唤出的是原车栏；这里改成由我们接住手势、展开自己的 Dock。
+     */
+    private fun handleCollapsedTouch(ev: android.view.MotionEvent): Boolean {
+        if (!collapsed) return false
+        when (ev.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                collapsedDownY = ev.rawY
+                return true
+            }
+            android.view.MotionEvent.ACTION_UP -> {
+                val dy = collapsedDownY - ev.rawY
+                if (dy > REVEAL_SWIPE_PX) {
+                    revealFromCollapsed()
+                    return true
+                }
+                collapsedDownY = 0f
+                return true
+            }
+            android.view.MotionEvent.ACTION_CANCEL -> {
+                collapsedDownY = 0f
+                return true
+            }
+        }
+        return true
+    }
+
+    /**
+     * 第204轮：前台 App 是不是「我们让位」的沉浸型应用（网易云 / 汽水音乐）。
+     *
+     * 只认名单（[OemDockPolicy.hidesGlobalDockFor]），不再做 dumpsys 沉浸探测 ——
+     * 那套探测在全局沉浸策略下会误判所有 App（第193轮的坑）。
+     */
+    private var immersiveAppForeground = false
+
+    /**
+     * 第205轮：沉浸 App 前台时 Dock 的「收起」态。
+     *
+     * 收起 ≠ 隐藏：窗口仍然 VISIBLE（透明、内容 GONE），
+     * 目的是**占住底部 112px 的触摸区**——用户从底部上滑时由我们接住，
+     * 展开我们自己的 Dock，而不是让系统把原车导航栏唤出来。
+     */
+    private var collapsed = false
+
+    /** 从底部上滑展开后，多久自动收起。 */
+    private var collapseRunnable: Runnable? = null
+
+    /** 收起态下按下的 y（用于判上滑）。 */
+    private var collapsedDownY = 0f
+
+    /** 每个 tick 重新判一次前台应用（拿不到就保持原状）。 */
+    private fun refreshImmersiveForeground() {
+        val fg = if (homeForeground) null else foregroundPackage()
+        val immersive = fg != null && OemDockPolicy.hidesGlobalDockFor(fg)
+        if (immersive == immersiveAppForeground) return
+        immersiveAppForeground = immersive
+        Logx.i(LogTags.DOCK, "全局 Dock 让位判定", "immersiveApp" to immersive, "foreground" to fg)
         updateVisibility()
-        Logx.i(
-            LogTags.DOCK,
-            "全局 Dock 让位",
-            "yield" to yield,
-            "foreground" to (fg ?: "-"),
-            "名单命中" to known,
-            "探测沉浸" to when {
-                known -> "名单"
-                homeForeground -> "桌面"
-                probe == null -> "不可用"
-                else -> probe.toString()
-            },
-        )
     }
 
     private fun setHomeForeground(value: Boolean) {
@@ -775,7 +726,12 @@ class GlobalDockService : Service() {
             // - 而全屏层还在 → 用户眼前什么都没变，就是「主页键没反应」。
             //
             // 所以直接让桌面处理（[MainActivity.onExternalHome]），把全屏层收掉。
-            if (pipFullscreen) {
+            // 桌面窗口还亮在屏幕上（或在画中画全屏里）→ **直接调桌面**：
+            // 桌面已经在前台时，HOME intent 只会把已有 task 挪到前面，
+            // 不会重新进 `onNewIntent`，抽屉 / 设置 / 车辆页 / 分屏页都收不掉
+            // —— 这就是独立验收判 P0 的「全局 Dock 首页键失效」。
+            // 只有桌面确实不在屏幕上（别的应用盖着）时才走 HOME intent 把它拉到前台。
+            if (homeOnScreen || pipFullscreen) {
                 runCatching { MainActivity.onExternalHome() }
                     .onFailure { Logx.w(LogTags.DOCK, "外部 HOME 处理失败", it) }
             } else {
@@ -1004,14 +960,6 @@ class GlobalDockService : Service() {
     }
 
     /** 移除让位把手窗口（重建 / 销毁时调用）。 */
-    private fun removeHandleWindow() {
-        val v = handle ?: return
-        handle = null
-        handleParams = null
-        runCatching { windowManager.removeViewImmediate(v) }
-            .onFailure { Logx.w(LogTags.DOCK, "移除让位把手失败", it) }
-    }
-
     override fun onDestroy() {
         Logx.i(LogTags.DOCK, "全局 Dock 服务销毁")
         main.removeCallbacksAndMessages(null)
@@ -1034,7 +982,6 @@ class GlobalDockService : Service() {
             .onFailure { Logx.w(LogTags.DOCK, "全局 Dock 取消媒体订阅失败", it) }
         runCatching { VehicleController.removeObserver(hvacObserver) }
             .onFailure { Logx.w(LogTags.DOCK, "全局 Dock 取消空调订阅失败", it) }
-        removeHandleWindow()
         if (::windowManager.isInitialized) {
             root?.let { view ->
                 runCatching { windowManager.removeViewImmediate(view) }
@@ -1164,30 +1111,16 @@ class GlobalDockService : Service() {
         private const val OPAQUE_BAR_COLOR = 0xFF162E2C.toInt()
 
         private const val TICK_MS = 1_000L
+
+        /** 收起态下多少 px 的上滑算「唤出 Dock」（设计画布像素，屏宽 1920）。 */
+        private const val REVEAL_SWIPE_PX = 24f
+
+        /** 展开后多久自动收起。 */
+        private const val REVEAL_AUTO_COLLAPSE_MS = 5_000L
+
+        /** 收起态只占屏幕最底部这么高的一条（px）：其余高度还回给 App。 */
+        private const val COLLAPSED_STRIP_PX = 24
         private const val QUICK_APP_REFRESH_TICKS = 30
-
-        /**
-         * 第180轮：几 tick 判一次「前台是不是沉浸型播放器、Dock 要不要让位」。
-         *
-         * 1s 一次：切到汽水音乐/网易云后 ≤1s 就隐藏 Dock，退出后 ≤1s 恢复；
-         * 成本只有 `getRunningTasks(1)` 取一个包名。
-         */
-        const val YIELD_CHECK_TICKS = 1
-
-        /** 让位把手的屏幕占比：宽 22%、高 6px（1080p 下约 422×6）。 */
-        const val HANDLE_W_RATIO = 0.22f
-        const val HANDLE_H_RATIO = 0.009f
-
-        /** 上滑唤出阈值（负值=向上）；下滑收起阈值；横向容差。 */
-        const val SWIPE_REVEAL_PX = -8f
-        const val SWIPE_COLLAPSE_PX = 24f
-        const val SWIPE_COLLAPSE_MAX_DX = 90f
-
-        /** 点击判定的纵向容差（小于它算"点一下"，不是滑动）。 */
-        const val TAP_SLOP_PX = 12f
-
-        /** 点把手后 Dock 临时展开的时长。 */
-        const val HANDLE_REVEAL_MS = 8000L
 
         /** 每 5s 兜底重绑一次空调状态（observer 可能晚于服务注册）。 */
         private const val HVAC_REFRESH_TICKS = 5
@@ -1214,6 +1147,38 @@ class GlobalDockService : Service() {
 
         @Volatile
         private var active: GlobalDockService? = null
+
+        /**
+         * 是否**让位**给整屏覆盖页（设置页 `s01..s25`）。
+         *
+         * 画板里设置页是整屏覆盖、底部**没有** Dock（面板下沿就是背景），
+         * 而全局 Dock 是另一个窗口（`CarDesk 全局 Dock`），压在桌面窗口之上，
+         * 桌面里 `dock.visibility = GONE` 根本管不到它 —— 实测设置页底部那条
+         * 一直是全局 Dock 窗口画出来的。
+         *
+         * 所以开关由 [LauncherView.showSettings] / [closeSettings] 显式设置：
+         * 返回 [updateVisibility] 的 `want`，只影响可见性，不动窗口本身
+         * （窗口留着，`policy_control` 也不改，关掉设置页一调就回来）。
+         */
+        @Volatile
+        private var suppressed = false
+
+        /**
+         * 设置页打开 / 关闭时调用：让全局 Dock 临时让位。
+         *
+         * 服务没在跑（开关关闭 / 没权限）时是空操作。
+         */
+        fun setSuppressed(on: Boolean) {
+            if (suppressed == on) return
+            suppressed = on
+            val svc = active
+            Logx.i(LogTags.DOCK, "全局 Dock 抑制切换", "suppressed" to on, "active" to (svc != null))
+            if (svc == null) return
+            svc.main.post { svc.updateVisibility() }
+        }
+
+        /** 全局 Dock 当前是否真的画在屏幕上（[showing] 是 updateVisibility 的结论）。 */
+        fun isShowing(): Boolean = active?.showing == true
 
         /**
          * 按当前开关 / 权限拉起或停掉服务。

@@ -159,6 +159,27 @@ class MainActivity : Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideSystemUi()
 
+        // 第227轮：窗口 format **必须在窗口创建之前**定下来。
+        //
+        // ## 为什么
+        //
+        // `SurfaceView` 的 surface 是**跟着窗口 surface 走**的：
+        // 窗口 format 一变（`OPAQUE` ⇄ `TRANSLUCENT`），窗口 surface 重建，
+        // `SurfaceView` 的 surface 跟着销毁重建 ⇒ 一轮
+        // `surfaceDestroyed` → `surfaceCreated` ⇒ 播放器被放掉再起一次
+        // ⇒ 视频**从第一帧重新开始**（用户看到的是「开机后视频跳回开头」）。
+        //
+        // 实测（第227轮验收）：`SurfaceView` 后端下视频壁纸**每次冷启动起播两次**，
+        // 两次间隔 652ms，中间系统侧有一条
+        // `BufferQueueProducer: [SurfaceView - …] detachBuffer: BufferQueue has no connected producer`。
+        //
+        // ## 修法
+        //
+        // 窗口**创建前**就把 format 设好 ⇒ 窗口一次建对 ⇒ **永远不需要改 format**
+        // ⇒ 没有 surface 重建 ⇒ 只起播一次。
+        // （`setContentView` 之前调用 ⇒ 窗口的 surface 还没分配。）
+        applyWindowFormatBeforeCreate()
+
         // 隐藏 API 豁免：车机的天气 SDK / TBox 都是 ROM 私有类，
         // 没有豁免就反射不到（走的是 targetSdk 29 的口径，我们已对齐）。
         // 只影响本进程，失败也不影响任何功能 —— 见 `core/HiddenApiCompat`。
@@ -177,6 +198,59 @@ class MainActivity : Activity() {
     // ------------------------------------------------------------------
     // 冷启动分段（第九十三轮）
     // ------------------------------------------------------------------
+
+    /**
+     * 第227轮：**窗口创建之前**把窗口 format 定下来。
+     *
+     * ## 为什么必须提前
+     *
+     * 桌面窗口的 format 只有两种：
+     *
+     * - `PixelFormat.OPAQUE`（默认）：视频壁纸走 `TextureView` 时用 ——
+     *   帧画进窗口自己的 buffer，窗口不透明即可；
+     * - `PixelFormat.TRANSLUCENT`：视频壁纸走 `SurfaceView` 时用 ——
+     *   视频是**硬件图层**、压在窗口**之下**，窗口那块区域必须透明才能透出视频。
+     *
+     * 关键：**format 只能在窗口创建前定**。
+     * 窗口建好之后再改 format ⇒ 窗口 surface 重建 ⇒
+     * `SurfaceView` 的 surface 跟着销毁重建 ⇒ 播放器被放掉再起一次
+     * ⇒ 视频从第一帧重新开始（实测每次冷启动起播两次，间隔 652ms）。
+     *
+     * 所以这里在 `setContentView` 之前（窗口 surface 还没分配）就把 format 设好，
+     * 窗口**一次建对**，后面再也不用改。
+     *
+     * ## 不透明时什么都不做
+     *
+     * 窗口默认就是 `OPAQUE`，不需要调 `setFormat` ——
+     * 多调一次也可能触发一次无谓的窗口 surface 重建。
+     */
+    private fun applyWindowFormatBeforeCreate() {
+        val prefs = com.cardesk.launcher.core.Prefs(this)
+        val target = com.cardesk.launcher.core.VideoWallpaper.targetWindowFormat(
+            prefs.videoWallpaper,
+            prefs.videoWallpaperEnabled,
+            prefs.videoWallpaperBackend,
+        )
+        if (target != android.graphics.PixelFormat.TRANSLUCENT) {
+            // 默认就是 OPAQUE —— 不动窗口，避免多余的 surface 重建。
+            Logx.i(
+                LogTags.APP,
+                "窗口 format：OPAQUE（默认，不动）",
+                "backend" to prefs.videoWallpaperBackend,
+            )
+            return
+        }
+        runCatching {
+            window.setFormat(target)
+            // 半透明窗口不能有窗口级的背景色，否则整屏都是那块底色。
+            window.setBackgroundDrawable(null)
+        }
+        Logx.i(
+            LogTags.APP,
+            "窗口 format：TRANSLUCENT（建窗前定好）",
+            "backend" to prefs.videoWallpaperBackend,
+        )
+    }
 
     /**
      * 挂上启动页（纯 Canvas 视图，第一帧毫秒级）。
@@ -237,6 +311,8 @@ class MainActivity : Activity() {
             ),
         )
         StartupTrace.mark("launcherCreated")
+        // 第218轮：桌面建好 ⇒ 按键增强的执行端可以就绪了
+        setupKeyActionExecutor()
 
         view.viewTreeObserver.addOnPreDrawListener(
             object : ViewTreeObserver.OnPreDrawListener {
@@ -633,12 +709,50 @@ class MainActivity : Activity() {
         }.apply { name = "cardesk-perm-location" }.start()
     }
 
+    /**
+     * 第219轮：**存储权限**是否已具备（应用内视频库要读共享存储）。
+     *
+     * 车机上本包是 uid 1000 系统应用 ⇒ 天然具备；
+     * 普通安装（AVD / 侧载）才需要运行时申请。
+     */
+    fun hasStoragePermission(): Boolean =
+        com.cardesk.launcher.core.Permissions.hasStoragePermission(applicationContext)
+
+    /**
+     * 第219轮：申请存储权限。
+     *
+     * 用户批准后 [onRequestPermissionsResult] 会继续把视频选择器打开。
+     */
+    fun requestStoragePermission() {
+        com.cardesk.launcher.core.Permissions.ensureStoragePermission(this)
+    }
+
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<out String>,
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        // 第219轮：存储权限批下来了 ⇒ 把**应用内视频选择器**接着打开。
+        if (requestCode == com.cardesk.launcher.core.Permissions.REQUEST_STORAGE) {
+            val granted = grantResults.isNotEmpty() &&
+                grantResults.all { it == android.content.pm.PackageManager.PERMISSION_GRANTED }
+            Logx.i(
+                LogTags.SETTING,
+                "存储权限申请结果",
+                "granted" to granted,
+            )
+            if (granted) {
+                launcher?.openVideoPicker()
+            } else {
+                android.widget.Toast.makeText(
+                    this,
+                    "没有存储权限就列不出视频；可以用「用系统选择器导入」",
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }
+            return
+        }
         // 录音权限（频谱采集用）。批下来了就立刻重启采集 ——
         // 采集器停在「缺 RECORD_AUDIO」的死状态里，不重启就永远起不来。
         if (requestCode == com.cardesk.launcher.core.Permissions.REQUEST_RECORD_AUDIO) {
@@ -907,6 +1021,13 @@ class MainActivity : Activity() {
      * 所以这里用返回键兜底。
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // 第218轮：**按键增强**（语音键单击/双击/长按、媒体键长按）。
+        //
+        // 为什么放在 `dispatchKeyEvent` 而不是 View 的 `onKeyDown`：
+        // 这里比 View 树的派发**更早**，能拿到所有按键事件（包括没有焦点的小控件）。
+        if (keyActionExecutor?.onKeyEvent(event, android.os.SystemClock.uptimeMillis()) == true) {
+            return true
+        }
         if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
             val view = launcher
             if (view != null && view.isPipFullscreen()) {
@@ -918,38 +1039,217 @@ class MainActivity : Activity() {
         return super.dispatchKeyEvent(event)
     }
 
+    /** 按键增强的执行端（第218轮）。桌面的 `launcher` 就绪后才建。 */
+    private var keyActionExecutor: com.cardesk.launcher.ui.KeyActionExecutor? = null
+
     /**
-     * 打开系统相册选壁纸（第 105 轮：自定义壁纸）。
+     * 装好按键增强的执行端。
      *
-     * 用 `ACTION_OPEN_DOCUMENT`（不需要存储权限），结果在 [onActivityResult] 里回到
-     * [LauncherView.onWallpaperPicked]。
+     * 要等 `launcher` 建好 —— 360 环影、导航投屏都要靠它。
+     */
+    private fun setupKeyActionExecutor() {
+        if (keyActionExecutor != null) return
+        val view = launcher ?: return
+        val appPrefs = com.cardesk.launcher.core.Prefs(applicationContext)
+        keyActionExecutor = com.cardesk.launcher.ui.KeyActionExecutor(
+            context = this,
+            prefs = appPrefs,
+            onToggle360 = { view.toggleCam360() },
+        )
+        Logx.i(LogTags.KEYS, "按键增强：执行端就绪", "enabled" to appPrefs.keysEnhanced)
+    }
+
+    /**
+     * 打开系统相册选壁纸（第 105 轮：自定义壁纸；第230轮补降级链）。
+     *
+     * ## 第230轮：车机上「没有可用的图片选择器」
+     *
+     * 用户反馈真机上点导入只弹这一句。根因与视频壁纸第218轮一样：
+     * 车机没有相册 / DocumentsUI 接管 `ACTION_OPEN_DOCUMENT`，
+     * 原来只发一次意图、抛异常就弹提示，用户完全没法导入。
+     *
+     * ⇒ 改成三层：
+     * 1. 按 [com.cardesk.launcher.core.ImagePicker.strategies] 逐个
+     *    `resolveActivity` 预检，第一个能解析的就用它；
+     * 2. 全都不行 ⇒ 打开**应用内图片列表**（`LauncherView.openImagePicker()`），
+     *    车机里有图片文件就能选；
+     * 3. 结果在 [onActivityResult] 里带回 [LauncherView.onWallpaperPicked]。
      */
     fun startWallpaperImport() {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "image/*"
+        val strategies = com.cardesk.launcher.core.ImagePicker.strategies()
+        for (strategy in strategies) {
+            val intent = com.cardesk.launcher.core.ImagePicker.buildIntent(strategy)
+            val resolved = runCatching {
+                packageManager.resolveActivity(intent, 0)
+            }.getOrNull()
+            if (resolved == null) {
+                com.cardesk.launcher.core.log.Logx.d(
+                    com.cardesk.launcher.core.log.LogTags.SETTING,
+                    "静态壁纸：图片选择器不可用，换下一个",
+                    "strategy" to strategy.describe(),
+                )
+                continue
+            }
+            val ok = runCatching {
+                startActivityForResult(intent, REQ_WALLPAPER)
+            }.isSuccess
+            if (ok) {
+                com.cardesk.launcher.core.log.Logx.i(
+                    com.cardesk.launcher.core.log.LogTags.SETTING,
+                    "静态壁纸：已拉起系统图片选择器",
+                    "strategy" to strategy.describe(),
+                    "handler" to (resolved.activityInfo?.packageName ?: "?"),
+                )
+                return
+            }
+            com.cardesk.launcher.core.log.Logx.w(
+                com.cardesk.launcher.core.log.LogTags.SETTING,
+                "静态壁纸：拉起选择器失败，换下一个",
+                "strategy" to strategy.describe(),
+            )
         }
-        try {
-            startActivityForResult(intent, REQ_WALLPAPER)
-        } catch (e: Exception) {
-            android.widget.Toast.makeText(this, "没有可用的图片选择器", android.widget.Toast.LENGTH_SHORT).show()
-        }
+        // 全都不行 ⇒ 打开应用内图片列表（车机真正可用的那条路）。
+        com.cardesk.launcher.core.log.Logx.w(
+            com.cardesk.launcher.core.log.LogTags.SETTING,
+            "静态壁纸：车机没有系统图片选择器，改用应用内列表",
+            "tried" to strategies.size,
+        )
+        android.widget.Toast.makeText(
+            this,
+            "车机没有系统图片选择器，已打开车机里的图片列表",
+            android.widget.Toast.LENGTH_SHORT,
+        ).show()
+        launcher?.openImagePicker()
     }
 
     @Suppress("DEPRECATION")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (requestCode == REQ_WALLPAPER) {
-            val uri = if (resultCode == RESULT_OK) data?.data else null
+            // 第230轮：与视频壁纸同样的多级兜底 ——
+            // 车机文件管理器返回的 Intent 常常没有 `data`。
+            val uri = if (resultCode == RESULT_OK) {
+                com.cardesk.launcher.core.ImagePicker.extractUri(data)
+            } else {
+                null
+            }
+            com.cardesk.launcher.core.log.Logx.i(
+                com.cardesk.launcher.core.log.LogTags.SETTING,
+                "静态壁纸：收到选图结果",
+                "resultCode" to resultCode,
+                "uri" to (uri?.toString() ?: "null"),
+                "hasData" to (data != null),
+                "hasClip" to (data?.clipData?.itemCount ?: 0),
+            )
+            if (resultCode == RESULT_OK && uri == null) {
+                android.widget.Toast.makeText(
+                    this,
+                    "没取到图片文件，请重新选择",
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
+            }
             launcher?.onWallpaperPicked(uri)
+            return
+        }
+        if (requestCode == REQ_VIDEO_WALLPAPER) {
+            // 第218轮：uri **多级兜底**。
+            //
+            // 实车诊断包实测（领克 AAOS 820A）：
+            //   `视频壁纸：收到选视频结果 resultCode=0 uri=null`
+            // ⇒ 车机文件管理器返回的 Intent **没有 `data`**，
+            // 只靠 `data?.data` 永远拿不到 ⇒ 补 `clipData` / `EXTRA_STREAM` 两级兜底。
+            val uri = if (resultCode == RESULT_OK) {
+                com.cardesk.launcher.core.VideoPicker.extractUri(data)
+            } else {
+                null
+            }
+            com.cardesk.launcher.core.log.Logx.i(
+                com.cardesk.launcher.core.log.LogTags.SETTING,
+                "视频壁纸：收到选视频结果",
+                "resultCode" to resultCode,
+                "uri" to (uri?.toString() ?: "null"),
+                "hasData" to (data != null),
+                "hasClip" to (data?.clipData?.itemCount ?: 0),
+            )
+            if (resultCode == RESULT_OK && uri == null) {
+                // 选了但没取到 uri ⇒ 明确告诉用户，别让他以为「没反应」。
+                android.widget.Toast.makeText(
+                    this,
+                    "没取到视频文件，请重新选择",
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
+            }
+            launcher?.onVideoWallpaperPicked(uri)
             return
         }
         @Suppress("DEPRECATION")
         super.onActivityResult(requestCode, resultCode, data)
     }
 
+    /**
+     * 打开系统相册选**视频**（第207轮：视频壁纸）。
+     *
+     * 用 `ACTION_OPEN_DOCUMENT` + 视频类型（不需要存储权限），
+     * 结果在 [onActivityResult] 里回到 [LauncherView.onVideoWallpaperPicked]。
+     */
+    fun startVideoWallpaperImport() {
+        // 第218轮：**降级链**。
+        //
+        // 实车诊断包实测：领克车机上 `ACTION_OPEN_DOCUMENT` + 「视频通配类型」
+        // **没有 app 接管** ⇒ 直接抛 `ActivityNotFoundException`
+        // ⇒ 弹「没有可用的视频选择器」，用户根本没法导入视频。
+        //
+        // ⇒ 按 `VideoPicker.strategies()` 逐个试（先精确后宽泛），
+        // 用 `resolveActivity` 预检，别等抛异常。
+        val strategies = com.cardesk.launcher.core.VideoPicker.strategies()
+        for (strategy in strategies) {
+            val intent = com.cardesk.launcher.core.VideoPicker.buildIntent(strategy)
+            val resolved = runCatching {
+                packageManager.resolveActivity(intent, 0)
+            }.getOrNull()
+            if (resolved == null) {
+                com.cardesk.launcher.core.log.Logx.d(
+                    com.cardesk.launcher.core.log.LogTags.SETTING,
+                    "视频壁纸：选择器不可用，换下一个",
+                    "strategy" to strategy.describe(),
+                )
+                continue
+            }
+            try {
+                startActivityForResult(intent, REQ_VIDEO_WALLPAPER)
+                com.cardesk.launcher.core.log.Logx.i(
+                    com.cardesk.launcher.core.log.LogTags.SETTING,
+                    "视频壁纸：已拉起选择器",
+                    "strategy" to strategy.describe(),
+                    "handler" to (resolved.activityInfo?.packageName ?: "?"),
+                )
+                return
+            } catch (e: Exception) {
+                com.cardesk.launcher.core.log.Logx.w(
+                    com.cardesk.launcher.core.log.LogTags.SETTING,
+                    "视频壁纸：拉起选择器失败，换下一个",
+                    "strategy" to strategy.describe(),
+                )
+            }
+        }
+        // 全都不行 ⇒ 明确告诉用户，并给出**替代路径**（车机上有文件管理器）。
+        com.cardesk.launcher.core.log.Logx.w(
+            com.cardesk.launcher.core.log.LogTags.SETTING,
+            "视频壁纸：车机没有可用的视频选择器",
+            "tried" to strategies.size,
+        )
+        android.widget.Toast.makeText(
+            this,
+            "车机没有视频选择器，请用文件管理器把视频放到「我的车机」里再试",
+            android.widget.Toast.LENGTH_LONG,
+        ).show()
+    }
+
     companion object {
         /** 系统相册选壁纸的请求码（第 105 轮）。 */
         private const val REQ_WALLPAPER = 0x5101
+
+        /** 系统相册选视频壁纸的请求码（第207轮）。 */
+        private const val REQ_VIDEO_WALLPAPER = 0x5102
 
         /**
          * 当前活着的桌面 Activity（全局 Dock 要把动作递进来时用）。

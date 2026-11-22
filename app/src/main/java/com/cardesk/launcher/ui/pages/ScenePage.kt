@@ -24,6 +24,7 @@ import com.cardesk.launcher.core.CarStatus
 import com.cardesk.launcher.core.CarStatusItem
 import com.cardesk.launcher.core.CarTopGeometryFactory
 import com.cardesk.launcher.core.CarTopPainter
+import com.cardesk.launcher.core.CardStyle
 import com.cardesk.launcher.core.Design
 import com.cardesk.launcher.core.Palettes
 import com.cardesk.launcher.core.Skin
@@ -65,6 +66,15 @@ import kotlin.math.roundToInt
  *
  * 整页 Canvas 自绘，点击区域在 onMeasure 后按尺寸计算。
  */
+/**
+ * cardtop 资产右侧烘焙柔影的裁切线（占车模图宽度的比例）。
+ *
+ * `car3d/<model>/cardtop/<color>/closed.webp` 在 x210..222 有一条 alpha 16..35 的竖向柔影
+ * （车侧/后视镜投影，出图时被裁成硬边）。车况卡把车模缩到 190px 宽，它只剩 5px，
+ * 但在纯白卡上仍是一根硬边细线 —— 车身右缘在 78.5% 处，从这里裁掉。
+ */
+private const val CAR3D_CLIP_RIGHT = 0.785f
+
 class ScenePage(context: Context) : View(context) {
 
     var onOpenVehicle: (() -> Unit)? = null
@@ -93,6 +103,15 @@ class ScenePage(context: Context) : View(context) {
 
     /** 艺术家：默认是**空串**。 */
     var mediaArtist: String = ""
+
+    /**
+     * 媒体卡副标题：有歌手显示歌手，没有则退回来源名（画板 `Main.png` 的「通用音乐」）。
+     *
+     * 不直接改 [mediaArtist] 的语义 —— 它来自播放器，空就是空；
+     * 版式上的兜底放在这里。
+     */
+    private val mediaSubtitle: String
+        get() = mediaArtist.ifEmpty { mediaSource }
     var mediaSource: String = "通用音乐"
 
     /**
@@ -126,6 +145,100 @@ class ScenePage(context: Context) : View(context) {
 
     /** 封面主色 —— 封面光晕用。null = 自动从 [mediaArtwork] 采样。 */
     var mediaAccent: Int? = null
+
+    // -------------------------------------------------- 收藏（第207轮）
+    //
+    // 第207轮：**首页的音乐卡片也加上收藏按钮**（原来只有导航页组合卡有）。
+    // 首页音乐卡是 Canvas 自绘的，所以这里的收藏按钮也是**自绘**：
+    // 心形图标（复用 [com.cardesk.launcher.ui.widget.MediaActionIcons]）+ 一个命中区。
+
+    /**
+     * 当前会话的**收藏态**（三态：已收藏 / 未收藏 / 不知道）。
+     *
+     * 与导航页组合卡同一个数据源（`MusicController.get().favoriteState`），
+     * 所以两处显示的收藏态永远一致。
+     */
+    var favoriteState: com.cardesk.launcher.core.media.MediaActions.FavoriteState =
+        com.cardesk.launcher.core.media.MediaActions.FavoriteState.UNKNOWN
+
+    /**
+     * 当前会话所在的**播放器包名** —— 用来查这个播放器支不支持收藏。
+     *
+     * 未知包 / 不支持收藏 → **不画收藏按钮**（亮一个点了没反应的按钮更糟）。
+     */
+    var musicPackage: String? = null
+
+    /** 未知播放器的运行时能力探测（会话发了心形评分 → 会支持收藏）。 */
+    var actionProbe: com.cardesk.launcher.core.media.MediaActions.Probe? = null
+
+    /** 点收藏按钮。 */
+    var onFavoriteToggle: (() -> Unit)? = null
+
+    /**
+     * 第209轮：音乐卡里**歌名/歌手实际占位的右缘**（px，卡片坐标系）。
+     *
+     * 收藏心形要摆在「歌名」和「播放键」中间，位置跟着它走，
+     * 所以每帧画的时候记下来（给单测看）。
+     */
+    private var musicTextRight = 0f
+
+    /**
+     * 收藏按钮显不显示。
+     *
+     * 判据与导航页一致：[com.cardesk.launcher.core.media.MediaActions.capsOf]。
+     */
+    private fun favoriteSupported(): Boolean =
+        com.cardesk.launcher.core.media.MediaActions.capsOf(musicPackage, actionProbe).favorite
+
+    /** 收藏按钮的命中区 key（见 companion 里的 [FAVORITE_HIT_KEY]）。 */
+
+    /**
+     * 收藏图标缓存（第207轮）。
+     *
+     * [com.cardesk.launcher.ui.widget.MediaActionIcons.heart] 每次都会 new 一个 Drawable，
+     * 而音乐卡是**每帧重画**的（进度环 / 歌词都在动）——
+     * 每帧 new 一个 Drawable 会白白制造垃圾。
+     * 所以按「实心与否 + 颜色」缓存，状态不变就复用同一个。
+     */
+    private var favoriteIconCache: android.graphics.drawable.Drawable? = null
+    private var favoriteIconFilled = false
+    private var favoriteIconColor = 0
+
+    private fun favoriteIcon(
+        filled: Boolean,
+        color: Int,
+    ): android.graphics.drawable.Drawable {
+        val cached = favoriteIconCache
+        if (cached != null && favoriteIconFilled == filled && favoriteIconColor == color) {
+            return cached
+        }
+        val created = com.cardesk.launcher.ui.widget.MediaActionIcons.heart(filled, color)
+        favoriteIconCache = created
+        favoriteIconFilled = filled
+        favoriteIconColor = color
+        return created
+    }
+
+    // ------------------------------------------------------------------
+    // 第207轮：给单测开的观察口（只读，不改行为）
+    // ------------------------------------------------------------------
+
+    /** 收藏命中区（没画出来时是 null）。 */
+    fun favoriteHitForTest(): RectF? = hits[FAVORITE_HIT_KEY]
+
+    /** 音乐卡播放键命中区（没画出来时是 null）。 */
+    fun playHitForTest(): RectF? = hits[PLAY_HIT_KEY]
+
+    /** 音乐卡里歌名/歌手实际占位的右缘（第209轮：心形摆在它和播放键中间）。 */
+    fun musicTextRightForTest(): Float = musicTextRight
+
+    /** 收藏命中区是否存在。 */
+    fun hasFavoriteHitForTest(): Boolean = hits.containsKey(FAVORITE_HIT_KEY)
+
+    /** 模拟一次点击（走真实的 [handleTap] 命中判定）。 */
+    fun dispatchTapForTest(x: Float, y: Float) {
+        handleTap(x, y)
+    }
 
     /** 自动采样封面主色时缓存的位图（按引用比较，位图换了才重算）。 */
     private var accentArtwork: Bitmap? = null
@@ -485,10 +598,24 @@ class ScenePage(context: Context) : View(context) {
     /** 音乐卡来源行的设计坐标矩形（来源菜单锚点）；未绘制时为 null。 */
     val sourceAnchorRect: RectF? get() = hits["source"]
 
+    /**
+     * 媒体卡矩形（第244轮）：首页的来源弹层按「卡片上方」定位。
+     *
+     * 弹层不贴在来源图标上 —— 画板 11 的弹层是 361×625 的大列表，
+     * 贴着图标会把卡片和歌词全盖住；弹在卡片**上方**才不挡住正在看的内容。
+     */
+    val musicCardRect: RectF? get() = hits["musicCard"]
+
     // 几何常量
     private val left = 44f
     private val rightEnd = Design.W - 44f
-    private val bottomMargin = 166f
+    /**
+     * 底部卡片行距屏幕底的高度。
+     *
+     * 第242轮按设计板 Main 实测：卡片 803..953，Dock 顶 968 ——
+     * 即「卡底 = 1080 - 127」。旧的 166 会让整行比设计稿高 39px。
+     */
+    private val bottomMargin = 127f
     private val cardH = 150f
     private val cardBottom = Design.H - bottomMargin
     private val cardTop = cardBottom - cardH
@@ -585,11 +712,17 @@ class ScenePage(context: Context) : View(context) {
         text.color = Skin.TEXT_DIM
         canvas.drawText("行程", rect.left + 20f, rect.top + TRIP_TITLE_BASE, text)
 
-        val pad = 20f
-        val cw = (rect.width() - pad * 2f) / 2f
-        val colX = floatArrayOf(rect.left + pad, rect.left + pad + cw)
+        // 第244轮（用户反馈「留白太多，时长和总里程可以往右一点」）：
+        // 按画板实测把两列改成 左列起点 14、右列起点 51.8% 卡宽（429 卡 ⇒ 222），
+        // 行距收紧成 标签基线 51/104、数值基线 77/130（原来数值贴到卡底 143）。
+        val leftX = rect.left + TRIP_COL_LEFT
+        val splitX = rect.left + rect.width() * TRIP_COL_SPLIT
+        val colX = floatArrayOf(leftX, splitX)
         val rowTop = floatArrayOf(rect.top + TRIP_CELL_TOP_1, rect.top + TRIP_CELL_TOP_2)
-        val cellW = cw - 6f
+        val cellW1 = splitX - leftX - TRIP_CELL_TRAILING
+        val cellW2 = rect.right - TRIP_CELL_TRAILING - splitX
+        val cellWS = floatArrayOf(cellW1, cellW2)
+        val cellW = minOf(cellW1, cellW2)
         // 第189轮：四个数值**一起**量，取都放得下的最大字号（见 [fitValueSize]）——
         // 「平均油耗 6.8 L/100km」是最长的那个，其它三格跟着降到同一档，
         // 免得同一张卡里两个格子的数字一大一小。
@@ -607,10 +740,10 @@ class ScenePage(context: Context) : View(context) {
             TRIP_VALUE_SP_MIN,
         )
         val labelSp = if (narrow) TRIP_LABEL_SP_NARROW else TRIP_LABEL_SP
-        drawTripCell(canvas, colX[0], rowTop[0], "里程", values[0], cellW, labelSp, valueSp)
-        drawTripCell(canvas, colX[1], rowTop[0], "时长", values[1], cellW, labelSp, valueSp)
-        drawTripCell(canvas, colX[0], rowTop[1], "平均油耗", values[2], cellW, labelSp, valueSp)
-        drawTripCell(canvas, colX[1], rowTop[1], "总里程", values[3], cellW, labelSp, valueSp)
+        drawTripCell(canvas, colX[0], rowTop[0], "里程", values[0], cellWS[0], labelSp, valueSp)
+        drawTripCell(canvas, colX[1], rowTop[0], "时长", values[1], cellWS[1], labelSp, valueSp)
+        drawTripCell(canvas, colX[0], rowTop[1], "平均油耗", values[2], cellWS[0], labelSp, valueSp)
+        drawTripCell(canvas, colX[1], rowTop[1], "总里程", values[3], cellWS[1], labelSp, valueSp)
     }
 
     /**
@@ -650,11 +783,17 @@ class ScenePage(context: Context) : View(context) {
             true -> "关"
             false -> "开"
         }
-        val pad = 20f
-        val cw = (rect.width() - pad * 2f) / 2f
-        val colX = floatArrayOf(rect.left + pad, rect.left + pad + cw)
+        // 第244轮（用户反馈「留白太多，时长和总里程可以往右一点」）：
+        // 按画板实测把两列改成 左列起点 14、右列起点 51.8% 卡宽（429 卡 ⇒ 222），
+        // 行距收紧成 标签基线 51/104、数值基线 77/130（原来数值贴到卡底 143）。
+        val leftX = rect.left + TRIP_COL_LEFT
+        val splitX = rect.left + rect.width() * TRIP_COL_SPLIT
+        val colX = floatArrayOf(leftX, splitX)
         val rowTop = floatArrayOf(rect.top + TRIP_CELL_TOP_1, rect.top + TRIP_CELL_TOP_2)
-        val cellW = cw - 6f
+        val cellW1 = splitX - leftX - TRIP_CELL_TRAILING
+        val cellW2 = rect.right - TRIP_CELL_TRAILING - splitX
+        val cellWS = floatArrayOf(cellW1, cellW2)
+        val cellW = minOf(cellW1, cellW2)
         // 第189轮：和行程卡一样，四个值一起量字号（这里的最长值是「部分不可读」）。
         val values = listOf(doorText, windowText, trunkText, hoodText)
         val narrow = cellW < 150f
@@ -665,10 +804,10 @@ class ScenePage(context: Context) : View(context) {
             TRIP_VALUE_SP_MIN,
         )
         val labelSp = if (narrow) TRIP_LABEL_SP_NARROW else TRIP_LABEL_SP
-        drawTripCell(canvas, colX[0], rowTop[0], "车门", values[0], cellW, labelSp, valueSp)
-        drawTripCell(canvas, colX[1], rowTop[0], "车窗", values[1], cellW, labelSp, valueSp)
-        drawTripCell(canvas, colX[0], rowTop[1], "后备箱", values[2], cellW, labelSp, valueSp)
-        drawTripCell(canvas, colX[1], rowTop[1], "引擎盖", values[3], cellW, labelSp, valueSp)
+        drawTripCell(canvas, colX[0], rowTop[0], "车门", values[0], cellWS[0], labelSp, valueSp)
+        drawTripCell(canvas, colX[1], rowTop[0], "车窗", values[1], cellWS[1], labelSp, valueSp)
+        drawTripCell(canvas, colX[0], rowTop[1], "后备箱", values[2], cellWS[0], labelSp, valueSp)
+        drawTripCell(canvas, colX[1], rowTop[1], "引擎盖", values[3], cellWS[1], labelSp, valueSp)
     }
 
     // ---------------------------------------------------------------- 底部卡片顺序
@@ -916,13 +1055,14 @@ class ScenePage(context: Context) : View(context) {
             } else {
                 lyricMaxWidth(leftX)
             }
+            val label = clipLabel(s, w)
             if (leftX != null) {
                 // 锚定布局：这一行从自己的左边缘起排（不居中）。
                 text.textAlign = Paint.Align.LEFT
-                canvas.drawText(clipLabel(s, w), leftX, base[i], text)
+                canvas.drawText(label, leftX, base[i], text)
             } else {
                 text.textAlign = Paint.Align.CENTER
-                canvas.drawText(clipLabel(s, w), cx, base[i], text)
+                canvas.drawText(label, cx, base[i], text)
             }
         }
 
@@ -990,9 +1130,11 @@ class ScenePage(context: Context) : View(context) {
 
     /** 字号档 → 颜色（越靠近当前句越亮）。 */
     private fun lyricColorOf(tier: Int): Int = when (tier) {
-        com.cardesk.launcher.core.media.LyricSizeTier.MAIN -> Skin.TEXT
-        com.cardesk.launcher.core.media.LyricSizeTier.NEAR -> Skin.TEXT_SOFT
-        else -> Skin.TEXT_DIM
+        // 第222轮：中心歌词**直接压在壁纸上** ⇒ 颜色按壁纸明暗走
+        // （见 [com.cardesk.launcher.core.WallpaperContrast]）。
+        com.cardesk.launcher.core.media.LyricSizeTier.MAIN -> Skin.overlayCenter.text
+        com.cardesk.launcher.core.media.LyricSizeTier.NEAR -> Skin.overlayCenter.soft
+        else -> Skin.overlayCenter.faint
     }
 
     // ---------------------------------------------------------------- 导航引导
@@ -1735,17 +1877,36 @@ class ScenePage(context: Context) : View(context) {
         val end = rightEnd
         // 第五十二轮：天气块随内容基线上移（112 → 75）
         val top = 75f
-        text.textAlign = Paint.Align.RIGHT
         // 天气温度是**整数**，没有天气数据时用车外温度兜底
         val ambient = info?.ambientTemp?.takeIf { !it.isNaN() }
         val temp = weatherTemp ?: ambient?.toInt()
         val shown = temp?.toString() ?: "--"
 
+        // 第222轮：天气块**直接压在壁纸上**（没有底板）⇒ 颜色按壁纸明暗走。
+        // 日间模式 + 暗色壁纸时，深色字压在深色照片上几乎看不见 —— 就是这一处。
+        val ink = Skin.overlayTop
+
         // 度数符号（38px）先画，主数字（96px 粗体）贴着它的左边
         text.typeface = Typeface.DEFAULT
         text.textSize = 38f
-        text.color = Skin.TEXT
+        text.color = ink.text
         val degW = text.measureText("°")
+        text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        text.textSize = 96f
+        val numW = text.measureText(shown)
+
+        // 图标（20px 太阳）+ 详情（20px 次文字，与上排距 12）
+        text.typeface = Typeface.DEFAULT
+        text.textSize = 20f
+        text.color = ink.soft
+        val detail = weatherDetailText()
+        val detailW = text.measureText(detail)
+
+        // 度数符号（38px）先画，主数字（96px 粗体）贴着它的左边
+        text.textAlign = Paint.Align.RIGHT
+        text.typeface = Typeface.DEFAULT
+        text.textSize = 38f
+        text.color = ink.text
         canvas.drawText("°", end, top + 77f, text)
 
         text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
@@ -1755,9 +1916,7 @@ class ScenePage(context: Context) : View(context) {
         // 图标（20px 太阳）+ 详情（20px 次文字，与上排距 12）
         text.typeface = Typeface.DEFAULT
         text.textSize = 20f
-        text.color = Skin.TEXT_SOFT
-        val detail = weatherDetailText()
-        val detailW = text.measureText(detail)
+        text.color = ink.soft
         canvas.drawText(detail, end, top + 124f, text)
         drawWeatherIcon(canvas, end - detailW - 5f - 10f, top + 114f, weatherSky)
         text.textAlign = Paint.Align.LEFT
@@ -1778,7 +1937,8 @@ class ScenePage(context: Context) : View(context) {
     /** 天气图标。 */
     private fun drawWeatherIcon(canvas: Canvas, cx: Float, cy: Float, sky: String) {
         // 第四轮起与状态栏共用 [com.cardesk.launcher.ui.WeatherGlyphs]，避免两边画法分叉。
-        com.cardesk.launcher.ui.WeatherGlyphs.draw(canvas, cx, cy, sky, Skin.TEXT_SOFT, 2f)
+        // 第222轮：颜色跟天气块一起走浮层墨色（压在壁纸上的图标）。
+        com.cardesk.launcher.ui.WeatherGlyphs.draw(canvas, cx, cy, sky, Skin.overlayTop.soft, 2f)
     }
 
     // ---------------------------------------------------------------- 行程卡
@@ -1920,14 +2080,32 @@ class ScenePage(context: Context) : View(context) {
         }
     }
 
+    /**
+     * 统一卡片底（第242轮「液态玻璃」）：模糊背景 + 半透明面 + 内高光 + 柔阴影。
+     *
+     * 所有卡片的观感都由这一处决定 —— 设计稿 L1/L2 的差别只在于 [strong]。
+     */
     private fun card(canvas: Canvas, r: RectF, radius: Float = GLASS_RADIUS, strong: Boolean = false) {
-        canvas.drawRoundRect(r, radius, radius, Paint(fill).apply {
-            color = if (strong) Skin.surfaceStrong else Skin.surface
-        })
-        canvas.drawRoundRect(r, radius, radius, Paint(stroke).apply {
-            color = Skin.GLASS_STROKE
-            strokeWidth = 1.2f
-        })
+        com.cardesk.launcher.core.Glass.card(
+            canvas = canvas,
+            rect = r,
+            radius = radius,
+            fill = if (strong) Skin.surfaceStrong else Skin.surface,
+            stroke = Skin.GLASS_STROKE,
+        )
+    }
+
+    /** 不画阴影的卡片底（贴在别的卡里的小块用）。 */
+    private fun cardFlat(canvas: Canvas, r: RectF, radius: Float = GLASS_RADIUS, strong: Boolean = false) {
+        com.cardesk.launcher.core.Glass.card(
+            canvas = canvas,
+            rect = r,
+            radius = radius,
+            fill = if (strong) Skin.surfaceStrong else Skin.surface,
+            shadow = false,
+            sheen = false,
+            stroke = Skin.GLASS_STROKE,
+        )
     }
 
     /**
@@ -1978,12 +2156,19 @@ class ScenePage(context: Context) : View(context) {
     /**
      * 底部功能卡的统一标题（设计板：21px 弱文字，距左 18 / 距上 10）。
      */
-    private fun cardTitle(canvas: Canvas, rect: RectF, title: String) {
+    private fun cardTitle(
+        canvas: Canvas,
+        rect: RectF,
+        title: String,
+        size: Float = 21f,
+        baseline: Float = 27f,
+    ) {
         text.textAlign = Paint.Align.LEFT
         text.typeface = Typeface.DEFAULT
-        text.textSize = 21f
+        text.textSize = size
         text.color = Skin.TEXT_DIM
-        canvas.drawText(title, rect.left + 18f, rect.top + 27f, text)
+        // 左内边固定 18；字号变小后不再需要额外缩进。
+        canvas.drawText(title, rect.left + 18f, rect.top + baseline, text)
     }
 
     /** 没有可启动应用时的兜底：原来的「车辆 / 导航 / 电话 / 全部」四个入口。 */
@@ -2086,23 +2271,25 @@ class ScenePage(context: Context) : View(context) {
         val h = rect.height()
         card(canvas, rect)
         // 卡被压窄时（卡片库加卡 / 小档）整体按比例缩，避免控件跑出卡片。
-        val k = (w / 338f).coerceIn(0.62f, 1.15f)
+        // 第243轮：基准宽度改成设计板实测的 666（Main.png 333..999）。
+        val k = (w / MUSIC_CARD_W).coerceIn(0.55f, 1f)
         // 封面光晕。
         // 里它是音乐卡的**背景层**（marginStart/End = -24 → 铺满整张卡）
         // 画在封面 / 文字 / 进度环**之下**。
-        drawCoverGlow(canvas, rect)
+        // 设计板（Main.png 333..999）的媒体卡**没有**左侧青色光晕，
+        // 所以第243轮起不再画这层（drawCoverGlow 保留给旧布局的其他调用方）。
 
         // ① 来源行（图标 + 名称 + 箭头）—— 设计板放在卡片**左上角**
         text.textAlign = Paint.Align.LEFT
         text.typeface = Typeface.DEFAULT
-        text.textSize = (21f * k).coerceAtLeast(12f)
+        text.textSize = (14f * k).coerceAtLeast(11f)
         text.color = Skin.TEXT_DIM
-        val srcY = top + 10f
+        val srcY = top + 8f
         // 第125轮：来源图标（真实 App 图标优先，取不到用自绘符号）。
         // 图标与原来的品牌色圆点**同中心**（x+22k / srcY+12k），文字起点也不变，
         // 所以只是把那个小圆点换成了图标，版式没有漂。
-        val iconSize = 16f * k
-        val iconCx = x + 22f * k
+        val iconSize = 18f * k
+        val iconCx = x + 26f * k
         val iconCy = srcY + 12f
         val appIcon = mediaSourceIcon
         if (appIcon != null) {
@@ -2123,33 +2310,45 @@ class ScenePage(context: Context) : View(context) {
             )
         }
         text.color = Skin.TEXT_DIM
-        canvas.drawText(mediaSource, x + 34f * k, srcY + 20f, text)
+        canvas.drawText(mediaSource, x + 40f * k, srcY + 18f, text)
         val srcNameW = text.measureText(mediaSource)
         stroke.color = Skin.TEXT_DIM
         stroke.strokeWidth = 1.6f
-        val chx = x + 34f * k + srcNameW + 6f * k
+        val chx = x + 40f * k + srcNameW + 6f * k
         val chy = srcY + 12f
         // 来源行可点（sceneSource 的独立点击区）
         //
         // 命中区**先登记再画** —— [withPress] 要靠它算缩放中心，
         // 而 `hits` 每帧开头是清空的。
         hits["source"] = RectF(x + 14f * k, srcY, chx + 14f * k, srcY + 30f)
+        // 整张媒体卡（第244轮）：来源弹层要弹在**卡片上方**，需要一个卡片矩形。
+        hits["musicCard"] = RectF(rect)
         // 下拉箭头是「这里能展开来源菜单」的入口 —— 按下时它自己缩一点。
         withPress(canvas, "source") {
             canvas.drawLine(chx, chy, chx + 5f, chy + 5f, stroke)
             canvas.drawLine(chx + 5f, chy + 5f, chx + 10f * k, chy, stroke)
         }
 
-        // ② 封面 68×68 圆角 18（设计板 `.appicon`）
-        val coverSize = 68f * k
-        val cover = RectF(x + 18f * k, top + 42f, x + 18f * k + coverSize, top + 42f + coverSize)
+        // ② 播放键 / 进度环的圆心（第208轮：收藏心形的位置要围着它算，先算出来）
+        //
+        // 两者同心，都在一个 64×64 的 FrameLayout 里，播放按钮 `layout_gravity="center"`。
+        // 64×64 容器的右边缘 = 卡片右 − paddingEnd 18。
+        val bx = x + w - 24f * k - MUSIC_PLAY_RADIUS * k
+        val by = top + h / 2f
+
+        // ③ 封面 68×68 圆角 18（设计板 `.appicon`）
+        val coverSize = 84f * k
+        // 第248轮：用户指出「媒体源（QQ音乐）这几个字压住封面」——
+        // 来源行基线在 top+26，封面原来从 top+27 起，只差 1px，14px 的字看起来就压在图上。
+        // 封面整体下移 9px（top+36），它自己的垂直中心仍在卡内居中偏下，不与底边撞。
+        val cover = RectF(x + 24f * k, top + 36f, x + 24f * k + coverSize, top + 36f + coverSize)
         val art = mediaArtwork
         // 封面是「打开音乐页」的入口 —— 按下时整块缩一点。
         // 命中区**先登记再画**（`hits` 每帧开头是清空的）。
         hits["musicCover"] = cover
         withPress(canvas, "musicCover") {
             if (art != null) {
-                val path = Path().apply { addRoundRect(cover, 18f, 18f, Path.Direction.CW) }
+                val path = Path().apply { addRoundRect(cover, 22f, 22f, Path.Direction.CW) }
                 canvas.save()
                 canvas.clipPath(path)
                 canvas.drawBitmap(art, null, cover, Paint(Paint.FILTER_BITMAP_FLAG))
@@ -2157,45 +2356,142 @@ class ScenePage(context: Context) : View(context) {
             } else {
                 // 第五十一轮：设计板 s01 的通用音乐卡封面是**纯色 `--surfaceSoft` 圆角块**，
                 // 之前画的是「强调色 → surfaceStrong」的渐变，日间模式下和设计板差一截。
-                canvas.drawRoundRect(cover, 18f, 18f, Paint(fill).apply {
-                    color = Skin.surfaceSoft
+                // 画板 `Main.png` 的封面块是**浅灰**（约 #E9EAEC），不是几乎透明的
+                // `surfaceSoft`（62% 白叠在白卡上等于看不见）。
+                canvas.drawRoundRect(cover, 22f, 22f, Paint(fill).apply {
+                    color = chipFill()
                 })
             }
-            stroke.color = Skin.ACCENT
+            stroke.color = Skin.TEXT_DIM
             stroke.strokeWidth = 3f
             canvas.drawLine(cover.centerX() + 4f, cover.centerY() - 14f, cover.centerX() + 4f, cover.centerY() + 6f, stroke)
             canvas.drawCircle(cover.centerX() - 2f, cover.centerY() + 11f, 5.5f, stroke)
             canvas.drawLine(cover.centerX() + 4f, cover.centerY() - 14f, cover.centerX() + 13f, cover.centerY() - 10f, stroke)
         }
 
-        // ③ 文本列（封面右边距 14 → x = 18 + 68 + 14 = 100）
-        val tx = cover.right + 14f * k
+        // ④ 文本列（封面右边距 14 → x = 18 + 68 + 14 = 100）
+        val tx = cover.right + 12f * k
         val ringR = MusicCardVisuals.ringRadius(MUSIC_RING_SIZE, MUSIC_RING_STROKE) * k
-        val textColW = (x + w - 18f * k - ringR * 2f - 10f * k - tx).coerceAtLeast(24f)
+        // 文本列的**自然上限**（让到进度环外侧）。
+        val textColWMax = (x + w - 18f * k - ringR * 2f - 10f * k - tx).coerceAtLeast(24f)
+
+        // 先量一遍文字**实际占多宽** —— 收藏心形要摆在「歌名」和「播放键」**中间**，
+        // 位置得跟着歌名长度走（歌名越长，心形越往左）。
+        //
+        // 量的时候要把画笔设成**和真正绘制时一样**（`clipLabel` 用的是当前画笔度量）。
+        text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        text.textSize = (22f * k).coerceAtLeast(15f)
+        val titleText = clipLabel(mediaTitle, textColWMax)
+        val titleW = text.measureText(titleText)
+        text.typeface = Typeface.DEFAULT
+        text.textSize = (14f * k).coerceAtLeast(11f)
+        // 画板 `Main.png` 的媒体卡在没有歌手信息时，副标题显示的是**来源名**
+        // （「暂无播放」下面那行「通用音乐」）。真实播放时歌手存在，就显示歌手。
+        val artistText = clipLabel(mediaSubtitle, textColWMax)
+        val artistW = text.measureText(artistText)
+        // 文字实际占位的右缘（歌名 / 歌手取宽的那个）—— **定位用**（还没截断）
+        val textEdge = tx + maxOf(titleW, artistW)
+
+        // ⑤ 收藏心形（第209轮：**摆在歌名和播放键中间**）
+        //
+        // 第208轮把它贴在播放键左边（间隙只有 6），看着像和播放键连成一块；
+        // 用户要求**离播放键远一点、放到歌名和播放键中间**。
+        //
+        // 几何（设计坐标，k = 卡片宽 / 338）：
+        //   可摆区间 = [歌名右缘 + 8, 播放键左缘 − 6]（两端都是**最小间隙**）；
+        //   心形在这个区间里**居中**；
+        //   竖直方向仍与播放键**同一条中线**（by）。
+        //
+        // 空间不够时（歌名特别长）→ 贴着播放键放，**绝不压到字上**。
+        //
+        // **播放器不支持收藏就不画**（亮一个点了没反应的按钮更糟）。
+        val favSize = MUSIC_FAV_ICON_SIZE * k
+        val favRect = if (favoriteSupported()) {
+            val leftBound = textEdge + MUSIC_FAV_TEXT_GAP * k
+            val rightBound = bx - MUSIC_PLAY_RADIUS * k - MUSIC_FAV_GAP * k
+            val avail = (rightBound - leftBound).coerceAtLeast(0f)
+            val actual = minOf(favSize, avail)
+            val fl = if (avail >= favSize * 0.6f) {
+                leftBound + (avail - actual) / 2f
+            } else {
+                rightBound - favSize
+            }
+            // 卡片太矮时别把心形顶出卡外。
+            val minTop = top + 4f * k
+            val maxTop = (top + h - 4f * k - favSize).coerceAtLeast(minTop)
+            val ft = (by - favSize / 2f).coerceIn(minTop, maxTop)
+            RectF(fl, ft, fl + favSize, ft + favSize)
+        } else {
+            null
+        }
+
+        // 文本列的右边界：有心形时还要让开**心形左边缘**，
+        // 否则歌名/歌手会从心形底下穿过去。
+        val textColW = if (favRect != null) {
+            minOf(textColWMax, favRect.left - MUSIC_FAV_TEXT_GAP * k - tx).coerceAtLeast(24f)
+        } else {
+            textColWMax
+        }
+
         // 标题 26px 粗体
         text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        text.textSize = (26f * k).coerceAtLeast(16f)
+        text.textSize = (22f * k).coerceAtLeast(15f)
         text.color = Skin.TEXT
-        canvas.drawText(clipLabel(mediaTitle, textColW), tx, top + 70f, text)
+        val titleFinal = clipLabel(mediaTitle, textColW)
+        val titleWFinal = text.measureText(titleFinal)
+        // 封面 27..111（中线 69）：标题基线 66、副标题 88，两行夹着中线。
+        canvas.drawText(titleFinal, tx, top + 66f, text)
 
-        // ④ 艺术家 18px（没有就留空，默认空串）
+        // 艺术家 18px（没有就留空，默认空串）
         text.typeface = Typeface.DEFAULT
-        text.textSize = (18f * k).coerceAtLeast(12f)
+        text.textSize = (14f * k).coerceAtLeast(11f)
         text.color = Skin.TEXT_SOFT
-        canvas.drawText(clipLabel(mediaArtist, textColW), tx, top + 98f, text)
+        val artistFinal = clipLabel(mediaSubtitle, textColW)
+        val artistWFinal = text.measureText(artistFinal)
+        canvas.drawText(artistFinal, tx, top + 90f, text)
+
+        // 文字**实际画出来**占位的右缘（歌名/歌手取宽的那个）。
+        // 注意用的是**最终截断后**的宽度 —— 歌名太长被截了的话，右缘要跟着缩。
+        musicTextRight = tx + maxOf(titleWFinal, artistWFinal)
+
+        // ⑥ 收藏心形（第209轮：摆在歌名和播放键中间）
+        //
+        // 命中区**先登记再画**（`hits` 每帧开头是清空的）。
+        favRect?.let { r ->
+            hits[FAVORITE_HIT_KEY] = r
+            val filled = favoriteState.known && favoriteState.isFavorited
+            val color = when {
+                filled -> accentColor()
+                favoriteState.known -> Skin.TEXT_DIM
+                else -> Skin.TEXT_SOFT
+            }
+            val icon = favoriteIcon(filled, color)
+            withPress(canvas, FAVORITE_HIT_KEY) {
+                icon.setBounds(
+                    r.left.toInt(), r.top.toInt(),
+                    r.right.toInt(), r.bottom.toInt(),
+                )
+                icon.draw(canvas)
+            }
+        }
 
         // 进度环 + 播放按钮
         // 两者同心，都在一个 64×64 的 FrameLayout 里，播放按钮 `layout_gravity="center"`。
-        // 64×64 容器的右边缘 = 卡片右 − paddingEnd 18。
-        val bx = x + w - 18f * k - (MUSIC_RING_SIZE / 2f) * k
-        val by = top + h / 2f
+        // 圆心 bx/by 在上面第②步已经算好。
         // 进度环在播放按钮**之下**（里 是 sceneMusicPlay 的前一个兄弟节点）。
         drawMusicRing(canvas, bx, by, k)
         // 命中区**先登记再画**（`hits` 每帧开头是清空的，[withPress] 要靠它算缩放中心）。
-        hits["play"] = RectF(bx - 28f * k, by - 28f * k, bx + 28f * k, by + 28f * k)
+        hits[PLAY_HIT_KEY] = RectF(
+            bx - MUSIC_PLAY_RADIUS * k, by - MUSIC_PLAY_RADIUS * k,
+            bx + MUSIC_PLAY_RADIUS * k, by + MUSIC_PLAY_RADIUS * k,
+        )
         // 播放键：按下时整块（含进度环外的圆底）缩一点。
-        withPress(canvas, "play") {
-            canvas.drawCircle(bx, by, 28f * k, Paint(fill).apply { color = Skin.surfaceStrong })
+        withPress(canvas, PLAY_HIT_KEY) {
+            // 设计板：播放键是**纯白实心圆**（L3 级），夜间用浮层色。
+            canvas.drawCircle(
+                bx, by, MUSIC_PLAY_RADIUS * k,
+                Paint(fill).apply { color = if (Skin.isNight) Skin.surfaceStrong else 0xFFFFFFFF.toInt() },
+            )
             fill.color = Skin.TEXT
             if (mediaPlaying) {
                 canvas.drawRoundRect(RectF(bx - 9f * k, by - 9f * k, bx - 3f * k, by + 9f * k), 2f, 2f, fill)
@@ -2319,14 +2615,19 @@ class ScenePage(context: Context) : View(context) {
         val x = rect.left
         val top = rect.top
         card(canvas, rect)
-        cardTitle(canvas, rect, "快捷车控")
+        // 第248轮：用户指出「快捷车控」压住下面的按钮。
+        // 原因是标题用 21px、基线 top+27，而 chip 从 top+26 起 —— 字的下缘正好落在 chip 上。
+        // 这里改成 16px、基线 top+23，并把 chip 整体下移到 top+34。
+        cardTitle(canvas, rect, "快捷车控", size = 16f, baseline = 23f)
         val k = (rect.width() / CLIMATE_CARD_W).coerceIn(0.55f, 1.25f)
         val pad = CLIMATE_CARD_PAD * k
         val gap = CLIMATE_SEAT_GAP * k
         val seatW = ((rect.width() - pad * 2f - gap * 2f) / 3f).coerceAtLeast(24f)
         val s = state
+        // 第244轮：chip 从「高 70、卡顶 30」放大到「高 100、卡顶 26」，
+        // 卡片高 150 ⇒ 下方只剩 24px 留白，不再是一半空的。
         val seatTop = top + 34f * k
-        val seatH = (cardH - 34f * k - 8f).coerceAtLeast(50f)
+        val seatH = 96f * k
         // 命中区**先登记再画**（`hits` 每帧开头是清空的，[withPress] 要靠它算缩放中心）。
         hits["seatHeat"] = RectF(x + pad, seatTop, x + pad + seatW, seatTop + seatH)
         hits["seatVent"] = RectF(x + pad + seatW + gap, seatTop, x + pad + seatW * 2f + gap, seatTop + seatH)
@@ -2350,36 +2651,39 @@ class ScenePage(context: Context) : View(context) {
         hits["maxFan"] = mxR
         // MAX 风挡：按下时整块缩一点。
         withPress(canvas, "maxFan") {
-            canvas.drawRoundRect(mxR, 18f * k, 18f * k, Paint(fill).apply { color = Skin.surfaceSoft })
+            // 画板 `Main.png` 1024..1422 的 chip 是「浅灰底 + 深色线稿」，不是白玻璃：
+            // 底色 = 主文字色 9.4%（日间 ≈ #E7EAEA，夜间自动变成比卡面浅一档的灰）。
+            canvas.drawRoundRect(mxR, 18f * k, 18f * k, Paint(fill).apply { color = chipFill() })
             val mxColor = if (maxOn) Skin.ACCENT else Skin.TEXT_SOFT
             stroke.color = mxColor
-            stroke.strokeWidth = (3f * k).coerceAtLeast(1.5f)
+            stroke.strokeWidth = (2f * k).coerceAtLeast(1.2f)
             val fcx = mxR.centerX()
-            val fcy = seatTop + SEAT_CONTENT_TOP * k + 15f * k
-            canvas.drawCircle(fcx, fcy, 4f * k, Paint(fill).apply { color = mxColor })
+            // 画板的「最大风挡」图标：上一条出风格栅（圆角矩形）+ 下面三条风线。
+            val ventTop = seatTop + CHIP_ICON_TOP * k
+            canvas.drawRoundRect(
+                RectF(fcx - 16f * k, ventTop, fcx + 16f * k, ventTop + 13f * k),
+                3f * k, 3f * k, stroke,
+            )
             for (i in 0..2) {
-                val a = Math.toRadians((i * 120).toDouble())
-                canvas.drawCircle(
-                    fcx + (Math.cos(a) * 15f * k).toFloat(),
-                    fcy + (Math.sin(a) * 15f * k).toFloat(),
-                    10f * k, stroke,
-                )
+                val y = ventTop + 19f * k + i * 5f * k
+                canvas.drawLine(fcx - 13f * k, y, fcx + 13f * k, y, stroke)
             }
             text.textAlign = Paint.Align.CENTER
             text.typeface = Typeface.DEFAULT
             text.textSize = (15f * k).coerceAtLeast(10f)
             text.color = mxColor
-            val fanLabelY = seatTop + SEAT_CONTENT_TOP * k + 30f * k + 4f * k + 15f * k
+            val fanLabelY = seatTop + CHIP_LABEL_BASELINE * k
             canvas.drawText(fitText("最大风挡", seatW - 8f * k), mxR.centerX(), fanLabelY, text)
-            // 进度条（22×4）
-            fill.color = if (maxOn) Skin.ACCENT else Skin.surfaceStrong
-            val maxBarY = fanLabelY + 6f * k
-            canvas.drawRoundRect(
-                RectF(mxR.centerX() - 11f * k, maxBarY, mxR.centerX() + 11f * k, maxBarY + 4f * k),
-                2f * k, 2f * k, fill,
-            )
         }
     }
+
+    /**
+     * 快捷车控 chip 的底色：主文字色 9.4%。
+     *
+     * 画板 `Main.png` 的 chip 是 #E7EAEA（卡面 #FFFFFF），
+     * 用 `Skin.GLASS_FILL`（近白）会读成「又一块白板」，与画板的灰底不一致。
+     */
+    private fun chipFill(): Int = (Skin.TEXT and 0x00FFFFFF) or (0x12 shl 24)
 
     /** 座椅位：图标 + 文案 + 3 段进度；[k] 是卡片宽度不足时的等比缩放。 */
     private fun seat(
@@ -2394,35 +2698,40 @@ class ScenePage(context: Context) : View(context) {
         k: Float = 1f,
     ) {
         val r = RectF(x, top, x + w, top + h)
-        canvas.drawRoundRect(r, 18f * k, 18f * k, Paint(fill).apply { this.color = Skin.GLASS_FILL })
-        // 座椅轮廓（图标区 30px）
+        // 浅灰底（画板 chip 比卡面暗一档），不是白玻璃。
+        canvas.drawRoundRect(r, 18f * k, 18f * k, Paint(fill).apply { this.color = chipFill() })
+        // 座椅轮廓：画板的线稿是 **22×26**（不是 30px 大图标），居中留白更多。
         stroke.color = if (level > 0) tint else Skin.TEXT_SOFT
-        stroke.strokeWidth = (3f * k).coerceAtLeast(1.5f)
-        val sw = 30f * k
-        val sh = 34f * k
+        stroke.strokeWidth = (2f * k).coerceAtLeast(1.2f)
+        val sw = 26f * k
+        val sh = 30f * k
         val cx = r.centerX()
-        val sy = top + SEAT_CONTENT_TOP * k
-        canvas.drawRoundRect(RectF(cx - sw / 2f, sy, cx + sw / 2f, sy + sh), 9f * k, 9f * k, stroke)
-        canvas.drawLine(cx - sw / 2f - 7f * k, sy + 7f * k, cx - sw / 2f, sy + sh - 5f * k, stroke)
-        canvas.drawLine(cx + sw / 2f + 7f * k, sy + 7f * k, cx + sw / 2f, sy + sh - 5f * k, stroke)
-        // 文案（15px，marginTop 4）
+        val sy = top + CHIP_ICON_TOP * k
+        canvas.drawRoundRect(RectF(cx - sw / 2f, sy, cx + sw / 2f, sy + sh), 8f * k, 8f * k, stroke)
+        canvas.drawLine(cx - sw / 2f - 5f * k, sy + 6f * k, cx - sw / 2f, sy + sh - 4f * k, stroke)
+        canvas.drawLine(cx + sw / 2f + 5f * k, sy + 6f * k, cx + sw / 2f, sy + sh - 4f * k, stroke)
+        // 文案 15px（第244轮随 chip 放大），基线距 chip 顶 78。
         text.textAlign = Paint.Align.CENTER
         text.typeface = Typeface.DEFAULT
         text.textSize = (15f * k).coerceAtLeast(10f)
         text.color = if (level > 0) tint else Skin.TEXT_SOFT
-        val labelY = sy + sh + 4f * k + 15f * k
+        val labelY = top + CHIP_LABEL_BASELINE * k
         // 卡片被压得很窄时，长标签按卡宽裁剪，避免文字跑出卡外。
         canvas.drawText(fitText(label, w - 8f * k), cx, labelY, text)
-        // 3 段进度（14×4，间距 4）
-        val segTop = labelY + 6f * k
-        val segW = 14f * k
-        val segGap = 4f * k
-        val totalW = 3 * segW + 2 * segGap
-        var sx = cx - totalW / 2f
-        for (i in 0..2) {
-            fill.color = if (i < level) tint else Skin.surfaceStrong
-            canvas.drawRoundRect(RectF(sx, segTop, sx + segW, segTop + 4f * k), 2f * k, 2f * k, fill)
-            sx += segW + segGap
+        // 三档档位（第248轮：用户要求「通风加热是三档，现在没有档位体现」；
+        // 第249轮再改：用户要求「放到按钮的底部，改成 --- 这种形式」）。
+        // 形制与空调弹窗里的 ChipButton 完全一致：三根横杠、整组居中、离底边 10px，
+        // 亮 = 已开档数，暗 = 剩余档位。两处必须同形，否则同一个信息在首页和弹窗里长得不一样。
+        val dashW = 12f * k
+        val dashH = 3.2f * k
+        val dashGap = 4f * k
+        val dashCy = top + h - 11f * k
+        val totalW = 3 * dashW + 2 * dashGap
+        for (i in 0 until 3) {
+            fill.color = if (i < level) tint else CardStyle.scaleAlpha(Skin.TEXT_SOFT, 0.45f)
+            val left = cx - totalW / 2f + i * (dashW + dashGap)
+            canvas.drawRoundRect(left, dashCy - dashH / 2f, left + dashW, dashCy + dashH / 2f,
+                dashH / 2f, dashH / 2f, fill)
         }
     }
 
@@ -2583,44 +2892,45 @@ class ScenePage(context: Context) : View(context) {
         val w = rect.width()
         card(canvas, rect)
 
-        // 标题「续航」
+        // 标题「续航」—— 画板 16px（`Main.png` y819），不是 21px
         text.textAlign = Paint.Align.LEFT
         text.typeface = Typeface.DEFAULT
-        text.textSize = 21f
-        text.color = Skin.TEXT_SOFT
-        canvas.drawText("续航", x + 22f, top + 31f, text)
+        text.textSize = 16f
+        text.color = Skin.TEXT_DIM
+        canvas.drawText("续航", x + 22f, top + 32f, text)
 
         // 数值 + 单位（卡被压窄时整体缩小，避免数字压到右边缘）
-        val k = (w / 338f).coerceIn(0.7f, 1.1f)
+        val k = (w / 266f).coerceIn(0.7f, 1.1f)
         val range = info?.rangeKm?.takeIf { it >= 0 }
         val shown = range?.toString() ?: "--"
         text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        text.textSize = 50f * k
+        // 画板：数字 56 粗、单位 18（卡宽 266，`k` 只在卡被压窄时才缩）
+        text.textSize = 56f * k
         // 第136轮：续航按剩余里程分级着色（>100 常态 / ≤100 黄 / ≤50 红）。
         text.color = rangeValueColor(range)
         val shownW = text.measureText(shown)
         canvas.drawText(shown, x + 22f * k, top + 80f, text)
         text.typeface = Typeface.DEFAULT
-        text.textSize = 20f * k
+        text.textSize = 18f * k
         text.color = Skin.TEXT_DIM
-        canvas.drawText("km", x + 22f * k + shownW + 8f, top + 80f, text)
+        canvas.drawText("km", x + 22f * k + shownW + 6f, top + 80f, text)
 
-        // 油量条 12px
+        // 油量条 6px（画板 y903..909）
         val barY = top + 100f
         val barX = x + 22f * k
         val barW = w - 44f * k
         fill.color = Skin.surfaceStrong
-        canvas.drawRoundRect(RectF(barX, barY, barX + barW, barY + 12f), 6f, 6f, fill)
+        canvas.drawRoundRect(RectF(barX, barY, barX + barW, barY + 6f), 3f, 3f, fill)
         val fuel = fuelPercent
         if (fuel != null && barW > 0f) {
             val ratio = (fuel.coerceIn(0, 100) / 100f)
             fill.color = Skin.ACCENT
-            canvas.drawRoundRect(RectF(barX, barY, barX + barW * ratio, barY + 12f), 6f, 6f, fill)
+            canvas.drawRoundRect(RectF(barX, barY, barX + barW * ratio, barY + 6f), 3f, 3f, fill)
         }
 
-        // 油量文案
+        // 油量文案（画板 14px，基线贴着卡底 12px）
         text.typeface = Typeface.DEFAULT
-        text.textSize = 17f
+        text.textSize = 14f
         text.color = Skin.TEXT_DIM
         text.textAlign = Paint.Align.LEFT
         canvas.drawText(
@@ -2738,12 +3048,15 @@ class ScenePage(context: Context) : View(context) {
         val topDown = Car3dAssets.topDownOnly(context, assetDir)
         val cardView = if (topDown) Car3dAssets.VIEW_CARDTOP else Car3dSettings.cardView
 
-        // —— 车模区（第182轮竖放）：俯视资产已是竖版，图区改 246×300、水平居中；
+        // —— 车模区（第182轮竖放）：俯视资产已是竖版，图区改 246×300、**水平居中**；
         // 03/05 的旧 3/4 视角仍用 356×292 的旧区。比例一律按 model.json 的 slot 算，不硬编码。——
-        val boxW = if (topDown) CAR_TOP_BOX_W else CAR_STATUS_CAR_W
-        val boxH = if (topDown) CAR_TOP_BOX_H else CAR_STATUS_CAR_H_LEGACY
-        val boxTop = if (topDown) CAR_TOP_BOX_TOP else CAR_STATUS_CAR_TOP_LEGACY
-        val boxX = if (topDown) r.left + (CAR_STATUS_CARD_W - boxW) / 2f else r.left + CAR_STATUS_CAR_X
+        // 第244轮（用户反馈）：车模**居中**，四轮胎压贴到各自车轮旁边，
+        // 「全车已关」挪到卡片下部居中 —— 之前车模靠左、胎压挤在底部一行，
+        // 看着像「左边一张图 + 底下一排数」，和画板的「整车为中心」不符。
+        val boxW = if (topDown) CAR_STATUS_CAR_BOX_W else CAR_STATUS_CAR_W
+        val boxH = if (topDown) CAR_STATUS_CAR_BOX_H else CAR_STATUS_CAR_H_LEGACY
+        val boxTop = if (topDown) CAR_STATUS_CAR_BOX_TOP else CAR_STATUS_CAR_TOP_LEGACY
+        val boxX = r.centerX() - boxW / 2f
         val carArea = RectF(boxX, r.top + boxTop, boxX + boxW, r.top + boxTop + boxH)
         car3d.setPose(context, dir, car3dPose(), rich = true, view = cardView)
         // 降级链可能落到不同比例的视角（如 card 缺失→hero），按**实际会用**的视角算比例。
@@ -2766,19 +3079,24 @@ class ScenePage(context: Context) : View(context) {
         } else {
             image
         }
+        // cardtop 资产右侧有一条烘焙柔影（资产 x210..222、alpha 16..35，见
+        // VehiclePage.CAR3D_CLIP_RIGHT 注释）。车况卡里它只有 5px 宽，但在白卡上仍是一条
+        // 硬边细线；裁掉车身右缘以外那一条，和车辆页保持同一处理。
+        val clipSave = canvas.save()
+        canvas.clipRect(imageRect.left, imageRect.top, imageRect.left + imageRect.width() * CAR3D_CLIP_RIGHT, imageRect.bottom)
         val car3dPainted = car3d.paint(canvas, context, cardView, imageRect, fit = false)
+        canvas.restoreToCount(clipSave)
         if (!car3dPainted) {
             val frame = CarTopPainter.frame(carArea.centerX(), carArea.centerY(), CAR_STATUS_MODEL_W, CAR_STATUS_MODEL_H)
             CarTopPainter.draw(canvas, frame, CarTopGeometryFactory.of(carModel), carColors)
         }
 
-        // —— 一行状态文字（最多两行）：只有车门/车窗，车窗黄色 ——
+        // —— 状态文字：卡片下部居中（全关时是「✓ 全车已关」）——
         val items = CarStatus.items(effDoors, effWindows, hood, effTrunk)
-        drawSnapshotStatusText(canvas, r, items)
+        drawCarStatusBottomText(canvas, r, items)
 
-        // —— 胎压：四个小胶囊贴到各自的轮子旁（锚点来自资产）——
         lastCarImageRect = RectF(imageRect)
-        drawTirePills(canvas, r, i, imageRect, closedRefBounds(context, assetDirOrNull(), imageRect), topDown, context)
+        drawTireBesideWheels(canvas, r, imageRect, i)
         if (cardPressed) canvas.restore()
     }
 
@@ -2967,6 +3285,171 @@ class ScenePage(context: Context) : View(context) {
      * 现在底色也走主题 token（[Skin.surfaceStrong]）：
      * 夜里是深灰胶囊 + 浅字，白天是浅灰胶囊 + 深字，两套都读得出来。
      */
+
+    /**
+     * 车况卡右侧状态文字（第243轮，按设计板 Main.png 车况卡）。
+     *
+     * 画板里这块是车模右侧的一列：`✓ 全车已关` / 未关时逐条列位置。
+     * 列宽只有 ~146px（卡 388 − 左侧车模 226 − 右内边距 16），
+     * 所以按**字符折行**（中文逐字可断行），最多三行，整体在车模中线附近垂直居中。
+     */
+    /**
+     * 车况卡状态文字（第244轮：**卡片下部居中**）。
+     *
+     * 第174轮时它贴在车模右侧，第243轮按画板改成右半边一列；用户实测反馈
+     * 「车模该居中、状态该在下面」，所以现在：车模占卡片中央，
+     * 这行字落在卡片下部（胎压之上、卡片下内边之上）水平居中。
+     *
+     * - 0 处 → 「✓ 全车已关」（弱化色，不加绿）；
+     * - 1~2 处（车门/车窗/尾门各算一处）→ 逐个列位置，车门橙、车窗黄、尾门橙；
+     * - ≥3 处 → 合并一句（措辞由 [CardSnapshot.statusParts] 给出）。
+     *
+     * 最多两行：一行放得下就一行，放不下折第二行，两行都居中。
+     */
+    private fun drawCarStatusBottomText(canvas: Canvas, r: RectF, items: List<CarStatusItem>) {
+        val doors = ArrayList<String>(4)
+        val windows = ArrayList<String>(4)
+        var trunkOpen = false
+        items.forEachIndexed { idx, it ->
+            if (it.open != true) return@forEachIndexed
+            when (idx) {
+                in CAR_STATUS_DOOR_ITEMS -> doors.add(it.label)
+                CAR_STATUS_TRUNK_ITEM -> trunkOpen = true
+                in CAR_STATUS_WINDOW_ITEMS -> windows.add(it.label)
+            }
+        }
+        val parts = CardSnapshot.statusParts(doors, windows, trunkOpen)
+
+        // 拼成「带颜色的碎片」列表：位置名（告警色）+ 分隔符/后缀（弱化色）。
+        class Run(val text: String, val color: Int)
+        val runs = ArrayList<Run>(8)
+        val allClosed = parts.size == 1 && parts[0].kind == CardSnapshot.StatusKind.NONE
+        if (allClosed) {
+            runs.add(Run("✓ 全车已关", Skin.TEXT_DIM))
+        } else {
+            parts.forEachIndexed { i, part ->
+                val color = when (part.kind) {
+                    CardSnapshot.StatusKind.WINDOW -> Skin.WINDOW_OPEN
+                    CardSnapshot.StatusKind.DOOR -> Skin.CAR_STATE_WARN
+                    CardSnapshot.StatusKind.GENERIC ->
+                        if (doors.isNotEmpty() || trunkOpen) Skin.CAR_STATE_WARN else Skin.WINDOW_OPEN
+                    CardSnapshot.StatusKind.NONE -> Skin.TEXT_DIM
+                }
+                if (i > 0) runs.add(Run("、", Skin.TEXT_DIM))
+                runs.add(Run(part.text, color))
+            }
+            if (parts.isNotEmpty() &&
+                parts[0].kind != CardSnapshot.StatusKind.NONE &&
+                parts[0].kind != CardSnapshot.StatusKind.GENERIC
+            ) {
+                runs.add(Run(" 未关", Skin.TEXT_DIM))
+            }
+        }
+
+        text.typeface = Typeface.DEFAULT
+        text.textAlign = Paint.Align.LEFT
+        text.textSize = CAR_STATUS_BOTTOM_TEXT_SP
+        val maxW = (r.width() - 36f).coerceAtLeast(40f)
+        val lineH = CAR_STATUS_BOTTOM_TEXT_SP + 6f
+
+        // 按字符折行（保留每段颜色）。
+        val lines = ArrayList<MutableList<Run>>()
+        var line = ArrayList<Run>()
+        var lineW = 0f
+        for (run in runs) {
+            var buf = StringBuilder()
+            for (ch in run.text) {
+                val cw = text.measureText(ch.toString())
+                if (lineW + cw > maxW && lineW > 0f) {
+                    if (buf.isNotEmpty()) {
+                        line.add(Run(buf.toString(), run.color))
+                        buf = StringBuilder()
+                    }
+                    lines.add(line)
+                    line = ArrayList()
+                    lineW = 0f
+                }
+                buf.append(ch)
+                lineW += cw
+            }
+            if (buf.isNotEmpty()) line.add(Run(buf.toString(), run.color))
+        }
+        if (line.isNotEmpty()) lines.add(line)
+
+        val shown = lines.take(2)
+        // 底边基线：卡片下内边往上 [CAR_STATUS_BOTTOM_TEXT_FROM_BOTTOM]；两行时向上让一行。
+        var y = r.bottom - CAR_STATUS_BOTTOM_TEXT_FROM_BOTTOM - (shown.size - 1) * lineH
+        for (l in shown) {
+            val totalW = l.sumOf { text.measureText(it.text).toDouble() }.toFloat()
+            var x = r.centerX() - totalW / 2f
+            for (run in l) {
+                text.color = run.color
+                canvas.drawText(run.text, x, y, text)
+                x += text.measureText(run.text)
+            }
+            y += lineH
+        }
+    }
+
+    /**
+     * 车况卡胎压（第244轮：**贴到各自车轮旁边**）。
+     *
+     * 四个标签按车轮方位摆：左前/右前在车头两侧，左后/右后在车尾两侧；
+     * 标签 12px 弱文字在上、数值 22px 粗体 + 单位 11px 在下；
+     * 异常胎压只把数值染成琥珀色，不加底色块。
+     */
+    private fun drawTireBesideWheels(canvas: Canvas, r: RectF, car: RectF, i: VehicleInfo) {
+        // 第248轮：用户意见「四块胎压样式不统一 → 去掉位置描述、数字放大、再靠近车模」；
+        // 第249轮：「胎压字体再放大 1.5 倍」「单位也要放大，现在比例失调」；
+        // 第250轮：「车模适当放大、整体下移」—— 数字 39px 与单位 21px 并排时整组要 107px 宽，
+        // 卡宽 388 撑不下更大的车模，所以单位改成**放在数字下方**（同一列内两行）：
+        // 组宽只有数字宽度（约 68px），车模就能从 150 放大到 210，也不再顶到卡边。
+        val gapX = CAR_STATUS_TIRE_GAP_X
+        // 第251轮：用户澄清「前排两个胎压要往上挪一点，不是要贴到车胎上」。
+        // 所以横向仍按 rect 边缘摆（离车体留白、左右对称），只把**前**轴比例上调：
+        //   前轴 0.18（用户第 251 轮再要求「往上挪一个身位」，从 0.35 再抬 50px）、后轴 0.69。
+        // 纵向比例是相对 rect 高度的，车模尺寸再变也不用重算像素。
+        val frontY = car.top + car.height() * 0.18f + 14f
+        val rearY = car.top + car.height() * 0.69f + 14f
+        val anchors = arrayOf(
+            Triple(car.left - gapX, frontY, -1),   // 左前
+            Triple(car.right + gapX, frontY, +1),  // 右前
+            Triple(car.left - gapX, rearY, -1),    // 左后
+            Triple(car.right + gapX, rearY, +1),
+        )
+        for (k in 0 until 4) {
+            val raw = i.tires.getOrNull(k)?.takeIf { !it.isNaN() && it > 0f }
+            val bar = raw?.let { it / 100f }
+            val abnormal = bar != null && (bar < 2.0f || bar > 2.8f)
+            val value = if (bar == null) "--" else String.format(java.util.Locale.US, "%.1f", bar)
+            val (edge, cy, dir) = anchors[k]
+
+            text.textAlign = Paint.Align.LEFT
+            text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            text.textSize = 39f
+            val vw = text.measureText(value)
+            text.typeface = Typeface.DEFAULT
+            text.textSize = 21f
+            val uw = text.measureText("bar")
+            // 两行一组：数字在上、单位在下，整组按「数字宽」对齐到贴车侧。
+            val anchorX = if (dir < 0) edge - gapX else edge + gapX
+            val startX = if (dir < 0) anchorX - vw else anchorX
+
+            text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            text.textSize = 39f
+            text.color = if (abnormal) Skin.WARN else Skin.TEXT
+            canvas.drawText(value, startX, cy, text)
+
+            text.typeface = Typeface.DEFAULT
+            text.textSize = 21f
+            text.color = Skin.TEXT_SOFT
+            val unitLeft = if (dir < 0) anchorX - uw else anchorX
+            canvas.drawText("bar", unitLeft, cy + 24f, text)
+        }
+        text.textAlign = Paint.Align.LEFT
+        text.typeface = Typeface.DEFAULT
+    }
+
     private fun drawTirePills(
         canvas: Canvas,
         r: RectF,
@@ -3514,6 +3997,23 @@ class ScenePage(context: Context) : View(context) {
                 return
             }
         }
+        // 收藏按钮（第207轮）
+        hits[FAVORITE_HIT_KEY]?.let { r ->
+            if (r.contains(x, y)) {
+                Logx.event(
+                    LogTags.SCENE,
+                    "音乐卡收藏按钮点击",
+                    "card" to "music",
+                    "favorited" to favoriteState.isFavorited,
+                    "known" to favoriteState.known,
+                    "x" to x,
+                    "y" to y,
+                )
+                onFavoriteToggle?.invoke()
+                performClick()
+                return
+            }
+        }
         // 车况卡（第166轮 C 版）：整卡点击 → 打开「车辆状态」面板。
         // 逐窗命中区（carWin0..3）随改版移除：车模不再兼任「车窗开关示意图」。
         hits[CAR_STATUS_CARD_HIT_KEY]?.let { r ->
@@ -3531,7 +4031,7 @@ class ScenePage(context: Context) : View(context) {
             }
         }
         // 播放键
-        hits["play"]?.let { r ->
+        hits[PLAY_HIT_KEY]?.let { r ->
             if (r.contains(x, y)) {
                 // 排障场景：「音乐卡播放键点了不动」——记下点击前的播放状态。
                 Logx.event(
@@ -3859,6 +4359,41 @@ class ScenePage(context: Context) : View(context) {
          */
         const val MUSIC_RING_STROKE = 2f
 
+        // ------------------------------ 音乐卡播放键 / 收藏心形（第208轮重新排版）
+
+        /**
+         * 音乐卡**播放键**的圆半径（设计坐标）。
+         *
+         * 播放键的圆底、命中区都按它算；
+         * 第208轮收藏心形要贴在它**左边**，所以也用它来定位。
+         */
+        const val MUSIC_PLAY_RADIUS = 28f
+
+        /**
+         * 音乐卡**收藏心形**的边长（设计坐标）。
+         *
+         * 第207轮是 26（放在卡片右上角）；
+         * 第208轮按用户要求挪到**播放键左侧**并**放大一倍** → 52；
+         * 第209轮再往左挪 —— 摆在**歌名和播放键中间**（不再是贴着播放键）。
+         */
+        const val MUSIC_FAV_ICON_SIZE = 52f
+
+        /**
+         * 收藏心形与**播放键圆**之间的**最小**间隙（设计坐标）。
+         *
+         * 第209轮起心形不再贴着播放键，而是摆在歌名和播放键**中间**；
+         * 这个值只是**兜底** —— 万一空间不够，至少别和播放键圆碰上。
+         */
+        const val MUSIC_FAV_GAP = 6f
+
+        /**
+         * 收藏心形与**歌名文本列**之间的**最小**间隙（设计坐标）。
+         *
+         * 心形往左挪之后，歌名列的右边界要跟着让开 ——
+         * 否则歌名会从心形底下穿过去。
+         */
+        const val MUSIC_FAV_TEXT_GAP = 8f
+
         /**
          * 进度环轨道色。
          *
@@ -3992,6 +4527,12 @@ class ScenePage(context: Context) : View(context) {
         /** 车况卡整卡命中键（第166轮 C 版：点整张卡开「车辆状态」面板）。 */
         const val CAR_STATUS_CARD_HIT_KEY = "carStatusCard"
 
+        /** 音乐卡**收藏心形**的命中键（第207轮新增，第208轮挪到播放键左侧）。 */
+        const val FAVORITE_HIT_KEY = "favorite"
+
+        /** 音乐卡**播放键**的命中键。 */
+        const val PLAY_HIT_KEY = "play"
+
         /** 第178轮：01 的俯视横置图区 356×246，水平居中、比原 3/4 区略偏上。 */
         const val CAR_STATUS_CAR_X = 16f
         /** 第181轮选型 A：俯视车模整体下移量（设计 px，卡内坐标）。 */
@@ -4071,6 +4612,28 @@ class ScenePage(context: Context) : View(context) {
         const val CAR_STATUS_CAR_TOP_LEGACY = 40f
         const val CAR_STATUS_CAR_H_LEGACY = 292f
 
+        // ── 第243轮（设计板 Main.png 车况卡特写实测）──────────────
+        // 卡 1488..1876 / 380..760；车模 1600..1700（卡内 112..212）、440..660（卡内 64..284）；
+        // 「全车已关」在卡内 x≈232；四轮胎压一行贴在卡底（标签 680、数值 700..730）。
+        //
+        // 第244轮（用户反馈）：车模改**水平居中**，四轮胎压**贴到各自车轮旁边**，
+        // 「全车已关」挪到**卡片下部居中**。CAR_STATUS_CAR_BOX_X / CAR_STATUS_TEXT_X
+        // 随之作废（不再按卡左内边定位），常量保留供历史对照。
+        /** 车模图区：上沿 / 宽 / 高（图按资产宽高比在框内居中；x 由卡片中心算）。 */
+        const val CAR_STATUS_CAR_BOX_TOP = 30f
+        const val CAR_STATUS_CAR_BOX_W = 210f
+        const val CAR_STATUS_CAR_BOX_H = 290f
+
+        /** 胎压文字锚点：距车模 rect 边缘 [CAR_STATUS_TIRE_GAP_X]；纵向按车高比例落前后轴（0.18 / 0.69）。 */
+        const val CAR_STATUS_TIRE_GAP_X = 6f
+
+        /** 胎压标签基线相对数值基线的抬升（标签在上、数值在下）。 */
+        const val CAR_STATUS_TIRE_LABEL_GAP = 20f
+
+        /** 状态文字（「✓ 全车已关」）字号 / 基线相对卡底的距离。 */
+        const val CAR_STATUS_BOTTOM_TEXT_SP = 18f
+        const val CAR_STATUS_BOTTOM_TEXT_FROM_BOTTOM = 22f
+
         /**
          * 车模左右为胎压胶囊预留的沟槽宽度（第176轮）：胎压不再压车身、也不画引线，
          * 胶囊放进这两条沟槽里（左侧前/后、右侧前/后），靠纵向位置与轮子对应。
@@ -4092,16 +4655,22 @@ class ScenePage(context: Context) : View(context) {
         // 放大后的层级：状态行 26 = 标题 26 > 详情入口 24 > 胎压数值 22 > 单位 14。
 
         /** 车况卡标题（「车况」）字号（第189轮：13 → 26）。 */
-        const val CAR_STATUS_TITLE_SP = 26f
+        const val CAR_STATUS_TITLE_SP = 20f
 
         /** 车况卡标题基线相对「卡顶 + [CAR_STATUS_TITLE_TOP]」的偏移（= 字号本身）。 */
-        const val CAR_STATUS_TITLE_TOP = 12f
+        const val CAR_STATUS_TITLE_TOP = 10f
 
         /** 车况卡「详情 ›」字号（第189轮：12 → 24，比标题小一档）。 */
-        const val CAR_STATUS_LINK_SP = 24f
+        const val CAR_STATUS_LINK_SP = 16f
 
         /** 车况卡状态行字号（第189轮：13 → 26）。 */
         const val CAR_STATUS_STATUS_SP = 26f
+
+        /** 车况卡右侧状态文字字号（画板 `✓ 全车已关` 约 20px）。 */
+        const val CAR_STATUS_RIGHT_TEXT_SP = 20f
+
+        /** 底部四轮胎压的标签顺序（画板：左前/右前/左后/右后）。 */
+        val CAR_TIRE_LABELS = arrayOf("左前", "右前", "左后", "右后")
 
         // -------------------------------------------------- 底部卡片字号（第189轮）
         //
@@ -4122,13 +4691,13 @@ class ScenePage(context: Context) : View(context) {
         const val TRIP_TITLE_BASE = 31f
 
         /** 单元格标签字号（第189轮：19 → 21）。 */
-        const val TRIP_LABEL_SP = 21f
+        const val TRIP_LABEL_SP = 16f
 
         /** 单元格标签基线（相对单元格顶）。 */
-        const val TRIP_LABEL_BASE = 20f
+        const val TRIP_LABEL_BASE = 14f
 
         /** 单元格数值字号（第189轮：24 → 27；放不下会整卡一起降档）。 */
-        const val TRIP_VALUE_SP = 27f
+        const val TRIP_VALUE_SP = 28f
 
         /** 单元格数值字号下限。 */
         const val TRIP_VALUE_SP_MIN = 20f
@@ -4137,16 +4706,23 @@ class ScenePage(context: Context) : View(context) {
         const val TRIP_VALUE_SP_NARROW = 24f
 
         /** 卡片被压窄时的标签字号（原来是 19）。 */
-        const val TRIP_LABEL_SP_NARROW = 19f
+        const val TRIP_LABEL_SP_NARROW = 15f
 
         /** 数值基线（相对单元格顶）。 */
-        const val TRIP_VALUE_BASE = 51f
+        const val TRIP_VALUE_BASE = 40f
 
         /** 第一行单元格顶（相对卡顶）。 */
-        const val TRIP_CELL_TOP_1 = 36f
+        const val TRIP_CELL_TOP_1 = 37f
 
         /** 第二行单元格顶（相对卡顶）。 */
-        const val TRIP_CELL_TOP_2 = 92f
+        const val TRIP_CELL_TOP_2 = 90f
+
+        /** 行程/车门车窗卡的列位置（第244轮按画板实测）：左列距卡左、右列起点占比。 */
+        const val TRIP_COL_LEFT = 14f
+        const val TRIP_COL_SPLIT = 0.518f
+
+        /** 单元格右侧留给「相邻列」的空隙（单元格裁字按这个宽度算）。 */
+        const val TRIP_CELL_TRAILING = 8f
 
         /**
          * 车窗打开 = 黄色（用户指定）。
@@ -4270,17 +4846,17 @@ class ScenePage(context: Context) : View(context) {
          * 但它管的是画「续航」的那张卡（`drawRangeCard`）。
          * 名字跟着显示名一起改掉，免得下次又被当成车况卡。
          */
-        const val RANGE_CARD_W = 311f
+        const val RANGE_CARD_W = 300f
 
         /** 卡片库新增：行程卡 / 车门车窗卡的自然宽度。 */
-        const val TRIP_BOTTOM_CARD_W = 388f
+        const val TRIP_BOTTOM_CARD_W = 440f
         const val STATUS_BOTTOM_CARD_W = 380f
 
         /** 快捷入口卡宽（第五十轮对齐设计板 s01：与通用音乐 / 快捷车控同宽 338）。 */
         const val QUICK_CARD_W = 338f
 
         /** 媒体卡宽。第四十九轮「浮屿」从 400 收到 338，与快捷卡 / 车控卡同宽。 */
-        const val MUSIC_CARD_W = 338f
+        const val MUSIC_CARD_W = 600f
 
         /**
          * 媒体卡里标题 / 歌手那一列的宽度。
@@ -4294,22 +4870,22 @@ class ScenePage(context: Context) : View(context) {
         val MUSIC_TEXT_COL_W = MusicCardVisuals.textColumnWidth()
 
         /** 空调快捷卡左右内边距。 */
-        const val CLIMATE_CARD_PAD = 15f
+        const val CLIMATE_CARD_PAD = 14f
 
         /** 空调快捷卡里每个座位位的宽。 */
         const val CLIMATE_SEAT_W = 100f
 
         /** 座位位之间的间隙。 */
-        const val CLIMATE_SEAT_GAP = 4f
+        const val CLIMATE_SEAT_GAP = 8f
 
         /** 空调快捷卡宽 = padding 15*2 + 100*3 + 4*2 = 338（第四十九轮「浮屿」统一宽度）。 */
-        const val CLIMATE_CARD_W = 15f + 100f * 3 + 4f * 2 + 15f
+        const val CLIMATE_CARD_W = 420f
 
         /** 胎压卡宽。 */
         const val TIRE_CARD_W = 350f
 
         /** 卡片间距（等的 marginStart 20px）。 */
-        const val CARD_GAP = 20f
+        const val CARD_GAP = 24f
 
         /** 壁纸提示条自动隐藏时长（1600ms）。 */
         const val HINT_AUTO_HIDE_MS = 1600L
@@ -4333,7 +4909,19 @@ class ScenePage(context: Context) : View(context) {
         const val MUSIC_CONTENT_TOP = 22f
 
         /** 空调位内容顶部偏移（第五十轮：标题行之下，槽位高 104，内容 8~96）。 */
-        const val SEAT_CONTENT_TOP = 8f
+        const val SEAT_CONTENT_TOP = 10f
+
+        /**
+         * 快捷车控 chip 里图标的顶边（距 chip 顶）。
+         *
+         * 第244轮：用户反馈「快捷操作按钮大小与卡片不匹配、留白过多」——
+         * 原来 chip 112×70 摆在卡顶 30、下面空 50px。现在 chip 高 100、卡内上下各留 ~26，
+         * 图标与文案随之放大并整体下移，chip 与卡片的比例接近画板那种「几乎撑满」。
+         */
+        const val CHIP_ICON_TOP = 18f
+
+        /** 快捷车控 chip 文案基线（距 chip 顶）。 */
+        const val CHIP_LABEL_BASELINE = 72f
 
         /**
          * 有按压反馈的命中区（**判定顺序** = [handleTap] 的顺序，先命中的赢）。
@@ -4343,8 +4931,9 @@ class ScenePage(context: Context) : View(context) {
          */
         private val PRESS_HIT_KEYS: List<String> = listOf(
             "source",
+            FAVORITE_HIT_KEY,
             CAR_STATUS_CARD_HIT_KEY,
-            "play",
+            PLAY_HIT_KEY,
             "musicCover",
             "nav",
             "seatHeat",

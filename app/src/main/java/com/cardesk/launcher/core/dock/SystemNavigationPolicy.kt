@@ -89,12 +89,28 @@ object SystemNavigationPolicy {
         hideStatusPackages: Set<String>,
         navInsets: Boolean,
         hideNavigation: Boolean = false,
+        immersiveNavigationPackages: Collection<String> = emptyList(),
+        preserveForeignImmersiveFull: Boolean = false,
     ): String? {
-        val remaining = remainingSegments(current)
+        val remaining = remainingSegments(current, preserveForeignImmersiveFull)
         val out = ArrayList<String>()
-        // 第193轮：预留区在时禁止写 immersive.navigation=*（见 KDoc）。
-        if (hideNavigation && !navInsets) {
-            out.add("immersive.navigation=*")
+        // 第204轮：按 App 藏原车导航栏。
+        //
+        // 真车 A/B 实测：`immersive.navigation=<具体包>` 会让
+        // `CarNavigationBar.mPolicyVisibility=false`（真的不画了），
+        // 而只影响列出来的包 —— 和我们「对沉浸型 App 让位」正好配套。
+        val navApps = immersiveNavigationPackages
+            .asSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .sortedWith(String.CASE_INSENSITIVE_ORDER)
+            .toList()
+        if (navApps.isNotEmpty()) {
+            out.add(NavigationKey + "=" + navApps.joinToString(NavigationSeparator))
+        } else if (hideNavigation && !navInsets) {
+            // 第193轮：预留区在时禁止写 immersive.navigation=*（见 KDoc）。
+            out.add(NavigationKey + "=*")
         }
         if (hideStatus) {
             val exemptions = hideStatusPackages
@@ -121,6 +137,8 @@ object SystemNavigationPolicy {
         hideStatusPackages: Set<String>,
         navInsets: Boolean,
         hideNavigation: Boolean = false,
+        immersiveNavigationPackages: Collection<String> = emptyList(),
+        preserveForeignImmersiveFull: Boolean = false,
     ): Boolean {
         val prefs = prefs(context)
         val current = readPolicy(context)
@@ -134,7 +152,15 @@ object SystemNavigationPolicy {
             // 排障场景：退出后策略没还原 —— 先确认进入前到底是什么值
             Logx.d(LogTags.SYS, "全局 Dock：记录 policy_control 原值", "original" to current)
         }
-        val value = merge(current, hideStatus, hideStatusPackages, navInsets, hideNavigation)
+        val value = merge(
+            current,
+            hideStatus,
+            hideStatusPackages,
+            navInsets,
+            hideNavigation,
+            immersiveNavigationPackages,
+            preserveForeignImmersiveFull,
+        )
         val ok = SystemOps.applyPolicyControl(context, value)
         if (ok) {
             prefs.edit()
@@ -162,6 +188,55 @@ object SystemNavigationPolicy {
             )
         }
         return ok
+    }
+
+    /**
+     * 第204轮：把我们算出来的策略「覆盖进去」，但保留别人写的段。
+     *
+     * 场景：全局 Dock 关闭 / 没有预留区这两条路径以前直接 `OemDockPolicy.buildPolicyValue`
+     * 算出整条策略、`SystemOps.applyPolicyControl` 一把写死 —— 真车上用户还有
+     * hywebview 之类在用 `immersive.full`（按 App 隐藏状态栏+导航栏），
+     * 这一把写就会把它清掉（第204轮实测：重启一次整条策略变成 null）。
+     *
+     * 现在的口径：
+     * - `immersive.navigation` / `immersive.status` 是**我们**的段，用 [owned] 里的替换；
+     * - 其它 `immersive.*`（重点是别人的 `immersive.full`）原样保留；
+     * - 非沉浸段（别的功能写的 `foo=bar`）也保留。
+     */
+    fun overwriteOwned(context: Context, owned: String?): Boolean {
+        val merged = mergePreserving(readPolicy(context), owned)
+        val ok = SystemOps.applyPolicyControl(context, merged)
+        Logx.i(
+            LogTags.SYS,
+            "全局 Dock：policy_control 合并写入",
+            "owned" to owned,
+            "merged" to merged,
+            "ok" to ok,
+        )
+        return ok
+    }
+
+    /** [overwriteOwned] 的纯函数部分（可单测）。 */
+    fun mergePreserving(current: String?, owned: String?): String? {
+        val keep = current
+            .orEmpty()
+            .split(SegmentSeparator)
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .filter { seg ->
+                when {
+                    seg.startsWith(NavigationKey) -> false
+                    seg.startsWith(StatusKey) -> false
+                    else -> true
+                }
+            }
+        val ours = owned
+            .orEmpty()
+            .split(SegmentSeparator)
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && !keep.contains(it) }
+        val out = (keep + ours).joinToString(SegmentSeparator)
+        return out.takeIf { it.isNotEmpty() }
     }
 
     /**
@@ -196,7 +271,10 @@ object SystemNavigationPolicy {
             )
             return false
         }
-        val ok = runCatching { SystemOps.applyPolicyControl(context, original) }.getOrDefault(false)
+        // 第204轮：恢复也要保住别人后加的段（真车上的 hywebview 会写 immersive.full）——
+        // 原值可能是几天前记的 null，直接写回去等于把用户中途加的配置清空。
+        val target = mergePreserving(current, original)
+        val ok = runCatching { SystemOps.applyPolicyControl(context, target) }.getOrDefault(false)
         if (ok) {
             prefs.edit()
                 .remove(KEY_ORIGINAL)
@@ -204,7 +282,12 @@ object SystemNavigationPolicy {
                 .remove(KEY_APPLIED)
                 .remove(KEY_APPLIED_SAVED)
                 .apply()
-            Logx.i(LogTags.SYS, "全局 Dock：policy_control 已恢复", "original" to original)
+            Logx.i(
+                LogTags.SYS,
+                "全局 Dock：policy_control 已恢复",
+                "original" to original,
+                "written" to target,
+            )
         } else {
             // 排障场景：恢复失败 —— 原值没丢，下次退出/重启还能再试
             Logx.w(LogTags.SYS, "全局 Dock：policy_control 恢复失败", "original" to original)
@@ -241,11 +324,26 @@ object SystemNavigationPolicy {
     }.getOrNull()
 
     /** 剥掉空段与所有 `immersive.*` 段，保留其余策略（顺序不变）。 */
-    private fun remainingSegments(current: String?): List<String> = current
+    private fun remainingSegments(
+        current: String?,
+        preserveForeignImmersiveFull: Boolean = false,
+    ): List<String> = current
         .orEmpty()
         .split(SegmentSeparator)
         .map { it.trim() }
-        .filter { it.isNotEmpty() && !it.startsWith(ImmersivePrefix) }
+        .filter { it.isNotEmpty() }
+        .filter { seg ->
+            // immersive.navigation / immersive.status 归我们管，一律先剥掉再重写。
+            // 第204轮起，别人写的 immersive.full 段在 preserveForeignImmersiveFull
+            // 时原样保留：真车上有 hywebview 之类的应用靠它按 App 隐藏状态栏+导航栏，
+            // 全剥掉会把用户已有的配置清空。
+            when {
+                seg.startsWith(NavigationKey) -> false
+                seg.startsWith(StatusKey) -> false
+                seg.startsWith(ImmersivePrefix) -> preserveForeignImmersiveFull
+                else -> true
+            }
+        }
 
     /**
      * 比较两个 `policy_control` 值是否等价：null / 空串 / 字面量 `"null"` 都表示「无策略」。
@@ -259,4 +357,11 @@ object SystemNavigationPolicy {
     }
 
     private const val ImmersivePrefix = "immersive."
+
+    /** 第204轮：按 App 藏原车导航栏用的键。 */
+    private const val NavigationKey = "immersive.navigation"
+
+    private const val StatusKey = "immersive.status"
+
+    private const val NavigationSeparator = ","
 }

@@ -51,6 +51,19 @@ object AdaptapiDayNight {
     private const val RETRY_INTERVAL_MS = 5_000L
 
     /**
+     * 重试间隔的上限（毫秒）—— 第220轮。
+     *
+     * 失败时逐次拉长（5 → 10 → 20 → 30 秒封顶），
+     * 成功一次就复位回 [RETRY_INTERVAL_MS]。
+     */
+    private const val MAX_RETRY_INTERVAL_MS = 30_000L
+
+    /**
+     * 连续失败多少次记一条日志（第一次必记）—— 第220轮。
+     */
+    private const val FAIL_LOG_EVERY = 10
+
+    /**
      * 光感变化的合并延时（毫秒）。
      *
      * 对标 App 是 400ms（`scheduleApplyFollowSensorCoalesced`）：车机在明暗边界上
@@ -98,19 +111,27 @@ object AdaptapiDayNight {
         if (registered) return true
         appContext = context.applicationContext
         val now = SystemClock.elapsedRealtime()
-        if (!force && now - lastAttemptAt < RETRY_INTERVAL_MS) return false
+        if (!force && now - lastAttemptAt < currentRetryIntervalMs()) return false
         lastAttemptAt = now
         // ① Device 实例**只建一次**：它的构造里会注册蓝牙 PBAP 广播接收器
         //    （厂商 `DeviceImpl` → `BtExtensionImpl` → `PbapExtensionImpl`），
         //    重建会攒出一串重复接收器。
-        if (device == null && !createDevice(context)) return false
+        if (device == null && !createDevice(context)) {
+            onAttachFailed()
+            return false
+        }
         // ② 昼夜通道：车机服务没连上时拿不到（`CarNotConnectedException`），可重试；
         //    但成功后**必须缓存**——`DayNightMode` 构造时会在共享的信号管理器上
         //    注册回调且不可反注册，反复建会攒出一串重复回调。
-        if (mode == null && !createMode()) return false
+        if (mode == null && !createMode()) {
+            onAttachFailed()
+            return false
+        }
         // ③ 回调注册（失败了下次再试，不重建上面两步）
         val ok = registerCallback(mode ?: return false)
         if (ok) {
+            failCount = 0
+            retryIntervalMs = RETRY_INTERVAL_MS
             Logx.i(
                 LogTags.THEME,
                 "接上车机昼夜通道",
@@ -121,6 +142,46 @@ object AdaptapiDayNight {
         return ok
     }
 
+    /**
+     * 挂载失败后的退避。
+     *
+     * ## 第220轮：失败要退避，失败日志要节流
+     *
+     * 之前不管成不成都按 [RETRY_INTERVAL_MS]（5 秒）重试，
+     * 而失败时那一条 WARN 会**把异常对象整个记下来** ——
+     * 于是「这台机器根本没有 AdaptAPI」这件事，
+     * 会以 5 秒一条的速度刷满日志文件。
+     *
+     * 现在：
+     * - 重试间隔**逐次拉长**（5 → 10 → 20 → 30 秒封顶），
+     *   成功一次就复位；
+     * - 失败日志**第一次必记、之后每第 10 次记一条**。
+     *
+     * 真车上这条通道第一次就接上了（不触发退避）；
+     * 模拟器上没有 AdaptAPI（会退避，日志也就不再刷屏）。
+     */
+    private fun onAttachFailed() {
+        failCount++
+        retryIntervalMs = (retryIntervalMs * 2).coerceAtMost(MAX_RETRY_INTERVAL_MS)
+        if (failCount % FAIL_LOG_EVERY != 1) return
+        Logx.w(
+            LogTags.THEME,
+            "接车机昼夜通道仍不可用（已退避重试）",
+            "连续失败次数" to failCount,
+            "下次重试间隔ms" to retryIntervalMs,
+        )
+    }
+
+    /** 连续失败次数。 */
+    private var failCount = 0
+
+    /** 当前的重试间隔（失败时逐次拉长）。 */
+    @Volatile
+    private var retryIntervalMs = RETRY_INTERVAL_MS
+
+    /** 当前的重试间隔。 */
+    private fun currentRetryIntervalMs(): Long = retryIntervalMs
+
     /** 建 Device 实例。 */
     private fun createDevice(context: Context): Boolean = runCatching {
         val app = context.applicationContext
@@ -129,10 +190,12 @@ object AdaptapiDayNight {
         device != null
     }.getOrElse { t ->
         device = null
-        Logx.w(
+        // 第220轮：**这里不再逐次记 WARN** ——
+        // 失败原因统一由 [onAttachFailed] 按「第一次 + 每第 10 次」记一条，
+        // 异常对象本身（带栈）只在那几条里带出去。
+        Logx.d(
             LogTags.THEME,
-            "接车机昼夜通道失败（建设备）",
-            t,
+            "建设备失败",
             "reason" to "${t.javaClass.simpleName}: ${t.message}",
         )
         false
@@ -149,10 +212,10 @@ object AdaptapiDayNight {
     }.getOrElse { t ->
         mode = null
         getDayNightMethod = null
-        Logx.w(
+        // 第220轮：同 [createDevice] —— 失败原因统一由 [onAttachFailed] 节流记。
+        Logx.d(
             LogTags.THEME,
-            "接车机昼夜通道失败（取昼夜通道）",
-            t,
+            "取昼夜通道失败",
             "reason" to "${t.javaClass.simpleName}: ${t.message}",
         )
         false
@@ -164,7 +227,8 @@ object AdaptapiDayNight {
      * @return true=夜间 / false=白天；null = 读不到（调用方回落到下一个来源）
      */
     fun nightUi(): Boolean? {
-        // 还没挂上时顺手再试一次（内部按 5 秒节流）：车机服务连上后自然就接上了。
+        // 还没挂上时顺手再试一次（内部有节流 + **失败退避**，第220轮）：
+        // 车机服务连上后自然就接上了；一直连不上也不会每 5 秒就试一次。
         if (!registered) appContext?.let { attach(it) }
         val dn = mode ?: return null
         val m = getDayNightMethod ?: return null

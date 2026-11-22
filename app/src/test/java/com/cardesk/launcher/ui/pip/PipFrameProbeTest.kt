@@ -1,5 +1,6 @@
 package com.cardesk.launcher.ui.pip
 
+import com.cardesk.launcher.core.PipSampleGate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -61,6 +62,24 @@ class PipFrameProbeTest {
         assertEquals(48, PipFrameProbe.BRIGHT_LUMA)
         assertEquals(0.02, PipFrameProbe.BRIGHT_RATIO_MIN, 1e-9)
         assertEquals(0.15f, PipFrameProbe.SAMPLE_INSET_RATIO, 1e-6f)
+    }
+
+    /**
+     * 第224轮：alpha 闸门的常量口径。
+     *
+     * 探针里的两个常量是 `PipSampleGate` 的**引用**（单一事实来源）——
+     * 这里同时钉住「数值」和「引用关系」，避免以后有人就地改一个而漏另一个。
+     */
+    @Test
+    fun `第224轮新增的 alpha 闸门常量符合预期`() {
+        assertEquals(128, PipFrameProbe.OPAQUE_ALPHA_MIN)
+        assertEquals(0.02, PipFrameProbe.OPAQUE_RATIO_MIN, 1e-9)
+        assertEquals(PipSampleGate.OPAQUE_ALPHA_MIN, PipFrameProbe.OPAQUE_ALPHA_MIN)
+        assertEquals(
+            PipSampleGate.OPAQUE_RATIO_MIN,
+            PipFrameProbe.OPAQUE_RATIO_MIN,
+            1e-9,
+        )
     }
 
     // ---------------------------------------------------------------- 第130轮：采样矩形

@@ -114,7 +114,7 @@ class SettingsDropdownTest {
         overlay.showPageKey("media")
         shadowOf(android.os.Looper.getMainLooper()).idle()
 
-        val options = texts(bodyOf(overlay), SettingsOverlay.DROPDOWN_OPTION_MARK)
+        val options = texts(overlay, SettingsOverlay.DROPDOWN_OPTION_MARK)
         assertEquals(
             "下拉应该列出全部 ${MediaSources.LIST.size} 个来源",
             MediaSources.LIST.size,
@@ -140,7 +140,7 @@ class SettingsDropdownTest {
         overlay.showPageKey("media")
         shadowOf(android.os.Looper.getMainLooper()).idle()
 
-        val options = marked(bodyOf(overlay), SettingsOverlay.DROPDOWN_OPTION_MARK)
+        val options = marked(overlay, SettingsOverlay.DROPDOWN_OPTION_MARK)
             .filterIsInstance<TextView>()
         val netease = options.first { it.text.toString() == "网易云音乐" }
         netease.performClick()
@@ -167,7 +167,7 @@ class SettingsDropdownTest {
         assertTrue("默认是通用音乐时应该有这条提示", genericNote != null)
         assertEquals("提示默认要显示", View.VISIBLE, genericNote!!.visibility)
 
-        val options = marked(body, SettingsOverlay.DROPDOWN_OPTION_MARK).filterIsInstance<TextView>()
+        val options = marked(overlay, SettingsOverlay.DROPDOWN_OPTION_MARK).filterIsInstance<TextView>()
         options.first { it.text.toString() == "QQ音乐" }.performClick()
         shadowOf(android.os.Looper.getMainLooper()).idle()
 
@@ -199,6 +199,29 @@ class SettingsDropdownTest {
         }
     }
 
+    /** v 在 body 坐标系里的位置（body 内部没有滚动，逐层累加就够）。 */
+    private fun boundsIn(v: View, body: View): android.graphics.Rect {
+        var x = 0
+        var y = 0
+        var n: View? = v
+        while (n != null && n !== body) {
+            x += n.left
+            y += n.top
+            n = n.parent as? View
+        }
+        return android.graphics.Rect(x, y, x + v.width, y + v.height)
+    }
+
+    private fun allViews(root: View): List<View> {
+        val out = ArrayList<View>()
+        fun walk(v: View) {
+            out.add(v)
+            if (v is ViewGroup) for (i in 0 until v.childCount) walk(v.getChildAt(i))
+        }
+        walk(root)
+        return out
+    }
+
     @Test
     fun `按钮底边到下一项要真的有空隙_不是零距离`() {
         val overlay = overlay()
@@ -206,18 +229,57 @@ class SettingsDropdownTest {
         shadowOf(android.os.Looper.getMainLooper()).idle()
 
         val body = layoutBody(bodyOf(overlay))
-        // 「配置 Dock 快捷应用…」按钮的下一个兄弟 = 「沉浸系统导航栏」那一行。
         val button = marked(body, SettingsOverlay.ACTION_BUTTON_MARK)
             .filterIsInstance<TextView>()
             .first { it.text.toString().contains("配置 Dock 快捷应用") }
-        val idx = (0 until body.childCount).first { body.getChildAt(it) === button }
-        assertTrue("按钮后面应该还有内容（下一行）", idx + 1 < body.childCount)
-        val next = body.getChildAt(idx + 1)
 
-        val gap = next.top - button.bottom
+        // 第242轮改成两栏（画板 s11）：按钮落在右栏里，不再是 body 的直属子 view，
+        // 所以「body 的下一个兄弟」这种写法不再成立 ——
+        // 改成按真实布局量：按钮下方 margin 那条带子里，**同一横坐标范围**内
+        // 不能再有任何内容（别的栏里的行横坐标不重叠，不算）。
+        val column = button.parent as ViewGroup
+        assertTrue("按钮应该在某一栏里（两栏版式），而不是 body 的直属子 view", column !== body)
+        val lp = button.layoutParams as ViewGroup.MarginLayoutParams
         assertTrue(
-            "按钮底边到下一项只隔了 $gap px —— 这就是「压到了下一个选项」",
-            gap >= 12,
+            "按钮「${button.text}」底下必须留间距（之前只给了 topMargin，底边贴住下一行）",
+            lp.bottomMargin >= 12,
+        )
+
+        // 逐枚按钮量：按钮下方 margin 那条带子里、同一横坐标范围内
+        // 最近的一条内容离按钮底边多远。
+        var measured = 0
+        for (b in marked(body, SettingsOverlay.ACTION_BUTTON_MARK).filterIsInstance<TextView>()) {
+            val m = b.layoutParams as ViewGroup.MarginLayoutParams
+            val bb = boundsIn(b, body)
+            var nearestGap = Int.MAX_VALUE
+            var nearest: View? = null
+            for (v in allViews(body)) {
+                if (v === b) continue
+                val r = boundsIn(v, body)
+                if (r.width() <= 0 || r.height() <= 0) continue
+                // 只算「在按钮下面」且横向真的和按钮重叠的内容（别的栏 / 说明文字不算）。
+                val xOverlap = minOf(r.right, bb.right) - maxOf(r.left, bb.left)
+                if (xOverlap <= 0) continue
+                if (r.top < bb.bottom - 1) continue
+                val gap = r.top - bb.bottom
+                if (gap < nearestGap) {
+                    nearestGap = gap
+                    nearest = v
+                }
+            }
+            if (nearest != null) {
+                measured++
+                assertTrue(
+                    "按钮「${b.text}」底边到下一项只隔了 $nearestGap px（下一项 " +
+                        "${nearest.javaClass.simpleName}，bottomMargin=${m.bottomMargin}）" +
+                        " —— 这就是「压到了下一个选项」",
+                    nearestGap >= 12,
+                )
+            }
+        }
+        assertTrue(
+            "Dock 页至少要有一枚按钮下面还有内容，否则这条断言等于没量（现在是空的）",
+            measured >= 1,
         )
     }
 

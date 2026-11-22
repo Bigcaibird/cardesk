@@ -35,7 +35,7 @@ object Shape {
      * 第五十八轮起**可由用户调整**（设置页「卡片风格」），
      * 改动统一走 [CardStyle.applyRadius]，内嵌块 / 图标底会等比跟着走。
      */
-    var CARD = 28f
+    var CARD = 24f
 
     /** 内嵌块 / 列表行圆角。 */
     var INNER = 18f

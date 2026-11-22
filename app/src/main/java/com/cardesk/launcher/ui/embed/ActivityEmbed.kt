@@ -1,5 +1,6 @@
 package com.cardesk.launcher.ui.embed
 
+import android.app.ActivityManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -7,6 +8,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.View
+import com.cardesk.launcher.core.HostTaskDisplay
 import com.cardesk.launcher.core.VirtualDisplayIdResolver
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
@@ -98,8 +100,39 @@ object ActivityEmbed {
     /** 慢速探测的总上限（毫秒）。 */
     private const val READY_SLOW_TOTAL_MS = 300_000L
 
+    /**
+     * 判定 task 归属时最多查多少个最近任务（第224轮）。
+     *
+     * 与 `PipSurface.MAX_RUNNING_TASKS` 同口径：取最近 50 个足够覆盖
+     * 「画中画承载应用 + 桌面 + 几个系统界面」。
+     */
+    private const val MAX_HOST_TASKS = 50
+
     /** 承载面 → 就绪等待器（拆承载面时要一并停掉）。 */
     private val starters = java.util.WeakHashMap<View, ReadyStarter>()
+
+    /**
+     * 第226轮：**我们自己**建的虚拟屏（`ui/pip/PipMirrorHost.kt`）的 displayId。
+     *
+     * 窗口透明时画中画改走「自建虚拟屏 + `TextureView` 镜像」，
+     * 那块 View 不是 `ActivityView`、没有 `mVirtualDisplay` 字段可探，
+     * 所以由宿主在虚拟屏建好后 [bindHostedDisplay] 登记进来。
+     *
+     * [virtualDisplayIdOf] 会**先查这张表** —— 否则搬移/黑屏自愈拿不到 displayId，
+     * 会退回「判据不可用」⇒ 自愈与守护窗口整级失效。
+     */
+    private val hostedDisplayIds = java.util.WeakHashMap<View, Int>()
+
+    /** 登记「这块 View 的承载画面在我们自己建的虚拟屏 [displayId] 上」（第226轮）。 */
+    fun bindHostedDisplay(view: View, displayId: Int) {
+        synchronized(hostedDisplayIds) { hostedDisplayIds[view] = displayId }
+        Logx.i(LogTags.NAV_UI, "画中画宿主屏已登记", "display" to displayId)
+    }
+
+    /** 注销登记（释放时调用）。 */
+    fun unbindHostedDisplay(view: View) {
+        synchronized(hostedDisplayIds) { hostedDisplayIds.remove(view) }
+    }
 
     /** 试着把 [pkg] 嵌进来；失败返回 null。 */
     fun embed(context: Context, pkg: String): View? {
@@ -536,9 +569,30 @@ object ActivityEmbed {
          * surface 重建（切页 / 切到别的应用再回来）。
          *
          * AOSP 的 `ActivityView` 在 surface 重建时**不会**重新创建 VirtualDisplay，
-         * 也就不会再次触发 `onActivityViewReady` → 承载应用不会被拉起来 → 黑屏。
-         * 这里在重建时把承载应用**重新下发一次启动**
-         * （用的是那套 NEW_TASK 旗标，已有 task 会被拉到前台而不是重开）。
+         * 也就不会再次触发 `onActivityViewReady`。
+         *
+         * ## 第67轮的写法：重建时**无条件**重新拉起
+         *
+         * 当时的假设是「surface 重建 ⇒ 承载应用需要重新拉起」。
+         * 用的是那套 NEW_TASK 旗标 —— 但实测**并不总是**「拉到前台」：
+         * 承载应用会被重新走一遍启动流程，落回它自己的首页。
+         *
+         * ## 第224轮：**先判 task 在哪块屏，再决定要不要拉起**
+         *
+         * 用户报「导入视频壁纸后，画中画的高德跑回首页」。实车日志里
+         * 每次 `承载面重建，重新拉起承载应用` 之后都跟着一条
+         * `START … pkg=com.autonavi.amapautp.yh` —— 一共 4 次，
+         * 全发生在弹完文件选择器、回到桌面之后。
+         *
+         * 机制：弹文件选择器 → cardesk `onPause/onStop` → `ActivityView` 的
+         * surface 被销毁（AOSP 9 只 `mVirtualDisplay.setSurface(null)`，**不 release**）
+         * → 回到桌面 surface 重建 → 这里无条件 `startActivity` → 高德被重拉。
+         *
+         * 而这时高德的 task **一直还在我们的 VirtualDisplay 上**，根本不需要重拉。
+         * 所以现在先算 [HostTaskDisplay.State]：
+         * **明确在我们屏上 / 判不准 ⇒ 不动**；明确在别的屏 / task 没了 ⇒ 才拉起。
+         * （判不准不动，是因为误判的代价是「把用户正在用的应用踢回首页」，
+         *  漏判有进程看门狗兜底。）
          *
          * ## 第六十七轮补的一条
          *
@@ -592,11 +646,29 @@ object ActivityEmbed {
                 handler.post { attempt("surface") }
                 return
             }
+            // —— 第224轮：task 还在我们屏上就不重新拉起 ——
+            val state = ActivityEmbed.hostTaskState(view, pkg)
+            if (!HostTaskDisplay.shouldRelaunch(state)) {
+                Logx.i(
+                    LogTags.NAV_UI,
+                    if (state == HostTaskDisplay.State.ON_OUR_DISPLAY) {
+                        "承载面重建，承载应用 task 仍在虚拟屏上，不重新拉起"
+                    } else {
+                        "承载面重建，判不准 task 在哪个屏，按「没黑」处理，不重新拉起"
+                    },
+                    "pkg" to pkg,
+                    "times" to surfaceCreatedCount,
+                    "state" to state,
+                    "vid" to virtualDisplayIdOf(view),
+                )
+                return
+            }
             Logx.i(
                 LogTags.NAV_UI,
                 "承载面重建，重新拉起承载应用",
                 "pkg" to pkg,
                 "times" to surfaceCreatedCount,
+                "state" to state,
             )
             handler.post { startActivity(view, intent) }
         }
@@ -723,15 +795,29 @@ object ActivityEmbed {
     }
 
     /**
-     * 读一个任务的 **displayId**（第130轮）。
+     * 读一个任务的 **displayId**（第130轮；第224轮修正适用范围）。
      *
-     * `ActivityManager.RunningTaskInfo` 继承自 `TaskInfo`，
-     * 它的 `displayId` 是**隐藏字段**（公开 SDK 里没有）→ 只能反射读。
+     * `ActivityManager.RunningTaskInfo` 的 `displayId` 是隐藏字段（公开 SDK 里没有）→ 反射读。
      *
-     * AOSP 从 API 21 起就有这个字段（`TaskInfo.displayId`），
-     * 真车（API 28）与模拟器（API 29）都能读到。
+     * ## 第224轮实测：**API 28 上这个字段根本不存在**
      *
-     * @return null = 读不到（判据不可靠，调用方必须按「不知道」处理）
+     * 之前这里注释写的是「AOSP 从 API 21 起就有 `TaskInfo.displayId`」——
+     * 在 API 28 基准模拟器上实测**不成立**：`RunningTaskInfo` 的字段只有
+     * `id / stackId / baseActivity / topActivity / description / numActivities /
+     * numRunning / thumbnail / configuration / resizeMode /
+     * supportsSplitScreenMultiWindow / lastActiveTime`，**没有 `displayId`**。
+     *
+     * ⇒ 在车机与基准模拟器（都是 API 28）上，这条判据**恒为 null**：
+     * 「task 在哪块屏」永远判不准 → 四态判据永远是 [HostTaskDisplay.State.UNKNOWN]。
+     *
+     * 本轮**不**去补第二套证据（`stackId` → `getAllStackInfos()` 的栈表、
+     * 或「比 `configuration.screenWidthDp`」）：
+     * 前者的入口 `ActivityManager.getService()` 在应用进程里被隐藏 API 限制拦住（实测拿不到），
+     * 后者在 surface 重建的瞬间会把「正在被搬回来的 task」误判成「被搬到主屏」，
+     * 而误判的直接后果就是**又一次重启用户正在用的应用**——正是本轮要修的现象。
+     * ⇒ **判不准就当没黑**，这条判据在 API 28 上一律返回 UNKNOWN。
+     *
+     * @return null = 读不到（车机/API 28 上恒为 null）
      */
     fun displayIdOfTask(task: Any): Int? = runCatching {
         task.javaClass.getField("displayId").getInt(task)
@@ -781,6 +867,9 @@ object ActivityEmbed {
      * @return null = 取不到（判据不可用，调用方必须按「不知道」处理）
      */
     fun virtualDisplayIdOf(view: View): Int? {
+        // 0) 第226轮：自己建的虚拟屏（窗口透明时的画中画镜像路线）
+        synchronized(hostedDisplayIds) { hostedDisplayIds[view] }?.let { return it }
+
         val candidates = ArrayList<VirtualDisplayIdResolver.Candidate>(4)
 
         // 1) 公开方法（API 30+）
@@ -826,6 +915,74 @@ object ActivityEmbed {
         val ownDisplayId = runCatching { view.display?.displayId }.getOrNull()
         return VirtualDisplayIdResolver.pick(candidates, ownDisplayId)
     }
+
+    /**
+     * 承载应用 task 的归属快照（第224轮）。
+     *
+     * @property state 四态判据（[HostTaskDisplay]）
+     * @property ourDisplayId 我们自己的 VirtualDisplay id；null = 取不到
+     * @property taskDisplayIds 匹配到承载应用的 task 各自的 displayId（读不到某项时为 null）
+     */
+    data class HostTaskInfo(
+        val state: HostTaskDisplay.State,
+        val ourDisplayId: Int?,
+        val taskDisplayIds: List<Int?>,
+    )
+
+    /**
+     * 查「承载应用的 task 现在在哪块屏上」（第224轮）。
+     *
+     * ## 为什么下沉到这里
+     *
+     * 这段能力原来在 `PipSurface.isTaskOnOurDisplay()` 里（第130/140轮），
+     * 但第224轮 `ReadyStarter` 也要用同一个判断 —— 两份实现必然分叉。
+     * 所以统一搬到这里：**判据只有一份**，`PipSurface` 与 `ReadyStarter` 都调它。
+     *
+     * ## 两个「查不到」的区别
+     *
+     * - `getRunningTasks` 返回**空列表** → 我们看不到全量 task（无权限 / 时序）
+     *   ⇒ [HostTaskDisplay.State.UNKNOWN]，**不能**当成「task 没了」；
+     * - 列表非空但没有承载应用的 task → 真的被系统回收了
+     *   ⇒ [HostTaskDisplay.State.NOT_FOUND]。
+     *
+     * ## 第224轮补：API 28 没有 `RunningTaskInfo.displayId`
+     *
+     * 之前这里直接 `displayIdOfTask()`（反射 `displayId`），而 AOSP 9 的
+     * `RunningTaskInfo` **根本没有这个字段**（实测字段清单见 [displayIdOfTask]）——
+     * 于是「task 在哪块屏」在车机与基准模拟器上恒为 null，四态永远 UNKNOWN。
+     * ⇒ 结论（第224轮实测）：**API 28 上这条判据恒为 UNKNOWN**。
+     * 对承载面重建而言这正是想要的安全侧（判不准就不重启）；
+     * 要不要补「比配置宽度」的第二套证据，留给拿到实车日志后的下一轮决定。
+     *
+     * @param view 承载面（用来取我们自己的 VirtualDisplay id）
+     * @param pkg 承载应用包名
+     */
+    @Suppress("DEPRECATION")
+    fun hostTaskInfo(view: View, pkg: String): HostTaskInfo {
+        val ourId = virtualDisplayIdOf(view)
+        if (pkg.isBlank()) {
+            return HostTaskInfo(HostTaskDisplay.State.UNKNOWN, ourId, emptyList())
+        }
+        // 搬家途中 task 的 displayId 正在变，快照不可信。
+        val migrating = HostTaskMigration.isMigrating(pkg)
+        val am = view.context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        val tasks = runCatching { am?.getRunningTasks(MAX_HOST_TASKS) }.getOrNull()
+        if (tasks.isNullOrEmpty()) {
+            // 连 task 列表都看不到 ⇒ 判不准（不是「task 没了」）。
+            return HostTaskInfo(HostTaskDisplay.State.UNKNOWN, ourId, emptyList())
+        }
+        // 注意：**不能用 baseIntent** —— API 28 上是隐藏字段，反射会 NoSuchFieldError。
+        val mine = tasks.filter {
+            it.baseActivity?.packageName == pkg || it.topActivity?.packageName == pkg
+        }
+        val displayIds = mine.map { displayIdOfTask(it) }
+        val state = HostTaskDisplay.stateOf(ourId, displayIds, migrating)
+        return HostTaskInfo(state, ourId, displayIds)
+    }
+
+    /** 只要状态时的简写。 */
+    fun hostTaskState(view: View, pkg: String): HostTaskDisplay.State =
+        hostTaskInfo(view, pkg).state
 
     /**
      * 释放承载面。

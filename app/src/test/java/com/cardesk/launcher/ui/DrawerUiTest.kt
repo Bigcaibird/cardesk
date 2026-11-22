@@ -216,28 +216,37 @@ class DrawerUiTest {
         injectLauncherApp(a)
         val page = drawer(a)
         val cell = cellOf(page)
-        // 注意：body 自己就是 LinearLayout，所以不能拿 findAll 的第一个 ——
-        // 它先序遍历会先返回 body 自己。图标列是 body 的**子** view。
-        val column = (cell as ViewGroup).getChildAt(0)
-        // 格子 300 宽、名称列 160 宽 → 居中时左边距约 70；贴左沿则是 0。
-        val offset = column.left
+        // 格子的第 0 个子 view 就是「图标 + 名称」那一列（LinearLayout，居中）。
+        val column = (cell as ViewGroup).getChildAt(0) as LinearLayout
+        val icon = findAll(cell, ImageView::class.java).first()
+
+        // 第242轮：图标 76 → 88、格子仍是 278、名称列 246。
+        // 名称列自己居中（左边距 (278-246)/2 = 16），但**图标**要在 278 里居中：
+        // 左边距必须是 (格宽 - ICON)/2 = 95，而不是跟着名称列停在 16。
+        val cellPos = IntArray(2)
+        val iconPos = IntArray(2)
+        cell.getLocationInWindow(cellPos)
+        icon.getLocationInWindow(iconPos)
+        val offset = iconPos[0] - cellPos[0]
+        val expected = (DrawerPage.CELL_W - DrawerPage.ICON) / 2
         assertTrue(
-            "图标列左边距只有 $offset —— 还是贴左沿，没有居中",
-            offset in 40..110,
+            "图标左边距 $offset，应该是 (格宽 ${cell.width} - 图标宽 ${icon.width})/2 = $expected" +
+                "（column.left=${column.left} column.w=${column.width}）",
+            kotlin.math.abs(offset - expected) <= 1,
         )
         assertEquals(
-            "图标列应该在格子里居中",
+            "图标列（名称列）应该在格子里居中",
             Gravity.CENTER_HORIZONTAL,
-            (cell as LinearLayout).gravity and Gravity.CENTER_HORIZONTAL,
+            column.gravity and Gravity.CENTER_HORIZONTAL,
         )
     }
 
     @Test
-    fun `图标本身还是76_没被改小`() {
+    fun `图标本身是88_没被改小`() {
         val a = activity()
         injectLauncherApp(a)
         val page = drawer(a)
         val icon = findAll(cellOf(page), ImageView::class.java).first()
-        assertEquals("图标边长不该动", DrawerPage.ICON, icon.width)
+        assertEquals("图标边长不该动（画板 88，不是旧的 76）", DrawerPage.ICON, icon.width)
     }
 }

@@ -88,6 +88,18 @@ class OverlayBackdrop(context: Context) : View(context) {
             invalidate()
         }
 
+    /**
+     * `.scrim` 的强度倍率（1 = 设计值 26% 黑）。
+     *
+     * 空调画板 `04-climate-day.png` 面板外的底色 ≈ (226,237,242)，只比首页暗一点；
+     * 用满 26% 遮罩会压到 (176,182,184)（第 3 轮验收 Δ50）。
+     */
+    var scrimScale: Float = 1f
+        set(value) {
+            field = value
+            invalidate()
+        }
+
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
     override fun onDraw(canvas: Canvas) {
@@ -123,7 +135,7 @@ class OverlayBackdrop(context: Context) : View(context) {
                 // 背景板透明之后，`.scrim` 就变成「压暗桌面」了 —— 必须一起减弱。
                 CardStyle.scaleAlpha(palette.scrim, OverlaySpec.THROUGH_SCRIM_SCALE)
             } else {
-                palette.scrim
+                CardStyle.scaleAlpha(palette.scrim, scrimScale)
             }
             canvas.drawRect(0f, 0f, w, h, paint)
         }

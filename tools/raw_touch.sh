@@ -77,11 +77,63 @@ raw_drag() { # raw_drag <x1> <y1> <x2> <y2> [步数]
   raw_up
 }
 
+# ---------------------------------------------------------------------------
+# 第207轮：**双指**注入（协议 B 多点，ABS_MT_SLOT 切换 slot 0/1）
+#
+# 桌面翻页主手势是**双指横滑**，单指注入验证不了它。
+# evdev 协议 B 的多点写法：
+#   切换 slot → 写该 slot 的 TRACKING_ID/坐标 → SYN
+# 两根手指要**各自**切换 slot 写坐标（同一个 SYN 里可以各写各的 slot）。
+# ---------------------------------------------------------------------------
+
+# 双指按下：slot 0 与 slot 1
+raw2_down() { # raw2_down <x0> <y0> <x1> <y1>
+  ev_abs 47 0;  ev_abs 57 1; ev_abs 53 "$(sx $1)"; ev_abs 54 "$(sy $2)"; ev_abs 58 100
+  ev_abs 47 1;  ev_abs 57 2; ev_abs 53 "$(sx $3)"; ev_abs 54 "$(sy $4)"; ev_abs 58 100
+  ev_syn
+}
+
+# 双指同时移动
+raw2_move() { # raw2_move <x0> <y0> <x1> <y1>
+  ev_abs 47 0;  ev_abs 53 "$(sx $1)"; ev_abs 54 "$(sy $2)"; ev_abs 58 100
+  ev_abs 47 1;  ev_abs 53 "$(sx $3)"; ev_abs 54 "$(sy $4)"; ev_abs 58 100
+  ev_syn
+}
+
+# 双指抬起（先抬 slot 1，再抬 slot 0 —— 真机最常见的收尾）
+raw2_up() {
+  ev_abs 47 1;  ev_abs 57 -1; ev_abs 58 0
+  ev_syn
+  ev_abs 47 0;  ev_abs 57 -1; ev_abs 58 0
+  ev_syn
+}
+
+# 双指横滑：按下 → N 步匀速 MOVE → 抬起
+raw2_swipe() { # raw2_swipe <x0> <y0> <x1> <y1> <dx> <dy> [步数]
+  local dx=${5} dy=${6} n=${7:-10}
+  raw2_down "$1" "$2" "$3" "$4"
+  sleep 0.05
+  local i
+  for ((i=1; i<=n; i++)); do
+    local ox oy
+    ox=$(python3 -c "print(int($dx*$i/$n))")
+    oy=$(python3 -c "print(int($dy*$i/$n))")
+    raw2_move "$(python3 -c "print($1+$ox)")" "$(python3 -c "print($2+$oy)")" \
+              "$(python3 -c "print($3+$ox)")" "$(python3 -c "print($4+$oy)")"
+    sleep 0.015
+  done
+  raw2_up
+}
+
 case "${1:-}" in
   down) raw_down "$2" "$3" ;;
   move) raw_move "$2" "$3" ;;
   up)   raw_up ;;
   flick) raw_flick "$2" "$3" "$4" "$5" ;;
   drag) raw_drag "$2" "$3" "$4" "$5" "${6:-10}" ;;
-  *) echo "用法: $0 {down|move|up|flick|drag} ..." >&2; exit 1 ;;
+  down2) raw2_down "$2" "$3" "$4" "$5" ;;
+  move2) raw2_move "$2" "$3" "$4" "$5" ;;
+  up2)   raw2_up ;;
+  swipe2) raw2_swipe "$2" "$3" "$4" "$5" "$6" "$7" "${8:-10}" ;;
+  *) echo "用法: $0 {down|move|up|flick|drag|down2|move2|up2|swipe2} ..." >&2; exit 1 ;;
 esac

@@ -4842,7 +4842,7 @@ VirtualDisplay 的 display id 换了一个（#67 → #68），
 | 文件 | `dist/CarDesk-platform-ecarx-cardesk-4237.apk` |
 | versionCode / versionName | 4237 / 1.0.1141-system |
 | 大小 | 2 346 709 字节 |
-| SHA-256 | `935c5fa931599901480dda93c0519208294787d3325532a5f19d9cd0efdf1dba` |
+| SHA-256 | `935c5fa931599901480dda93c0519208294787d3325552a5f19d9cd0efdf1dba` |
 | 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
 | 单测 | 1937 项全绿（`tools/release.sh` 出包时一并跑的） |
 
@@ -8089,3 +8089,3282 @@ onTemp?.invoke(temperature)
 | 提交 | 第199轮代码 `8b052f3`；第200轮代码 `a82176f`；出包 `7f9e2ef` |
 | GitHub Release | [`v1.0.1177`](https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1177) —— **已发布**，附件为 4273 的 APK（3 575 679 B，远端 digest 与本地 SHA-256 一致） |
 | R2 上传 | **未做** —— 环境里没有 `R2_AK` / `R2_SK`（凭据只从环境变量读；与第132/133/136/190/191/192/193轮一致） |
+
+---
+
+## 第201轮：4273 五个现场问题（原车 Dock 复现 / 画中画黑块与避让 / 播放态跳动 / 画中画误翻页）
+
+### 一、用户提的需求
+
+4273 诊断包（2026-10-23，`cardesk-logs-20261023-184639.zip`）里记的五条：
+
+1. 原车 dock 导航栏隐藏不彻底，还是会时不时跳出来；网易云页面我们自己的 dock 隐藏了、原车还在显示；
+2. 来回切换页面时画中画（高德）显示异常，画中画底部出现一个长方形黑块；
+3. 高德从画中画切到全屏时没有避让 dock，部分画面被遮挡；
+4. 音乐卡片的播放状态来回跳；
+5. 在画中画里操作 App（比如拖动高德地图）时，单指滑动很容易触发桌面换页。
+
+### 二、逐条根因
+
+#### ① 原车导航栏为什么「时不时跳出来」
+
+| 事实 | 结论 |
+| --- | --- |
+| 我们的全局 Dock 是 `TYPE_NAVIGATION_BAR_PANEL`(2024)，和原车 `CarNavigationBar` 占**同一段** `[0,968][1920,1080]`，面板层级在上，且宿主铺了不透明底 `#162E2C` | Dock 只要 INVISIBLE，下面那根原车栏就露出来 |
+| 第180~200轮有「让位」：前台命中沉浸名单（网易云 / 汽水）、或运行时探测到沉浸、或用户点 6px 把手临时展开又收起 | 每次让位/收起 = 原车栏闪出来一次 |
+| 第193轮实测：`policy_control` 写 `immersive.navigation=*` 也压不住这台车的定制导航栏 | 靠策略隐藏这条路走不通 |
+
+结论：**只要 Dock 会隐藏，原车栏就一定会露**。UNI 的做法也是 Dock 常显、从不让位。
+
+#### ② 画中画底部黑块
+
+切页动画前要手动量一次 `GONE` 的页面。`layoutPageForAnimation` 以前**无条件**按
+`pageHost` 的整块 1920×1080 去 `measure` + `layout`，把导航页自己的
+LayoutParams（`topMargin=73`、`height=895`）覆盖成了 1080 高；
+下一帧父布局又缩回真实高度 → 画中画承载面高度抖一次，
+VirtualDisplay 的 resize 跟不上，底部留下一条没内容的黑块。
+
+诊断包里能直接看到连续两次同步：
+`ActivityView 同步 VirtualDisplay 尺寸 w=1321 h=1052` → 紧接着 `h=867`。
+
+#### ③ 全屏不避让 Dock
+
+`enterPipFullscreen()` 把画中画提到根容器时用的是整块设计画布
+`Design.W × Design.H`（1920×1080），底部 112px 正好在 Dock 底下。
+
+#### ④ 播放态来回跳
+
+诊断包里 wecarflow **会话自己**每 ~4s 在 PLAYING / PAUSED 之间翻一次，位置完全不动：
+
+```
+18:36:10 playing=true  pos=16044
+18:36:14 playing=false pos=16044
+18:36:26 playing=true  pos=16044
+18:36:33 playing=false pos=16044
+```
+
+第97轮加的 `PlaybackUiPolicy` 只管「会话说 PLAYING 但进度停滞」，管不了
+「会话自己说 PAUSED」，于是卡片上一秒播放、一秒暂停。
+
+#### ⑤ 画中画里单指滑动误翻页
+
+`onInterceptTouchEvent` 的 ACTION_DOWN **无条件** `singleTracking = true`，
+横拖超过 160px 且横向占优就抢事件、抬手翻页 —— 完全不看落点。
+在画中画里拖高德地图，正好满足这个条件。
+
+### 三、怎么修的
+
+#### ① 全局 Dock 不再让位（`core/dock/GlobalDockService.kt`）
+
+- `updateVisibility()`：`want = nativeInsets || !homeForeground`，不再看 `yieldToApp`；
+- 删掉：1s `checkYieldToApp()`、6px 让位把手窗口、下滑收起、临时展开、
+  `DEBUG_DOCK_YIELD` 调试广播，以及只服务它们的常量；
+- 保留 `DockYieldPolicy` / `ImmersiveDetector` / `OemDockPolicy.hidesGlobalDockFor`
+  与单测（纯函数，注释写明第201轮起不再参与显隐）；
+- 保留 `DEBUG_DOCK_LOOK`（圆角调试）不动。
+
+**取舍**：自己申请沉浸全屏的 App（网易云 / 汽水）底部 112px 会被我们的 Dock 盖住 ——
+这跟原车导航栏本来的占位一样。宁可盖住，也不要原车栏时不时闪出来。
+
+#### ② 手动量页面时尊重 LayoutParams
+
+新增纯函数 `core/PageLayoutRect.kt`：按页面自己的 width/height/margins 算矩形
+（`MATCH_PARENT` 时用宿主尺寸减边距），`layoutPageForAnimation` 改用它。
+导航页第一次量出来就是 895 高，不再 1080 → 895 抖一次。
+
+#### ③ 全屏帧高度到 Dock 顶边
+
+`enterPipFullscreen()` 改成 `Ui.frame(Design.W.toInt(), DOCK_TOP_Y, …)`（968），
+底部正好贴在 Dock 上沿。
+
+#### ④ 播放态暂停迟滞
+
+新增 `core/media/PlaybackStateHold.kt`（纯逻辑）：
+
+- **恢复播放立刻采纳**（用户按播放要马上有反馈）；
+- **转暂停要连续 4s 都报暂停**才采纳 —— 缓冲期的假暂停被吸收；
+- 用户自己的播放/暂停（乐观 UI）走 `force()`，不受迟滞影响；
+- 换会话 `reset()`，不把上一个 App 的迟滞带过来。
+
+`MusicSessionTracker.pushProgress()` 用它包裹原来的
+`resolvePlaying(PlaybackUiPolicy.uiPlaying(...))`，`applyPlayingUi()` 里 `force()` 对齐。
+
+#### ⑤ 画中画区域的按下不参与翻页判定
+
+`LauncherView.pipHitAt(ev)`：全屏态直接命中；否则对 `navPage.pip` /
+`navPage.pipSecondary` 取 `getGlobalVisibleRect` 判断 `rawX/rawY` 是否落在里面。
+`onInterceptTouchEvent` 与 `onTouchEvent` 两处 ACTION_DOWN 都改成
+`singleTracking = !pipHitAt(ev)`。三指横滑、右缘竖滑不受影响。
+
+### 四、判据（单测）
+
+| 用例 | 断言的是 |
+| --- | --- |
+| `matchParent_fillsHost` | 普通页面仍铺满宿主 |
+| `navPageLayout_keepsHeightAndTopMargin` | 导航页被摆成 `top=73 / h=895`，**不是** 1080 |
+| `margins_areSubtracted` | MATCH_PARENT + 四边距时尺寸正确 |
+| `marginsEatAllSpace_returnsNull` | 边距吃光空间时返回 null（不瞎摆） |
+| `shortPauseBlip_isAbsorbed` | 抖动 1.4s 的暂停不改变界面 |
+| `sustainedPause_isAdoptedAfterSettle` | 连续 4s 暂停才采纳 |
+| `resume_isImmediate` | 恢复播放下一拍就生效 |
+| `force_overridesPendingPause` | 用户按的暂停/播放不被迟滞拖住 |
+| `reset_startsFresh` | 换会话后直接采纳新状态 |
+
+全量单测 **2423 项全绿**（基线 2410 + `PageLayoutRectTest` 6 + `PlaybackStateHoldTest` 7）。
+
+### 五、验证
+
+- `gradle :app:compileSystemKotlin` 通过；
+- `gradle testSystemUnitTest` 2423/2423；
+- `gradle assembleSystem -PcardeskPackage=com.ecarx.cardesk` 打包通过。
+
+### 六、还没在真车上验的
+
+- ①「Dock 常显」在真车上是否真的完全不露原车栏（预期是，因为不透明面板一直盖着）；
+- ④ 迟滞 4s 对「用户按方向盘暂停」的体感（走的是 `force`，理论无延迟，
+  但方控回调整条链路没在真车上跑过）。
+
+
+### 七、产物
+
+| 项 | 值 |
+|---|---|
+| 包 | `dist/CarDesk-platform-ecarx-cardesk-4274.apk` |
+| 包名 / 版本 | `com.ecarx.cardesk` / 4274 / 1.0.1178-system |
+| 大小 | 3 575 311 字节 |
+| 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
+| SHA-256 | `e92a8df284acef1839637df825bfbdb9fa1ceaad493909ef824e6d5c265be117` |
+| 更新清单 | `dist/cardesk-latest.json`（R2 key `cardesk/CarDesk-platform-ecarx-cardesk-4274.apk`） |
+| R2 上传 / GitHub Release | **未做**（本轮只出包，凭据与环境不在本机） |
+| 全量单测 | 2423 项，0 失败 |
+
+## 第202轮：④ 播放态——僵尸会话不许再影响卡片
+
+### 一、现场
+
+2026-10-23 诊断包（`.work/diag-20261023/logs/cardesk-20261023-0.txt`）里有这样一段：
+
+```
+18:36:10.518 playing=true   position=16044
+18:36:14.410 playing=false  position=16044  stalled=false
+18:36:26.594 playing=true   position=16044
+18:36:33.292 playing=false  position=16044
+18:36:33.507 播放停滞检测触发 stallMs=4272
+18:36:37.206 playing=true   position=17785
+18:36:41.115 playing=false  position=17785
+```
+
+`com.tencent.wecarflow`（爱趣听 / 多媒体）每 4 秒在 PLAYING / PAUSED 之间翻一次，
+**播放位置一动不动**。用户确认：那段时间车上确实有声音，但放的是 **QQ 音乐**，
+不是爱趣听（QQ 音乐车机版不发布会话，只走广播）。
+
+结论：这是一个**僵尸会话** —— 状态在翻，根本没有出声。
+
+### 二、它为什么能抢走卡片
+
+1. `SessionChooser` 的「活跃即胜出」只看 `state == STATE_PLAYING`，
+   完全不看它是不是真的在放；
+2. 「选定来源」只在切来源那一瞬 `lockToPackage()`，选完就清，
+   之后完全靠「谁活跃跟谁」；
+3. 一旦它被选成 `sessionTrack`，`MusicController.applyQqBroadcastTrack()` 的
+   `if (sessionTrack != null) return` 会把 QQ 广播丢掉 —— 卡片上显示的就是这个僵尸会话。
+
+### 三、改法
+
+#### ① 新增 `core/media/SessionAudibility.kt`（纯逻辑，可单测）
+
+只看两件事：**在播**、**位置推进过**。
+
+- 位置在推进 → 真的在放；
+- 连续 4s（`WINDOW_MS`）没推进 → 当成没在放；
+- 暂停超过 10s（`RESUME_GAP_MS`）再恢复 → 重新给一次宽限（刚点播放那几秒不误判）；
+- 位置未知（`< 0`）→ 无从判断，按在放处理。
+
+僵尸会话每 4 秒翻一次，暂停时长永远够不到 10s → 宽限不会被反复重置，
+一个窗口之后稳定判成「没在放」。
+
+#### ② 抢占必须「真的在放」
+
+`SessionCandidate` 新增 `audible` 字段；`SessionChooser` 三条「活跃即胜出」的
+分支（`lastMusicPkg` 加权、非 mediacenter、mediacenter）全部改成 `c.audible`。
+锁定包（用户显式选定）不受影响 —— 那是用户的选择。
+
+#### ③ 追踪器采样 + 方控同步
+
+- `Record.sampleAudibility()`：状态回调时、每轮 reconcile 时各采一次；
+  结论变化打 I「会话可听性变化」（下一份诊断包就能直接判）；
+- `nativeSourcePlaying()` 从「有没有非白名单包在 PLAYING」改成
+  「有没有非白名单包**真的在放**」→ 僵尸会话不再让方控的 claim 跟着抖。
+
+#### ④ 选定来源持久优先
+
+新增 `pinnedSourcePkg()`：卡片来源行里选定的三方播放器，作为**持久**的优先项
+（只认 `MediaSources.PRIMARY_PACKAGES`，多媒体 / 蓝牙 / USB 不算）。
+它没有会话时仍然往下走，不会把界面清空（第126轮的规则不变）。
+
+#### ⑤ 会话持续发 null 时不再永远挂着旧曲目
+
+追踪器 2.5s 一轮、清空延迟 3s —— 只要它**持续**发 null，延迟 Runnable 就永远被
+重排，清空从来不会发生，之前绑定的会话曲目会一直挂在卡片上。
+现在加了两个立即清空出口：广播那份还在（QQ 音乐），或连续两次 null（约 5s）。
+
+### 四、判据（单测）
+
+| 用例 | 断言的是 |
+| --- | --- |
+| `firstPlayingSample_isAudible` | 刚开始播放给宽限 |
+| `advancingPosition_staysAudible` | 位置在推进 → 一直算在放 |
+| `frozenPosition_goesInaudibleAfterWindow` | 位置不动 → 一个窗口后判成没在放 |
+| `pause_makesInaudibleImmediately` | 暂停立即不算 |
+| `resumeAfterLongPause_getsGrace` | 停久了再恢复，重新给宽限 |
+| `flappingZombieSession_endsInaudibleAndStaysThere` | 4s 一翻、位置不动的僵尸会话，30s 后稳定判死 |
+| `unknownPosition_isTreatedAsPlaying` | 位置未知按在放处理 |
+| `choose_inaudibleActiveSession_doesNotPreempt` | 僵尸会话不许抢已显示的会话 |
+| `choose_audibleActiveSession_stillWins` | 真的在放时仍按老规则胜出 |
+| `choose_lastMusicInaudible_doesNotWin` | `last_music_package` 加权也不能让僵尸翻盘 |
+
+全量单测 **2433 项全绿**（第201轮的 2423 + `SessionAudibilityTest` 7 + 选择规则 3）。
+
+### 五、验证
+
+- `gradle :app:compileSystemKotlin` 通过；
+- `gradle testSystemUnitTest` 2433/2433；
+- 未打包（等确认要不要和 ① 的探针一起出）。
+
+### 六、还没在真车上验的
+
+- wecarflow 的 `PlaybackState.position` 在真车上是否确实不推进
+  （诊断包里是，但那是 4268 的包）—— 新包里看「会话可听性变化」这条日志即可判定；
+- 选定来源 = QQ 音乐时，卡片是否完全由广播驱动（会话侧不再绑 wecarflow）。
+
+### 七、第202轮补充：卡片来源改为「谁在出声显示谁」（真车反馈）
+
+真车上（4275）发现另一处对不上：设置里的「音乐来源」是 QQ 音乐，实际出声的是网易云，
+卡片却把网易云的歌标成「QQ音乐」—— 用户耳朵听到的和眼睛看到的不是一回事。
+
+- `MediaSources.resolveSourceId(trackSourceId, selectedId)`（新增纯函数）：
+  **实际在放的那路优先**，设置里的来源只在没有播放时当默认；「通用音乐」不覆盖另一侧的确定来源。
+- `LauncherView.currentSourceLabel/currentSourceId` 改用该函数（原先「显式选过来源就以选择为准」）。
+- `MusicSessionTracker.selectAndNotify` 不再把设置来源当**持久锁**传给 `SessionChooser`
+  （只保留切来源那一瞬的 `lockedPkg`）—— 它会让卡片一直追一个没在放的来源，
+  而实际出声的另一路被挡在外面。选定来源 + 可听性（`SessionAudibility`）合起来才是
+  「跟随真的在放的 App」。
+- `MediaSourcesTest` 新增 4 条：`resolveSourceId_trackSourceWinsOverSelectedSource` /
+  `fallsBackToSelectedWhenNothingPlays` / `ignoresGenericOnBothSides` / `unknownTrackSourceFallsBackToSelected`。
+
+全量单测 **2437 项全绿**（2433 + 4）。
+
+### 八、真车验证记录（4275，adb 198.18.50.1:5555）
+
+- ① 已验证：装 4275 后打开网易云，`CarDesk 全局 Dock` 保持可见（ty=2024，[0,968][1920,1080]），
+  截图里原车导航栏被完全盖住；作为对照，4273 在同一操作下 Dock 让位、原车栏露出。
+  4273 上那个「CarDesk Dock 让位把手」窗口在 4275 中已经不存在。
+- ④ 已验证一半：播网易云时 `播放状态变化` 日志为 0 条（稳态），但来源文案错标成「QQ音乐」，
+  即本节修正的问题。
+
+### 九、真车验证记录（4276，adb 198.18.50.1:5555）
+
+- **①** 网易云前台：`CarDesk 全局 Dock` 一直在（`isVisible=true`，ty=2024，[0,968][1920,1080]），
+  原车 `CarNavigationBar` 被完全盖住；4273 同一操作的对照是 Dock `isVisible=false` + 原车栏露出。
+- **②** 反复切页（分屏键 4 次 + 桌面横滑）期间 `ActivityView 同步 VirtualDisplay 尺寸` 只有
+  全屏相关的 4 条（1920×968 / 1321×867），**没有出现 1052** —— 手动 layout 把 navPage 撑到 1080 的路径已消除。
+- **③** 画中画全屏：`VirtualDisplay 尺寸 w=1920 h=968`（不再 1080），截图里地图正好铺到 Dock 上沿，
+  底部 112px 是 Dock 本身，没有被压住的画面。
+- **⑤** 全屏画中画里横滑 3 次、小窗画中画里横滑 2 次，`单指横滑翻页` 事件 0 条、page 不变；
+  桌面（音乐卡区域）横滑仍能正常翻页（page 0↔1）。
+- **④** 卡片来源已跟着实际播放（网易云音乐 / 小半 / 陈粒），`播放状态变化` 全程 0 条。
+- 遗留风险：`会话可听性变化` 在网易云切歌后出现一次 `audible=false`（positionMs 停在 174 达 4s，
+  但歌在放）—— 位置快照法对「按事件上报 position」的 App 会误判。后续可改用
+  `AudioManager` 播放配置（uid 是否真的在出声）作为主判据，位置法只作兜底。
+
+## 第203轮：④ 可听性改用「音频输出」作地面真相（4276 遗留风险）
+
+### 一、需求与背景
+
+第202轮用「位置有没有推进」判会话是不是真的在放。4276 真车验证暴露它的盲区：
+网易云切歌后 `PlaybackState.position` 停在 174 达 4 秒不动（歌一直在放），
+`SessionAudibility` 于是把正在出声的会话判成「没在放」。
+
+位置快照只能证明「变了」，不能证明「没变就是没放」——很多 App 只在事件发生时
+上报一次位置。用户选择方案 A：**按「谁真的在出声」重做判据**，位置法只作兜底。
+
+### 二、改法
+
+1. 新增 `core/media/AudioOutputProbe.kt`：注册 `AudioManager.registerAudioPlaybackCallback`，
+   从 `AudioPlaybackConfiguration` 反射读 `getClientUid()` / `isActive()`，
+   维护「当前正在出声的 uid 集合」；`isReady()` 表示已收到过回调、结论可信。
+2. `SessionAudibility.next(...)` 新增 `outputting: Boolean? = null`：
+   - `true` → 直接判在放（不看位置）；
+   - `false` → 直接判没在放（位置在动也不算，盖住静音播放/投屏）；
+   - `null` → 回落第202轮的位置判据。
+3. `MusicSessionTracker.Record`：新增 `uid`（`PackageManager.getPackageUid`，查不到 -1），
+   `sampleAudibility()` 在探测就绪且 uid 有效时传 `outputting`，
+   「会话可听性变化」日志补 `uid` / `outputting` 两个字段。
+4. `MusicSessionTracker.start()` 里 `AudioOutputProbe.ensure(...)`（幂等，失败自动降级）。
+
+### 三、单测
+
+`SessionAudibilityTest` 新增 3 条：输出为真时位置冻住仍算在放 / 输出为假时位置推进也算没在放 /
+探测不可用时回落位置判据。全量 **2440 tests / 0 failures**（第202轮 2437 + 3）。
+
+### 四、判据
+
+| 场景 | 期望 |
+| --- | --- |
+| 网易云在放、position 偶发冻住 | `audible=true` 不掉 |
+| 网易云暂停 | `audible=false` |
+| 爱趣听僵尸会话（自称在放、实际没出声） | `audible=false`，不抢卡片 |
+| 探测未就绪（反射被拦/无回调） | 回落位置判据，行为同第202轮 |
+
+## 第204轮：① 对沉浸型 App 真全屏（我们在让位 + 原车栏一起藏）
+
+### 一、现场依据
+
+用户车上装了 hywebview，给网易云开了「隐藏状态栏和导航栏」。抓系统设置发现它落地成：
+
+```
+policy_control = immersive.full=com.autonavi.amapauto,com.estrongs.android.pop,com.autonavi.amapautp.yh,com.netease.cloudmusic.iot,
+```
+
+同一台车做 A/B 对照（前台均为网易云）：
+
+| policy_control | CarNavigationBar | StatusBar |
+| --- | --- | --- |
+| 清空 | 可见 | 可见 |
+| `immersive.navigation=com.netease.cloudmusic.iot` | **隐藏**（`mPolicyVisibility=false`） | 不动 |
+| `immersive.full=com.netease.cloudmusic.iot` | **隐藏** | 也隐藏 |
+
+结论：这台车的原车 `CarNavigationBar` **可以**按 App 藏住，第193轮「policy_control 压不住定制栏」的判断不成立（当时写的是通配 `immersive.navigation=*` 的另一条路径）。
+
+### 二、改法（用户选 B：真全屏）
+
+1. 新增 `core/dock/DockVisibility.kt` 纯函数：`want(nativeInsets, homeForeground, immersiveAppForeground)`
+   = `(nativeInsets || !homeForeground) && !immersiveAppForeground`。
+2. `GlobalDockService`：每 tick 用 `OemDockPolicy.hidesGlobalDockFor(前台包名)` 判一次，
+   命中沉浸名单（网易云 / 汽水）就让位（Dock INVISIBLE），日志「全局 Dock 让位判定」；
+   回到桌面/别的 App 立刻恢复。
+3. `SystemNavigationPolicy.merge/apply` 新增两个参数：
+   - `immersiveNavigationPackages`：写 `immersive.navigation=<包1,包2>`（只列具体包，不写 `*`，
+     预留带对其它 App 仍然有效）；
+   - `preserveForeignImmersiveFull`：保留别人写的 `immersive.full=` 段
+     （真车上有 hywebview 在用，扒掉会把用户已有配置清空）。
+4. `GlobalDockPolicyGate` 预留区路径传入 `OemDockPolicy.IMMERSIVE_MEDIA_APPS` 与 `preserve=true`。
+
+### 三、单测
+
+新增 `DockVisibilityTest` 4 条 + `SystemNavigationPolicyTest` 4 条（按 App 写包名 / 不被
+navInsets 拦 / 保留外部 full 段 / 不保留时仍剥掉）。全量 **2448 tests / 0 failures**。
+
+### 四、真车验证（4280，adb 198.18.50.1:5555）
+
+| 场景 | 全局 Dock | CarNavigationBar | 截图 |
+| --- | --- | --- | --- |
+| 桌面 | `isVisible=true` | 被我们的 2024 面板盖住 | Dock 正常 |
+| 网易云前台 | **`isVisible=false`** | **`isVisible=false`** | 真全屏，底部无任何栏 |
+| 高德前台 | `isVisible=true` | 面板之下 | Dock 正常 |
+
+同时确认 `settings get global policy_control` 在我们写入后为：
+
+```
+immersive.full=com.autonavi.amapauto,com.estrongs.android.pop,com.autonavi.amapautp.yh,com.netease.cloudmusic.iot,:immersive.navigation=com.luna.music.car,com.netease.cloudmusic.iot
+```
+
+hywebview 写的 `immersive.full` 段被保留（第204轮修掉的坑：`restoreNormal` / 无预留区路径以前整条覆盖写，
+会把别人的段清空；现在统一走 `SystemNavigationPolicy.overwriteOwned` / `mergePreserving`，
+恢复原值时也只替换 `immersive.navigation` / `immersive.status` 两段）。
+
+## 第205轮：沉浸 App 里从底部上滑，唤出的是我们自己的 Dock
+
+### 一、需求
+
+第204轮让位后，网易云等沉浸 App 是真全屏了；但用户从底部上滑时，系统唤出的是**原车导航栏**
+（immersive 的「临时露出」），不是我们的 Dock。
+
+### 二、改法
+
+沉浸 App 前台时，Dock 不再 `INVISIBLE`，改成**收起态**：
+
+- 窗口仍 `VISIBLE`（占住底部 112px 的触摸区），但背景透明、`DockBarView` 设 `GONE` —— 画面依旧全屏；
+- 在窗口上接住触摸：收起态下**上滑 ≥ 24px** → 展开我们自己的 Dock（不透明底 + 内容可见），
+  5 秒后自动收起（用户切走/回桌面则立即恢复正常态）；
+- 手势由我们的窗口消费，系统就没机会把原车导航栏唤出来。
+
+### 三、待真车确认
+
+- 装 4281 后：网易云里上滑 → 出现的是我们的 Dock，且没有原车栏；
+- 若系统手势优先级仍高于我们的窗口（SystemUI 先吃掉上滑），需要改用
+  `immersive.navigation` 下系统的强制露出策略或把手势窗口调高优先级——adbd 已断开，等下次连车验证。
+
+### 四、第205轮修正（用户实测反馈）
+
+1. **收起态不再吞掉 App 底部的触摸**：第一版把整条 112px 留成透明窗口，结果 App 底部
+   112px「看得见、点不到」。现在收起态窗口只有屏幕最底部 **24px** 高（只用来接上滑唤出），
+   其余高度全部交还给 App。
+2. **桌面单指翻页恢复**：第201轮把所有画中画区域都排除出翻页判定，而桌面首页地图卡片
+   占了大半屏 → 用户反馈「第一页也很难切页」。现在只保留「**全屏画中画**里不翻页」，
+   小窗画中画重新可以单指横滑翻页。
+   - 已知取舍：小窗里拖高德地图仍可能触发翻页（单指翻页与拖地图的固有冲突）；
+     若要彻底分开，需要给「小窗翻页」加开关或改两指手势。
+
+## 第206轮：翻页改成「双指横滑」
+
+### 一、为什么
+
+第205轮恢复「小窗画中画也能单指翻页」之后，单指右要在画中画里拖地图、又要翻页 ——
+在同一个区域同时承担两件事，必然互相打架：拖地图会翻页，想翻页又不能从地图上滑。
+
+用户拍板：**翻页改成双指**，单指完全留给画中画（及其它应用）自己的手势。
+
+### 二、改法
+
+- `core/PageGesture.kt` 新增 `twoFingerStep(dx, spanRatio, threshold=160)`：
+  - 两指中位点横移 ≥ 160 设计 px → 翻页（左滑下一页 / 右滑上一页）；
+  - **两指间距变化超过 18% 判为捏合缩放**，不翻页（画中画里缩放地图不会误翻页）。
+- `LauncherView`：
+  - `ACTION_DOWN` 起**不再启动单指翻页判定**（`singleTracking` 恒为 false，相关分支保留但不再进入）；
+  - 两指按下时开始跟踪中位点与间距；横移超过 60px 且横向压倒纵向、间距基本不变时
+    **接管事件**（子视图收到 CANCEL，避免一边翻页一边拖地图）；
+  - 抬手用 `twoFingerStep` 做最终判定，日志「手势：双指横滑翻页」。
+  - 三指横滑、右缘竖滑、滚轮翻页保持不变。
+
+### 三、单测
+
+`PageGestureTest` 新增 5 条（左滑 / 右滑 / 位移不够 / 捏合不翻页 / 间距轻微变化仍翻页）；
+`ThreeFingerSwipeTest` 里「两指不该翻页」的旧断言按新语义改成「两指左滑翻到下一页」。
+全量 **2457 tests / 0 failures**。
+
+### 四、产物
+
+| 项 | 值 |
+| --- | --- |
+| 包 | `dist/CarDesk-platform-ecarx-cardesk-4284.apk` |
+| 版本 | 4284 / `1.0.1188-system` |
+| SHA-256 | `5825c7e650c5d32628e213e256e6205257ef60e01ccb0eb39f2914eefd486d57` |
+| 单测 | 2457 / 0 |
+
+### 五、第206轮补充：接管点上移到 `dispatchTouchEvent`（模拟器实测发现）
+
+模拟器 instrumentation 实测（`app/src/androidTest/.../PageSwipeDeviceTest.kt`）发现：
+把双指事件派发到窗口根视图时，`LauncherView.onInterceptTouchEvent` **只收到 DOWN**，
+`ACTION_POINTER_DOWN` 被消费了按下的子视图截走（并伴随 CANCEL），
+`twoFinger` 永远是 false —— 双指怎么滑都不翻页。
+
+改法：双指识别整体挪到 **`LauncherView.dispatchTouchEvent`**（整棵子树的入口，
+每个事件都会经过，不受子视图 `requestDisallowInterceptTouchEvent` 影响）：
+
+- DOWN 时重置并声明 `requestDisallowInterceptTouchEvent(true)`；
+- 两指按下开始跟踪中位点/间距；
+- MOVE 判定成立时先给子树补一个 `ACTION_CANCEL`（地图停止跟手），
+  本次及后续事件由自己吞掉（`twoFingerTaken`）；
+- UP 时用 `twoFingerStep` 判定并 `swipePage`。
+
+模拟器验证（AVD `cardesk28`，1920×1080，Android 9）：
+
+| 用例 | 结果 |
+| --- | --- |
+| 双指左滑 → 下一页 | 通过（日志 `手势：双指横滑翻页 dx=-200`） |
+| 双指右滑 → 上一页 | 通过（`dx=200`） |
+| 单指横滑 → 不翻页 | 通过 |
+| 双指捏合（间距 ×1.8）→ 不翻页 | 通过 |
+
+限制说明：模拟器 `/dev/input` 没有触摸屏节点、`input` 只支持单指，
+`UiAutomation.injectInputEvent` 注入的多指会被框架按 split-motion-events 拆成单指序列，
+所以上面验的是**视图层**（`LauncherView.dispatchTouchEvent` 入口，正是接管点）；
+真车上的窗口派发仍以实车为准。
+
+---
+
+## 第207轮：双指横滑「很难滑动」的根因修复
+
+### 一、为什么
+
+用户反馈：**「双指滑动切屏有问题，很难滑动」**。
+
+第206轮把翻页改成双指横滑之后，判定链路是通的（`PageSwipeDeviceTest` 全绿），
+但真实手指一滑就不动 —— 真机上手势根本翻不动。
+
+### 二、根因（四个，同源都在「两指状态的记账」上）
+
+第206轮的 `trackTwoFingerSwipe()` 有 4 个问题，
+**前一个是主因，后三个让它在边缘场景下必翻不动**：
+
+1. **接管之后就不再更新中位点（主因）** ——
+   `ACTION_MOVE` 分支开头就是 `if (!twoFinger || twoFingerTaken) return twoFingerTaken`，
+   于是**一旦接管（横移越过 60px 接管线），后续所有 MOVE 都被丢弃**，
+   `twoFingerMid` 从此冻结在「刚越过接管线那一刻」的位置。
+   抬手时算出来的位移最多也就 60 多 px，
+   永远够不到第206轮设定的 `TWO_FINGER_PX = 160f` → **双指怎么滑都不翻页**。
+
+   > 为什么老测试全绿：第206轮的用例**只发一个 `ACTION_MOVE`**（一次性给到 400px），
+   > 接管判定与最终判定看到的是同一个位移，恰好绕开了这个 bug。
+   > 真实双指滑动是**连续很多个小 MOVE**（每帧 5~15px），这才是暴露问题的形态。
+
+2. **捏合判定过严** —— 只看「间距变化**比例** > 18%」。
+   两指初始靠得近时（只有几十 px），手指抖 5~6px 就是「20% 的变化」→
+   正常横滑被误判成捏合，直接被杀掉。
+
+3. **纵向位移基准不同源** —— `dx` 用两指中位点，`dy` 却用 `ev.y`（**第一根手指**的 Y）。
+   两指不在同一水平线上时纵向分量莫名偏大，把本该判为横滑的手势卡掉。
+
+4. **抬手那一刻纵向基准会退化（变异验证时发现）** ——
+   `ACTION_UP` 时只剩**一根**手指，`midY(ev)` 退化成单指的 Y，
+   与按下时记下的两指中位点 Y 不同源 → `dy` 虚高 → 横滑被卡。
+
+### 三、改法
+
+`core/PageGesture.kt`（纯逻辑层）：
+
+| 常量/函数 | 第206轮 | 第207轮 | 理由 |
+| --- | --- | --- | --- |
+| `TWO_FINGER_PX` | 160f | **140f** | 双指比单指多一根手指要就位、行程也更短，阈值不降一档手感就是「推不动」 |
+| `TWO_FINGER_SCALE_TOLERANCE` | 0.18f | **0.30f** | 原来太紧，真手指间距的正常抖动就被判成捏合 |
+| `TWO_FINGER_SPAN_SLOP` | — | **60f（新增）** | 间距变化的**绝对**容差，兜住小间距场景 |
+| `TWO_FINGER_AXIS_RATIO` | — | **1.2f（新增）** | 双指横滑的轴比（与单指同口径） |
+| `isTwoFingerPinch(span0, span)` | 内联比例判定 | **纯函数**：绝对量 OR 相对量 | 「变化 ≤ 60px 直接判非捏合，否则再比 30% 相对量」 |
+| `twoFingerStep` | `(dx, spanRatio, threshold)` | `(dx, dy, span0, span, threshold, axisRatio)` | 改用**绝对间距**，并纳入纵向位移轴比判定 |
+
+> 捏合判定刻意取**宽松口径**（宁可让极轻微的捏合漏判为横滑，也不要把正常横滑误杀）——
+> 用户的抱怨是「滑不动」，误杀比漏判更伤。
+
+`ui/LauncherView.kt`（接线层）：
+
+- **★ 核心**：`ACTION_MOVE` **无论是否已接管都持续更新** `twoFingerMid` / `twoFingerRatio`；
+- 新增字段 `twoFingerMidY`：纵向位移的终点在 **MOVE（两指都在）** 时就记下来，
+  抬手不再用退化的 `midY(ev)`；
+- `dy` 改用两指中位点，与 `dx` **同源**；
+- `spanX()`（仅水平距离）替换为 `span()`（两指**直线距离**，捏合判定更准）；
+- 新增 `midY(ev)` 辅助方法（与 `midX` 同口径）；
+- 保留 `TWO_FINGER_SLOP = 60f` 接管阈值与接管机制（越过 60px 给子树补 CANCEL、吞掉后续事件），
+  **只修「接管后不再更新中位点」这一处**，不重写整体手势架构。
+
+### 四、测试
+
+| 文件 | 条数 | 说明 |
+| --- | --- | --- |
+| `core/PageGestureTest.kt` | 29 | 第206轮的 5 条按新签名重写；新增 4 条（靠得近仍可翻页 / 靠得近但明显张开仍是捏合 / 纵向为主不翻页 / 捏合判定线） |
+| `ThreeFingerSwipeTest.kt`（Robolectric） | 9 | 新增 5 条：`两指分多段滑动也能翻到下一页`（**10 段 × 40px 连续 MOVE**，正是原测试漏掉的真实手势形态）/ 两指竖向滑动不翻页 / 两指捏合不翻页 / **两指不在同一水平线上也能横滑翻页** / **分步抬手（先抬一指再抬另一指）也能横滑翻页** |
+| `androidTest/.../PageSwipeDeviceTest.kt` | 8 | 设备级：新增 `twoFingerSwipeInSteps()` 分段滑动辅助方法 + 4 条（分多段滑动 / 竖向不翻页 / **不等高也能横滑** / **分步抬手**） |
+
+全量 JVM 单测：**2467 tests / 0 failures / 0 errors / 0 skipped**（比第206轮 +10）。
+
+### 五、变异验证（证明新用例真的能捕获缺陷）
+
+新写的测试如果抓不住缺陷，绿了也没意义。
+所以每一处修复都**临时把代码改回去**跑一遍，确认对应用例会红：
+
+| 变异 | 改回的内容 | 结果 |
+| --- | --- | --- |
+| MUTATION-1 | MOVE 分支提前 `if (twoFingerTaken) return`（第206轮的 bug） | ✅ `两指分多段滑动也能翻到下一页` FAILED |
+| MUTATION-2 | `isTwoFingerPinch` 还原成纯相对量 18% | ✅ `捏合判定线` / `两指靠得近时轻微抖动仍可翻页` / `两指靠得近且轻微抖动仍能横滑翻页` FAILED |
+| MUTATION-3 | `dy` 改回用 `ev.y`（基准不同源） | ✅ `两指不在同一水平线上也能横滑翻页` FAILED |
+| MUTATION-4 | `ACTION_UP` 的 `dy` 改回 `midY(ev)`（基准退化） | ✅ `两指不在同一水平线上也能横滑翻页` FAILED |
+
+变异过程还**反向暴露了两个测试自身的缺陷**，一并修掉：
+
+- `两指靠得近时轻微抖动仍可翻页` 原来用 30→35（16.7%），本来就低于旧的 18% 线，**区分不出新旧**；
+  改成 30→36（20%）后才真正有区分度。
+- `两指不在同一水平线上也能横滑翻页` 原来纵向只差 200px，横向 400px 仍压得住；
+  加大到 800px 后才既能过新实现、又能被 MUTATION-3/4 抓住。
+
+### 六、模拟器实测（AVD `cardesk28` / `emulator-5560` / API 28 / arm64 / 1920×1080）
+
+**6.1 设备级 instrumentation（`am instrument`，真框架 + 真 View 树）**
+
+```
+OK (8 tests)   Time: 3.205
+```
+
+8 条全过：双指左滑 / 双指右滑 / **分多段滑动** / 两指竖向不翻页 / 单指不翻页 / 双指捏合不翻页 /
+**双指不等高也能横滑** / **分步抬手**。
+
+**6.2 真机级原始注入（`sendevent` 写 evdev，走完整输入管线）**
+
+第206轮时只能验「视图层」派发（`UiAutomation.injectInputEvent` 的多指会被框架按
+split-motion-events 拆成单指序列）。本轮给 `tools/raw_touch.sh` 补了**双指注入**
+（evdev 协议 B：`ABS_MT_SLOT` 切 slot 0/1 + `ABS_MT_TRACKING_ID`），
+于是可以在模拟器上做**与真车同一条链路**的验证：
+`evdev → InputManager → 窗口派发 → LauncherView.dispatchTouchEvent`。
+
+验证矩阵（每条用例用**时间戳窗口**隔离 logcat，避免相邻用例串行污染）：
+
+| 用例 | 期望 | 实测 |
+| --- | --- | --- |
+| 双指左滑 400px | 翻页 | ✅ `dx=-399.99 dy=0.0 span=282.8` → `切页 from=1 to=0` |
+| 双指右滑 400px | 翻页 | ✅ `dx=399.99` → `切页 from=0 to=1` |
+| 双指左滑 200px | 翻页（阈值 140） | ✅ `dx=-200.01` → `切页 from=1 to=0` |
+| 双指左滑 100px | 不翻页（位移不够） | ✅ 无「切页」日志 |
+| 双指竖滑 400px | 不翻页 | ✅ 无「切页」日志 |
+| 两指不等高（y=850 / y=250，差 600px）左滑 400px | 翻页 | ✅ `dx=-399.99 dy=0.0 span=632.4` → `切页 from=0 to=1` |
+| 单指左滑 400px | 不翻页 | ✅ 无「切页」日志 |
+
+**6.3 决定性对照：旧代码在同一条链路上「滑不动」**
+
+把 MUTATION-1（接管后不再更新中位点）打回 APK 装到模拟器，
+用**完全相同**的双指注入参数复测：
+
+```
+【旧代码】双指左滑 400px → 无「切页」日志（复现了用户说的「滑不动」）
+【修复版】双指左滑 400px → 切页 from=0 to=1
+```
+
+同一条输入管线、同一组坐标，**旧代码不翻页、新代码翻页** ——
+证明这次修的是根因，不是把阈值调到「碰巧能过」。
+
+**6.4 判定证据**
+
+| 项 | 结果 |
+| --- | --- |
+| logcat `FATAL EXCEPTION` | **0** |
+| logcat `E AndroidRuntime` | **0** |
+| logcat Exception 关键字 | **0** |
+| 截图 | 第一页（状态栏 / Dock / 音乐卡 / 场景页）、第二页（车况卡：胎压 / 续航 / 行程 / 快捷车控）均正常渲染 |
+| `pm list packages` | `com.cardesk.launcher`（4284 / 1.0.1188）、`com.cardesk.launcher.test` 已装 |
+| `dumpsys activity` | 前台 `com.cardesk.launcher/.MainActivity` |
+| `settings` | `animator_duration_scale` / `window_animation_scale` / `transition_animation_scale` = 1.0 |
+| `getprop` | `sdk=28` / `abi=arm64-v8a` / `model=Android SDK built for arm64` |
+
+**6.5 已知干扰（非本轮引入）**
+
+`com.cardesk.launcher`（debug 包）首次启动会自己拉起系统的
+「Notification access」设置页（`mCallingPackage=com.cardesk.launcher`），
+偶尔把焦点抢走导致截图拍到设置页。
+这是既有的通知监听授权流程（`core/media/NotificationAccess.kt`），
+与本轮手势改动无关；截图与日志都是在焦点确认为 `LauncherView` 时采集的。
+
+### 七、产物
+
+由 `tools/release.sh` 出包（版本号自动 +1，`assembleSystem` + `testSystemUnitTest`，
+干净全量构建）：
+
+| 项 | 值 |
+| --- | --- |
+| 包 | `dist/CarDesk-platform-ecarx-cardesk-4285.apk` |
+| 包名 | `com.ecarx.cardesk` |
+| 版本 | 4285 / `1.0.1189-system` |
+| 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`，与车机平台证书一致） |
+| APK SHA-256 | `88ddbaa3c652992142c90e1598e4f7ae536f0fe99627c70a2d00026fee9c5284` |
+| 大小 | 3,586,375 字节 |
+| R2 清单 | `dist/cardesk-latest.json`（对象 key `cardesk/CarDesk-platform-ecarx-cardesk-4285.apk`） |
+| 出包时单测 | 2467 / 0 |
+
+### 八、本轮未做
+
+- **未提交 Git**：工作区还有第201~206轮的在途改动，不擅自提交。
+- **未在领克 5570 基准镜像上复测**：用户明确指示「这一轮只需要在 cardesk avd 上验证」。
+
+---
+
+## 第208轮：四个需求一次做完（导航/首页收藏按钮 + 壁纸轮播 + 动态壁纸 + 视频壁纸）
+
+> 配套实测报告：[`emu-verify/REPORT-r208.md`](emu-verify/REPORT-r208.md)（截图在 `emu-verify/shots-r208/`）
+
+### 一、这一轮要做的四件事
+
+1. **导航页音乐卡**的「播放顺序 / 播放模式」按钮放大到**与收藏按钮一样大**；
+2. **首页（场景页）音乐卡**也加上**收藏按钮**；
+3. 壁纸功能加**静态壁纸轮播**（轮播已有的静态壁纸）；
+4. 加**动态壁纸**支持 —— 用户经问卷选择「**两者都要**」：
+   既内置**程序化动态壁纸**，也支持**导入本地视频**当动态壁纸。
+
+### 二、需求①：导航页播放模式按钮放大
+
+**根因**：`NavPage` 里收藏按钮与播放模式按钮是两套独立的尺寸常量，
+播放模式按钮内容区 28dp、外框 52×56，收藏按钮内容区 40×40 —— 两者视觉差一大截。
+
+**改法**：把两个按钮**共用同一组常量**
+（`ACTION_ICON_CONTENT = 40` / `ACTION_ICON_FRAME_W = 48` / `ACTION_ICON_FRAME_H = 56`），
+播放模式按钮内边距由 `(12,14,12,14)` 收成 `(4,8,4,8)`，
+外框由 52×56 改成 48×56。
+
+**锁法**：`MediaActionButtonsLayoutTest` 用 Robolectric 量**真实 ImageView 的内容区**，
+断言两个控件内容区**都是 40×40**（不是量常量，是量控件），
+以后谁改了尺寸、只改了一边，测试就红。
+
+### 三、需求②：首页音乐卡收藏按钮
+
+**改法**（`ui/pages/ScenePage.kt` + `ui/LauncherView.kt`）：
+
+- 卡片**右上角自绘心形**（26×26，命中区先登记再画，和项目「不依赖图片资源」一致）；
+- **按能力表显隐** —— 会话不支持收藏就不画（导航页 40、首页 26，首页更小）；
+- 与导航页**共用** `MusicController.get().favoriteState` 和**同一条下发通道**，
+  两处收藏态永远一致；下发失败统一 toast「当前播放器不支持收藏」；
+- `refresh()` 里同步 `musicPackage` / `actionProbe` / `favoriteState`，
+  避免外部播放器收藏后桌面不刷新。
+
+### 四、需求③：静态壁纸轮播
+
+**新增** `core/WallpaperCarousel.kt`（纯逻辑层）：
+`INTERVAL_SECONDS = [15, 30, 60, 300]`、`DEFAULT_INTERVAL_SEC = 60`、
+`normalizeInterval()`（**平局取大**）、`nextIndex()`、
+`shouldSwitch(enabled, elapsedMs, intervalSec, dragging)`。
+
+**接线**（`ui/LauncherView.kt`）：
+`carouselTicker` 用 **1 秒心跳**（不是按间隔起定时器，改间隔不用重建定时器），
+`checkWallpaperCarousel()` 每秒问一次「够不够时间切了」；
+**拖壁纸时不切**；手动换壁纸会**关掉动态/视频壁纸**并重置计时。
+
+**设置页**：壁纸页新增「壁纸轮播」区 —— 开关 + 间隔 chip（15 秒 / 30 秒 / 1 分钟 / 5 分钟）。
+
+**优先级**：视频壁纸 > 程序化动态壁纸 > 静态壁纸；动态/视频开启时静态轮播自动暂停。
+
+### 五、需求④a：程序化动态壁纸
+
+**新增** `core/LiveWallpapers.kt`：4 张 —— 流动极光 / 星空闪烁 / 水波粼粼 / 流星夜空
+（`NONE = -1` 哨兵、`normalize()`、`next()` / `prev()`、`phase()` 60 秒周期）。
+
+**新增** `ui/widget/LiveWallpaperRenderer.kt`：**逐帧自绘**，不缓存位图
+（星空 shader 按「场景 + 尺寸」缓存，避免每帧重建）。
+
+**接线**（`ui/widget/BackgroundView.kt`）：`Choreographer` 驱动帧循环
+（`startLiveLoop()` / `stopLiveLoop()` / `liveElapsedMs()`），
+`onDraw` 里动态壁纸优先；`onDetachedFromWindow` 停循环。
+setter 统一走 `onMain{}` —— `Choreographer.getInstance()` 在非主线程会抛 `IllegalStateException`。
+
+### 六、需求④b：导入视频当动态壁纸 —— 这一轮挖出五个真根因
+
+这是本轮最花时间的一块。**导入链路一开始就通了，播放链路先后踩了五个坑**，
+每一个都是「看起来像模拟器限制、其实是代码/环境问题」，逐个挖出来：
+
+#### 根因 1：`TextureView` 没拿到尺寸就被 draw → **应用直接崩溃**
+
+```
+FATAL EXCEPTION: main
+java.lang.NullPointerException: Attempt to invoke virtual method
+  'void android.view.TextureLayer.setLayerPaint(android.graphics.Paint)'
+  on a null object reference
+    at android.view.TextureView.getTextureLayer(TextureView.java:392)
+    at android.view.TextureView.draw(TextureView.java:339)
+```
+
+`TextureView` 在**拿到尺寸之前**被 draw，`mLayer` 还是 null → NPE。
+触发路径：本帧布局阶段挂上 `TextureView` → 失败分支同一帧就把它摘掉 →
+下一帧它仍被 draw 到。
+
+**改法**：**挂层推到下一帧**（`post`），摘层也**推到下一帧** ——
+「先 layout 再 draw」是 `TextureView` 不崩的前提。
+
+#### 根因 2：起播时 surface 的 buffer 尺寸还是 0×0 → `prepareAsync` 直接失败
+
+```
+java.io.IOException: Prepare Async failed.: status=0x80000000
+```
+
+`SurfaceView.surfaceChanged` 是在 `SurfaceView.updateSurface()` **内部**回调的，
+那一刻新尺寸还没生效；`TextureView` 那边则是 attach 阶段就回调 `onSurfaceTextureAvailable`，
+此时 SurfaceTexture 的 buffer 尺寸也是 0×0。**解码器按 0×0 去配输出 buffer，必然失败。**
+
+**改法**：起播闸口改成「**SurfaceTexture 有了 且 View 拿到真实宽高**」两个条件都满足才 prepare，
+并且再 `post` 一帧，确保 `TextureView` 真的被画过一次（消费端接上生产者了）。
+
+#### 根因 3：`Surface` 临时对象被 GC → 生产者被断开 → 解码器 EPIPE
+
+```
+E/SurfaceUtils: Failed to connect to surface 0x..., err -32      ← EPIPE
+W/NuPlayerDecoder: [c2.android.avc.decoder] failed to connect to native window, error=-32
+```
+
+`mp.setSurface(Surface(surfaceTexture))` 里那个 `Surface` 是**临时值**，
+被 GC 后析构函数会 `IGraphicBufferProducer::disconnect()` → 生产者断开 →
+解码器再连就是 EPIPE → **一帧都出不来**（播放器 state 正常、解码器在跑，就是没画面）。
+
+**改法**：**持有 `Surface` 引用**（`videoSurface` 字段），播放器释放之后才放它。
+
+#### 根因 4：平台签名包的私有目录，**SELinux 不允许媒体服务读**
+
+```
+avc: denied { read } ... scontext=u:r:mediaserver:s0
+  path="/data/data/com.ecarx.cardesk/files/video_wallpaper/wallpaper.mp4"
+  tcontext=u:object_r:system_app_data_file:s0
+```
+
+真正解码视频的是**媒体服务**（`mediaserver` / `media.extractor`），它要**自己按路径去打开这个文件**
+（哪怕我们把 fd 递过去，AOSP 也会把 fd 换算回真实路径 —— 实测传 fd 之后拒绝日志里出现的仍然是**路径**）。
+
+而平台签名包（`com.ecarx.cardesk`，uid 1000 / `system_app` 域）的私有目录标签是
+`system_app_data_file`，AOSP 策略**不允许 mediaserver 读它**。
+debug 包（`com.cardesk.launcher`，uid 10087）的目录标签是 `app_data_file` → 能读 → 所以 debug 包能播、system 包不能。
+
+**改法**：视频文件改放**外部应用目录**
+（`/storage/emulated/0/Android/data/<包名>/files/video_wallpaper/wallpaper.mp4`，标签 `sdcardfs`，媒体服务读得到），
+外部存储不可用时回退 `filesDir`；旧目录的文件自动**迁移**一次。
+
+#### 根因 5：`SurfaceView` + media overlay 在模拟器上**合成不出来**
+
+`SurfaceView.setZOrderMediaOverlay(true)` 的层级语义是对的
+（子 surface 在「窗口背景之上 / 桌面内容之下」，正好是壁纸该待的位置），
+但**模拟器不合成 media overlay 层**：视频确实在解码
+（`dumpsys media.player` 里能看到 `c2.android.avc.decoder`、`state(5)`、`looping(1)`），
+画面却一帧都看不见。
+
+**改法**：**统一收敛成单一 `TextureView` 路径** ——
+`TextureView` 是普通 View，跟着 app 窗口一起合成，插在
+「壁纸层」与「桌面内容」之间（`indexOfChild(content)`），
+视频在卡片下面、壁纸上面，层级正好，而且**不依赖 media overlay 支持**（模拟器与实车都能用）。
+同时删掉窗口背景挖空那套临时方案。
+
+#### 最后剩下的是**环境限制，不是代码问题**
+
+把同一段视频交给**模拟器自带播放器**（Gallery3D `MovieActivity`）：
+
+| 播放器 | 状态 | 帧数 | 画面 |
+| --- | --- | --- | --- |
+| 系统 Gallery3D | `state(5)` / `c2.android.avc.decoder` / `640x360` | `numFramesTotal(0)` | **全黑** |
+| CarDesk（system 签名） | `state(5)` / `c2.android.avc.decoder` | `numFramesTotal(0)` | **全黑** |
+
+host GPU 与 SwiftShader 两种后端都一样 —— **这台 AVD 镜像的视频解码能配置、能 prepare，
+但一帧都出不来**。所以「视频画面」在模拟器上**无法验证**，需在实车复测；
+其余环节（导入、落盘、起播、层级、无崩溃）已全部验证。
+
+### 七、实测数据（cardesk AVD / `emulator-5560` / API 28 / arm64 / 1920×1080）
+
+| 判据 | 结果 |
+| --- | --- |
+| 全量 JVM 单测 | **2496 / 0 failures / 0 errors / 0 skipped** |
+| 设备级 `WallpaperFeatureDeviceTest` | **OK (3 tests)**（Time 42.9s） |
+| logcat FATAL / Exception | **0** |
+| 需求① | 导航页音乐卡 ♡ 与 ⇄ **同大**（截图 `final-nav-btns-big.png`） |
+| 需求② | 场景页音乐卡**右上角 ♡**（截图 `final-scene-fav.png`，网易云会话 PLAYING 时显示） |
+| 需求③ | 日志「壁纸轮播切换 from=2 to=3 intervalSec=15」；设备测试「轮播前下标=2 → 轮播后下标=3」 |
+| 需求④a | 4 张动态壁纸逐张截图（`final-livew-0..3.png`）；日志「动态壁纸切换 index=0..3 流动极光/星空闪烁/水波粼粼/流星夜空」 |
+| 需求④b 导入 | 日志「收到选视频结果 resultCode=-1」→「开始导入」→「已打开输入流 null=false」→「视频壁纸已导入 bytes=179627 path=/storage/emulated/0/Android/data/com.ecarx.cardesk/files/video_wallpaper/wallpaper.mp4」；落盘 179627 字节 |
+| 需求④b 起播 | 日志「视频壁纸已开始播放 bytes=179627 size=1920x1080」；`dumpsys media.player` 见 `c2.android.avc.decoder` / `640x360` |
+| 需求④b 画面 | **模拟器不出帧**（系统自带播放器同样全黑，`numFramesTotal(0)`）→ 留待实车复测 |
+| 设置页 | 壁纸页三分区齐全（轮播间隔 / 动态壁纸 4 项 / 视频壁纸），截图 `final-settings-wallpaper2.png`、`final-settings-video.png` |
+
+**已知干扰（非本轮引入）**：`com.cardesk.launcher`（debug 包）首次启动会自己拉起系统的
+「Notification access」设置页抢焦点；截图与日志均在焦点确认为 LauncherView 时采集。
+
+### 八、产物
+
+由 `tools/release.sh` 出包（版本号自动 +1，`assembleSystem` + `testSystemUnitTest`，干净全量构建）：
+
+| 项 | 值 |
+| --- | --- |
+| 包 | `dist/CarDesk-platform-ecarx-cardesk-4286.apk` |
+| 包名 | `com.ecarx.cardesk` |
+| 版本 | 4286 / `1.0.1190-system` |
+| 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`，与车机平台证书一致） |
+| APK SHA-256 | `cfac1820ed9c7a79b7ac2ead8163051cd0330f17574beedf5e99946347b776bb` |
+| 大小 | 3,609,687 字节 |
+| R2 清单 | `dist/cardesk-latest.json`（对象 key `cardesk/CarDesk-platform-ecarx-cardesk-4286.apk`） |
+| 出包时单测 | 2496 / 0 |
+
+### 九、收尾复核（出包后）
+
+出包之后又把 **4286 这个正式包**在 cardesk AVD 上冷启动复跑了一遍，确认「发布出去的那个包」
+本身没问题（而不是只有 debug 包能跑）：
+
+| 复核项 | 结果 |
+| --- | --- |
+| 装机 | `versionCode=4286` / `versionName=1.0.1190-system`，包名 `com.ecarx.cardesk` |
+| 冷启动 | `am force-stop` → `am start` → 18 秒观察窗，日志「视频壁纸已开始播放 bytes=179627 size=1920x1080」（视频壁纸开关是**开着的**，冷启动能自动恢复播放） |
+| 崩溃 | 该窗口 logcat FATAL / `E AndroidRuntime` 计数 **0** |
+| 焦点 | `mCurrentFocus=com.ecarx.cardesk/com.cardesk.launcher.MainActivity`（没有被设置页抢走） |
+| 画面 | 桌面完整渲染（静态壁纸 + 四卡片 + Dock + 状态栏），场景页音乐卡右上角 ♡ 可见，截图 `final-videow-on.png` |
+| 产物校验 | `shasum -a 256 dist/CarDesk-platform-ecarx-cardesk-4286.apk` = `cfac1820…76bb`，与上面第八节一致 |
+
+同时把**测试期残留的素材**清掉了，避免下一个人接着用这个模拟器时被误导：
+
+| 路径 | 处理 |
+| --- | --- |
+| `/sdcard/Movies/vwtest.mp4` | 已删 |
+| `/sdcard/Download/cardesk-test.mp4` | 已删 |
+| `/data/user/0/com.cardesk.launcher/files/video_wallpaper/wallpaper.mp4`（debug 包旧目录） | 已删 |
+| `/storage/emulated/0/Android/data/com.ecarx.cardesk/files/video_wallpaper/wallpaper.mp4`（**正式包的功能产物**） | **保留** |
+
+> 补充说明：正式包的视频壁纸开关目前是**打开**状态，所以冷启动会走「恢复播放」这条路。
+> 这台 AVD 出不了视频帧（见第六节根因 5），`TextureView` 无 buffer 时是**透明**的，
+> 所以画面上看到的是底下的静态壁纸 —— 这是**镜像限制**，不是层被漏挂了。
+> 实车上视频帧出来后，`TextureView` 会在静态壁纸之上、桌面内容之下正常显示。
+
+### 十、本轮未做
+
+- **未提交 Git**：工作区还有第201~207轮的在途改动，不擅自提交。
+- **未在领克 5570 基准镜像上复测**：用户明确指示「只需要在 cardesk avd 上验证」。
+- **视频画面未在模拟器上验证**：镜像层面不出帧（系统播放器同样如此），需实车复测。
+
+---
+
+## 第209轮：首页音乐卡收藏按钮 —— 挪到播放键左侧 + 放大一倍
+
+> 用户反馈：「首页音乐卡收藏按钮放到播放按钮左侧，同时放大一倍」。
+>
+> 配套实测报告：[`emu-verify/REPORT-r209.md`](emu-verify/REPORT-r209.md)（截图在 `emu-verify/shots-r209/`）
+
+### 一、这一轮改了什么
+
+第207轮加的首页音乐卡收藏按钮**放在卡片右上角、只有 26×26** ——
+离右下角的播放键远、也不够醒目。本轮按用户要求重排：
+
+| 项 | 第207轮 | 第209轮 |
+| --- | --- | --- |
+| 位置 | 卡片**右上角** | **播放键正左侧**、与它同一条水平中线 |
+| 尺寸 | 26 × 26 | **52 × 52**（放大一倍） |
+
+### 二、几何怎么定的（设计坐标，k = 卡片宽 / 338）
+
+```
+播放键圆心 bx、圆半径 MUSIC_PLAY_RADIUS = 28、进度环半径 30
+心形框右边缘 = bx − 28 − 6(MUSIC_FAV_GAP) = bx − 34
+心形框左边缘 = bx − 34 − 52(MUSIC_FAV_ICON_SIZE)
+竖直方向     = 与播放键同中线 by（卡片太矮时夹在卡内）
+```
+
+新增常量（都在 `ScenePage` 的 companion 里）：
+
+| 常量 | 值 | 含义 |
+| --- | --- | --- |
+| `MUSIC_PLAY_RADIUS` | 28f | 播放键圆半径（心形定位也用它） |
+| `MUSIC_FAV_ICON_SIZE` | 52f | 收藏心形边长（第207轮是 26） |
+| `MUSIC_FAV_GAP` | 6f | 心形与播放键圆的间隙 |
+| `MUSIC_FAV_TEXT_GAP` | 8f | 心形与歌名文本列的间隙 |
+
+**歌名列要跟着让**：文本列右边界从「进度环外侧」改成「**心形左边缘 − 8**」，
+否则长歌名会从心形底下穿过去。
+
+**顺手修了一个漏**：收藏键一直没进 `PRESS_HIT_KEYS`，
+所以心形从来没有按压缩放反馈（第207轮的遗留）。本轮补上，
+顺序按 `handleTap` 的实际分发顺序放在 `source` 之后。
+
+### 三、验证（cardesk AVD / `emulator-5560` / API 28 / arm64）
+
+| 判据 | 结果 |
+| --- | --- |
+| 新增单测 `首页音乐卡收藏按钮在播放键左侧且放大一倍` | 通过：心形**整个落在播放键左侧**、与播放键**同中线**、边长比例 52/56、正方形 |
+| 全量 JVM 单测 | **2493 / 0 failures / 0 errors / 0 skipped** |
+| 实机截图 | 心形在播放键左侧、明显变大；歌名「九万字」/歌手「黄诗扶」仍完整不截断 |
+| 点心形 (784,838) | 日志「音乐卡收藏按钮点击 card=music favorited=false known=true」，再点 `favorited=true` —— **收藏真的生效了** |
+| 点播放键 (852,838) | 日志「音乐卡播放暂停点击」—— **心形没有抢走播放键的命中区** |
+| logcat FATAL / `E AndroidRuntime` | **0** |
+| 焦点 | `com.ecarx.cardesk/com.cardesk.launcher.MainActivity` |
+
+### 四、踩到的坑（记下来别再踩）
+
+**`gradle assembleSystem` 不带 `-PcardeskPackage=com.ecarx.cardesk` 会出成另一个包。**
+
+`app/build.gradle.kts` 里：不带这个属性时，system 变体的 `applicationId` 会被改成
+**`com.ecarx.qq.tool`**（那是「替换参考 App」的版本，第一九五轮起就不再发了）。
+本轮第一次手工构建就漏了这个参数 → 装到设备上的是 `com.ecarx.qq.tool`，
+而 `com.ecarx.cardesk` **根本没被替换**（`pm path` 显示的 base.apk 还是老包，
+大小 3,609,687 ≠ 新包的 3,610,283），
+于是**截图看的是旧版式**，一度以为改动没生效。
+
+⇒ **验证前后一定要核对包**：`adb shell pm path <包名>` + 设备上 `base.apk` 的 md5
+必须和宿主 `app/build/outputs/apk/system/app-system.apk` 的 md5 一致。
+（本轮已把误装的 `com.ecarx.qq.tool` 从模拟器上卸载干净。）
+
+### 五、产物
+
+由 `tools/release.sh` 出包（版本号自动 +1，干净全量构建 + 全量单测）：
+
+| 项 | 值 |
+| --- | --- |
+| 包 | `dist/CarDesk-platform-ecarx-cardesk-4287.apk` |
+| 包名 | `com.ecarx.cardesk` |
+| 版本 | 4287 / `1.0.1191-system` |
+| 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
+| APK SHA-256 | `a715c4975c2a518dea65d6d9747f04caf2221023e9e483d96afb80b168f6b6cd` |
+| 大小 | 3,609,939 字节 |
+| R2 清单 | `dist/cardesk-latest.json`（对象 key `cardesk/CarDesk-platform-ecarx-cardesk-4287.apk`） |
+| 出包时单测 | 2493 / 0 |
+
+装机冒烟：设备 `base.apk` md5 = 宿主 md5 = `94c0055e7d56565015e1a324983e8445`（一致）、
+`versionCode=4287`、logcat FATAL **0**、焦点在 `MainActivity`、桌面完整。
+
+---
+
+## 第210轮：首页音乐卡收藏心形 —— 再往左挪，摆在歌名和播放键中间
+
+> 用户反馈：「离播放按钮远一点，放到歌名和播放按钮中间」。
+>
+> 配套实测报告：[`emu-verify/REPORT-r210.md`](emu-verify/REPORT-r210.md)（截图在 `emu-verify/shots-r210/`）
+
+### 一、第208轮还不够
+
+第208轮把心形从「卡片右上角」挪到了「播放键左边」，但间隙只有 6 个设计单位 —— 
+实机上看着**像和播放键连成一块**。本轮按用户要求再往左挪，摆在**歌名和播放键中间**。
+
+### 二、几何改成「按歌名长度居中」
+
+```
+可摆区间 = [歌名右缘 + 8, 播放键左缘 − 6]      ← 两端都是最小间隙
+心形     = 在这个区间里**居中**
+竖直方向 = 仍与播放键同一条中线
+```
+
+歌名越长，心形越往左（**跟着文字走**），所以要用 `Paint.measureText` 量文字实际占位：
+
+| 位置 | 做法 |
+| --- | --- |
+| 量文字 | 先按**自然上限**（让到进度环外侧）截断并量宽 → 得到 `textEdge`（歌名/歌手取宽的那个） |
+| 定位 | `leftBound = textEdge + 8`，`rightBound = 播放键左缘 − 6`，心形在两者之间居中 |
+| 空间不够 | （歌名特别长）→ 心形**贴着播放键**放，绝不压到字上；文本列再为心形让位 |
+| 文本列 | 右边界 = `min(自然上限, 心形左边缘 − 8)`，保证歌名不会从心形底下穿过去 |
+
+### 三、验证（cardesk AVD / `emulator-5560` / API 28 / arm64）
+
+| 判据 | 结果 |
+| --- | --- |
+| 实机画面 | 心形落在「九万字」和播放键**中间**，两边都留出明显空档 |
+| 实机像素 | 歌名右缘 ≈ 577、播放键圆左缘 ≈ 815 → 中点 ≈ 696；心形中心 ≈ **697** ✅ |
+| 点心形 (697,838) | 日志「音乐卡收藏按钮点击 card=music favorited=true known=true」 |
+| 点播放键 (852,838) | 日志「音乐卡播放暂停点击」—— 命中区互不干扰 |
+| 点中间空白 (620,838) | **不命中**任何按钮（确实在空档里） |
+| logcat FATAL / `E AndroidRuntime` | **0** |
+| 全量 JVM 单测 | **2495 / 0 failures / 0 errors / 0 skipped** |
+
+### 四、单测是怎么锁住这个版式的
+
+新增两个用例（`MediaActionButtonsLayoutTest`）：
+
+1. `首页音乐卡收藏按钮摆在歌名和播放键中间` ——
+   心形在歌名右缘与播放键左缘**之间**、**不贴着播放键**（间距 > 半边长）、
+   且大致在两者**中间**（±15%）。
+2. `歌名极长时收藏按钮不压到歌名上` ——
+   歌名极长时文本列要让位，心形不能压到歌名上。
+
+**两个用例都做了变异检查**（把实现改回错误版本，测试必须红）：
+
+| 变异 | 结果 |
+| --- | --- |
+| 心形改回「贴着播放键」 | ✅ 用例 1 FAILED |
+| 文本列不再为心形让位 | ✅ 用例 2 FAILED |
+
+> ⚠️ **踩到的坑：Robolectric 的 `Paint.measureText` 每个字只算 1px**
+> （真机是真实字宽）。所以「歌名极长」那个用例一开始用 26 字的中文标题**抓不住**变异 ——
+> 必须用 `repeat(200)` 这种超长标题，才够宽把文本列撑满、逼出截断分支。
+> 这也解释了为什么**版式断言必须在真机上再验一遍**（本轮两边都做了）。
+
+### 五、产物
+
+由 `tools/release.sh` 出包（版本号自动 +1，干净全量构建 + 全量单测）：
+
+| 项 | 值 |
+| --- | --- |
+| 包 | `dist/CarDesk-platform-ecarx-cardesk-4288.apk` |
+| 包名 | `com.ecarx.cardesk` |
+| 版本 | 4288 / `1.0.1192-system` |
+| 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
+| APK SHA-256 | `a5728eee9d81d6f3459413dfec9710910ca6f3bba7b7e92b28d53b16ca3de815` |
+| 大小 | 3,610,463 字节 |
+| R2 清单 | `dist/cardesk-latest.json`（对象 key `cardesk/CarDesk-platform-ecarx-cardesk-4288.apk`） |
+| 出包时单测 | 2495 / 0 |
+
+装机冒烟：设备 `base.apk` md5 = 宿主 md5 = `510a05e26e4ae5ca78cbbe05bb3cad6c`（一致）、
+`versionCode=4288`、logcat FATAL **0**、点心形日志正常、焦点在 `MainActivity`。
+
+---
+
+## 第211轮：动态壁纸 / 静态壁纸轮播 的性能对比（纯测量，没改代码）
+
+> 用户要求：「对比一下支持动态壁纸和静态壁纸轮播后的性能与之前的性能差异」。
+>
+> 实测报告：[`emu-verify/REPORT-r211.md`](emu-verify/REPORT-r211.md)
+> 测量脚本：`/tmp/cardesk-r211/perf_ab.py`（五场景 A/B）、`perf_ab2.py`（补内存/宿主占用/解码进程）、
+> `perf_ab3.py`（内存趋势 + 解码进程明细）
+
+### 一、怎么比的
+
+- **「之前」= 4285**（第207轮出包，代码里**根本没有**轮播/动态壁纸/视频壁纸）
+- **「之后」= 4288**（第208~210轮出包，功能可以开可以关）
+- 每个场景：装包 → 改 prefs → 冷启动 → 静置 14 秒 → 测 **60 秒**窗口
+- 指标：app CPU（客机 `/proc/<pid>/stat` ÷ 整机 `/proc/stat`）、宿主 qemu 占用、
+  `dumpsys gfxinfo` 帧统计、`dumpsys meminfo` PSS、logcat GC 计数与场景标记
+
+### 二、主表
+
+| 场景 | app CPU% | 宿主 qemu% | 整机 busy% | fps | 卡顿% | PSS(MB) | p50 帧耗时 |
+|---|---|---|---|---|---|---|---|
+| 4285 之前（无这些功能） | 0.82 | 45.1 | 9.76 | 2.8 | 0.59 | 58.1 | 7ms |
+| 4288 全关（有代码不启用） | 0.77 | 43.0 | 8.92 | 2.8 | 2.37 | 58.1 | 7ms |
+| 4288 静态壁纸轮播（15 秒） | 1.06 | 51.8 | 11.05 | 3.7 | 3.17 | **89.9** | 8ms（p99 25ms） |
+| 4288 程序化动态壁纸 | **5.09** | **77.5** | **15.86** | **53.0** | **97.04** | 52.7 | **20ms** |
+| 4288 视频壁纸 | 0.87 | 52.5 | 11.90 | 2.8 | 0.60 | 58.4 | 7ms |
+
+### 三、四条结论
+
+1. **「有这功能」本身零开销** —— 4285 vs 4288 全关：CPU / 内存 / 帧率完全一致。
+   所有开销都来自**启用**。
+2. **静态壁纸轮播：CPU 可忽略，内存 +32MB。**
+   PSS 随时间实测：64.9 → 73.5 → 81.9 → 90.3 → **稳住**（每切一张 +8.3MB）。
+   根因：`WallpaperRenderer` 把每张壁纸缓存成**全屏 1920×1080 ARGB 位图（8.29MB/张）**，
+   LRU 上限 40MB → 稳态 58MB → **90MB**。切换那一帧 p99 15ms → **25ms**（重建整张壁纸）。
+3. **程序化动态壁纸：唯一有明显开销的功能。**
+   app CPU **×6.6**、宿主整机 **+34.5pt（接近翻倍）**、帧耗时 **20ms > 16.67ms 的 60fps 预算**
+   （这台模拟器 97% 的帧都超时）。**定性变化**：静态壁纸是**按需渲染**（2.8fps），
+   动态壁纸把它变成**常驻 60fps 重绘**。
+   内存反而更低（52.7MB，全矢量不缓存位图）；GC 60 秒只有 1 次 → **瓶颈在光栅化，不在分配**。
+4. **视频壁纸：测不出真实成本。**
+   解码不在 app 进程里（`mediaserver` / `hardware.google.media.c2@1.0-service` 实测都是 **0.00%**），
+   因为**这台镜像一帧都解不出来**（`numFramesTotal(0)`）→ 解码器空转。
+   ⇒ 这里的 0.87% **不代表实车**，真实性能要实车复测。
+
+### 四、顺带挖出两个问题（代码层面确认，本轮没改）
+
+1. **轮播心跳生命周期有缺陷**（`ui/LauncherView.kt`）
+   - `:295` 每次 `run()` 都 **new 一个 Handler**，不走类里的 `handler` 字段（`:535`）；
+   - `:4972` `onDetachedFromWindow()` 的 `handler.removeCallbacksAndMessages(null)` **清不掉它**；
+   - `:1089` `build()` 里 `postDelayed(carouselTicker, 1000)` **前面没有 removeCallbacks**；
+   - 而 `build()` 在换肤（`:2132`）和改底栏形态（`:4115`）时都会重跑
+     → **每重建一次，1 秒心跳就多跑一份**（随重建次数线性增长的常驻开销）。
+   - 修法：改用类里的 `handler` + post 前 `removeCallbacks` + `onDetachedFromWindow` 里显式停。
+2. **动态壁纸每帧重建 Path / Shader**（`ui/widget/LiveWallpaperRenderer.kt`）
+   极光带每帧重建路径 + 新建 `LinearGradient`，水面/星空的渐变也没缓存（只有夜空缓存了）
+   → 这是那 20ms 帧耗时的主因。
+
+### 五、本轮未做
+
+- **未改代码、未出包**（本轮纯测量）。
+- **视频壁纸真实性能未在实车验证**。
+- **未提交 Git**。
+
+---
+
+## 第212轮：修复第211轮挖出来的两个缺陷
+
+> 用户要求：「修复缺陷」。
+>
+> 配套实测报告：[`emu-verify/REPORT-r212.md`](emu-verify/REPORT-r212.md)（截图在 `emu-verify/shots-r212/`）
+
+### 一、缺陷① 壁纸轮播心跳的生命周期（`ui/LauncherView.kt`）
+
+第207轮加的轮播心跳（每秒查一次「够不够时间切壁纸」）有两个问题：
+
+| 位置 | 问题 |
+|---|---|
+| `:295` | `carouselTicker.run()` 里每次 **new 一个 Handler**（`Handler(Looper.getMainLooper())`），不走类里的 `handler` 字段（`:563`） |
+| `:4992` | `onDetachedFromWindow()` 只有 `handler.removeCallbacksAndMessages(null)` → **清不掉轮播心跳** → 视图 detach 后它还在跑 |
+| `:1089` | `build()` 里 `postDelayed(carouselTicker, 1000)` **前面没有 removeCallbacks** |
+| `:2132` / `:4115` | 换肤（`applyTheme`）和改底栏形态（`onSettingsApplied`）都会重跑 `build()` → **每重建一次，1 秒心跳就多挂一条链** |
+
+**修法**（统一走类里的 `handler`）：
+- `carouselTicker.run()` 改用 `handler.postDelayed(this, 1000L)`；
+- `build()` 里 post 前先 `handler.removeCallbacks(carouselTicker)` **去重**；
+- `onAttachedToWindow()` 里补挂（detach 时被 `removeCallbacksAndMessages(null)` 一起清掉了，
+  桌面切后台再回来轮播不能停）；
+- `onDetachedFromWindow()` 里显式 `handler.removeCallbacks(carouselTicker)`。
+
+### 二、缺陷② 动态壁纸每帧重建 shader / 路径 / 随机参数（`ui/widget/LiveWallpaperRenderer.kt`）
+
+第211轮实测发现每帧都在重建一批**根本不该重建**的东西：
+
+| 每帧新建的东西 | 次数 | 本轮改成 |
+|---|---|---|
+| 极光带的 `LinearGradient` | 3 | 按尺寸缓存（透明度折算方式见下） |
+| 银河带 / 水面 / 月晕 / 流星拖尾的 shader | 1~2 | 按尺寸缓存 |
+| 前景地面 `Path` | 1 | 按尺寸缓存 |
+| `Random(种子)`（星点 / 波纹 / 流星的随机参数） | 1 | 按尺寸**预生成一次** |
+| 波纹的 `RectF` | 26 | 复用同一个 |
+
+⇒ 每帧少掉 5~6 个对象分配、200~450 次 `Random.nextFloat()`、30 多个 `RectF`。
+
+**画面必须一模一样**，所以：
+- 随机参数**按原来的顺序、用原来的种子**抽一次再缓存（顺序一变星星就全换位置）；
+- 极光带原来把透明度拆在两处（shader 的 alpha × `paint.alpha`，合成后是 `0x66 × breathe²`），
+  现在 shader 固定 `0x66`、把 `breathe²` 折进 `paint.alpha` —— **合成结果一致**。
+
+### 三、怎么证明「画面没变」：逐像素对拍
+
+新增 `LiveWallpaperRendererParityTest`：
+把**改造前的实现原样抄一份**放在测试里当"参考实现"，
+同一时刻、同一尺寸各画一张，**逐像素比对**（4 种动态壁纸 × 5 个时刻 = 20 组）。
+
+实测结果：
+
+| 动态壁纸 | 差异像素 | 最大通道差 |
+|---|---|---|
+| 流动极光 | 1787~3891 / 57600（约 3~7%） | **≤ 2**（透明度舍入） |
+| 星空闪烁 | **0** | **0** |
+| 水波粼粼 | **0** | **0** |
+| 流星夜空 | **0** | **0** |
+
+⇒ 星空 / 水波 / 流星**一个像素都不差**；
+只有极光因为透明度的截断时机会差 1/255（深色渐变上肉眼不可见）。
+
+**变异检查**：把新实现的星点 `x/y` 抽取顺序对调 → 对拍测试 **FAILED** ✅（证明不是空断言）。
+
+### 四、怎么证明「心跳修好了」：两个缺陷各一个用例
+
+新增 `WallpaperCarouselTickerTest`（用 `carouselTickCountForTest()` 数心跳跑了几次）：
+
+| 用例 | 盯什么 | 变异检查 |
+|---|---|---|
+| `心跳稳定时每秒只跑一次` | 3 秒 ≈ 3 次 | — |
+| `重建不会让心跳叠加` | 重建 3 次后 3 秒仍 ≈ 3 次（修之前是 12 次） | 去掉 `removeCallbacks` → **FAILED** ✅ |
+| `detach 之后心跳停` | detach 后心跳不再跑 | 心跳改回自己 new Handler → **FAILED** ✅ |
+
+### 五、⚠️ 修正第211轮的一个判断
+
+第211轮我写了「动态壁纸每帧重建 Path / Shader → **这就是那 20ms 帧耗时的主要来源**」。
+**这个判断是错的**，本轮的交替重复实测推翻了它：
+
+| 场景 | app CPU% | 宿主 qemu% | fps | 卡顿% | p50 帧耗时 |
+|---|---|---|---|---|---|
+| 4288 修复前 · 第1轮 | 5.19 | 78.6 | 53.0 | 97.2 | 20.0 |
+| 修复后 · 第1轮 | 5.09 | 79.4 | 53.0 | 97.08 | 20.0 |
+| 4288 修复前 · 第2轮 | 5.31 | 82.9 | 53.0 | 85.04 | 21.0 |
+| 修复后 · 第2轮 | 5.25 | 80.0 | 53.0 | 96.86 | 20.0 |
+
+⇒ **帧耗时前后基本没变（p50 都是 20ms）**，app CPU 只降约 2%。
+⇒ 那 20ms 的真凶是**填充率**，不是对象分配：
+每帧要铺满 1920×1080 的渐变夜空（200 万像素）+ 3 条带 alpha 的渐变极光带（≈140 万像素），
+≈ **340 万像素/帧**的带渐变求值的填充。
+⇒ 本轮缓存改造的价值是**消除每帧垃圾**（正确的工程习惯 + 避免长时间运行的 GC 抖动），
+**不是**帧耗时优化。要压动态壁纸的帧耗时，得走**降帧**或**降填充率**（缓存静态层），
+那是产品级的取舍，本轮没做。
+
+### 六、验证
+
+| 判据 | 结果 |
+| --- | --- |
+| 全量 JVM 单测 | **2501 / 0 failures / 0 errors / 0 skipped**（新增 6 个） |
+| 设备实测：4 张动态壁纸 | 逐张截图确认渲染正常（极光 / 星空 / 水波 / 流星） |
+| 设备实测：静态壁纸轮播 | 日志「壁纸轮播切换 from=5 to=6 / 6→7 / 7→8」，间隔精确 15 秒 |
+| logcat FATAL / `E AndroidRuntime` | **0** |
+| 装机 md5 核对 | 宿主 = 设备 ✅ |
+
+### 七、产物
+
+由 `tools/release.sh` 出包（版本号自动 +1，干净全量构建 + 全量单测）：
+
+| 项 | 值 |
+| --- | --- |
+| 包 | `dist/CarDesk-platform-ecarx-cardesk-4289.apk` |
+| 包名 | `com.ecarx.cardesk` |
+| 版本 | 4289 / `1.0.1193-system` |
+| 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
+| APK SHA-256 | `8980fc3a1296d7514e2a55ea7419c7033495f19e48f1c82d26c9916143f641b1` |
+| 大小 | 3,614,039 字节 |
+| R2 清单 | `dist/cardesk-latest.json`（对象 key `cardesk/CarDesk-platform-ecarx-cardesk-4289.apk`） |
+| 出包时单测 | 2501 / 0 |
+
+装机冒烟：设备 `base.apk` md5 = 宿主 md5 = `0637ac9519a674e02c9abc339ba120e3`（一致）、
+`versionCode=4289`、轮播日志正常（间隔精确 15 秒）、logcat FATAL **0**、焦点在 `MainActivity`。
+
+### 八、本轮未做
+
+- **没做降帧 / 降填充率**（那是产品级取舍，见第五节）。
+- **未提交 Git**。
+
+---
+
+## 第213轮 · 视频壁纸真实视频性能测试（`星河共赏_bec2.mp4`）
+
+> 本轮**不改代码**，是纯测量轮。目标：用一段真实的 1920×1080@60fps 视频，
+> 把「视频壁纸到底要花多少 CPU」测出来 —— 并顺带查清第208轮遗留的画面不可见问题。
+
+### 一、测试素材
+
+| 项 | 旧素材（第208轮用） | **本轮素材** |
+|---|---|---|
+| 文件 | `test-wallpaper.mp4`（Swift/AVFoundation 合成） | **`星河共赏_bec2.mp4`**（真实内容） |
+| 大小 | 179,627 B | **60,878,141 B（58.07 MB）** |
+| 分辨率 / 帧率 | 640×360 / 25 fps | **1920×1080 / 60 fps** |
+| 时长 | 4 s | **60 s** |
+| 视频编码 | H.264 **Baseline / level 3.0** | H.264 **High / level 4.2** |
+| 码率 | 357 kbps | **8,107,085 bps（8.1 Mbps）** |
+| 音轨 | 无 | **有（AAC）** |
+
+宿主没有 `ffprobe` / `mediainfo` / `exiftool`，规格由自写的
+AVFoundation 脚本（`/tmp/cardesk-r213/vinfo.swift`）+
+mp4 `avcC` box 解析（`/tmp/cardesk-r213/avcinfo.py`）得出。
+
+### 二、⚠️ 推翻第208轮的结论：「这台 AVD 一帧都出不来」是**误判**
+
+第208轮基于 640×360 旧素材得出「镜像解不出视频、只能留待实车复测」。本轮实测：
+
+| 素材 | `numFramesTotal` 增速 | 媒体进程 CPU | 结论 |
+|---|---|---|---|
+| 旧 640×360 Baseline@3.0 | **0.0 帧/s** | 0.00% | 确实一帧都出不来 |
+| **新 1920×1080 High@4.2** | **53.4 帧/s** | **29.92%** | **解得动，但很吃 CPU** |
+
+⇒ 不是镜像能力问题，**是那个 Swift 合成素材这台设备解不了**。
+
+### 三、性能实测（60 秒窗口 × 3 场景）
+
+| 场景 | appCPU% | 媒体CPU% | 宿主qemu% | 整机busy% | 视频fps | 卡顿% | p99 | PSS(MB) |
+|---|---|---|---|---|---|---|---|---|
+| S1 基线（静态壁纸） | 0.83 | 0.00 | 54.0 | 11.60 | — | 0.60 | 15 ms | 59.1 |
+| **S2 视频壁纸 1080p60** | 1.09 | **29.92** | **212.6** | **42.28** | **53.4** | **7.10** | **34 ms** | 59.5 |
+| S3 视频壁纸 640×360 | 0.82 | 0.00 | 55.5 | 11.65 | 0.0 | 0.60 | 15 ms | 59.7 |
+
+要点：
+
+1. **开销几乎全在解码侧** —— app 自己只多 **0.26%**，媒体解码进程多 **29.92%**。
+   这台镜像是**软件解码**（`c2.android.avc.decoder`，跑在 `media.codec` 进程）；
+   **实车领克 820A 有硬件 VPU，这个 29.92% 不能直接当成实车数字**。
+2. **UI 卡顿率 0.60% → 7.10%（11.8 倍）**，帧耗时 p99 15 ms → 34 ms。
+   桌面 UI 自己没变慢，是 4 核 CPU 被软解码抢走 30%，主线程等核变久。
+3. **软解码跟不上 1080p60**：丢帧 34.12 帧/s（源 60 fps，输出 53.4 fps）。
+4. **本轮数据是实车的下界** —— TextureView 没生成 SF layer，
+   GPU 合成那段开销**根本没被计入**（见下条）。
+
+### 四、画面仍不可见，但原因与第208轮判定的不同
+
+- 像素级证据：视频壁纸 vs 静态基线两张 1920×1080 截图全图对比，
+  **只有状态栏时钟那一小块（17×23 px）不同**，视频一个像素都没上屏。
+- `dumpsys SurfaceFlinger --list`：**没有任何 TextureView / SurfaceTextureLayer**。
+- **决定性对照**：把**同一个文件**交给系统 Gallery3D（**SurfaceView** 路径），
+  画面**完整显示** ⇒ 这台镜像的解码与视频合成能力都正常。
+
+⇒ **问题在 `TextureView` 这条合成路径本身**。
+第208轮「模拟器不合成 media overlay 层 ⇒ 统一收敛到单一 TextureView 路径」的修法方向，
+**在这台设备上不成立**（TextureView 压根没生成 SF layer）。
+⇒ 实车复测这一项**依然要做**，而且现在知道要盯的是「**TextureView 有没有生成 SF layer**」。
+
+### 五、本轮未做
+
+- **没改代码**（纯测量轮）。
+- **没出包**（无代码变更）。
+- **未提交 Git**。
+
+---
+
+## 第214轮 · 修复「视频壁纸画面不显示」（`SurfaceView` 后端）
+
+### 一、问题
+
+第213轮用真实 1080p60 视频测完性能后，把「第208轮画面不可见」这件事查到底：
+
+| 证据 | 实测 |
+|---|---|
+| 解码 | **正常** —— `numFramesTotal` 稳定涨 **53.4 帧/s**（源 60fps），日志「视频壁纸：收到第一帧」 |
+| 画面 | **一个像素都没上屏** —— 与静态壁纸截图 1920×1080 全图对比，**只差状态栏时钟那一小块（17×23 px）** |
+| `dumpsys SurfaceFlinger --list` | 全设备 65 层，**一条 TextureView 层都没有** |
+| 对照：系统 Gallery3D（**SurfaceView** 路径）播**同一个文件** | **画面完整显示** |
+
+⇒ 问题在 **`TextureView` 这条合成路径本身**，与解码无关、与镜像能力无关。
+（第208轮「模拟器不合成 media overlay 层 ⇒ 统一收敛到单一 `TextureView` 路径」的修法方向，
+在这台设备上不成立。）
+
+### 二、方案：改成 `SurfaceView` 独立层 + 半透明窗口
+
+`SurfaceView` 是**推模式**：有自己独立的 SurfaceFlinger 层，默认 z 序在**窗口 buffer 之下**。
+层级天然就是：
+
+```
+系统壁纸层
+  └─ cardesk 窗口 buffer   ← 桌面卡片 / 状态栏 / Dock 画在这里
+       └─ SurfaceView 层    ← 视频在这（窗口 buffer 同一块区域被“挖空”）
+```
+
+代价是**窗口 buffer 在视频那块区域必须透明** ⇒ 窗口切 `PixelFormat.TRANSLUCENT`。
+
+| 改动 | 文件 | 要点 |
+|---|---|---|
+| 视频层双后端 | `ui/LauncherView.kt` | `SurfaceView`（默认）/ `TextureView`（保留备选，实车复测用） |
+| 起播闸口 | `ui/LauncherView.kt` | `SurfaceView` 走 `holder.surface.isValid`；`TextureView` 走 `SurfaceTexture` + `setDefaultBufferSize` |
+| 窗口半透明 | `ui/LauncherView.kt` | `applyVideoWindowFormat()`；**先切 format 再挂层**（切 format 会重建 Surface） |
+| 桌面底色透明 | `ui/LauncherView.kt` | `applyDesktopBackground()`：视频播放时底色必须透明 |
+| **壁纸让路要重绘** | `ui/widget/BackgroundView.kt` | `videoPassthrough` 改成带 `invalidate()` 的 setter —— 原来改完不重绘，**旧壁纸一直留在屏上** |
+| 后端常量与 pref | `core/VideoWallpaper.kt`、`core/Prefs.kt` | `design_video_wallpaper_backend`（0=SurfaceView / 1=TextureView），**无设置页入口**，实车复测时直接改 pref 切换 |
+
+### 三、⚠️ 保留 `TextureView` 路径的理由
+
+模拟器上 `TextureView` 不通、`SurfaceView` 通，但**实车（领克 AAOS）未必一样**。
+留着老路径 + 一个 pref 开关，实车复测时可以**不改代码**就在两条路径间来回切，一次实车跑就能对比。
+
+
+### 四、验证
+
+| 判据 | 结果 |
+|---|---|
+| **画面真的上屏** | `dumpsys SurfaceFlinger --list` 出现 **`SurfaceView - com.ecarx.cardesk/…`**；截图是**视频画面**，桌面卡片/状态栏/Dock 正确叠在上面 |
+| 画面在动 | 间隔 4 秒两帧对比：**5.1% 采样像素变化** |
+| 视频帧率 | **46.5–51.8 fps**（源 60 fps） |
+| logcat | 「视频壁纸已开始播放 bytes=60878141 size=1920×1080 **backend=SurfaceView**」 |
+| logcat FATAL / `E AndroidRuntime` | **0** |
+| 全量 JVM 单测 | **2510 / 0 failures / 0 errors**（新增 9 个） |
+| 新增单测 · 变异检查 | 去掉 `if (videoPassthrough) return` → 「让路之后一个像素都不画」**FAILED** ✅<br>去掉 setter 里的 `invalidate()` → 「让路会触发重绘」**FAILED** ✅ |
+| 装机 md5 核对 | 宿主 = 设备 ✅ |
+
+#### ⚠️ 变异检查踩的坑（值得记一笔）
+
+第一次做变异②（去掉 setter 里的 `invalidate()`）时，**测试照过不误**。
+查下来不是断言不行，是**变异脚本打错了位置**：
+
+```python
+s.replace("            field = value\n            invalidate()\n", ...)   # ← 只 replace 第一处
+```
+
+`palette` / `wallpaper` 等属性的 setter **形状完全一样**（8 空格缩进 + 同样的两行），
+`replace(..., 1)` 命中的是**文件里最靠前的那一处** —— 改掉了 `palette`，
+`videoPassthrough` 根本没被碰。⇒ 断言当然过。
+
+⇒ **变异脚本必须用唯一锚点**（本轮改成整段 `var videoPassthrough: Boolean = false …` 一起匹配，
+并加 `assert s.count(old) == 1` 兜底），改完还要 **grep 确认**再跑测试。
+
+顺带把判据也换掉了：原来用 `ShadowView.wasInvalidated()`，
+它观测的是「View 当前处于 invalidated 状态」，会被 layout/draw 等各种路径置位；
+现在改成**覆写 `invalidate()` 计数**，观测的是「这个方法被调用了几次」，
+才真正对应要保证的行为。
+
+### 五、性能回归（60 秒窗口 × 3 场景）
+
+| 场景 | appCPU% | 媒体CPU% | 宿主qemu% | 整机busy% | 视频fps | 卡顿% | p99 | **SF SurfaceView 层** |
+|---|---|---|---|---|---|---|---|---|
+| S1 基线 静态壁纸 | 0.99 | 0.00 | 56.8 | 12.44 | — | 3.55 | 53 ms | 0 |
+| **S2 SurfaceView** | 1.25 | 29.66 | 216.8 | 44.77 | **46.5** | **16.96** | 65 ms | **2** ✅ |
+| S3 TextureView | 1.62 | 30.23 | 232.5 | 49.53 | 35.3 | 29.82 | 53 ms | 0 ❌ |
+
+两个结论：
+
+1. **第213轮「数据是实车的下界」得到验证** —— 真正把 surface 接进合成之后，
+   **GPU 合成那段开销显现了**：视频 fps 53.4→46.5、卡顿率 7.10%→16.96%、p99 34ms→65ms。
+2. **`SurfaceView` 不只是「能显示」，性能还更好** —— 同样的解码开销（媒体 CPU 29.66 vs 30.23），
+   但帧率更高（46.5 vs 35.3）、**卡顿率只有一半**（16.96% vs 29.82%）。
+   推模式独立层 + HWC 硬件叠加，比拉模式每帧传纹理划算得多。
+
+> ⚠️ 解码侧仍是**软解码**（`c2.android.avc.decoder` 跑在 `media.codec`，占 29% CPU）。
+> **实车领克 820A 有硬件 VPU，这 29% 不能直接套到实车。**
+
+### 六、实车复测清单（唯一未闭环项）
+
+| # | 复测项 | 怎么看 |
+|---|---|---|
+| 1 | 视频壁纸画面**真的显示** | 桌面上能看到视频在动 |
+| 2 | 走的**是哪条后端** | logcat「视频壁纸已开始播放 … backend=SurfaceView\|TextureView」 |
+| 3 | `TextureView` 路径在实车上行不行 | 把 `design_video_wallpaper_backend` 改成 `1` 再重启 app 对比 |
+| 4 | 实车**硬件解码**的开销 | 实车有 VPU，第213轮的 29.92% 软解码开销**不能直接套用** |
+| 5 | 半透明窗口在车机上的表现 | 切壁纸时有没有闪烁；系统壁纸会不会透出来 |
+| 6 | 关掉视频壁纸后窗口恢复不透明 | 截图确认底色与壁纸正常 |
+
+### 七、本轮未做
+
+- **没做实车复测**（唯一的未闭环项，清单见第六节）。
+- **未提交 Git**。
+
+### 八、产物
+
+由 `tools/release.sh` 出包（版本号自动 +1，干净全量构建 + 全量单测）：
+
+| 项 | 值 |
+| --- | --- |
+| 包 | `dist/CarDesk-platform-ecarx-cardesk-4290.apk` |
+| 包名 | `com.ecarx.cardesk` |
+| 版本 | 4290 / `1.0.1194-system` |
+| 签名 | AOSP platform（SHA-256 `c8a2e9bc…92ab8`） |
+| APK SHA-256 | `5617bdfa1c7c4225fc827db037dfabafba8f71ea6bd03b0c3cc170a7b3e31c6d` |
+| 大小 | 3,615,519 字节 |
+| R2 清单 | `dist/cardesk-latest.json`（对象 key `cardesk/CarDesk-platform-ecarx-cardesk-4290.apk`） |
+| 出包时单测 | 2510 / 0 |
+
+### 九、装机冒烟（4290）
+
+| 场景 | 期望 | 实测 |
+|---|---|---|
+| 装机 md5 | 宿主 = 设备 | `0f4bbf5d…` ✅ |
+| 版本 | 4290 / 1.0.1194-system | ✅ |
+| 视频开 · SurfaceView | SF 出现 SurfaceView 层 | **2 层** ✅ |
+| 视频开 · TextureView（对照） | 不出 SF 层 | **0 层** ✅（后端切换生效） |
+| 关掉视频壁纸 | 窗口恢复不透明、壁纸回来 | `isOpaque=1` ✅，静态壁纸完整 ✅ |
+| 窗口半透明（视频开时） | `isOpaque=0` | ✅ |
+| logcat FATAL | 0 | **0**（四个场景全 0） |
+| 焦点 | cardesk 桌面 | ✅ |
+
+### 十、本轮未做
+
+- **没做实车复测**（唯一未闭环项，清单见第六节）。
+- **没做视频转码/分辨率限制**（属产品级取舍，见第六节「测出来的产品约束」）。
+- **未提交 Git**。
+
+---
+
+## 第214轮·补 · 日间模式专项测试
+
+用户要求「日间模式也测试一下」。日间 = `daynight_enabled=true` + `daynight_mode=1`（跟随时间），
+日间区间 06:00–18:30，测试时刻 10:2x 落在日间 ⇒ 日志「日夜态变化 **night=false**」。
+
+### 一、功能判据：全部通过 ✅
+
+| 场景 | 期望 | 实测 |
+|---|---|---|
+| 日间 + 视频壁纸开 | 视频上屏、层级正确、窗口半透明 | SF 层 **2**、`isOpaque=0`、log「backend=SurfaceView」✅ |
+| 日间 + 视频壁纸关 | 静态壁纸日间版、窗口恢复不透明 | SF 层 **0**、`isOpaque=1` ✅ |
+| **运行时切日夜**（日→夜） | 视频壁纸**不能掉** | SF 层仍 **2**、`isOpaque=0`、视频照常播 ✅ |
+| logcat FATAL | 0 | **0**（四个场景全 0）✅ |
+
+运行时切换是**重点回归点**：日夜切换会走 `build()` 重建桌面，重建里会重新
+`startVideoWallpaper()`。实测**视频没掉、窗口仍半透明** ——
+说明「视频模式底色透明」这条状态没被重建冲掉。
+
+### 二、⚠️ 发现一个可读性缺陷（**视频壁纸引入的，不是日间模式本身的**）
+
+日间模式下右上角的温度「8°」和天气明细压在视频画面上几乎读不出来。
+用 WCAG 相对亮度对比度公式量化（`/tmp/cardesk-r214/contrast.py`）：
+
+| 场景 | 温度文字 | 天气文字 | 判定 |
+|---|---|---|---|
+| 夜间 + 视频壁纸 | **7.62** | 3.32 | 可读 ✅ / 勉强 ⚠️ |
+| **日间 + 视频壁纸** | **1.37** | **1.17** | **看不清 ❌** |
+| 日间 + 静态壁纸 | — | — | 正常可读 ✅（目视确认；算法在浅色背景下失效，不作数） |
+
+**根因**：**视频画面亮度不受日夜控制**，而浮层文字颜色只跟日夜走
+（`Skin.TEXT` / `Skin.TEXT_SOFT`，日间是深色 `0xFF0F1724`），
+⇒ 「日间配色 + 深色视频」这个组合下深色字直接糊在深色视频上。
+
+**这是双向问题**：夜间 UI 是浅色字（`0xFFEEF3FA`），遇��**亮色**视频同样看不清。
+
+**可选修法**（产品级取舍，本轮**未擅自实施**）：
+
+| # | 修法 | 效果 | 代价 |
+|---|---|---|---|
+| 1 | 浮层文字加**描边 / 阴影**（`Paint.setShadowLayer`） | 通用，任意背景有保底对比 | 轻微影响观感 |
+| 2 | 浮层区域加**半透明底衬**（圆角矩形） | 对比度最稳 | 视觉上多一块底 |
+| 3 | 视频壁纸时**强制一套中性配色**（带描边） | 改动集中 | 视频壁纸不再跟随日夜 |
+| 4 | 按视频首帧**平均亮度自动选 UI 配色** | 最贴合内容 | 复杂，视频会变、亮度也会变 |
+
+**建议**：1 + 2 组合（描边保底 + 底衬兜底），对静态壁纸零影响。
+
+### 三、本轮未做
+
+- **没做可读性修复**（属产品级取舍，等定方案）。
+- **未提交 Git**。
+
+---
+
+## 第215轮 · 视频壁纸下的浮层文字可读性（描边 + 底衬）
+
+> ⛔ **已回退（第217轮）** —— 用户反馈「改得有点丑」，
+> 本轮的**描边 + 底衬**方案已**全部撤销**（代码 + 单测）。
+> ⇒ 视频壁纸下**不再做任何浮层增强**，浮层文字直接压在视频画面上。
+> 保留本章作为**决策记录**：这条路的做法、实测数据、踩过的坑都在这里，
+> 以后要重做（比如换成更克制的半透明遮罩而不是描边）可以直接复用。
+> 回退明细见第217轮章节 / `emu-verify/REPORT-r217.md`。
+
+
+### 一、问题
+
+第214轮日间模式实测时测出来的缺陷：**视频壁纸开启时，桌面浮层直接压在视频画面上**。
+
+根因：**视频画面的亮度不受日夜控制**，而浮层文字颜色只跟日夜走：
+
+| 场景 | 温度文字 | 天气文字 | 判定 |
+|---|---|---|---|
+| 夜间 + 视频壁纸 | 9.88 | 3.49 | 可读 / 勉强 ⚠️ |
+| **日间 + 视频壁纸** | **2.15** | **1.25** | **看不清 ❌** |
+| 日间 + 静态壁纸 | — | — | 可读 ✅ |
+
+（对比度 = WCAG 相对亮度对比度，≥4.5 是正文 AA。）
+
+⇒ 不只是日间的问题：**夜间 UI 是浅色字，遇到亮色视频同样会看不清**。
+
+### 二、⚠️ 两个必须绕开的 API 事实
+
+| 事实 | 后果 |
+|---|---|
+| **`android.graphics.Paint` 没有 `strokeColor`** | 描边和填充**共用 `color`** ⇒ `Style.FILL_AND_STROKE` 画出来是**同色加粗**，对比度一点没提升 |
+| **`Paint.setShadowLayer` 在硬件加速的 Canvas 上不生效** | Android 只在软件层支持 shadow layer，桌面是硬件加速的 ⇒ 用它等于什么都没做（不报错、也不画） |
+
+⇒ 唯一可行：**两遍画** —— 先画对比色的**空心加粗**（描边层），再画原色的**实心正文**。
+（`LyricWipeText` 的 `haloColor`/`haloWidth` 本来就是这个机制，直接复用。）
+
+### 三、改动清单
+
+| 改动 | 文件 | 要点 |
+|---|---|---|
+| **token + helper** | `core/Skin.kt` | `overlayOnVideo` / `overlayStroke` / `overlayScrim`；`drawOverlayStroke()` 两遍描边；`overlayStrokeWidth()` |
+| **天气块底衬** | `ui/pages/ScenePage.kt` | 右上角温度/天气/图标整块铺半透明圆角矩形 |
+| 天气文字描边 | `ui/pages/ScenePage.kt` | 温度 96px / 度数 38px / 明细 20px 逐个两遍画 |
+| 中心歌词描边 | `ui/pages/ScenePage.kt` | 当前句走 `LyricWipeText` 的 `halo` 通道；衬句两遍画 |
+| 顶栏文字描边 | `ui/widget/StatusBarView.kt` | 时间/日期/续航/车外温度 |
+| 顶栏图标描边 | `ui/widget/StatusBarView.kt` | 齿轮/电池/wifi/蓝牙：先整体画加粗对比色一遍，再画原色 |
+| **开关** | `ui/LauncherView.kt` | 起播成功 → `Skin.overlayOnVideo = true`；停止/出错 → `false` |
+
+描边与底衬的颜色**跟日夜互补**（在 `Skin.apply` 里按 `pal.night` 更新）：
+
+| | 文字 | 描边 / 底衬 | 理由 |
+|---|---|---|---|
+| 夜间 | 浅色 `0xFFEEF3FA` | **深色** `0xB3000000` / `0x73000000` | 浅字压深色才顶得出来 |
+| 日间 | 深色 `0xFF0F1724` | **浅色** `0xE6FFFFFF` / `0x8CFFFFFF` | 深字压浅色才顶得出来 |
+
+**对静态壁纸零影响**：`overlayOnVideo` 只在视频壁纸播放时为 `true`；
+换肤（日夜切换）**不会**重置它 —— 它是运行状态，不是主题 token。
+
+### 四、实测效果（对比度）
+
+| 区域 | 日间 修复前 | 日间 修复后 | 夜间 修复前 | 夜间 修复后 |
+|---|---|---|---|---|
+| 温度大字 | **2.15 ❌** | **15.90 ✅** | 9.88 ✅ | **17.06 ✅** |
+| 天气明细 | **1.25 ❌** | **6.60 ✅** | 3.49 ⚠️ | **7.46 ✅** |
+| 中心歌词 | 9.29 ✅ | 15.76 ✅ | — | 11.42 ✅ |
+
+⇒ 原来「看不清」的两处现在都 **≥ 6.6**（AA 阈值 4.5）；夜间「勉强」的天气明细也升到 **7.46**。
+
+### 五、验证
+
+| 判据 | 结果 |
+|---|---|
+| 全量 JVM 单测 | **2517 / 0 failures / 0 errors / 0 skipped**（新增 7 个） |
+| 新增单测 · 变异检查 | 去掉「没开增强就不画」的闸口 → 「开增强时描边层会多画一圈」**FAILED** ✅<br>换肤时不更新描边色 → 3 个 **FAILED** ✅ |
+| 设备实测 · 日间 | 画面上屏、FATAL **0**、对比度达标 ✅ |
+| 设备实测 · 夜间 | 画面上屏、FATAL **0**、对比度达标 ✅ |
+
+#### 踩到的两个坑
+
+1. **`Paint` 没有 `strokeColor`** —— 第一版实现用了 `Style.FILL_AND_STROKE` + `strokeColor`，
+   编译直接报错才暴露出来；顺带确认了「同色加粗」在原理上也不可能有对比度收益。
+2. **Robolectric 默认图形模式不渲染文字** —— `canvas.drawText` 在 LEGACY 模式下画不出任何像素，
+   断言全成空跑。必须加 `@GraphicsMode(GraphicsMode.Mode.NATIVE)`。
+
+### 六、本轮未做
+
+- **没做实车复测**（与第214轮同一个未闭环项）。
+- **未提交 Git**。
+
+---
+
+## 第216轮 · 顶栏（时间 / 油量 / 连接图标）在视频壁纸下的可读性
+
+> ⛔ **已回退（第217轮）** —— 用户反馈「改得有点丑」，
+> 本轮的**描边 + 底衬**方案已**全部撤销**（代码 + 单测）。
+> ⇒ 视频壁纸下**不再做任何浮层增强**，浮层文字直接压在视频画面上。
+> 保留本章作为**决策记录**：这条路的做法、实测数据、踩过的坑都在这里，
+> 以后要重做（比如换成更克制的半透明遮罩而不是描边）可以直接复用。
+> 回退明细见第217轮章节 / `emu-verify/REPORT-r217.md`。
+
+
+> **一句话**：第215轮给「顶栏」加描边时**改错了组件** —— 改的是左侧那块
+> `ui/widget/StatusBarView`，而屏幕最上方真正在用的是 `ui/shell/ShellStatusBar`。
+> ⇒ 顶栏右上角的时钟 / 油量% / 连接图标全是**裸元素**，日间压深色视频画面
+> 时钟对比度只有 **1.95**。本轮补上，出包 **4292**。
+
+### 一、问题
+
+**4291 装机冒烟实测**（日间 + 视频壁纸）：
+
+```
+顶栏右侧 · 时钟「10:36」   区域动态范围对比度 = 1.95  ❌ 看不清
+```
+
+放大后能直接看出：**深色的「10:36」裸文字直接压在深蓝色视频画面上**，
+既没有描边也没有底衬。
+
+**根因（组件对照）**：
+
+| 文件 | 画的是什么 | 在屏幕上的位置 |
+|---|---|---|
+| `ui/widget/StatusBarView.kt`（第215轮改的） | 时间/日期/续航/车外温度 + 齿轮/电池/wifi/蓝牙 | **左侧**「驾驶模式 · 待命」那一块 |
+| `ui/shell/ShellStatusBar.kt`（真正在用的） | **右上角**：时间 / 油量% / 燃油图标 / 连接图标 / 位置胶囊 / 天气胶囊 | 屏幕最上方 |
+
+⇒ `ShellStatusBar` 里的时钟、油量百分比、燃油图标、连接类图标
+**全都没有底衬**，视频壁纸下一律裸压在画面上；
+位置/天气胶囊因为**自带胶囊底板**所以没露馅。
+
+**为什么夜间没暴露**：夜间文字是浅色（`0xFFEEF3FA`），压深色视频本来就可读（9.83），
+⇒ 这个缺陷**只在日间 + 视频壁纸**下暴露。
+
+### 二、修复
+
+| 改动 | 文件 | 要点 |
+|---|---|---|
+| **描边倍率** | `core/Skin.kt` | `drawOverlayStroke()` 增加 `strokeScale` 参数（默认 1，既有调用不变） |
+| **时钟描边** | `ui/shell/ShellStatusBar.kt` | 走 `Skin.drawOverlayStroke`，倍率 `CLOCK_STROKE_SCALE = 1.6` |
+| **油量%描边** | `ui/shell/ShellStatusBar.kt` | 同上（17px 裸文字） |
+| **图标描边** | `ui/shell/ShellStatusBar.kt` | 燃油图标 + 5 个连接图标：先画**对比色加粗**的同形图标，再画原本色的 |
+| 描边色 | `core/Skin.kt` | 沿用第215轮：日间浅色 `0xE6FFFFFF` 压深字、夜间深色 `0xB3000000` 压浅字 |
+
+**图标为什么也要两遍画**：`android.graphics.Paint` **没有 `strokeColor`**（描边与填充共用 `color`），
+`Paint.setShadowLayer` 在**硬件加速** Canvas 上被忽略 ⇒ 只能「先画对比色空心加粗、再画原色实心」。
+
+- 线条类（蓝牙/热点弧/WiFi 弧/燃油）：线宽 `+ ICON_OUTLINE_PAD (2.6)`（26×26 基准坐标系）
+- 实心类（信号条/WiFi 点/热点圆心）：形状**外扩** `ICON_OUTLINE_PAD_FILL (1.4)`
+
+**为什么时钟要单独倍率**：`overlayStrokeWidth(textSize) = max(1.5, textSize × 0.07)`，
+32px 时钟只算出 **2.24px**，在 1920×1080 上几乎看不出 ⇒ 给时钟 1.6 倍（≈3.4px）。
+
+### 三、实测效果（对比度）
+
+| 区域 | 日间 4291（修前） | 日间 **4292** | 夜间 4291 | 夜间 **4292** |
+|---|---|---|---|---|
+| **顶栏时钟** | **1.95 ❌** | **14.38 ✅** | 9.83 | **16.25 ✅** |
+| 顶栏右侧（整体） | 13.80 | 10.53 | 12.01 | 10.02 |
+| 温度大字 | 15.90 | 15.90 | 17.05 | 17.05 |
+| 天气明细 | 6.60 | 6.16 | 7.46 | 6.37 |
+| 中心歌词 | 15.76 | 15.76 | 11.43 | 11.39 |
+
+**静态壁纸回归**（描边必须完全不画）：SF 层 **0**、窗口 `isOpaque=1`、FATAL **0**，
+各区域对比度回到壁纸原样（时钟 10.20）⇒ **对静态壁纸零影响**成立。
+
+### 四、验证
+
+| 判据 | 结果 |
+|---|---|
+| 出包 | **4292** / `1.0.1196-system` / 3,619,475 B<br>SHA-256 `67b4325ecc789d6bfd7be46813876fbcf9c0dc78d358269508b10337090d28ca`<br>装机 md5 `c4041d173585f5ea9af7f5e69c087216`（本地 = 设备端） |
+| 全量 JVM 单测 | **2526 / 0 failures / 0 errors / 0 skipped**（新增 8 个） |
+| 新增单测 | `ShellStatusBarOverlayTest` 6 个 + `SkinOverlayLegibilityTest` 补 2 个 |
+| 变异检查 | **5 个全部被捕获** ✅（详见 `emu-verify/REPORT-r216.md` 第四节） |
+| 装机冒烟 · 日/夜 | SF 2 层、`isOpaque=0`、FATAL **0** ✅ |
+| 截图 | `emu-verify/shots-r216/`（6 张） |
+
+#### 踩到的三个坑
+
+1. **测试全局状态泄漏引发的「随机」失败** ——
+   第215轮的 `SkinOverlayLegibilityTest` 有用例把全局 `Skin.overlayOnVideo` 设成 `true` 后没还原；
+   泄漏出去后歌词会多画一圈 halo，行带高度 40 → 41 ⇒
+   `LyricsPreviewRenderTest` 的断言**随机**失败（JUnit 方法顺序不定 ⇒ 第215轮绿、第216轮红）。
+   ⇒ 两个测试类都加 `@After` 强制还原，不靠用例内部自觉调。
+2. **变异检查里的「计数断言」不够严** ——
+   计数放在绘制调用**之前**时，「把绘制调用删掉」这种变异不会让计数变化 ⇒ 断言空跑、变异漏网。
+   ⇒ 计数改到**绘制函数内部**（只有真走到描边分支才算）。
+3. **「整条顶栏一起画」会掩盖图标描边层的错色** ——
+   时钟/油量的描边层（走 `Skin.drawOverlayStroke`）已经把画面点亮，
+   图标描边层错用正文色也照样绿 ⇒ 加了只画图标段的测试观测口 `drawIconRowForTest()`。
+
+### 五、本轮未做
+
+- **没做实车复测**（与第214/215轮同一个未闭环项）。
+- **未提交 Git**。
+
+---
+
+## 第217轮 · 回退第215/216轮的「浮层描边 + 底衬」
+
+> 用户反馈：「改的有点丑，回退掉吧」；
+> 选定范围 = **两轮都回退**（视频壁纸下不做任何浮层增强）+ **重新出包 4293** 并装机验证。
+
+### 一、为什么回退
+
+第215/216轮解决了**客观存在**的可读性问题（视频亮度不受日夜控制，
+日间深色字压深色视频时对比度只有 1.37~2.15），
+但**可读性达标 ≠ 好看**：
+
+| 位置 | 做法 | 观感问题 |
+|---|---|---|
+| 右上角天气块 | 半透明圆角底衬 + 三段文字各自描边 | 整块浮在画面上，像贴了张胶片 |
+| 中心歌词 | 衬句描边 + 当前句 halo | 描边把字「框」住了，不通透 |
+| 顶栏右上角 | 时钟/油量%/连接图标全部加**白描边** | 纯线条图标套一圈粗白边，边缘发毛发脏 |
+
+### 二、回退清单
+
+**主代码**
+
+| 文件 | 撤销内容 |
+|---|---|
+| `core/Skin.kt` | `overlayOnVideo` / `overlayStroke` / `overlayScrim` / `overlayStrokeWidth()` / `drawOverlayStroke()` 整套 API；`apply(pal)` 里按日夜更新描边色那段；两个失效 import |
+| `ui/pages/ScenePage.kt` | 歌词衬句两遍描边、当前句 `haloColor`/`haloWidth`、天气块三段文字描边、`drawWeatherScrim()` 整个函数 |
+| `ui/widget/StatusBarView.kt` | 时间/日期/续航/车外温度描边、图标「加粗对比色」第二遍、`drawStatusIcons()` 与 4 个图标函数的 `outline` 参数 |
+| `ui/shell/ShellStatusBar.kt` | **第216轮全部**：时钟/油量%描边、燃油与 5 个连接图标的描边层、2 个测试观测口、3 个新常量 |
+| `ui/LauncherView.kt` | 起播/停止/出错三处的 `Skin.overlayOnVideo = …` |
+
+**测试**：删除 `SkinOverlayLegibilityTest.kt`（第215轮）、`ShellStatusBarOverlayTest.kt`（第216轮），
+共 16 个用例（走可恢复删除，文件在回收站）。
+
+**文档**：CHANGELOG 第215/216轮章节、`REPORT-r215.md`、`REPORT-r216.md` **保留**，
+但标题下都加了「⛔ 已回退」横幅 ⇒ 保留决策记录与实测数据，以后重做可直接复用。
+
+### 三、验证
+
+| 判据 | 结果 |
+|---|---|
+| `:app:assembleSystem` 编译 | **BUILD SUCCESSFUL** ✅ |
+| 全量 JVM 单测 | **2510 / 0 failures / 0 errors / 0 skipped**（第214轮基线也是 2510 ⇒ 16 个新增用例全部摘净） |
+| 全局残留检查 | `overlayOnVideo` / `overlayStroke` / `overlayScrim` / `drawOverlayStroke` 在主代码里**零命中** ✅ |
+| 出包 | **4293** / `1.0.1197-system` / 3,615,899 B<br>SHA-256 `51da0d1efcb179235cd565bb37039acaba75d98561ac2cd997f550f7bae83314`<br>装机 md5 `ace3593f1fce11406b43d27f624cc7c6`（本地 = 设备端） |
+| 装机冒烟 · 日/夜 | SF **2** 层、`isOpaque=0`、FATAL **0** ✅ ⇒ 第214轮的 SurfaceView 视频壁纸能力**完全保留** |
+
+### 四、已知代价（用户知情接受）
+
+视频壁纸下浮层文字直接压画面，日间对比度回到第214轮的状态：
+
+| 区域 | 日间 | 夜间 |
+|---|---|---|
+| 温度大字 | **2.15 ❌** | 9.88 ✅ |
+| 天气明细 | **1.25 ❌** | 3.37 ⚠️ |
+| 顶栏时钟 | **1.66 ❌** | 9.88 ✅ |
+| 中心歌词 | 9.65 ✅ | 3.50 ⚠️ |
+
+### 五、留给以后的经验（重做时直接用）
+
+1. **描边在纯线条图标上特别脏** —— 顶栏 wifi/电池是 1~2px 细线，
+   套 6px 对比色描边后边缘全是毛刺 ⇒ 描边宽度必须跟着图标线宽走。
+2. **底衬比描边安全但更重** —— 不发毛，却像贴了张卡片 ⇒
+   若重做，建议只在**大面积文字块**用底衬，**不要**给单行小字加描边。
+3. **更优路线还没试过** —— 对视频画面加一层**统一的顶部/角落渐变遮罩**，
+   既保住对比度，又不破坏桌面本身的通透感。
+4. **`Paint` 没有 `strokeColor`** —— 描边与填充共用 `color`；
+   `setShadowLayer` 在硬件加速 Canvas 上被忽略 ⇒ 硬件加速下描边只能两遍画。
+
+### 六、本轮未做
+
+- **没做实车复测**（与第214轮同一个未闭环项）。
+- **未提交 Git**。
+
+---
+
+## 第218轮 · 修两个实车反馈的问题（视频壁纸选不到文件 / 按键增强配了没用）
+
+> 用户带着实车诊断包反馈：
+> 1. **动态/视频壁纸在车机上提示「没有可用的视频浏览器/选择器」**；
+> 2. **按键增强配置了没用**。
+>
+> 本轮把这两条链路从「只有配置界面」补成「真能跑」。
+
+### 一、诊断包结论
+
+实车：领克 `geely/dcy11_a1/dcy11:9`，**Android 9 / API 28**，
+QUALCOMM MSM8996，1920×968@160dpi，装的是 4293。
+
+| 现场日志 | 含义 |
+|---|---|
+| `12:32:25.533 视频壁纸：收到选视频结果 resultCode=0 uri=null` | 车机文件管理器返回的 Intent **没有 `data`** ⇒ uri 取不到 |
+| `12:33:51.858 设置变更 key=custom_keys_enabled … to=true`<br>`12:34:15.362 设置变更 key=voice_double_action … to=360环影(开关)` | 配置**确实写进 pref 了**，但按下去什么都不会发生 |
+
+### 二、根因
+
+| # | 根因 |
+|---|---|
+| ① | `startVideoWallpaperImport()` 用 `ACTION_OPEN_DOCUMENT` + `video/*` 直接 `startActivityForResult`，车机上**没人接管这个组合** ⇒ 抛 `ActivityNotFoundException` ⇒ 弹「没有可用的视频选择器」 |
+| ② | `onActivityResult` 只认 `data?.data`，车机返回的 Intent **没有 `data`** ⇒ uri 为 null |
+| ③ | 按键增强的 6 个配置项**只在设置界面被读写**，主源码里**没有任何执行点** ⇒ 配了等于没配（这条链路从来没写过，不是 bug） |
+
+### 三、改了什么
+
+**问题1 · 视频壁纸导入**
+
+- 新增 `core/VideoPicker.kt`（纯逻辑，可 JVM 单测）：
+  - `strategies()` —— **三级降级链**：`OPEN_DOCUMENT`+视频通配 → `OPEN_DOCUMENT`+不限类型 → `GET_CONTENT`+视频通配；
+  - `extractUri()` —— **uri 三级兜底**：`data` → `clipData[0]` → `EXTRA_STREAM`；
+  - `looksLikeVideo()` —— 降级到「不限类型」时按扩展名挡掉图片/文档。
+- `MainActivity.startVideoWallpaperImport()`：逐级 `resolveActivity` **预检**，
+  全都不行 ⇒ 弹「车机没有视频选择器，请用文件管理器把视频放到「我的车机」里再试」。
+- `MainActivity.onActivityResult()`：改用 `VideoPicker.extractUri(data)`，
+  `resultCode==OK && uri==null` ⇒ 提示「没取到视频文件，请重新选择」。
+
+**问题2 · 按键增强执行链路**（三层，前两层纯 Kotlin）
+
+| 层 | 文件 | 职责 |
+|---|---|---|
+| 识别 | `core/KeyGesture.kt`（新） | 手势状态机（单击/双击/长按），不持有时间源 |
+| 解析 | `core/KeyActionResolver.kt`（新） | 「哪个键 × 哪种手势」→「做什么动作」 |
+| 执行 | `ui/KeyActionExecutor.kt`（新） | 切驾驶模式 / 切 360 / 唤起语音助手 / 切导航投屏 |
+
+- 接入点：`MainActivity.dispatchKeyEvent` 开头（比 View 树更早，能拿到所有按键事件）。
+- **单击延迟 280ms** 到双击窗口结束才发 —— 否则双击会先误触发单击动作。
+- 语音键按**候选 keyCode** 覆盖：`108` / `231` / `84` / `204` / `112`。
+  ⚠️ 源码里**不能**写 `KeyEvent.KEYCODE_VOICE_ASSIST`（compileSdk 34 上是 **231**，
+  而 API 28 的车机发的是 **108**），只能写字面量。
+- **陌生 keyCode 也会留痕**（INFO 级，`Logx` 的 DEBUG 不落盘 ⇒ 诊断包里看不到）
+  ⇒ 用户在实车按一次语音键，下一轮就能把候选表收窄。
+
+**顺带修掉的真实缺陷**
+
+- 长按成立后抬手**会多发一次单击**（`KeyGesture.onUp()` 没拦 `longFired`）
+  ⇒ 用户看到「切了两次」。这个缺陷是本轮新写的 Robolectric 端到端测试抓出来的。
+- 长按抬手**不参与双击判定**（不更新 `lastUpAt`）。
+
+### 四、验证
+
+| 判据 | 结果 |
+|---|---|
+| `:app:assembleSystem -PcardeskPackage=com.ecarx.cardesk` | **BUILD SUCCESSFUL** ✅ |
+| 全量 JVM 单测 | **2555 / 0 failures / 0 errors / 0 skipped**（第217轮基线 2510 ⇒ 新增 45 例全摘净） |
+| 变异检查 | **13 项全部被捕获** ✅（脚本加了 `verify_restore` 自校验，还原不完整会被当场发现） |
+| AVD 单击 | `input keyevent 108` ⇒ 280ms 后「切换驾驶模式」⇒ `已切换到 运动模式` ✅ |
+| AVD 双击 | `input keyevent 108 108` ⇒ 只触发 1 次「切换 360」，无误发单击 ✅ |
+| AVD 视频导入 | 正常 → 第一级 `OPEN_DOCUMENT(video/*)`；关掉 DocumentsUI → **自动降级到第三级 `GET_CONTENT`（相册接管）**；再关掉相册 → 弹明确提示，**FATAL 0 / 无崩溃** ✅ |
+| AVD 视频壁纸播放 | `视频壁纸已开始播放 bytes=60878141 size=1920x1080 backend=SurfaceView` ✅ |
+| 陌生键码留痕 | `按键增强：不认识的按键 keyCode=24 keyName=KEYCODE_VOLUME_UP` ✅ |
+| 出包 | **4294** / `1.0.1198-system` / 3,627,463 B<br>SHA-256 `09240b93f28d5857f02704902428afb1fd5b00d12fdcda5e077afbda421d0abe`<br>装机 md5 `8d8df8ea73913c0508309e32bfd037bf`（本地 = 设备端） |
+| 装机冒烟 · 日/夜 | 启动 FATAL **0**、crash buffer 空、单击/双击链路通、夜间 `night=true` ✅ |
+
+截图：`emu-verify/shots-r218/`；详细报告：`emu-verify/REPORT-r218.md`
+
+### 五、留给实车的三个未知数
+
+1. **语音键的真实 keyCode** —— 本轮已把「陌生 keyCode 记进诊断包」的口子开好，
+   用户按一次语音键再出诊断包即可定位。
+2. **车机语音助手包名** —— 现用 4 个候选 intent 依次 `resolveActivity`，
+   全失败弹「没找到语音助手应用」。
+3. **视频壁纸在 MSM8996 上的解码开销** —— 需实车看 CPU 占用。
+
+### 六、本轮未做
+
+- **没做实车复测**（实车不在手边）。
+- **没自建文件选择器**（车机上自研 SAF 成本高，优先级低于把入口修通）。
+- **未提交 Git**。
+
+---
+
+## 第219轮 · 视频壁纸导入加一条**不依赖系统选择器**的路（应用内视频列表）
+
+> 第218轮修完「视频选择器」后，实车诊断包的现场又暴露出更硬的事实：
+> **车机上的系统选择器本身就不可用** ⇒ 本轮按用户拍板的方向做：
+> **做应用内视频列表，系统选择器保留为备选。**
+
+### 一、为什么还要再做一轮
+
+第218轮在实车（领克 AAOS 820A）诊断包里读到：
+
+```
+12:32:25.532  CarDesk/App    : onPause
+12:32:25.533  CarDesk/Setting : 视频壁纸：收到选视频结果 resultCode=0 uri=null
+```
+
+- `onActivityResult` **被调用了** ⇒ 旧代码没抛异常，选择器确实被拉起过并返回了 `RESULT_OK`；
+- 但 **`onPause` 到返回只隔 1 毫秒** ⇒ 那个接手的 App **秒退**，用户根本没机会浏览文件；
+- 诊断包的 uid=1000 系统包清单里**没有 `com.android.documentsui`** ⇒ 车机没有 AOSP 那套文档选择器。
+
+⇒ 「靠系统选择器」这条路在车机上不可靠，
+第218轮的三级降级链只能改善「有人接但返回得奇怪」，救不了「没人接 / 秒退不带 uri」。
+
+### 二、我们凭什么能自己列
+
+同一份诊断包：`uid=1000 packages=… com.ecarx.cardesk …`
+⇒ **本包在车机上跑在 uid 1000（系统应用）**，
+局域网传输功能也早就在直接读写车机的 `Download` 目录 ⇒ 可以自己扫共享存储。
+
+### 三、改了什么
+
+**新增 `core/VideoLibrary.kt`（纯逻辑）**
+
+- `libraryDir()` —— 我们自己的目录 `Download/CarDesk`；
+- `scanFiles()` —— 扫目录找视频（只碰 `java.io.File` ⇒ JVM 单测直接跑）；
+- `isVideoPath` / `extensionOf` / `sort` / `formatSize`。
+
+> ⚠️ **只扫 `Download/CarDesk` 这一个目录**（用户要求）：车机共享存储里可能有几千个文件，
+> 递归扫一遍要几秒到几十秒 ⇒ 界面发顿。
+> 视频进这个目录的路径是**局域网传输**（设置 → 局域网传输 → 手机扫码上传）。
+> ⚠️ **只在用户点「导入视频…」时才扫描**（不在启动时、不在后台扫）。
+
+**新增 `ui/VideoPickerOverlay.kt`**
+
+参照 `SourceMenuLayer` 的形态：全屏层 = 遮罩 + 居中面板；
+标题 / 状态行 / 可滚动列表 / 底部按钮行（重新扫描 · 用系统选择器 · 取消）；
+每行两行字：文件名 + 「大小 · 日期 · 完整路径」；扫描在后台线程做。
+
+**其它**
+
+- `core/VideoWallpaper.kt`：新增 `importFromFile`（按文件路径导入），
+  拷贝逻辑抽成 `copyToWallpaper` 与 `importFromUri` 共用；
+- `ui/SettingsOverlay.kt`：视频壁纸区改成**两个**入口 ——
+  「导入视频…」（应用内列表，主路径）+「用系统选择器导入…」（第218轮降级链，备选）；
+- `ui/LauncherView.kt`：`openVideoPicker()` + `importVideoFromLibrary()`；
+- `MainActivity` / `core/Permissions.kt`：存储权限接口 + 授权回调；
+- 清单新增 `READ_EXTERNAL_STORAGE`
+  （车机上本包是 uid 1000 系统应用 ⇒ 权限天然 granted；
+  实测这套系统上它是 `SYSTEM_FIXED + GRANTED_BY_DEFAULT`）。
+
+### 四、顺带修掉的两个问题
+
+1. **导入前先删旧文件是多余的** —— 实测 `File.renameTo` 用的是 POSIX `rename(2)`，
+   **本身就是原子替换**（`renameTo=true dst内容='new'`）；
+   删了反而会在改名失败时把旧壁纸弄丢 ⇒ 已删掉。
+2. **扫描逻辑本来并不「纯」** —— `Item` 里放过 `Uri.fromFile()`，
+   纯 JVM 单测直接 NPE ⇒ 去掉 `uri` 字段，扫描层不再碰任何 Android 类。
+
+> 这两个都是**单测与变异检查抓出来的**，不是读代码看出来的。
+
+### 五、验证
+
+| 判据 | 结果 |
+|---|---|
+| 新增单测 | `VideoLibraryTest` 12 + `VideoLibraryShareDirTest` 2 + `VideoWallpaperImportFileTest` 5 = **19 例** |
+| 变异检查 | **9 项全部被捕获** ✅（脚本含还原自校验） |
+| 全量 JVM 单测 | **2574 / 0 failures / 0 errors / 0 skipped**（第218轮基线 2555） |
+| AVD 端到端 | 放 58.1MB 真视频进 `Download/CarDesk` → 列表列出（`视频数=1`）→ 点选 → `视频壁纸已导入 bytes=60878141` → 重启 `视频壁纸已开始播放 backend=SurfaceView`，**FATAL 0** ✅ |
+| 出包 | **4295** / `1.0.1199-system` / 3,637,859 B<br>SHA-256 `1ac296e87cd5e032e0a9aacdb3787b25297d586d82f6b7b1aad832f34f8654a2`<br>装机 md5 `1ba230555971991e4b9fd7b349d4423c`（本地 = 设备端） |
+| 装机冒烟 | 启动 FATAL **0**、视频壁纸照常播放 ✅ |
+
+截图：`emu-verify/shots-r219/`；详细报告：`emu-verify/REPORT-r219.md`
+
+### 六、车机上的用户操作路径
+
+1. **设置 → 局域网传输** → 手机扫码 → 上传视频（落在车机 `Download/CarDesk`）；
+2. **设置 → 壁纸 → 视频壁纸 → 导入视频…** → 点列表里那个视频；
+3. 导入完成，壁纸立即开始播放。
+
+系统选择器那条路仍保留为备选（万一台机 ROM 变了、系统选择器又能用了，不用等下一版）。
+
+### 七、本轮未做
+
+- **没做实车复测**（实车不在手边）。
+- **没做多选 / 预览 / 列表项删除**（先让「能导入」闭环）。
+- **未提交 Git**。
+
+---
+
+## 第220轮 · 车机体感卡顿：主线程不许碰文件 I/O，也不许碰车控
+
+> 用户反馈：「cardesk 在车机上操作体感上有些卡顿」，并给了实车诊断包
+> （1.0.1197-system，领克 dcy11 / 高通 MSM8996 / 4GB）。
+> 本轮把「卡顿」拆成**可测量的两件事**，逐条改掉。
+
+### 一、诊断包里量出来的根因
+
+#### 1.1 日志把主线程堵住了
+
+诊断包 3.5 分钟里有 **13,712 行**日志，来源分布：
+
+| tag | 行数 | 速率 | 跑在哪 |
+|---|---|---|---|
+| `CarDesk/Ambient`（氛围灯逐帧） | 4,791 | 20 行/秒 | **主线程**（60Hz 渲染 tick 里） |
+| `CarDesk/Vehicle`（属性变化回调） | 4,199 | 21 行/秒 | binder 线程 |
+| `CarDesk/Signal`（信号降级链「读不到」） | 2,854 | 14 行/秒 | **主线程**（每秒刷新里） |
+| 其余 | 1,868 | ~8 行/秒 | 混合 |
+
+⇒ **~60 行/秒**，每行 ~150 字节 ⇒ **落盘速率 ~10KB/秒**。
+
+而当时的 `FileLogSink.write()` 每写一行要：
+
+```kotlin
+RandomAccessFile(file, "rw").use { raf ->
+    raf.seek(raf.length())   // lseek
+    raf.write(bytes)          // write
+}                             // open + close
+```
+
+**每行 4 次系统调用**，而且 `SimpleDateFormat.format()` 也在**调用线程**上跑。
+调用线程经常就是主线程 ⇒ 实车（高通 820A + eMMC）上一次同步「开→写→关」要 **2~5ms**
+⇒ 主线程每秒被日志堵掉 **50~125ms**。
+
+#### 1.2 证据：每秒心跳跑成了 1.1 秒
+
+桌面有一个 1 秒心跳（`LauncherView.ticker` → `refresh()`）。
+诊断包里相邻两条「状态栏时钟刷新」的时间戳：
+
+```
+12:31:41.106 → 12:31:42.254 → 12:31:43.407 → 12:31:44.508
+     ↑ 差 1148ms        ↑ 1153ms        ↑ 1101ms
+```
+
+**每一轮都稳定超出 1000ms 约 89~153ms** ——
+这就是主线程每轮被堵掉的量（不是抖动，是稳定的）。
+
+#### 1.3 第二根因：车控信号在主线程上同步读
+
+`refresh()` 里那一行 `currentVehicleInfo()` 内部要走完：
+
+| 信号 | 降级链 | 每轮读取次数 |
+|---|---|---|
+| 车门 / 引擎盖 / 后备箱 | car_signal → IDoorAndWindow → BCM_DOOR_POS → DOOR_POS 属性 → MC 事件属性 | 5 档 × 6 项 |
+| 车窗 | IDoorAndWindow → BCM_FUNC_WINDOW_POS → WINDOW_POS 属性 | 3 档 × 4 项 |
+| 行程 / 里程 / 胎压 / 油量 / 驾驶模式 / 环温 | ISensor / ITripData / TS_* / 一参+带 zone 读 | ~15 |
+
+⇒ **一轮 30~60 次同步 binder 往返**，全在主线程上。
+实车一次往返 1~3ms ⇒ **再堵 30~150ms**。
+
+#### 1.4 第三个后果：诊断包只剩最后 6.5 分钟
+
+4MB 的日志预算 ÷ 10KB/秒 ≈ **6.5 分钟**写满 ⇒ 8 份文件轮转完，
+诊断包只能装最近 8 份 ⇒ 实车那份诊断包**直接丢弃了最老的 4 份**。
+「出问题之前发生了什么」全没了。
+
+### 二、改了什么
+
+| # | 改法 | 落点 |
+|---|---|---|
+| 1 | **落盘一律不在调用线程上做**：后台写线程 + 队列；文件**常驻句柄**（append），每行只剩一次 `write()`；时间戳在调用线程只取 `System.currentTimeMillis()`，`SimpleDateFormat` 挪到写线程 | `core/log/FileLogSink.kt`（重写） |
+| 2 | **车控信号采样搬出主线程**：新增后台采样器，每秒一轮，产出不可变快照；主线程只读快照 | `vehicle/VehicleSignalSampler.kt`（新增）、`ui/LauncherView.kt` |
+| 3 | **氛围灯 60Hz 渲染 tick 搬到独立渲染线程**：频谱回调也 post 到那里 ⇒ 状态不需要加锁；界面预览回主线程（20Hz 节流） | `core/ambient/AmbientLightController.kt` |
+| 4 | **日志节流**：DEBUG 级**同内容**60 秒去重（Logcat 仍全量）；氛围灯帧落盘 250ms；车控回调按功能号 1 行/秒 | `core/log/LogThrottle.kt`（新增）、`core/log/Logx.kt`、`vehicle/AdaptapiGateway.kt` |
+| 5 | **昼夜通道失败要退避**：5→10→20→30 秒，失败日志第一次必记、之后每第 10 次记一条 | `vehicle/AdaptapiDayNight.kt` |
+| 6 | **诊断包新增两行性能字段**：`车控信号采样: 采样 N 轮 · 最近 Xms · 峰值 Yms` 与 `落盘: 已写 N 行，平均 X µs/行` | `core/log/Diagnostics.kt`、`core/log/StatusSnapshot.kt` |
+
+**口径不变**：采样频率不变、读的通道不变、降级链顺序不变、氛围灯的算法与写入频率不变。
+只是把「在主线程上做」改成「在后台线程上做」。
+
+### 三、模拟器实测（`cardesk28` / API 28 / arm64 / 端口 5560）
+
+| 判据 | 结果 |
+|---|---|
+| **落盘写法 A/B**（同一设备、同一文件系统、500 行） | 旧写法 **29 µs/行** vs 新写法 **3 µs/行** → **快 7 倍** ✅ |
+| **落盘速率**（开氛围灯 + 落盘级别「全部（含调试）」） | Logcat 全量 4,748 B/秒 → 实际落盘 **738 B/秒 = 15.5%** ✅ |
+| **4MB 日志预算能撑多久** | 旧 **14.7 分钟** → 新 **94.7 分钟**（6.4 倍） ✅ |
+| **线程分离** | `/proc/<pid>/task/*/comm` 实测多出 `cardesk-log-write` / `cardesk-vehicle-signal` / `cardesk-ambient` 三条后台线程 ✅ |
+| **氛围灯逐帧日志不再在主线程** | 日志 TID **1435** ≠ 主线程 TID **1301** ✅ |
+| **主线程心跳周期**（模拟器） | 1002~1010ms（基线 1002~1006ms，**无回归**） ✅ |
+| **帧统计**（连续 12 次翻页） | 93 帧，jank 3.23%，p99 20ms，**最大帧 20ms**，Missed Vsync **0**，High input latency **0** ✅ |
+| **桌面渲染** | 续航 / 胎压 / 行程 / 车况 / 音乐卡 / 中央歌词 / Dock 全部正常（后台快照确实在喂 UI） ✅ |
+| **设置 → 诊断日志 → 导出诊断包** | 导出成功，summary 里带出新增的两行性能字段 ✅ |
+| **FATAL** | **0** ✅ |
+| **全量 JVM 单测** | **BUILD SUCCESSFUL**（`testSystemUnitTest`） ✅ |
+
+### 四、出包
+
+| 项 | 值 |
+|---|---|
+| 版本 | **4296** / `1.0.1200-system` |
+| 包名 | `com.ecarx.cardesk` |
+| 大小 | 3,865,267 B |
+| SHA-256 | `9a02c42847789a29e617b67302bb1ab2b4d926ab12fbc86c37bfaabced86c7e5` |
+| 平台证书 | `c8a2e9bc…92ab8`（AOSP platform）✅ · 签名方案 v2 ✅ |
+| 归档 | `dist/CarDesk-platform-ecarx-cardesk-4296.apk`（装机验证的就是这一份） |
+
+### 五、本轮未做
+
+- **没做实车复测**（车机不在手边）——
+  实车上的收益要等装上去再拉一份诊断包看
+  「1 秒心跳」是不是回到 1000ms 附近、日志是不是还在 6.5 分钟写满；
+  诊断包里的 `车控信号采样` 与 `落盘 … µs/行` 两行就是为此准备的判据。
+- **没改车控通道本身的读取次数**（口径不动），只是换了线程。
+- **未提交 Git**。
+
+---
+
+## 第221轮 · 修第220轮验收的两个 P1（诊断包不含当前会话 / 单文件轮换失效）
+
+> 第220轮的**性能目标已通过验收**（主线程零文件块写、车控采样搬后台、
+> 落盘降到 Logcat 的 15.6%、心跳回到 1002~1016ms、FATAL/ANR 均为 0）。
+> 验收同时查出**两个 P1**，本轮修掉并重新出包。
+> 交付版本 **4298**（4297 修 P1，收尾时自测又挖出一处截断文案单位问题 → 4298）。
+
+### 一、先纠正一处归因（重要）
+
+验收报告把 P1-2（单文件 512KB 轮换失效）判为**「历史遗留，非第220轮引入」**，
+依据是「旧包 4295 写出的 `-0.txt` 也已 781KB」。
+
+**这个依据不成立。** 设备上那两个文件的首行时间戳是：
+
+```
+cardesk-20261119-0.txt  →  11-19 14:53:10   ← 4296 装进 com.ecarx.cardesk 的那一刻
+cardesk-20261119-1.txt  →  11-19 15:14:30   ← 4296 的最后一次重装
+```
+
+⇒ **两个文件都是 4296（第220轮的新代码）写的**，不是 4295 写的。
+
+另一侧的证据更直接：**第220轮之前**我在同一台 AVD 上量到旧包写出的文件是
+
+```
+524,296 / 524,427 / 524,380 / 524,460 B      ← 正好 512KB + 一行
+```
+
+⇒ **旧写法是按 512KB 正常轮换的。**
+
+**根因**：第220轮把落盘改成「常驻句柄」之后，轮换检查只剩 `openTarget()` 里那一处，
+而 `openTarget()` **只在 `stream == null` 时**才会被调用 ——
+于是句柄一旦打开，文件就能一直长（实测长到 3.3MB），
+到 4MB 总量上限时 `trim()` 会把**正在写的文件**也删掉 ⇒ 表现为「一次性丢光」。
+
+⇒ **P1-2 是第220轮引入的回归**，本轮必修。
+
+### 二、改了什么
+
+| # | 改法 | 落点 |
+|---|---|---|
+| 1 | **写之前就判轮换上限**：`writtenBytes >= MAX_FILE_BYTES` ⇒ 关句柄 + 换新文件 | `core/log/FileLogSink.kt` |
+| 2 | **「取不到剩余空间」不等于「空间不足」**：`availableBytes <= 0` 时按「够」处理，别把日志整个掐掉 | `core/log/FileLogSink.kt` |
+| 3 | **诊断包必须含当前会话**：装不下时取该文件的**尾部**（保留最近的内容），而不是 `continue` 跳过整个文件 | `core/log/Diagnostics.kt` |
+| 4 | **截断文案纠正方向**：旧文案写「丢弃了最老的 N 个文件」，实际丢的可能是**最新**的；改为「最老的 N 个文件未包含」+「当前日志过大，已只保留最后 N MB」 | `core/log/Diagnostics.kt` |
+| 5 | **日志预览不再打「说明文字」标记**：它是**数据**不是文案（否则日志里出现 `FORBIDDEN` 词会误报「啰嗦文案又回来了」） | `ui/SettingsOverlay.kt` |
+| 6 | **新增 4 条回归测试** + 变异检查 | `app/src/test/…/core/log/FileLogSinkRotationTest.kt` |
+| 7 | **截断文案的单位**（第221轮收尾时**自己测出来的**）：尾部保留量常常不足 1MB，按 MB 取整会打印成「已只保留最后 **0 MB**」；改成不足 1MB 按 KB 打印 | `core/log/Diagnostics.kt` |
+
+> 第 7 条是**本轮验证时自己挖出来的**，不是验收报告提的：
+> 设备上把日志跑到 2.1MB 再导出，摘要里赫然写着
+> 「⚠ 当前日志文件过大，已只保留**最后 0 MB**」——
+> 尾部其实保留了 486KB，但按 MB 取整就是 0，
+> 看的人只会以为「什么都没保留」，比不写还糟。
+> 所以补了 `humanBytes()`（≥1MB 用 MB、≥1KB 用 KB、否则用 B），
+> 并加了一条单测锁住「不能出现 0 MB」。
+> ⇒ 交付版本因此从 4297 升到 **4298**（只多这一处文案 + 一条单测）。
+
+> 第 5 条是被第 2 条「带出来的」：
+> 以前 `hasFreeSpace()` 在取不到空间时返回「不足」⇒ Robolectric 里**根本不写文件**
+> ⇒ 设置页日志预览永远是占位符「(暂无日志)」。
+> 修好之后它会真的写文件 ⇒ 预览变成 40 行日志原文
+> ⇒ 被 [SettingsCopyTest] 当成「不在白名单的说明文字」报出来。
+> 这暴露的是**标记用错了**（数据不是文案），所以改标记而不是改白名单。
+
+### 三、验收留下的那个 ⚠：同口径翻页 A/B
+
+验收说「12 次连续翻页 12.15%」不能与报告的 3.23% 直接比，
+「需要用同一脚本、同一帧率、同一间隔对 4295/4296 做 A/B」。
+
+本轮补了这个 A/B（`cardesk28`，同一台设备、同一脚本 `/data/local/tmp/swipe12.sh`、
+**交替**跑以摊平噪声）。但要先修测量环境：
+
+| 噪声源 | 处理 |
+|---|---|
+| 领克 5570 模拟器占 **188% 宿主 CPU** | 停掉（用户已要求不再用它做测试） |
+| `basetest28`（5562）**内部全空闲**却占 181% 宿主 CPU | 停掉（启动参数已记录，可随时重启） |
+| AVD 上还跑着**高德地图**（259M）与 uni-launcher | 重启 AVD 后 `force-stop` |
+| `surfaceflinger` 吃到 **2.1GB**、`media.codec` 空转 **124% CPU** | 重启 AVD 清掉 |
+
+清理后交替 A/B 三轮：
+
+| 轮次 | 4295 旧包 | 4297 新包 |
+|---|---|---|
+| #1 | 94 帧 / **6 janky (6.38%)** / missed 0 / Slow UI 3 | 90 帧 / **0 janky (0%)** / missed 0 / Slow UI 1 |
+| #2 | 92 帧 / **0 janky (0%)** / missed 0 / Slow UI 0 | 93 帧 / **1 janky (1.08%)** / missed 0 / Slow UI 1 |
+| #3 | 93 帧 / **9 janky (9.68%)** / missed 0 / Slow UI 4 | 92 帧 / **1 janky (1.09%)** / missed 0 / Slow UI 1 |
+| **中位** | **6.38%** / Slow UI 3 | **1.08%** / Slow UI 1 |
+
+**结论：**
+- **Missed Vsync 两包全程都是 0**，最长帧都 ≤32ms ⇒ **没有可感知的卡顿回归**；
+- jank 百分比在这台 AVD 上**噪声极大**（同一个包能跑出 0% ~ 18%），
+  **不能当验收硬指标**（验收报告的判断是对的）；
+- 干净环境下中位数方向**对新包有利**（6.38% → 1.08%）。
+
+### 四、验证
+
+| 判据 | 结果 |
+|---|---|
+| 新增回归测试 | `FileLogSinkRotationTest` **5 例全绿** ✅（含「尾部不足 1MB 时不能写 0 MB」） |
+| **变异检查** | 去掉轮换检查 ⇒ `写满 512KB 之后轮换到新文件` **立刻失败** ✅（测试真的锁得住） |
+| 全量 JVM 单测 | **BUILD SUCCESSFUL** ✅ |
+| **干净目录从零复现** | 源码 rsync 到空目录 → `clean assembleSystem testSystemUnitTest` ⇒ **BUILD SUCCESSFUL in 1m 39s** ✅ |
+| 设备实测：单文件轮换 | 写满 512KB 后**自动换新文件**，旧文件停在 **524,513 B（512KB+一行）** ✅ |
+| 设备实测：轮换边界 | `-0.txt` 末行与 `-1.txt` 首行**同为 `18:14:36.608`** —— 不丢行、不重复 ✅ |
+| 设备实测：轮换后新文件 | `-1.txt` **持续增长**（不是「一次性丢光」） ✅ |
+| 设备实测：诊断包含当前会话 | 当前会话日志**在包里** ✅（1,455 行，18:05:10 → 18:08:47，与 summary 的「已写 1455 行」对上） |
+| 设备实测：**日志跑满 2MB 后再导出** | 最老的文件被**取尾部**（486,524 B），包内首行是**完整行**（`18:11:11.428`）、末行与设备端**完全一致**（`18:14:36.608`）✅ |
+| 设备实测：截断文案 | 4297 打出「最后 **0 MB**」（❌）⇒ 改成按 KB 打，4298 实测「最后 **171 KB**」✅ |
+| 4298 帧统计 | 88 帧 / **0 janky（0.00%）** / Missed Vsync **0** / 最长帧 **14ms** ✅ |
+| 线程分离仍在 | `cardesk-log-wri` / `cardesk-vehicle` / `cardesk-ambient` / `cardesk-spectru` ✅ |
+| 装机启动 FATAL | **0** ✅ |
+
+### 五、出包
+
+| 项 | 值 |
+|---|---|
+| 版本 | **4298** / `1.0.1202-system` |
+| 包名 | `com.ecarx.cardesk` |
+| 大小 | 3,649,351 B |
+| SHA-256 | `ff1b344dd7ff1bccca8e297b14ff3f72398a1e53e99e4c67a5af1cfaed09ddce` |
+| 平台证书 | `c8a2e9bc…92ab8`（AOSP platform）✅ |
+| 归档 | `dist/CarDesk-platform-ecarx-cardesk-4298.apk` |
+
+**装机验证的就是这一份**：设备上 `/data/app/com.ecarx.cardesk-Rq7BIK7FpU7Pnfai0lYZug==/base.apk`
+的 SHA-256 与 `dist/` 里的包**逐字节相同**（`ff1b344d…9ddce`）。
+
+> 中间版本 **4297**（P1 修复 + 文案修正之前）也归档过，
+> 现在是**旧包**，别装 —— `dist/README.md` 里已标成「旧包，不要装」。
+
+> 本轮又量到一次「同代码两次构建不一样」的坑：把源码 rsync 到空目录**从零重建**，
+> 得到的 APK 是 `452c04e5…10e73` / 3,648,695 B，
+> 与当时的交付包 `4e580aac…86c90` / 4,025,667 B **SHA 完全不同、体积差 376,972 B**（同源码同版本同证书）。
+> ⇒ 所以本轮**没有**跑 `tools/release.sh`（它会干净重建并覆盖 `dist/`），
+> 而是直接归档**装机验证过的那一份**，再拿设备 `base.apk` 跟 `dist/` 逐字节对 SHA。
+> **交付包与装机验证包必须是同一份** —— 这条规矩本轮又被证明是必要的。
+
+R2 清单 `dist/cardesk-latest.json` 已指向 4298（对象 key `cardesk/CarDesk-platform-ecarx-cardesk-4298.apk`），
+`dist/README.md` 已重写。
+
+### 六、本轮未做
+
+- **没做实车复测**（车机不在手边）。
+- **未提交 Git**。
+
+---
+
+## 第222轮 · 浮层文字/图标按壁纸明暗自适应（日间 + 暗色壁纸看不清）
+
+> 用户反馈：「**在日间模式下如果我使用了暗色的壁纸，状态栏和天气等文字图标会不那么明显**，
+> 解决一下这个问题；比如能否根据壁纸颜色来动态修改文字和图标的颜色」。
+>
+> 交付版本 **4299**（`1.0.1203-system`）。
+
+### 一、问题
+
+日夜模式决定的是「卡片 / 面板 / 胶囊」这一层的配色，
+而**直接压在壁纸上的那一层**能不能看清，取决于**壁纸本身有多亮**。
+
+⇒ 典型翻车：**日间模式 + 一张暗色壁纸** ——
+日间的字是深色的（`#191C23`），压在暗色照片上对比度只有 **1.01**，等于没有。
+
+实测（`cardesk28` AVD，日间 + 暗色自定义壁纸）：
+
+| 区域 | 修改前对比度 | 判定 |
+|---|---|---|
+| 顶栏时钟 | **1.01** | ❌ 整块糊在背景里 |
+| 顶栏油量 % | **1.01** | ❌ |
+| 右上天气大字（96px） | **1.06** | ❌ |
+| 右上天气明细（20px） | 2.42 | ❌ |
+
+被影响的是**裸元素**（没有底板）：
+顶栏右侧的时钟 / 油量 % / 燃油图标 / 四个连接图标、场景页右上角的天气块、
+屏幕中部的中心歌词。
+**带底板的**（驾驶模式胶囊 / 位置胶囊 / 天气胶囊 / 卡片 / Dock）不受影响 ——
+它们的底色由主题定，跟壁纸明暗无关。
+
+> 这跟第215/216轮在视频壁上遇到的是**同一个病**（当时量到时钟对比度只有 1.95），
+> 但那两轮用「描边 + 底衬」解，用户反馈「改得有点丑」，第217轮已**全部回退**。
+> 本轮换一条路：**不加工饰，只换颜色**。
+
+### 二、这一轮怎么解
+
+**按壁纸实际亮度换一套浮层墨色**：
+
+- 壁纸暗 → 用「浅字」（夜间那套文字色）；
+- 壁纸亮 → 用「深字」（日间那套文字色）。
+
+选哪一套**由对比度决定**（两套里谁的对比度高用谁），不是拍脑袋的阈值 ⇒
+**默认场景一个像素都不变**：
+
+| 场景 | 壁纸 | 选中的墨色 | 与之前 |
+|---|---|---|---|
+| 夜间主题 + 静态壁纸 | 深 | 夜间那套 | **完全一致** |
+| 日间主题 + 静态壁纸 | 浅 | 日间那套 | **完全一致** |
+| 日间主题 + **暗色照片** | 深 | 夜间那套 | ⬅ 本轮修的 |
+| 夜间主题 + **亮色照片** | 浅 | 日间那套 | 顺带修好 |
+
+### 三、改了什么
+
+| # | 改法 | 落点 |
+|---|---|---|
+| 1 | 新增 **壁纸亮度 → 浮层墨色** 纯逻辑层（亮度 / 对比度 / 选色 / 保对比度） | 新增 `core/WallpaperContrast.kt` |
+| 2 | 新增 **壁纸采样器**（按比例采样两块区域 + 夜间自定义壁纸的压暗系数 + 居中裁切的源图映射） | 新增 `core/WallpaperSampler.kt` |
+| 3 | `Skin` 增加两套浮层墨色 token（顶部 / 中部）+ 记录壁纸亮度 | `core/Skin.kt` |
+| 4 | `Palette` 增加「强调色提亮档」字段（原先写死在 `Skin` 里，没法成套引用） | `core/Palette.kt` |
+| 5 | 壁纸渲染器暴露**不进缓存**的直绘入口（给亮度采样当 192×108 代理图用） | `ui/widget/WallpaperRenderer.kt` |
+| 6 | 壁纸层计算亮度并发布（静态 / 自定义 / 动态三种壁纸各走各的采样源） | `ui/widget/BackgroundView.kt` |
+| 7 | 顶栏裸元素改用浮层墨色；**顺带修掉「画笔颜色只在构造时取一次」的老问题** | `ui/shell/ShellStatusBar.kt` |
+| 8 | 场景页天气块 + 中心歌词改用浮层墨色 | `ui/pages/ScenePage.kt` |
+| 9 | 桌面接线：壁纸 / 日夜 / 自定义图解码完成后重算并重绘 | `ui/LauncherView.kt` |
+| 10 | **视频壁纸**的亮度采样（`PixelCopy` 拷视频自己的 Surface） | 新增 `ui/widget/VideoBackdropSampler.kt` |
+| 11 | 新增 **17 条**回归测试（纯 JVM 7 + Robolectric 10） | `app/src/test/…/WallpaperContrastTest.kt`、`WallpaperSamplerTest.kt`、`ui/WallpaperOverlayInkTest.kt` |
+
+### 四、四种壁纸的采样源
+
+| 壁纸 | 采样源 | 备注 |
+|---|---|---|
+| 静态预设 | 现画一张 **192×108 代理图** | 壁纸几何全按 w/h 等比算 ⇒ 小图构图一致；**不进渲染器缓存**，免得把全屏成品图顶掉 |
+| 自定义照片 | 直接采**照片本身** | 夜间算上压暗系数（40% 黑 + 顶部渐变）；竖拍照片按「等比填满 + 居中裁切」换算源图区域 |
+| 程序化动态壁纸 | 现画一张代理图 | 动态壁纸一律夜间色调 |
+| 视频壁纸 | `PixelCopy` 拷**视频自己的 Surface** | 画面在独立图层上，窗口缓冲那块是透明的洞 ⇒ 采窗口根本采不到；**每 3 秒采一次**，失败安全回落 |
+
+采样**只在壁纸 / 日夜变化时跑一次**（不是每帧 —— 采样要读位图像素）。
+
+### 五、实测结果
+
+#### 5.1 修改前 / 修改后（同一台 `cardesk28` AVD，同一张暗色壁纸，日间模式）
+
+| 区域 | 修改前（4285） | 修改后（4299） |
+|---|---|---|
+| 顶栏时钟 | **1.01** ❌ | **14.69** ✅ |
+| 顶栏油量 % | **1.01** ❌ | **14.69** ✅ |
+| 右上天气大字 | **1.06** ❌ | **14.38** ✅ |
+| 右上天气明细 | 2.42 ❌ | **6.85** ✅ |
+
+截图：`emu-verify/shots-r222/01-before-day-dark-wallpaper.png` / `02-after-day-dark-wallpaper.png`
+
+#### 5.2 默认场景零变化
+
+| 场景 | 时钟文字色 | 对比度 | 判定 |
+|---|---|---|---|
+| 日间 + 浅色静态壁纸 | `rgb(25,28,35)` = **正好 `#191C23`** | 10.15 | 与修改前逐字相同 ✅ |
+| 夜间 + 暗色壁纸 | `rgb(237,239,243)` = **正好 `#EDEFF3`** | 16.92 | 与修改前逐字相同 ✅ |
+
+截图：`03-after-day-light-static-wallpaper.png` / `04-after-night-dark-wallpaper.png`
+
+#### 5.3 另外两种壁纸
+
+| 场景 | 采样日志 | 时钟对比度 |
+|---|---|---|
+| 日间 + 视频壁纸 | `PixelCopy` 采样生效 | 9.28 ✅ |
+| 日间 + 动态壁纸 | `壁纸亮度采样 top=11 center=17 live=0` | 17.07 ✅ |
+
+截图：`05-after-day-video-wallpaper.png` / `06-after-day-live-wallpaper.png`
+
+#### 5.4 领克 AAOS 820A 模拟器（`Lynkco_AAOS28_820A_arm64`，端口 5570）
+
+装**交付包 4299**（系统包 `com.ecarx.cardesk`，uid 1000）复测：
+**14.69 / 14.69 / 14.38 / 6.85**，与 cardesk AVD **逐项一致**；
+`cardesk` 自身 **FATAL = 0**。
+
+截图：`07-lynk-5570-system-pkg-day-dark-wallpaper.png`
+
+### 六、验证
+
+| 项 | 值 |
+|---|---|
+| 版本 | **4299** / `1.0.1203-system` |
+| 包名 | `com.ecarx.cardesk` |
+| 大小 | 3,659,311 B |
+| SHA-256 | `930d7025fa9ba783039f466f8f555bc88f1811c96f8a5762fb2188786c4b2d72` |
+| 平台证书 | `c8a2e9bc…92ab8`（AOSP platform）✅ |
+| 归档 | `dist/CarDesk-platform-ecarx-cardesk-4299.apk` |
+| 全量 JVM 单测 | **2596 / 0 failures / 0 errors / 0 skipped**（含新增 17 条） |
+| 装机冒烟 | cardesk AVD（5560）+ 领克 5570，`FATAL / Exception` **0** |
+| 壁纸类型覆盖 | 静态 / 自定义 / 动态 / 视频 **四种全测** |
+
+> **装机验证的就是交付的这份 4299**（不是「同代码另一次构建」）——
+> 上一轮（221）在这件事上栽过一次（同源码两次构建 APK 的 SHA 不一样），
+> 本轮直接装 `dist/` 里的产物复测，避免同一个坑。
+
+### 七、踩到的坑
+
+1. **`sourceRectFor` 用了放大后的 `dw`/`dh` 而不是视口尺寸** ——
+   竖拍照片（被裁掉一半）会取到**画面之外**的源图区域，采样值整个是错的。
+   单测直接钉死：竖拍 1080×1920 铺到 1920×1080 时，源图 y 必须从 **656** 开始。
+2. **`ensureContrast` 原来按「背景明暗」决定往哪混** ——
+   白字压中灰底时，往黑里混只会**更看不清**。
+   改成按「颜色与背景谁更亮」决定 ⇒ 永远往**离背景更远**的方向走。
+3. **两套墨色在中灰背景上会打平**（≈3.9，达不到正文 4.5）——
+   所以选完之后再各自拉够一次（`ensureContrast`），色相不变，只是深一点 / 浅一点。
+4. **模拟器上 `chown 1000:1000` 把普通应用的私有目录搞挂了** ——
+   `cardesk28` 上 `com.cardesk.launcher` 的 uid 是 10087，
+   推完文件按 1000 改属主 ⇒ 应用读不到自己的偏好和壁纸，
+   桌面看起来「设置没生效」。按 `dumpsys package` 里的真实 uid 改属主才对。
+5. **领克 5570 上 `am start` 会被系统设置页截胡** ——
+   领克镜像开机后会弹「通知使用权」和「Android Keyboard 屡次停止运行」，
+   截图前要先 `input keyevent 4` 退掉，再把桌面 Activity 拉起来。
+
+### 八、本轮未做
+
+- **没做实车复测**（与第214~221轮同一个未闭环项）。
+- **没给浮层墨色加设置项**（目前完全自动跟随壁纸明暗）。
+- **未上传 R2**（本机没有 `R2_AK` / `R2_SK` 凭据）。
+- **未提交 Git**。
+
+---
+
+## 第223轮 · 状态栏胶囊底板按壁纸明暗自适应（白胶囊压在黑壁纸上很突兀）
+
+> 用户反馈：「**状态栏白色的胶囊在黑色的壁纸上有点丑，把胶囊也应用夜间模式那套吧**」。
+>
+> 交付版本 **4300**（`1.0.1204-system`）。
+
+### 一、问题
+
+第222轮把**裸元素**（时钟 / 油量 / 连接图标 / 天气块 / 歌词）改成了「按壁纸明暗换字色」，
+但**带底板的胶囊**没动 —— 它们的底色仍然由**主题**决定（死值）。
+
+⇒ 典型翻车：**日间模式 + 一张暗色壁纸** ——
+日间那套胶囊底板是**浅色 `#F2F5F9`**（近乎纯白），压在深色壁纸上就是几块白疙瘩。
+
+这一条和第222轮的问题**性质不同**：
+
+| | 第222轮（裸元素） | 第223轮（胶囊） |
+|---|---|---|
+| 现象 | 深色字压在深色壁纸，**看不见** | 浅色底板压在深色壁纸，**看得见但难看** |
+| 病根 | 文字与背景对比度不够 | 底板与壁纸**明暗不搭** |
+| 修法 | 换字色 | 换**底板 + 描边 + 内部文字**（成套） |
+
+### 二、这一轮怎么解
+
+胶囊是**有底板**的元素 —— 它好不好看取决于**底板本身**跟壁纸上合不合，
+不是取决于文字对比度。所以墨色里除了文字/图标，还要带上**胶囊的面**：
+
+| 壁纸 | 胶囊底板 | 描边 | 胶囊内文字 |
+|---|---|---|---|
+| 暗 | 夜间那套 `#171A22` | `#333947` | 浅字 `#EDEFF3` |
+| 亮 | 日间那套 `#F2F5F9` | `#D5DBE5` | 深字 `#191C23` |
+
+底板与文字**成套**切换 ⇒ 不可能出现「深底深字」。
+
+⚠️ **全局的 `Skin.CHIP_FILL` / `Skin.CHIP_STROKE` 一个字都没改** ——
+那两个 token 被卡片、抽屉、设置弹层、浮窗、最近任务、空调页
+（`RecentTasksPage` / `DrawerPage` / `SettingsOverlay` / `FloatWindowLayer` /
+`ClimatePage` / `ScenePage` 车窗·胎压 chip）大量复用，一改就是**满屏卡片**跟着变。
+只有**压在壁纸上的**这几个胶囊用浮层那套。
+
+### 三、改了什么
+
+| # | 改法 | 落点 |
+|---|---|---|
+| 1 | 墨色里加三个**面**的 token（胶囊底板 / 次级面 / 描边），与文字成套 | `core/WallpaperContrast.kt`（`Ink` + `ON_DARK` / `ON_LIGHT`） |
+| 2 | 状态栏**三个胶囊**（驾驶模式 / 位置 / 天气）的底板 + 描边 + 内部文字 + 指示点改用浮层 token | `ui/shell/ShellStatusBar.kt` |
+| 3 | 状态栏正中的**翻页圆点条**同步（同一行、同一材质） | `ui/shell/PageDotsView.kt` |
+| 4 | 壁纸明暗变了要**重画圆点条**（以前只刷状态栏和场景页） | `ui/LauncherView.kt`（`applyBackdrop`） |
+
+### 四、实测结果
+
+（同机 A/B：`cardesk28` AVD / 5560，同一张暗色壁纸、日间模式，只换包）
+
+| 部位 | 修改前（4299） | 修改后（4300） |
+|---|---|---|
+| 驾驶模式胶囊底板 | `#F2F5F9`（白） | **`#171A22`**（夜间深底） |
+| 位置胶囊底板 | `#F2F5F9` | **`#171A22`** |
+| 天气胶囊底板 | `#F2F5F9` | **`#171A22`** |
+| 胶囊内文字 | `#191C23`（深） | **`#EDEFF3`**（浅） |
+| 翻页圆点条底板 | `#F2F5F9` | **`#171A22`** |
+| 翻页圆点条选中点 | `#0F9C8E` | **`#33C6B4`** |
+
+截图：`emu-verify/shots-r223/01-before-4299-day-dark-wallpaper.png` /
+`02-after-4300-day-dark-wallpaper.png`
+
+### 五、默认场景零变化
+
+| 场景 | 胶囊底板 | 胶囊内文字 | 判定 |
+|---|---|---|---|
+| 日间 + 浅色静态壁纸 | `#F2F5F9` | `#191C23` | 与修改前**逐字相同** ✅ |
+| 夜间 + 深色壁纸 | `#171A22` | `#EDEFF3` | 与修改前**逐字相同** ✅ |
+
+把 4299 与 4300 的默认场景截图做**整屏逐像素 diff**（唯一差异是时钟那一小块，
+因为两张图隔了几分钟），**挖掉时钟后差异区域为空** ⇒ 真的一个像素都没变。
+
+截图：`03-after-4300-day-light-static-wallpaper.png` /
+`04-after-4300-night-dark-wallpaper.png`
+
+### 六、另外一种壁纸
+
+| 场景 | 采样日志 | 胶囊底板 |
+|---|---|---|
+| 日间 + 视频壁纸 | `壁纸亮度采样 top=32 center=79` | `#171A22`（顶部暗 ⇒ 夜间那套）✅ |
+
+截图：`05-after-4300-day-video-wallpaper.png`
+
+### 七、验证
+
+| 项 | 结果 |
+|---|---|
+| 全量 JVM 单测 | **2602 / 0 failures / 0 errors / 0 skipped**（含新增 6 条） |
+| 编译 | `assembleSystem` + `assembleDebug` 均通过 |
+| 装机冒烟 | cardesk AVD（5560）`FATAL / Exception` **0**，进程存活 |
+| 交付包 | `dist/CarDesk-platform-ecarx-cardesk-4300.apk`（**装机验证过的同一份**） |
+
+### 八、本轮未做
+
+- **没做实车复测**（与第214~222轮同一个未闭环项）。
+- **没给胶囊换色加设置项**（目前完全自动跟随壁纸明暗）。
+- **未上传 R2**（本机没有 `R2_AK` / `R2_SK` 凭据）。
+- **未提交 Git**。
+
+## 第231轮 · 视频壁纸的亮度采样改成「直接解文件」+ 按最坏情况选墨色
+
+> 用户反馈：**视频壁纸（湖畔静思）下，状态栏 / 天气 / 歌词颜色与背景太近、看不清。**
+> 查下来不是「颜色选错了」，是**亮度根本没采到**：真车上视频是硬件解码直通 HWC 图层，
+> 第222轮的 `PixelCopy` 读那块 Surface 一直失败 ⇒ 墨色回落主题墨色；
+> 用户是日间主题 ⇒ 深字 `#191C23` 压暗色视频 = 三处同时糊。
+> 本轮把采样换成「直接解视频文件」，并按「最坏情况」而不是平均值挑字色。
+
+### 一、根因
+
+第222轮给视频壁纸接的采样是 `PixelCopy.request(videoSurface, …)`：
+
+- **模拟器**（走 GPU 合成）能读到，所以模拟器上一直「看起来正常」；
+- **真车（820A）**视频是硬件解码**直通 HWC 图层**的，那块 Surface 的缓冲对应用侧不可读
+  ⇒ `PixelCopy` 返回失败 ⇒ `VideoBackdropSampler` 回调 null
+  ⇒ `Skin.overlayTop/overlayCenter` 回落**主题墨色**。
+
+日间主题的主题墨色是**深字**（`Palettes.day.text = #191C23`）——
+压在暗色国风视频上，正好就是用户说的「天气、状态栏文字、歌词因为颜色过于相近导致不清晰」。
+
+次因：视频有局部高光（湖畔静思歌词带平均 luma 88、最亮 10% 到 122），
+只按区域**平均值**选墨色会「平均值说够 4.5:1、压到最亮那撮像素只有 3.3:1」。
+
+### 二、修法
+
+#### 1）采样：`MediaMetadataRetriever` → `MediaCodec` + `ImageReader`
+
+第一版试的是 `MediaMetadataRetriever.getFrameAtTime`（逻辑最简单），
+但实测在 cardesk28（API 28 / AOSP 软解）上**解出来全黑**：
+
+```
+I CarDesk/Scene: 视频壁纸解码诊断 w=256 h=144 px=-16777216    ← 0xFF000000
+I CarDesk/Scene: [EVT] 视频壁纸亮度采样 src=file pos=0 top=0 topBright=0 …
+```
+
+同一个文件用 `MediaPlayer` 播是正常的 ⇒ 它走「解码器 → 内存 buffer」那条路，
+模拟器软解只对**带 Surface 的输出**真的出图。
+
+新增 `ui/widget/VideoFrameLuma.kt`：
+
+```
+MediaExtractor → MediaCodec（输出到 ImageReader 的 Surface）→ 读 Y 平面 → 256×144 灰度图
+```
+
+- 解到 Surface 是**标准播放路径**，模拟器 / 真车都成立；
+- 只读 **Y 平面**（亮度），不转 RGB —— 本来要的就是亮度；
+- 比例坐标与整帧一致（等距抽样），区域含义不用改。
+
+`VideoBackdropSampler.sample()` 现在的顺序：
+**① 解文件 → ② `TextureView.getBitmap()` / `PixelCopy` 兜底 → ③ 都失败才 null**，
+`lastSource` 记 `file` / `layer` / `texture` 写进日志。
+
+#### 2）墨色按「最坏情况」算
+
+`WallpaperSampler` 新增：
+
+```kotlin
+data class Tone(val average: Int, val dark: Int, val bright: Int)
+fun tone(bitmap, region, scrim): Tone?
+```
+
+一趟扫描同时算平均 + 16 桶 luma 直方图；暗端 = 最暗的 10% 像素平均色、
+亮端 = 最亮的 10% 平均色。
+
+`WallpaperContrast.inkForTone(tone, themeNight)`：
+- **方向只看平均值** —— 避免「一团白高光把整块判成亮底、翻成深字」；
+- 选完再按最坏情况拉：浅字对 `tone.bright`、深字对 `tone.dark`，
+  用 `ensureContrast` 往白/往黑混到极限（中灰物理上限 ≈4.3:1）。
+
+#### 3）视频壁纸单独一套采样区
+
+| 常量 | 区域 | 用途 |
+|---|---|---|
+| `VIDEO_TOP_REGION` | `0.74..1.0 × 0.01..0.19` | 状态栏文字 + 右上天气块的**实际落点** |
+| `VIDEO_CENTER_REGION` | `0.28..0.72 × 0.36..0.60` | 歌词带 |
+
+旧 `TOP_REGION`（`0.55..1.0 × 0..0.20`）的 `0.55..0.74` 在「湖畔静思」上是**亮的暖色岩壁**
+（实测最亮 luma 191），会把区域平均从「暗」（79）拉到「中间调」（114）。
+**静态壁纸那条路一个字节没动** —— 第222轮在 cardesk28 上逐项验收过
+（时钟 14.69 / 天气 14.38 / 明细 6.85），换区域会让那批数字全部失效。
+
+#### 4）起播立刻采一次 + 换主题不冲掉视频墨色
+
+- `setOnPreparedListener` 里 `it.start()` 之后立刻 `sampleVideoBackdropIfNeeded()`
+  （原来要等第一个 3 秒窗口，那 3 秒里日间深字就压在暗视频上）；
+- `applyWallpaperBackdrop()` 加守卫：**视频在播且已有视频亮度分布 ⇒ 保持视频墨色**，
+  并打 `视频壁纸墨色保持（忽略静态壁纸的兜底亮度）`；
+- `releaseVideoPlayer()` 释放采样器 + 清掉分布。
+
+### 三、实测（cardesk28 / 5560）
+
+视频用 **720p 转码版**（原始 2340×1080 / AVC High level 5.1 在模拟器软解上解不出来，
+第222轮遗留；真车硬解没这个问题）：
+
+```
+I CarDesk/Scene: [EVT] 视频壁纸亮度采样 src=file pos=0     top=74 topBright=88 center=84 centerBright=110
+I CarDesk/Scene: [EVT] 视频壁纸亮度采样 src=file pos=3047  top=73 topBright=88 center=86 centerBright=136
+I CarDesk/Scene: [EVT] 视频壁纸亮度采样 src=file pos=6054  top=74 topBright=88 center=86 centerBright=139
+```
+
+- `src=file` ⇒ 走的是「解文件」那条路；数值与独立的 Swift 探针一致
+  （状态栏/天气区 luma 均值 70~84、p90 94~106；歌词带均值 84~90、p90 121~123）；
+- 日间主题 + 视频：状态栏 / 天气 / 歌词都是浅色，压在暗色画面上清楚可读；
+- 夜间主题 + 视频：同样浅色；
+- 日间 → 夜间切换（时钟拨到 20:00 触发「跟随时间」）：卡片变深、文字仍浅色、
+  视频没黑、进程没重启。
+
+| 时点 | 截图 |
+|---|---|
+| 日间主题 + 视频壁纸 | `emu-verify/r231-01-day-video-wallpaper.png` |
+| 夜间主题 + 视频壁纸 | `emu-verify/r231-02-night-video-wallpaper.png` |
+
+### 四、验证
+
+| 项 | 结果 |
+|---|---|
+| 全量 JVM 单测 | 2666 条（基线 2662 + 新增 7）：两遍各有 **1 条与本轮无关的时序型 flaky**（`FileLogSinkRotationTest` / `AmbientWritePipelineTest`），两条单独重跑都通过；其余全绿 |
+| 新增单测 | `WallpaperContrastTest` +4、`WallpaperSamplerTest` +3 |
+| 编译 | `assembleSystem` 通过 |
+| 装机冒烟 | cardesk AVD（5560）`FATAL / Exception` **0**，进程存活 |
+| 交付包 | `dist/CarDesk-platform-ecarx-cardesk-4308.apk`（**装机验证过的同一份**） |
+| R2 上传 | **已上传**：`https://file.chuxi.bid/cardesk/latest.json`（756 字节）+ `cardesk/CarDesk-platform-ecarx-cardesk-4308.apk`（3695739 字节），下载回读 SHA-256 一致 |
+
+### 五、影响面
+
+| 场景 | 影响 |
+|---|---|
+| 静态壁纸 / 自定义照片 | **一个像素都不变**（`averageColor` / `TOP_REGION` / `CENTER_REGION` 全部原样） |
+| 视频壁纸（暗色片） | 采样不再依赖 `PixelCopy` ⇒ 真车也能拿到；字色按最亮端拉够 |
+| 视频壁纸（亮色片） | 方向仍按平均值 ⇒ 选深字那一套，不会因为高光翻方向 |
+| 视频文件读不到 / 解不开 | 回落主题墨色（与旧行为一致，见「未做」） |
+
+### 六、本轮未做
+
+- **没在实车上复测**（车机 `198.18.50.1:5555` 仍 ping 不通）。
+  实车要确认两点：① 采样日志是 `src=file`；② 日间主题下状态栏 / 天气是浅色。
+- **没做「采样也失败」的第二层兜底**：视频文件读不到时仍回落主题墨色。
+  再兜一层就得在日间主题 + 视频壁纸时强制浅字，但亮色视频会反过来糊，这版先不做。
+- **原始 2340×1080 视频在 cardesk28 上解不出来**（AVC High level 5.1，模拟器软解不支持），
+  模拟器验证一律用 720p 转码版。
+- **未提交 Git**。
+
+## 第230轮 · 静态壁纸导入：车机上没有图片选择器时的三层兜底
+
+> 用户反馈：**导入静态壁纸只弹「没有可用的图片选择器」**，换不了壁纸。
+> 与第218轮视频壁纸遇到的是同一堵墙：车机上没有相册 / 系统文件浏览器接管选图请求。
+> 本轮把「一次尝试 + 一句提示」改成「系统选择器降级链 + 应用内图片列表 + 取址三级兜底」。
+
+### 一、根因
+
+`MainActivity.startWallpaperImport()` 只有一个动作：
+
+```kotlin
+val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply { addCategory(CATEGORY_OPENABLE); type = "image/*" }
+try { startActivityForResult(intent, REQ_WALLPAPER) }
+catch (e: Exception) { Toast.makeText(this, "没有可用的图片选择器", …).show() }
+```
+
+领克 AAOS 820A 上没有相册、也没有 DocumentsUI 接管 `OPEN_DOCUMENT`，
+`startActivityForResult` 直接抛 `ActivityNotFoundException` ⇒ 只弹这句话，**没有任何退路**。
+`onActivityResult(REQ_WALLPAPER)` 也只取 `data?.data`，车机文件管理器换成
+`clipData` / `EXTRA_STREAM` 回传时同样拿不到文件。
+
+### 二、改法（三层）
+
+| 层 | 做法 | 落点 |
+|---|---|---|
+| 1 | 选择器**降级链**：`OPEN_DOCUMENT`+图片 → `OPEN_DOCUMENT`+不限类型 → `GET_CONTENT`+图片，逐条 `resolveActivity` 预检 | 新增 `core/ImagePicker.kt` |
+| 2 | 全不行 ⇒ 打开**应用内图片列表**（缩略图 + 名称 + 大小/日期/路径，可重新扫描、可再试系统选择器） | 新增 `core/ImageLibrary.kt`、`ui/ImagePickerOverlay.kt` |
+| 3 | 取图地址**三级兜底**：`data` → `clipData` → `EXTRA_STREAM` | `ImagePicker.extractUri()` |
+
+接线：
+
+- `MainActivity.startWallpaperImport()`：走降级链；全不行时 toast
+  「车机没有系统图片选择器，已打开车机里的图片列表」并 `launcher?.openImagePicker()`。
+- `MainActivity.onActivityResult(REQ_WALLPAPER)`：改用 `ImagePicker.extractUri()`，
+  取不到时 toast「没取到图片文件，请重新选择」。
+- `LauncherView.openImagePicker()` / `importWallpaperFromLibrary(item)`：
+  列表选中的图走 `CustomWallpaper.importFromUri(Uri.fromFile(…))`，
+  与原系统选择器那条路完全一致（后台解码 → 落盘 → 立刻切过去 → 刷新设置预览）。
+
+### 三、途中发现并修掉的一个坑
+
+最初的降级链有第 4 档「`GET_CONTENT` + 不限类型」。模拟器实测：把相册与
+DocumentsUI 都停用后，这一档被 **`com.android.music`** 接管
+（日志 `已拉起系统图片选择器 strategy=GET_CONTENT (*/*) handler=com.android.music`），
+用户点「导入壁纸」会跳进音乐播放器 —— 比「没有选择器」更糟。
+⇒ 该档**删除**，宁可落到应用内列表。`ImagePickerTest` 同步断言为 3 档。
+
+### 四、实测（cardesk28 AVD，API 28，平台签名）
+
+| 场景 | 结果 |
+|---|---|
+| 系统选择器可用 | `已拉起系统图片选择器 strategy=OPEN_DOCUMENT (image/*) handler=com.android.documentsui`，正常列出图片 |
+| 停用 DocumentsUI | 自动降级到 `GET_CONTENT (image/*)`，由相册接管，正常选图 |
+| 相册也停用 | `车机没有系统图片选择器，改用应用内列表 tried=3`；面板列出 `Download/CarDesk/wp-test.jpg`（缩略图 + 33.9 KB + 日期 + 完整路径） |
+| 应用内列表点一张 | `图片库：选中图片` + `自定义壁纸已导入 srcW=1600 srcH=900`，桌面立刻换成该图 |
+| 全量单测 | **2659 / 0 failures / 0 errors / 0 skipped**（新增图片库 8 条 + 选择器 7 条） |
+
+证据图：`emu-verify/r230-01-image-picker-fallback.png`、
+`r230-02-image-picker-picked.png`、`r230-03-custom-wallpaper-applied.png`。
+
+### 五、边界
+
+- 只认 `jpg / jpeg / png / webp / bmp / heic / heif`；**不含 gif**（静态壁纸只取一帧）。
+- 应用内列表最多列 200 张、最多往下找两层目录，缺省扫
+  `Pictures` / `DCIM` / `Download` / `Download/CarDesk`。
+- 视频壁纸开着时，自定义静态壁纸不会显示（视频壁纸优先级更高）—— 需先关视频壁纸。
+- 没做实车复测（车机仍离线）。
+
+## 第229轮 · 单画音乐卡「内容跟着卡片走」+ 拖动调比例不再每帧重排承载应用
+
+> 用户两条反馈：① 单画中画拖分隔条后，音乐卡的进度条 / 时间 / 控制键不跟着卡宽走，
+> 出现贴边与遮挡；② 拖动调比例在车机上卡。
+> 前者按卡片实际宽度分三档重排；后者把「每帧 resize 虚拟屏」改成「松手 resize 一次」。
+
+### 一、音乐卡内容不跟卡片走（贴边 / 遮挡）
+
+**根因**：这张卡是第四十九轮按设计板 `s02-nav`（约 520 宽）用**绝对坐标**摆的：
+封面 `left 24 / 96×96`、歌名 `left 140`、进度条 `left 24 + MATCH_PARENT`（**没有右边距**）。
+分隔条一拖，卡片变窄，于是：
+
+- 进度条右端直接顶到卡片边框（只留了左边距）；
+- 时间行 `0:00 / 0:00` 一样贴右边；
+- 封面 96 + 歌名 left 140 在窄卡里挤在一起；
+- 控制键那一行总宽 248（`40+56+40` 加两个 56 的间距），窄卡里被裁掉两侧箭头；
+- 收藏 / 播放模式两个按钮是「贴左右两边」的，窄卡里和居中的控制键叠在一起。
+
+**改法**（`app/src/main/java/com/cardesk/launcher/ui/pages/NavPage.kt`）：
+
+1. 新增 `absIn(x, y, w, h, right)`：给整行元素补**右边距**。
+   进度条 / 时间行 / 歌名 / 歌手 / 歌词 / 来源行统一 `rightMargin = COMBINED_PAD(24)`，
+   任何宽度下左右都对称。
+2. 新增 `applyCombinedWidth(width)`，卡片宽度变化时自动套档：
+
+   | 档 | 宽度 | 版式 |
+   |---|---|---|
+   | 0 | ≥ 460（`COMBINED_NARROW_W`） | 设计板版式（封面 96、歌名 left 140、收藏 / 播放模式都在） |
+   | 1 | ≥ 320（`COMBINED_TIGHT_W`） | 封面缩到 72、歌名 left 112、收起收藏 / 播放模式 |
+   | 2 | 更窄 | 隐去封面，歌名从 24 起占满整行；控制键间距 56→12、按钮宽度 40/56/40→32/48/32；隐藏「已暂停」状态文案 |
+
+3. `applyActionVisibility()` 里加 `roomy = combinedTier <= 0` 的门槛，
+   窄档不再亮收藏 / 播放模式（不然会和控制键打架）。
+
+**实测**（模拟器 `emulator-5560`，prefs `desk_primary_ratio_normal_v1` 分别设 0.80 / 0.88 触发档位）：
+
+| 档位 | 卡片宽度 | 结果 |
+|---|---|---|
+| 0 | 525 | `音乐卡宽度档位 width=525 tier=0`，与改动前一致 |
+| 1 | 363 | `tier=1`：封面 72、歌名 112 起、进度条与时间行左右各留 24 |
+| 2 | 218 | `tier=2`：封面隐去、`‹ ▶ ›` 完整可见、进度条不贴边 |
+
+证据：`emu-verify/r229-01-music-card-tier1.png`、`r229-02-music-card-tier2.png`、
+`r229-03-music-card-default.png`。
+
+### 二、拖动调比例卡顿（每帧 resize 虚拟屏）
+
+**根因**：拖动时卡宽每帧都在变，`PipSurface.onSizeChanged()` 与镜像宿主的
+`onSurfaceTextureSizeChanged()` 每帧都会 `resize` 一次虚拟屏 ⇒ 承载应用每帧重排版重画
+（高德要重画整张地图），主线程被拖住；模拟器实测拖动期间手势 move 被合并成一步。
+
+**改法**：
+
+- `PipSurface`：新增 `dragPreview` 态 + `beginDragPreview()/endDragPreview()`，
+  拖动期间 `onSizeChanged()` 直接返回，松手时一次性 `syncVirtualDisplay()`；
+- `PipMirrorHost`：同样加 `dragPreview`，拖动期间只记 `pendingW/H`，`endDragPreview()` 时 resize 一次；
+- `NavPage` 分隔条回调：`onRatioChanged` 里 `pip.beginDragPreview(); pipSecondary.beginDragPreview()`，
+  `onRatioCommitted` 里 `post { endDragPreview() }` 并记「画中画拖动结束」（含 steps）。
+
+> 车机上的拖动流畅度仍需实车复测：模拟器是软件渲染（且手势注入会被合并），
+> 帧率不代表 820A。
+
+### 三、验证与交付
+
+- 全量单测：**2644 / 0 failures / 0 errors / 0 skipped**；
+  （出包第一次跑到一条 `PipRatioTest.quantize_snapsToPixelGrid` 的浮点边界失败，
+  同一份代码重跑即绿，记为 flaky，已写进 `tools/handoff-r230.md`。）
+- 全屏复核：点左缘玻璃条 → 地图铺满 1920 宽、右侧无 108px 空白；还原正常
+  （`emu-verify/r229-04-fullscreen-1920.png`）。
+- 交付：`dist/CarDesk-platform-ecarx-cardesk-4306.apk`
+  （`1.0.1210-system`，平台签名，SHA-256 `26784e77…564a`），已上传 R2。
+
+## 第228轮 · 真车逐条复核：补齐镜像路线的触摸与显示信息 + 路线跟着窗口走 + 拖动不再卡
+
+> 第226轮引入的「窗口内渲染（MIRROR）」路线**第一次在领克真车（API 28）上逐条复核**。
+> 第227轮只修了默认值与「切全屏 / 还原」，**没在真车上验过**。
+>
+> 交付版本 **4304**（`1.0.1208-system`，`--no-bump` 重出），**未上传 R2**（本机无凭据）。
+
+### 一、用户在真车上看到的四个现象 → 三个根因（**全是我们的代码**，不是高德）
+
+| # | 现象 | 根因 | 修在哪 |
+|---|---|---|---|
+| ① | **画中画里的高德点不动** | 镜像路线**从第一版起就没有任何触摸转发**。旧路线（`ActivityView`）是**自带**的（AOSP 9 `ActivityView.onTouchEvent` → `InputManager.createInputForwarder` → `IInputForwarder.forwardEvent`），我们自建的虚拟屏没有 ⇒ API 28 又没有 `MotionEvent.setDisplayId` 可用 | `PipMirrorHost.forwardTouch`（`createInputForwarder` + `forwardEvent`） |
+| ② | **切全屏后右侧缺 108px** | 镜像路线建虚拟屏后**没调** `wm.dontOverrideDisplayInfo(displayId)`（AOSP `ActivityView.initVirtualDisplay` 里紧跟着建屏就有这一句）⇒ WM 覆盖了虚拟屏的显示信息 ⇒ 承载应用按另一套尺寸排版 ⇒ 只画 1812/1920 | `PipMirrorHost.dontOverrideDisplayInfo` |
+| ③ | **大小调整玻璃条看不见** | `NavPage.placePipDivider()` 把 **row 局部坐标**当成 NavPage 坐标（差一个 `NAV_SIDE_MARGIN=44`）⇒ 玻璃条被画在 x≈1315，**正好压在画中画自己的滚动条上** | `NavPage.placePipDivider`（**与路线无关**，旧路线同样看不见） |
+| ④ | **双画下「一画」面板没圆角** | 与单画**同一个根因**：半透明窗口下 `ActivityView` 的图层不再被窗口轮廓裁剪。**真车像素实测**：单画 / 双画的地图卡左上角都是**直角**；而副画占位卡（普通 View + `clipToOutline`）是**圆的** | 走镜像路线即成立（用户实车确认「圆角正常了」） |
+
+> **旧线路触控没有问题**（用户原话）—— 复核结论一致：`ActivityView` 自带转发，我们的镜像路线没带。
+> ⇒ 修法不是「换回旧路线」，而是**把镜像路线补成和 AOSP `ActivityView` 一样完整**。
+
+### 二、这一版还修掉了一个**回归**：关掉视频壁纸后画中画行为变了
+
+- 路线判据原来用 **prefs**（「视频壁纸开 + SurfaceView 后端 ⇒ 该透明」），
+  而**窗口实际的 format** 是另一回事 —— 用户在设置里开关视频壁纸会**在运行中**改窗口 format；
+- 承载面又是「**同包名复用**」的 ⇒ 判据变了，承载面还挂着**上一条路线**的内容。
+
+⇒ 真车实测：用户关掉视频壁纸 ⇒ 窗口变不透明，但画中画**仍是镜像路线**
+⇒ 全屏右侧缺一块、拖动很卡 ⇒ 用户反馈「**以前不用视频壁纸一切正常，现在有问题了**」。
+
+修法两条：
+
+1. **判据改成问窗口本身**：`LauncherView.isWindowTranslucent()` 读 `window.attributes.format`（唯一的真相）；
+2. **路线变了就重建承载面**：`PipRenderPlan.needsRebuild(current, want)`（纯函数，有单测）
+   ⇒ 开关视频壁纸**不用重启桌面**就即时换路线。
+
+顺带修掉镜像路线在**换肤重建**时的一个洞：镜像宿主（连同它的虚拟屏）以前没跟着承载面一起搬家
+⇒ 旧承载面 `release` 时把虚拟屏销毁了 ⇒ 承载应用的 task 被推回主屏（高德抢屏）+ 应用被重启一遍。
+现在镜像宿主与承载面**整块搬家**（`PipSurface.detachMirrorHost` / `adoptContent`）。
+
+### 三、拖动卡顿（镜像路线专有）—— 四个成因一起修
+
+真车实测：拖分隔条只有 **~10fps**（帧间隔 34~177ms）。逐条拆：
+
+| 成因 | 证据 | 修法 |
+|---|---|---|
+| 每帧一次「反射 + IPC 到 WMS」（触摸排除区） | 单帧多花 **9~25ms** | 节流到 **400ms** 一次 |
+| `Class.getDeclaredMethods()` 每次都新建 `Method` 数组 | JDK 不缓存这层 ⇒ 每帧扫几十上百个方法 | 反射方法**解析一次就缓存**（找不到也缓存 null） |
+| 每帧 3~4 条 logcat（车机 logcat 本身很吵） | 逐帧日志实测 | 逐帧日志**节流 400ms**；去掉一条重复的 |
+| 承载应用按每个中间尺寸**重画整张地图** | 帧间隔与位移大小正相关 | 比例**吸附到 12px 一格** ⇒ 一次 200px 拖动只触发 ~16 次重画 |
+
+### 四、判据与实测（领克真车 `198.18.50.1:5555`，Android 9 / API 28）
+
+| 判据 | 结果 |
+|---|---|
+| 触摸转发器 | ✅ `画中画窗口内渲染：输入转发器就绪 display=8 ok=true` |
+| 触摸真的送达高德 | ✅ `画中画触摸转发 display=8 x=355.75 y=338.24 ok=true`，高德画面随之变化（用户实车确认） |
+| `dontOverrideDisplayInfo` | ✅ 反射打中（**车机 framework 里 `WindowManagerGlobal` 是 `android.view.WindowManagerGlobal`**，AOSP 9 已搬家；写 `com.android.internal.view.…` 会 `ClassNotFoundException` ⇒ 反射一次都没打中） |
+| 圆角 | ✅ 用户实车确认「圆角正常了」（镜像路线 ⇒ 普通 View ⇒ `clipToOutline` 成立） |
+| 全屏右侧缺口 | ✅ 修 `dontOverrideDisplayInfo` 后右侧满宽 |
+| 玻璃条 | ✅ 从 x≈1315（压在画面滚动条上）移到**卡缝** x≈1359 |
+| 壁纸开关换路线 | ✅ `画中画路线变了，重建承载面 from=LAYER to=MIRROR`（不用重启桌面） |
+| 崩溃 | ✅ `FATAL / Exception` **0** |
+| 单测 | **2644 / 0 failures / 0 errors / 0 skipped**（新增 7 条：路线重建判定 ×3、比例吸附 ×2、既有断言修订 ×2） |
+
+### 五、已知边界
+
+- **镜像路线的拖动仍然比 `ActivityView` 路线重**：承载面是窗口内的一个 `TextureView`，
+  每次换尺寸都要让承载应用重排版重画（12px 吸附只是把次数降了一个数量级，**没有消除**）。
+- **切全屏 / 还原会让承载应用重启一次**（`by=resize`）—— 设计内（否则应用不按新尺寸重排）。
+- 视频壁纸「右侧裁切」本轮没处理。
+- 车上 UNI 桌面（`xyz.i4o.uni.launcher`）未处理。
+
+### 六、交付与收尾（第228轮补完）
+
+- 更新说明：`tools/notes-r228.md`；清单由 `tools/make_manifest.py --notes-file tools/notes-r228.md` 重生成
+  （`dist/cardesk-latest.json`，`4304 / 1.0.1208`，APK SHA-256 `01cc94a5…6412`）。
+- **R2 已上传**：`cardesk/CarDesk-platform-ecarx-cardesk-4304.apk` 与 `cardesk/latest.json`，
+  公网 `https://file.chuxi.bid/cardesk/latest.json` 回读校验。
+- 报告：`emu-verify/REPORT-r228.md`（含本轮真车判据表 + 模拟器复测 + 已知边界）；
+  交接：`tools/handoff-r229.md`。
+- 模拟器复测（`emulator-5560`，同一份 4304）：视频壁纸开 + 高德画中画（MIRROR）正常、
+  首页 ⇄ 导航页来回切无黑块、`START … autonavi` 新增 0、`FATAL` 0。
+- **新发现的已知边界**：`LAYER` 路线（视频壁纸关 ⇒ 窗口不透明）+ 高德，在模拟器上画中画**黑屏**
+  （同一配置下 `com.cardesk.embedtest` 正常；真车第228轮实测该路线正常）⇒ 记为待真车复测确认，
+  证据 `emu-verify/r228-04-emu-layer-opaque-black.png`。
+- 工具加固：`tools/publish_r2.py` 的 APK 上传在 `urllib` 上会反复 `Broken pipe` / 写超时
+  （一次性把 body 塞进 socket，中途被掐没有断点）；本轮给它加了 **curl 兜底**
+  （`--aws-sigv4` + `--upload-file`，实测 3.6MB 4.2s 传完），`urllib` 传输失败时自动重传。
+- 未提交 Git（HEAD 仍停在第200轮，201+ 全是未提交工作树改动）——按要求只在明确指示时提交。
+
+---
+
+## 第227轮 · 修掉第225/226轮验收查出的三个问题 + 打通画中画「切全屏 / 还原」
+
+> 第225/226轮的功能性改动**全部通过验收**（高德确实承载在虚拟屏、不抢主屏、圆角、切页无黑块、
+> 切回不重启、`FATAL` 0），但验收查出 **1 个必修 + 2 个次要** 问题；
+> 第226轮新加的「窗口内渲染」路线在**画中画切全屏 / 还原**这条路上还有两个洞。
+>
+> 交付版本 **4304**（`1.0.1208-system`），**未上传 R2**（本机无凭据）。
+
+### 一、验收查出的三个问题
+
+| # | 问题 | 严重度 | 根因 |
+|---|---|---|---|
+| ① | **默认配置走的还是掉帧那条路** | **必修** | `core/Prefs.kt` 里 `videoWallpaperBackend` 默认值仍是 `BACKEND_TEXTURE_VIEW(1)`，与 4303 更新说明「后端保持 `0`」自相矛盾 ⇒ 上一版声称的「回到省电方案」在默认配置下**根本没生效** |
+| ② | SurfaceView 路线冷启动视频起播两次 | 次要 | 画中画 MIRROR 路线自建虚拟屏时，系统下发 display config override，连带把我们窗口的 `SurfaceView` surface 重建 ⇒ 播放器被换掉，新播放器从第一帧开始 ⇒ 用户看到「开机后视频跳回开头重播」 |
+| ③ | REPORT-r226.md 写「逐字节相同」 | 次要 | 措辞过强：实测是**静止子区域逐字节相同**，整卡差 0.294%（高德自己的地图动画） |
+
+### 二、改法
+
+1. **问题①**：`core/Prefs.kt` 默认值改回 `VideoWallpaper.BACKEND_SURFACE_VIEW`；
+   `core/VideoWallpaper.kt` 新增 `needsTranslucentWindow()` / `targetWindowFormat()` 两个纯函数，
+   让「窗口透明性」与「画中画路线」**共用同一个来源**（以前两处各写各的，口径一歪就是直角 / 错位 / 残留黑卡）；
+   `MainActivity.applyWindowFormatBeforeCreate()` 在 `setContentView` **之前**把窗口 format 定好。
+   **没有加「渲染后端」设置项** —— 后端是「装一次就不动」的设置，默认值改对之后车机用户不需要任何操作。
+2. **问题②**：`surfaceDestroyed` 时记 `videoResumePositionMs`，新播放器 `seekTo(resume, SEEK_CLOSEST)` **接着播**。
+   > 试过并作废：同一个 `MediaPlayer` 用 `setSurface()` 换输出面 —— 实测模拟器上**画面全黑**
+   > （壁纸亮度 21.9，正常 129~212）⇒ 解码器没有真的换输出面。
+3. **画中画切全屏 / 还原的两个洞**：
+   - `PipMirrorHost.ensureDisplay` 在虚拟屏已存在时**重新 `setSurface` + `resize`**（不再 early-return）
+     ⇒ 进/出全屏时 `SurfaceTexture` 销毁重建，虚拟屏被**重新指回新 surface** ⇒ 不黑屏；
+   - `PipMirrorHost.relaunch()` / `PipSurface.relaunch()`：**镜像路线的承载面是 `TextureView`，没有 `startActivity`**，
+     上一版靠「重新发启动」让应用重排其实**根本没发**；现在由镜像宿主自己发（它知道自己的虚拟屏 id）。
+
+### 三、判据与实测（模拟器 cardesk28 / API 28，最终包 4304）
+
+**默认配置**（`design_video_wallpaper_backend` 键**根本不存在**）：
+
+| 判据 | 结果 |
+|---|---|
+| 默认后端 | ✅ `backend=0`（SurfaceView，HWC 直通），与更新说明一字不差 |
+| 窗口 format | ✅ `TRANSLUCENT`，**建窗前就定好** |
+| 画中画路线 | ✅ `mode=mirror`，虚拟屏 1287×867 |
+| 高德在虚拟屏 | ✅ `Task #899`（`MainMapActivity`）挂在 **Display #28**；**Display #0 只有桌面** |
+| 画面不是黑的 | ✅ `black=false opaquePct=100` |
+| 视频不跳回开头 | ✅ `视频壁纸：surface 换新，从原位置接着播 positionMs=515` |
+| 视频确实在播 | ✅ 3 秒间隔天空区 **54.50%** 字节在变 |
+| 切页不重启 | ✅ 首页 ⇄ 导航页来回切，高德 `START u0` **无新增** |
+| 崩溃 | ✅ `FATAL / Exception` **0** 条 |
+
+**画中画 → 全屏 → 还原**（用户追加要求的那项）：
+
+| 判据 | 结果 |
+|---|---|
+| 进全屏 | ✅ `to=全屏` → 虚拟屏 resize 到 1920×968 → `已重新接上新的 surface … ok=true`（**没有重建虚拟屏**） |
+| 全屏时壁纸仍在背后 | ✅ 截图上沿仍是视频壁纸 |
+| 还原 | ✅ `to=还原` → `画中画归位到地图卡` → `ok=true` → `size=1287x867` |
+| 还原后应用重排 | ✅ `画中画重新拉起承载应用 … by=resize route=mirror` |
+| 还原后仍在虚拟屏 | ✅ `Task #899` 仍在 **Display #28**，主屏只有桌面 |
+| 还原带来的重启 | ⚠️ 高德 `START u0` +2 —— **设计内**（resize 必须让应用重新布局），不是崩溃、也不是跑到主屏 |
+| 崩溃 | ✅ `FATAL / Exception` **0** |
+
+**另一条后端（`TextureView`）的回归**（用 adb 把 pref 置 `1` 模拟「显式选过 TextureView 的老用户」）：
+`窗口 format：OPAQUE（默认，不动） backend=1` → `[EVT] 画中画显示 … mode=layer`，
+高德同样嵌在画中画里、主屏仍只有桌面、`FATAL` 0 ——
+**两条路线都没被删掉**，只是「默认走哪条」被固定下来了。
+
+| 其它 | 结果 |
+|---|---|
+| 单测 | **2637 / 0 failures / 0 errors / 0 skipped**（新增 9 条：默认值、format 目标值、两条口径一致性） |
+| 装机一致性 | 模拟器上的 `base.apk` 与 `dist/` 那份 **SHA-256 完全相同** |
+
+证据图：`emu-verify/r227-13-fullscreen.png`、`r227-14-restored.png`、`r227-15-settings-wallpaper.png`、
+`r227-16-settings-video-section.png`、`r227-17-backend1-layer.png`；
+完整报告见 `emu-verify/REPORT-r227.md`。
+（⚠️ 4304 本轮出过两版 —— 先出的一版带「渲染后端」设置项，按要求撤掉后用 `--no-bump` 重出，
+**以 SHA-256 `1458765c…c19ab` 这版为准**。）
+
+### 四、已知边界
+
+- **实车复测仍未做**（`198.18.50.1:5555` 第225/226/227 三轮都离线）：车机掉帧是否真的改善只能靠实车验，
+  模拟器是软件解码，**帧率表现不代表车机**。
+- 还原时会多一次承载应用启动（`by=resize`），设计内；要「一次都不重启」得另找让应用响应
+  `onConfigurationChanged` 自适应的路子。
+- ~~画中画仍不转发触摸（API 28 `ActivityView` 本身也不转发）~~ —— **本条括号里的解释是错的，已在第228轮更正**：
+  AOSP 9 的 `ActivityView.onTouchEvent` **自带**触摸转发
+  （`InputManager.createInputForwarder` → `IInputForwarder.forwardEvent`），
+  所以**旧 LAYER 路线一直是可以触控的**。当时观察到的「画中画不可触控」发生在
+  **MIRROR 路线**（自建虚拟屏 + `TextureView`，本来就没有任何输入转发）上，
+  跟 `ActivityView` 无关。第228轮已把 MIRROR 路线补成和 `ActivityView` 一样完整。
+- 视频壁纸「右侧裁切」本轮没处理。
+
+### 五、本轮未做
+
+- **没做实车复测**（第225/226/227 三轮同一个未闭环项）。
+- **未上传 R2**（本机没有 `R2_AK` / `R2_SK` 凭据）；`dist/cardesk-latest.json` 已按最终更新说明生成好。
+- 视频壁纸「右侧裁切」独立复测。
+- 未提交 Git（HEAD 仍停在第200轮）。
+
+---
+
+## 第226轮 · 视频壁纸回到省电的 SurfaceView：画中画改「窗口内渲染」
+
+> 用户反馈：「**实测在车机上现在的默认方案掉帧很严重，有种卡顿的感觉**，
+> 麻烦在基于渲染路径 0（SurfaceView）的方案上解决已有的问题，或是寻找其他更优方案」。
+>
+> 交付版本 **4303**（`1.0.1207-system`），已上传 R2。
+
+### 一、问题：省电与画中画正确性原来是对立的
+
+上一版（第225轮）为保住画中画圆角，把视频壁纸默认后端换成了 `TextureView`：
+视频每帧都要进窗口缓冲、由 GPU 合成一次 **1920×968@60** 的全屏画面 —— 车机上就掉帧了。
+
+回到 `SurfaceView`（`design_video_wallpaper_backend=0`）能省电，但它的前提是
+**桌面窗口必须 `TRANSLUCENT`**（硬件图层在窗口之下，靠窗口挖洞透出视频）。
+窗口一透明，第225轮修好过的三个现象会一起回来：
+
+| 现象 | 机制 |
+|---|---|
+| 画中画圆角变直角 | 承载层（`ActivityView` 内的 `SurfaceView`）是独立图层，不再被窗口轮廓裁剪；API 28 又没有 `SurfaceView.setCornerRadius` |
+| 「高德错乱 / 右侧裁切」 | 承载画面的坐标/裁剪与窗口脱节（同一根因） |
+| 切到首页残留黑卡 | 承载层不随窗口隐藏（同一根因） |
+
+⇒ 所以不能靠「换后端」来解决，必须让画中画在**窗口透明**时也能正确渲染。
+
+### 二、改法：混合渲染
+
+- **视频**保持 `SurfaceView` 硬件图层直通（省电、不掉帧），窗口保持半透明。
+- **画中画**改成「**自己建 `VirtualDisplay` + 把输出接到 `TextureView`**」：
+  承载画面画进窗口自己的缓冲 ⇒ 它变回普通 View ⇒ 圆角（`clipToOutline`）、
+  跟着页面隐藏、裁剪坐标全部按 View 规则走。
+  代价只有画中画那块（约 1287×867）的 GPU 合成，远小于全屏视频。
+
+落点：
+
+| 文件 | 改动 |
+|---|---|
+| `app/src/main/java/com/cardesk/launcher/core/PipRenderPlan.kt` | 新增。纯逻辑：窗口透明 ⇒ `MIRROR`，否则 `LAYER`（可单测） |
+| `app/src/main/java/com/cardesk/launcher/ui/pip/PipMirrorHost.kt` | 新增。自建虚拟屏（`DisplayManager.createVirtualDisplay`）+ `TextureView`；`ActivityOptions.setLaunchDisplayId` 起承载应用；尺寸变化只 `resize` 不重建 |
+| `app/src/main/java/com/cardesk/launcher/ui/pip/PipSurface.kt` | 新增 `translucentWindow` / `embedMirror()`；`clearContent()` 释放宿主并注销登记；`syncVirtualDisplay()` 走宿主 `resize` |
+| `app/src/main/java/com/cardesk/launcher/ui/embed/ActivityEmbed.kt` | 新增 `bindHostedDisplay` / `unbindHostedDisplay` 与 `hostedDisplayIds` 查表；`virtualDisplayIdOf()` **先查这张表** |
+| `app/src/main/java/com/cardesk/launcher/ui/LauncherView.kt` | `refreshPip()` 里按 prefs 判窗口是否透明（**不能**用运行态，见下），同步给主/副画 |
+
+两个关键坑（都已避开）：
+
+1. **不能用运行态 `videoWallpaperActive` 判路线**：画中画是在「桌面就绪」那一刻建的，
+   那时视频可能还没起播 ⇒ 第一次嵌入走错路线，之后又因为「同包名复用」永远不纠正。
+   改用 prefs（视频壁纸开 + 后端 `SurfaceView`）判定。
+2. **尺寸变化只能 `resize` 虚拟屏**，重建会把承载应用 task 推到主屏 —— 正是第225轮修掉的症状。
+
+### 三、判据与实测（模拟器 cardesk28 / API 28，`design_video_wallpaper_backend=0`）
+
+| 判据 | 结果 |
+|---|---|
+| 高德配成画中画、视频壁纸播放中 | ✅ 画面嵌在卡里，`mode=mirror`、`画中画窗口内渲染就绪 display=17` |
+| 画中画四角 | ✅ 圆角（裁图验证） |
+| 首页 ⇄ 导航页来回切 | ✅ 首页无黑块；切回后画面与切走前**静止子区域逐字节相同**（整卡差异 0.294%，来自高德自己的地图动画） |
+| 承载应用是否被重启 | ✅ `START u0 … autonavi` 新增 **0** 次 |
+| 崩溃 | ✅ `FATAL` **0** 条 |
+| 单测 | **2628 / 0 failures / 0 errors / 0 skipped**（新增 3 条路线判据） |
+
+证据图：`emu-verify/r226-01-amap-mirror-rounded.png`、`r226-02-home-clean-video.png`、
+`r226-03-nav-back-norestart.png`、`r226-04-embedtest-mirror.png`；完整报告见
+`emu-verify/REPORT-r226.md`。
+
+### 四、已知边界
+
+- 这是**模拟器**判据。车机上的掉帧改善需要实车复测（车机 `198.18.50.1:5555` 本轮仍离线）。
+- ~~画中画**不转发触摸**（API 28 的 `ActivityView` 本来也不转发）~~ —— **本条括号里的解释是错的，已在第228轮更正**：
+  AOSP 9 的 `ActivityView.onTouchEvent` **自带**触摸转发
+  （`InputManager.createInputForwarder` → `IInputForwarder.forwardEvent`），
+  **旧 LAYER 路线一直是可触控的**。当时的「不可触控」发生在 MIRROR 路线上（自建虚拟屏 + `TextureView`，
+  本来就没有输入转发），与 `ActivityView` 无关；第228轮已把 MIRROR 路线补齐。
+- 视频壁纸仍会「跳帧跟随解码」，模拟器是软解、测不出真机表现。
+
+---
+
+## 第225轮 · 高德跑主屏 / 切页残留 / 圆角丢失 / 移除自绘动态壁纸
+
+> 用户反馈：「**在车机上是左右切换首页与导航页复现**；其次在 cardesk 上安装高德、画中画配置高德测试；
+> 同时移除自绘的动态壁纸（在车机上太卡了），还有就是使用自绘的动态壁纸时不会有高德错乱显示的问题；
+> 另一个：**为什么画中画窗口的圆角没了**」。
+>
+> 交付版本 **4302**（`1.0.1206-system`），已上传 R2。
+
+### 一、四个问题的根因
+
+| # | 现象 | 根因 |
+|---|---|---|
+| 1 | 高德在画中画里「跑回首页」/ 整块全屏 | 高德被嵌进来之后**自己再起一个活动**（`UsbFillActivity` → `MainMapActivity`），那个活动**另建一个 task**、不带 `launchDisplayId`，被 AMS 放到**默认显示器**上 → 桌面被盖住、虚拟屏那层变黑。旧的搬移逻辑「搬稳就收工」，而且只挑**还留在虚拟屏上的那个 task**，于是全程判「已在我们的虚拟屏上」。 |
+| 2 | 左右切首页/导航页后，首页残留一块**黑色圆角卡** | 画中画挂在导航页里；切走时导航页被 `restPage()` 置 `GONE`，但承载层内部的 `SurfaceView` 是**独立图层**，AOSP 9 上祖先变 `GONE` 并不能可靠地把它从合成里摘掉 → 首页原位残留黑卡。 |
+| 3 | **画中画圆角没了** | 圆角靠父级 `clipToOutline`「窗口挖洞」实现（API 28 没有 `SurfaceView.setCornerRadius`，反射调用直接打「圆角 API 不可用」）。**窗口一旦 `TRANSLUCENT`，挖洞就失效**，承载层变成独立图层压在窗口上 → 直角、而且坐标/裁剪与窗口脱节（这正是用户说的「高德错乱显示」）。而视频壁纸的 `SurfaceView` 后端**必须**把窗口设成 `TRANSLUCENT`。 |
+| 4 | 自绘动态壁纸在车机上太卡 | 第207轮的程序化动态壁纸每帧要画满 1920×1080（第211轮实测帧耗时 p50=20ms），且它让窗口保持不透明 —— 恰好把第 3 条的病**遮住了**（所以「用自绘动态壁纸时不会错乱」）。 |
+
+### 二、这一轮怎么解
+
+| # | 修法 | 落点 |
+|---|---|---|
+| 1 | **搬稳后继续守**：0.6/0.9/1.2/1.8/2.4s 共 5 轮复查（约 7s）；复查时**优先挑「跑到别的屏上」的那个 task** 搬回来；最多搬 3 次防死循环 | `core/HostTaskMigrator.kt`（`verifyDelayMsForAttempt`）、`ui/embed/HostTaskMigration.kt`（`startVerify`/`verify`/`VERIFY_MAX_MOVES`、`runOnce` 的 escaped 优先） |
+| 2 | 离开导航页时把承载层**挪到屏外**（`translationX = -8000`），**不拆承载面**；切回来挪回 0 —— 应用不重启、画面不丢 | `ui/pip/PipSurface.kt`（`setContentVisible`）、`ui/LauncherView.kt`（`refreshPip` 里按 `page == PAGE_NAV` 调用） |
+| 3 | **视频壁纸默认后端改回 `TextureView`**（窗口保持不透明 → 圆角恢复、无残留）。第213轮「TextureView 画不上屏」的结论**是错的**：真因是诊断代码给 `SurfaceTexture` 装了 `setOnFrameAvailableListener`，抢掉了 `TextureView` 内部的帧回调 | `core/Prefs.kt`（默认 `BACKEND_TEXTURE_VIEW`）、`ui/LauncherView.kt`（去掉抢回调、改在 `onSurfaceTextureUpdated` 打一次「第一帧已上屏」） |
+| 4 | 移除程序化动态壁纸（渲染器 / 选择器 / 设置项 / prefs 全部删掉） | 删 `core/LiveWallpapers.kt`、`ui/widget/LiveWallpaperRenderer.kt` 及两份测试；`BackgroundView.kt` / `LauncherView.kt` / `SettingsOverlay.kt` / `core/Prefs.kt` 清接线 |
+
+### 三、判据与实测（cardesk28 / API 28）
+
+- 单测 **2625 / 0 failures**（新增「守护窗口」2 条；移除动态壁纸相关 11 条）。
+- 高德配成画中画：启动 20 秒后仍嵌在卡里；日志 `承载任务跑到别的屏上，优先搬它 … size=1920x944 候选=1` → `搬到我们的虚拟屏 … to=12` → 守护 5 轮全绿。
+- 首页 ⇄ 导航页来回切：首页**无黑卡**；切回导航页高德**仍在**（`START … autonavi` 新增 **0** 条、`FATAL` **0** 条）。
+- 圆角：`TextureView` 后端 + 视频壁纸开 + 画中画有内容 ⇒ 四角圆角（裁图对比直角版本）。
+- 证据截图：`emu-verify/r225-01-amap-pip.png`、`r225-02-home-clean.png`、`r225-03-nav-back-norestart.png`；过程见 `emu-verify/REPORT-r225.md`。
+
+### 四、已知边界
+
+- 车机若把视频壁纸后端改回 `0`（`SurfaceView`，HWC 直通更省电），圆角与残留问题会**回来** —— 这是半透明窗口的硬约束，不是本轮没修。
+- 模拟器上高德的软件解码跟不上 1080p60，视频帧可能不前进（车机是硬件解码，无此问题）。
+- 高德若被系统重启（崩溃/被清理），画中画会重新承载一次 —— 属正常自愈。
+
+## 第224轮 · 视频壁纸下画中画的高德跑回首页（「看不见」被当成「黑」+ 承载面重建无条件重启）
+
+> 用户反馈：「**导入视频壁纸后画中画里的高德跑回首页了**」（导入视频壁纸后显示混乱另案）。
+>
+> 交付版本 **4301**（`1.0.1205-system`）。
+
+### 一、问题
+
+视频壁纸一开，画中画里的高德就会**自己跳回首页**，有时连着跳几次；换回静态壁纸现象消失。
+
+查下来是**两条互不相干的缺陷叠在一起**，任何一条都会让承载应用被重启：
+
+| # | 缺陷 | 机制 |
+|---|---|---|
+| 1 | **「看不见」被当成「黑」** | 画中画画面是叠在桌面窗口上的一层**独立 Surface**，桌面窗口在那一块是**透明的洞**（alpha=0、RGB=0）。旧的黑屏检测只看 `maxLuma / avgLuma / brightRatio`，**不看 alpha** —— 透明与纯黑在像素数据上完全一样 ⇒ 「我们看不见它」被判成「它黑屏了」⇒ 连续 3 帧就触发自愈（重建承载面 → 重启承载应用）。视频壁纸把桌面窗口切成 `TRANSLUCENT`（`LauncherView.applyVideoWindowFormat()`），采样**恒为 0**，于是必误判。 |
+| 2 | **承载面重建时无条件重启** | 导入视频壁纸要弹文件选择器 ⇒ 桌面 `onPause/onStop` ⇒ `ActivityView` 的 surface 销毁（AOSP 9 只 `VirtualDisplay.setSurface(null)`，不 release）⇒ 回桌面时 surface 重建。旧代码在重建分支里**无条件** `startActivity`。 |
+
+实车日志铁证（交接文档）：`START u0 {act=MAIN ... pkg=com.autonavi.amapautp.yh cmp=.../UsbFillActivity} from uid 1000`，
+20:25:20 / 20:25:39 / 20:25:41 共四次。
+
+### 二、这一轮怎么解
+
+| # | 修法 | 落点 |
+|---|---|---|
+| A | **alpha 闸门**：每帧先算不透明像素占比（`alpha >= 128`），占比 < **0.02** ⇒ 判 **BLIND**：不累加黑帧、清零黑帧计数、单独记日志；`sawContent` 保持粘性 | `core/PipSampleGate.kt`（新）+ `ui/pip/PipFrameProbe.kt` |
+| B | **承载面重建前先判 task 在哪块屏**：判据下沉到 `ActivityEmbed.hostTaskInfo()`（与黑屏检测共用一份），四态 `ON_OUR_DISPLAY / OFF_OUR_DISPLAY / NOT_FOUND / UNKNOWN`；只在「不在我们屏上 / 找不到」时才重新拉起 | `core/HostTaskDisplay.kt`（新）+ `ui/embed/ActivityEmbed.kt` + `ui/pip/PipSurface.kt` + `ui/pip/PipBlackHeal.kt` |
+
+B 的四态与动作：
+
+| 状态 | 重建时 |
+|---|---|
+| `ON_OUR_DISPLAY` | **不重启** |
+| `OFF_OUR_DISPLAY` | 重启（真该救） |
+| `NOT_FOUND` | 重启（应用没了） |
+| `UNKNOWN`（判不准 / 正在搬栈） | **不重启** |
+
+> 原则：**判不准就当没黑**。误判成 OFF/NOT_FOUND 的代价是重启用户正在用的应用 ——
+> 那正是本轮要修的现象；「应用真的没了」还有进程看门狗兜底（连续 3 次看不到进程才动手）。
+
+### 三、API 28 的硬限制（实测，已写进代码注释）
+
+`ActivityManager.RunningTaskInfo` 在 **API 28 没有 `displayId` 字段**（API 29 才有）——
+基准模拟器上用 `app_process` 打过运行时字段清单核对。两条补证据的路本轮**主动放弃**：
+
+- `stackId` → `getAllStackInfos()` 的 `StackInfo.displayId`：探针里成立，但**应用进程里
+  拿不到入口**（`ActivityManager.getService()` 被隐藏 API 限制拦住）；
+- 比 `configuration.screenWidthDp`（`HostTaskMigrator` 第141轮起用的判据）：**surface 重建
+  那一瞬间不可信** —— 正在被搬回虚拟屏的 task 配置还停在主屏尺寸，会被误判成「被搬到主屏」
+  ⇒ 触发重启 ⇒ 正是用户报的现象。
+
+⇒ 车机与基准模拟器（都是 API 28）上四态**一律 UNKNOWN** ⇒ 重建时**一律不重启**，
+正是本轮想要的安全侧。
+
+### 四、实测（`cardesk28` AVD / 5560，4301 同一份包）
+
+场景：`design_video_wallpaper=true` + 画中画承载 `com.cardesk.embedtest`。
+
+**修复 A**：
+
+```
+D CarDesk/NavUI: 画中画虚拟显示器 id our=7 pkg=com.cardesk.embedtest role=主画
+W CarDesk/NavUI: 画中画画面采样：看不见承载面（半透明窗口/透明洞），不判黑
+    opaquePct=0 maxLuma=0 avgLuma=0 blind=1 rect=237,203,1138,810
+```
+
+**修复 B**（HOME 回桌面再拉起）：
+
+```
+D CarDesk/NavUI: 承载面销毁 pkg=com.cardesk.embedtest times=1
+D CarDesk/NavUI: 承载面重建，判不准 task 在哪个屏，按「没黑」处理，不重新拉起
+    pkg=com.cardesk.embedtest times=2 state=UNKNOWN vid=1
+```
+
+⇒ **没有** 任何 `START ... com.cardesk.embedtest`（旧代码这里一定 `startActivity`）。
+
+| 时点 | 截图 | 结果 |
+|---|---|---|
+| 视频壁纸 + 画中画 | `emu-verify/r224-01-pip-video-wallpaper.png` | 画中画里 EMBED TEST 正常显示、**不是黑块** |
+| HOME 后再回桌面 | `emu-verify/r224-02-after-home-return.png` | 画中画仍是原来那页，**没有跳回首页** |
+
+`FATAL / EXCEPTION` 计数：**0 / 0**，进程存活（同一 pid 全程未重启）。
+
+### 五、验证
+
+| 项 | 结果 |
+|---|---|
+| 全量 JVM 单测 | **2634 / 0 failures / 0 errors / 0 skipped**（基线 2602 + 新增 32） |
+| 新增单测 | `core/PipSampleGateTest.kt` 17、`core/HostTaskDisplayTest.kt` 14、`PipFrameProbeTest.kt` +1 |
+| 编译 | `assembleSystem` 通过 |
+| 装机冒烟 | cardesk AVD（5560）`FATAL / Exception` **0**，进程存活 |
+| 交付包 | `dist/CarDesk-platform-ecarx-cardesk-4301.apk`（**装机验证过的同一份**） |
+| R2 上传 | **已上传**：`https://file.chuxi.bid/cardesk/latest.json`（2929 字节）+ `cardesk/CarDesk-platform-ecarx-cardesk-4301.apk`（3664131 字节），回读 SHA-256 一致 |
+
+### 六、影响面
+
+| 场景 | 影响 |
+|---|---|
+| 静态壁纸（默认场景） | **一个像素都不变** |
+| 真黑屏（承载应用自己渲染黑） | **照常自愈**（不透明像素足够 ⇒ 仍判 BLACK） |
+| 视频壁纸 | 不再误判黑 ⇒ 不再反复重建承载面 |
+| 弹文件选择器 / 回桌面 | 不再无条件重启承载应用 |
+
+### 七、本轮未做
+
+- **没做实车复测**：车机 `198.18.50.1:5555` 从 20:58 起 ping 不通、`adb` offline（头单元睡了/熄火）。
+- **视频壁纸右侧裁切**（另一条反馈）未处理。
+- **API 28 上补 displayId 证据**主动放弃，理由见第三节。
+- **未提交 Git**。
+
+---
+
+## 第252轮 · UI 重设计 v3.3 全面落地（45 块画板）+ 逐条反馈收口
+
+> 用户诉求（分多轮给出）：按 `cardesk-ui/design/redesign` 的 45 张画板，把整个桌面 1:1 重做；
+> 之后又按实机观感连续给了三轮修正意见（Dock 右键太小 / 风量图标读不懂 / 车辆页缺后备箱 /
+> 设置左栏字号与分组 / s11 槽位被遮 / 胎压放大与前后排位置 / 空调档位改到底部 `---`）。
+
+### 一、材质与色彩（一处改动，全 App 生效）
+
+| 层 | 改动 | 落点 |
+|---|---|---|
+| L0 背景 | 浅青底 + 右上青 `#00C2B2` / 左下蓝 `#0E8FD8` / 左上白光三处径向柔光，壁纸只留纹理 | `ui/widget/BackgroundView.kt` `drawDesignWash()` |
+| L1/L2 卡面 | 真玻璃：模糊底取样 + 多层柔阴影 + 顶部内高光 + 1px rim | 新增 `core/Glass.kt`、`core/GlassDrawable.kt` |
+| 令牌 | `Palettes.day/night` 换成设计值（`surface 62% 白` / `A8161B22`、accent `#00A9A0` / `#16C2B2`） | `core/Palette.kt` |
+| 圆角 | `Shape.CARD 28 → 24` | `core/Design.kt` |
+| 小面板 | `Skin.flat/glass` 返回 `GlassDrawable` —— 抽屉 / 空调 / 设置 / 最近任务 / 弹层十几处一起玻璃化 | `core/Skin.kt` |
+
+### 二、逐块落地
+
+| 画板 | 落点 | 关键数值 |
+|---|---|---|
+| Main 首页 | `ui/pages/ScenePage.kt` | 四卡 `300 / 600 / 420 / 440`、gap 24、底边 953；媒体封面 84×84 r22、标题 22、来源行 14；座椅 chip 112×96；续航 56px + 6px 进度条 |
+| 车况卡 | 同上 | 车模 rect 210×290 @ top30、胎压 39px + `bar` 21px（单位在数字下方），前排 0.35→0.18 轴上移、后排 0.69；`✓ 全车已关` 底部居中 |
+| 02 导航组合页 | `ui/pages/NavPage.kt` + `pip/*` | 内边 32 / 缝 38 / 左 1166 : 右 652；PIP 窗头只留居中三点胶囊；音乐卡下移到贴 Dock（`NAV_ROW_BOTTOM_GAP 90 → 17`） |
+| 03 抽屉 | `ui/DrawerPage.kt` | 6 列 278×156、图标底板 88×88、按包名去重、无计数行 |
+| 04 空调 | `ui/ClimatePage.kt` | 浮层 (143,73) 1642×867；双温环 / 阶梯风量 / 吹风 chips / 座舱块；加热通风 96×56 + 三档 `---` |
+| 05 车辆 | `ui/pages/VehiclePage.kt` | 三列布局、真实 `Car3dPainter` 俯视车模、后备箱行、燃油口径 |
+| Dock / 状态栏 | `ui/shell/DockBarView.kt` / `ShellStatusBar.kt` | Dock 8 段；右键 56×56 pitch 64；风量键设计版风纹 + 7 档点；状态栏玻璃胶囊、位置→天气 |
+| 设置 25 页 | `ui/SettingsOverlay.kt` | 左树 21px 条目 / 17px accent 分组标题、行 128、开关 64×36、三处媒体源浮层统一 361×625 |
+
+### 三、本轮的修正（按用户反馈）
+
+| # | 反馈 | 修法 |
+|---|---|---|
+| 1 | Dock 右键太小 | `RIGHT_KEY 46 → 56`、pitch 57 → 64、键内图形同步放大 |
+| 2 | 风量键「不明所以」 | 删掉三条带钩横线，按画板重画「三道风 + 上卷钩」，下加 7 颗档位点 |
+| 3 | 车辆页缺后备箱 | 状态列加第五行「后备箱」，接 `VehicleInfo.trunkClosed` |
+| 4 | 设置左栏字小、标题不明显 | 条目 18→21、组标题 17 bold accent、同一条左线、行距 34/36 |
+| 5 | s11「编辑槽位」被遮 | `DOCK_SLOT_ROW_H 62 → 84`，按钮与下一行彻底分开 |
+| 6 | 胎压样式不统一 / 放大 | 去掉位置描述、数值 22→39、单位 21 放数字下方、按前后轴比例定位 |
+| 7 | 空调档位没体现、要 `---` | `ChipButton.showLevel`：底部三根横杠（12×3.2，亮 = 已开档） |
+
+### 四、验证
+
+| 判据 | 结果 |
+|---|---|
+| 编译 | `assembleSystem` 通过（平台签名 SHA-256 `c8a2e9…2ab8`） |
+| 单测 | `testSystemUnitTest` **2666 / 0 / 0** |
+| 实机 | cardesk28（5560）+ car15（5572）均装机；`logcat -b crash` 本应用 0 条、`FATAL EXCEPTION` 0 条 |
+| 独立验收 | 三轮独立子 agent 复验：11 条意见全 PASS、终验 2 条 P1（s20 单列 / 双画收单画）修完复核 PASS |
+| 截图 | `docs/ui-redesign/`（45 块对照）+ `round5/`（16 张本轮证据） |
+
+### 五、诚实偏差（未做到 1:1 的部分）
+
+- **真高斯模糊**：API 28 没有 `RenderEffect`，用「预模糊壁纸缩略图 + 半透明」近似（`Glass.backdrop` 480×270）。
+- **导航引导卡 / 中央歌词**：状态驱动 —— 无导航数据、无播放时整块隐藏，画板画的是有数据态。
+- **图标**：风纹 / 座椅 / 除霜等仍是 Canvas 手绘，与画板笔触有细微差异。
+- **车辆页**：`VehicleInfo` 没有电量与平均电耗字段，这两项显示 `--`。

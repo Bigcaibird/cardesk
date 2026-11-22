@@ -6,7 +6,8 @@ import kotlin.math.abs
  * 桌面翻页手势的纯逻辑判定。
  *
  * 第三十七轮把翻页手势收敛成三种：
- * 1. **单指横滑**（主手势，第三十七轮用户要求）——真车上单指左右滑最顺手；
+ * 1. **双指横滑**（主手势，第206轮起）——单指要留给画中画里拖地图，双指不冲突；
+ *    第三十七轮到第205轮曾经是「单指横滑」，实测和画中画的拖拽抢手势，已换掉；
  * 2. **左右三指滑动**（保留，第三十二轮用户要求）——多指手势仍然可用；
  * 3. **右缘竖滑**（保留手势）——最右 120px 命中区，纵向位移超过阈值就翻页。
  *
@@ -28,6 +29,44 @@ object PageGesture {
      * 只是方向从「竖滑」改成「横滑」。
      */
     const val THREE_FINGER_PX = 160f
+
+    /**
+     * 双指横滑的翻页阈值（设计坐标 px，按两指中位点算）。
+     *
+     * 第206轮：用户要求把翻页从单指改成**双指**——单指在画中画里要拖地图，
+     * 两者在同一个区域天然冲突；双指既能翻页、又不抢单指的地图手势。
+     *
+     * 第207轮：160 → 140。双指比单指多一根手指要就位、行程也更短，
+     * 阈值不降一档的话手感就是「推不动」。
+     */
+    const val TWO_FINGER_PX = 140f
+
+    /**
+     * 双指横滑必须「比纵向更横」的比例。
+     *
+     * 与 [SINGLE_FINGER_AXIS_RATIO] 同口径：斜着走的双指滑动不算翻页。
+     */
+    const val TWO_FINGER_AXIS_RATIO = 1.2f
+
+    /**
+     * 双指横滑时，两指间距允许的**相对**变化比例。
+     *
+     * 捏合缩放会让中位点几乎不动、但两指间距大幅变化；
+     * 超过这个比例就当成「缩放手势」而不是翻页。
+     *
+     * 第207轮：0.18 → 0.30。原来太紧，真手指间距的正常抖动就被判成捏合，
+     * 结果是「双指滑不动」。
+     */
+    const val TWO_FINGER_SCALE_TOLERANCE = 0.30f
+
+    /**
+     * 双指间距的**绝对**容差（设计坐标 px）。
+     *
+     * 两指离得近时（初始只有几十 px），相对比例会被几像素的抖动放大成
+     * 「百分比暴涨」，正常横滑会被误判成捏合。
+     * 给一个绝对下限兜住这种小间距场景。
+     */
+    const val TWO_FINGER_SPAN_SLOP = 60f
 
     /** 右缘竖滑的翻页阈值（设计坐标 px）。 */
     const val EDGE_TRIGGER = 120f
@@ -67,6 +106,47 @@ object PageGesture {
         if (abs(dx) <= threshold) return 0
         if (abs(dx) <= abs(dy) * axisRatio) return 0
         return if (dx < 0f) 1 else -1
+    }
+
+    /**
+     * 双指横滑的翻页步进（第206轮：主手势；第207轮修判定口径）。
+     *
+     * @param dx 两指中位点的水平位移（设计坐标 px）：**左滑为负、右滑为正**
+     * @param dy 两指中位点的纵向位移（设计坐标 px）
+     * @param span0 按下时两指间距（设计坐标 px）
+     * @param span 抬手时两指间距（设计坐标 px）
+     * @param threshold 触发阈值（设计坐标 px）
+     * @param axisRatio 横向必须大于纵向的倍数
+     * @return `1` = 下一页，`-1` = 上一页，`0` = 不触发（位移不够 / 不够横 / 在缩放）
+     */
+    fun twoFingerStep(
+        dx: Float,
+        dy: Float,
+        span0: Float,
+        span: Float,
+        threshold: Float = TWO_FINGER_PX,
+        axisRatio: Float = TWO_FINGER_AXIS_RATIO,
+    ): Int {
+        if (isTwoFingerPinch(span0, span)) return 0
+        if (abs(dx) < threshold) return 0
+        if (abs(dx) <= abs(dy) * axisRatio) return 0
+        return if (dx < 0f) 1 else -1
+    }
+
+    /**
+     * 两指间距的变化是不是「捏合缩放」（而不是横滑翻页）。
+     *
+     * 判定用**绝对量 + 相对量**两条线，取更容易触发的那条：
+     * - 相对：间距变化超过初始间距的 [TWO_FINGER_SCALE_TOLERANCE]（30%）；
+     * - 绝对：间距变化超过 [TWO_FINGER_SPAN_SLOP]（60 设计 px）。
+     *
+     * 为什么要有绝对量那条：两指初始靠得近时（只有几十 px），
+     * 手指抖 10px 就是「30% 的变化」，纯相对判定会把正常横滑误杀成捏合。
+     */
+    fun isTwoFingerPinch(span0: Float, span: Float): Boolean {
+        val delta = abs(span - span0)
+        if (delta <= TWO_FINGER_SPAN_SLOP) return false
+        return delta > span0 * TWO_FINGER_SCALE_TOLERANCE
     }
 
     /**

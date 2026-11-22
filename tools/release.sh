@@ -112,6 +112,10 @@ fi
 
 # ---------------------------------------------------------------- 2) 干净构建目录
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/cardesk-release-XXXXXX")"
+# 收尾必须删掉这份干净构建目录：一次 1.8G，攒几次就把盘顶满了
+# （2026-11-19 实测：TMPDIR 里堆了 8 份 cardesk-release-*，共 14.4G）。
+# 产物在第 4.1 步之前已 cp 回 "$REPO/dist"，删 WORK 不影响出包。
+trap 'rm -rf "$WORK"' EXIT
 echo "== 干净构建目录：$WORK"
 rsync -a --checksum \
     --exclude build --exclude .gradle --exclude dist --exclude dist-dev --exclude preview \

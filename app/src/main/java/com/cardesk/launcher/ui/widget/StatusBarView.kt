@@ -94,15 +94,7 @@ class StatusBarView(context: Context) : View(context) {
         // 右侧信息与图标
         var x = width.toFloat() - 56f
         gearRect.set(x - 44f, h / 2f - 22f, x, h / 2f + 22f)
-        drawGear(canvas, gearRect.centerX(), gearRect.centerY(), 19f)
-        x -= 76f
-
-        drawBattery(canvas, x - 46f, h / 2f - 12f, 46f, 24f)
-        x -= 74f
-        drawWifi(canvas, x - 34f, h / 2f)
-        x -= 62f
-        drawBluetooth(canvas, x - 26f, h / 2f)
-        x -= 62f
+        drawStatusIcons(canvas, h)
 
         bold.color = palette.text
         bold.textSize = 26f
@@ -117,6 +109,19 @@ class StatusBarView(context: Context) : View(context) {
         text.color = palette.warn
         text.textSize = 24f
         canvas.drawText(outdoorText, x - text.measureText(outdoorText), h / 2f + 8f, text)
+    }
+
+    /** 顶栏图标（齿轮 / 电池 / wifi / 蓝牙）。 */
+    private fun drawStatusIcons(canvas: Canvas, h: Float) {
+        var x = width.toFloat() - 56f
+        gearRect.set(x - 44f, h / 2f - 22f, x, h / 2f + 22f)
+        drawGear(canvas, gearRect.centerX(), gearRect.centerY(), 19f)
+        x -= 76f
+        drawBattery(canvas, x - 46f, h / 2f - 12f, 46f, 24f)
+        x -= 74f
+        drawWifi(canvas, x - 34f, h / 2f)
+        x -= 62f
+        drawBluetooth(canvas, x - 26f, h / 2f)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -154,6 +159,7 @@ class StatusBarView(context: Context) : View(context) {
             canvas.drawArc(rect, 215f, 110f, false, paint)
         }
         paint.style = Paint.Style.FILL
+        paint.color = palette.textDim
         canvas.drawCircle(cx, cy + 14f, 3f, paint)
     }
 

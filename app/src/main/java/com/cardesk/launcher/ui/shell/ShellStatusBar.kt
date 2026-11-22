@@ -3,17 +3,16 @@ package com.cardesk.launcher.ui.shell
 import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
-import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
-import android.graphics.Shader
 import android.graphics.Typeface
 import android.view.MotionEvent
 import android.view.View
 import com.cardesk.launcher.core.Design
-import com.cardesk.launcher.core.Palettes
+import com.cardesk.launcher.core.Glass
 import com.cardesk.launcher.core.Skin
+import com.cardesk.launcher.core.WallpaperContrast
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.ui.WeatherGlyphs
@@ -48,6 +47,30 @@ import java.util.Locale
  * 让元素在原行高里占得更满 —— 行内元素是垂直居中的，字号图标一大，
  * 元素上下的空隙自然就小了。
  * 放大幅度取「第五十二轮 2/3」与「原值」之间（约为原值的 0.8~0.85）。
+ *
+ * **第223轮：胶囊跟着壁纸明暗走** ——
+ * 用户反馈「状态栏白色的胶囊在黑色的壁纸上有点丑」：
+ * 胶囊**有底板**，好不好看取决于底板跟壁纸上合不合，不取决于文字对比度。
+ * 所以这一行的**三个胶囊**（驾驶模式 / 位置 / 天气）的底板 + 描边 + 内部文字
+ * 一起按壁纸明暗成套切换（暗 ⇒ 夜间那套 `#171A22`/`#333947`，亮 ⇒ 日间那套）。
+ * 详见 [Skin.overlayTop] 与 [com.cardesk.launcher.core.WallpaperContrast]。
+ *
+ * **第三百轮：按 `cardesk-ui/design/redesign/Main.png` 重排，去掉一切深色实心块**
+ *
+ * 设计稿这一行是**极简**的（实测，1:1）：
+ * - 左：34×34 的**玻璃**圆角方块（x28..61、y5..38、圆角 12）+ 深色齿轮；
+ *   紧随其后一个 34 高的**玻璃胶囊**（x74..220）—— 不再是强调色实心方块；
+ * - 中：一组翻页点（accent 长条 22×6 + 弱色圆点 6，组中心 x≈888）；
+ * - 右：**全部裸文字 / 裸图标**（位置 · 天气 · 蓝牙 · WiFi · 信号 · 油量% · 时间），
+ *   没有任何胶囊底板。
+ *
+ * 所以：位置 / 天气两个胶囊被拆掉，改成裸元素；
+ * 左边两件从「实心强调色 / 实心浅色」换成 `GlassDrawable` 那套玻璃
+ * （`Glass.card`，带内高光与 1px rim），底板与文字仍成套跟着壁纸明暗走。
+ *
+ * 行高常量 [ROW_TOP] / [ROW_H] 也按实测改了（5 / 33 → 行中心 21.5）：
+ * `PageDotsView` 直接引用这两个常量来纵向居中，行一改它自动跟着对齐，
+ * 这正是第八十二轮把几何集中到这里的用意。
  */
 class ShellStatusBar(context: Context) : View(context) {
 
@@ -189,12 +212,6 @@ class ShellStatusBar(context: Context) : View(context) {
         color = Skin.TEXT
         style = Paint.Style.FILL
     }
-    private val chipPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Skin.CHIP_FILL }
-    private val chipStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Skin.CHIP_STROKE
-        style = Paint.Style.STROKE
-        strokeWidth = 0.9f
-    }
     private val locationPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Skin.TEXT_SOFT
         textSize = 17f
@@ -210,8 +227,6 @@ class ShellStatusBar(context: Context) : View(context) {
     }
     private val pinDotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Skin.ACCENT_LIGHT }
     private val sepPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Skin.TEXT_DIM }
-    /** 顶部渐变遮罩（沉浸式）。 */
-    private val scrimPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val avatarRect = RectF()
 
     /**
@@ -219,24 +234,16 @@ class ShellStatusBar(context: Context) : View(context) {
      *
      * **第八十二轮：必须独立出来。**
      * 以前位置/天气胶囊画在屏幕正中，和左侧的驾驶模式胶囊隔得很远，
-     * 所以「用同一个 RectF 复用」没暴露问题；现在天气胶囊挪到**右侧图标行**，
+     * 所以「用同一个 RectF 复用」没暴露问题；后来天气胶囊挪到**右侧图标行**，
      * 两者虽然还是分开的，但复用的那个 RectF 会被**最后画的那个胶囊覆盖**
      * —— 点驾驶模式胶囊时 `contains` 判的是天气胶囊的位置，就再也点不开了。
-     * 命中判定和绘制用的矩形必须一一对应，所以拆成三个独立的。
+     * 命中判定和绘制用的矩形必须一一对应，所以拆成独立的两个。
+     *
+     * 第三百轮：位置 / 天气改成裸元素，不再需要各自的 RectF，已删掉。
      */
     private val assistRect = RectF()
 
-    /** 位置胶囊的矩形。 */
-    private val locRect = RectF()
-
-    /** 天气胶囊的矩形。 */
-    private val wxRect = RectF()
-
     private val tmp = RectF()
-
-    private val avatarShader: Shader by lazy {
-        LinearGradient(0f, 0f, AVATAR, AVATAR, intArrayOf(Skin.ACCENT_LIGHT, 0xFF2B4FD8.toInt()), null, Shader.TileMode.CLAMP)
-    }
 
     // —— 按压反馈 ——
     //
@@ -266,76 +273,170 @@ class ShellStatusBar(context: Context) : View(context) {
         //
         // 可读性改由**扁平分段胶囊**保证：每一段信息各自一个圆角底板，互不干扰。
 
-        val top = ROW_TOP
-        val rowH = ROW_H
+        // 这一行元素的**垂直中心**（第三百轮按设计稿实测：元素 y5..38、高 34 ⇒ 中心 21.5）
+        val cy = ROW_TOP + ROW_H / 2f
 
-        // 头像（第四十九轮：改成**纯色扁平方块**，不再是蓝色渐变）
-        // 头像在状态行里**垂直居中**（设计板那行是 flex align-items:center）
-        val avatarTop = top + (rowH - AVATAR) / 2f
-        avatarRect.set(EDGE, avatarTop, EDGE + AVATAR, avatarTop + AVATAR)
+        // 第222轮：**裸元素**（时钟 / 油量% / 燃油图标 / 连接类图标）直接压在**壁纸**上，
+        // 颜色按壁纸明暗走 —— 见 [com.cardesk.launcher.core.WallpaperContrast]。
+        //
+        // 这里必须**每帧重设**画笔颜色：
+        // 换壁纸不会重建这个 View（只有换日夜才会），画笔颜色不刷就停在旧值上。
+        val ink = Skin.overlayTop
+        clockPaint.color = ink.text
+        fuelPaint.color = ink.text
+        iconPaint.color = ink.text
+        // 定位针的中心点（设计稿是强调色小圆）也跟强调色成套走。
+        pinDotPaint.color = ink.accentLight
+
+        // 设置入口（第三百轮：**玻璃方块**，不再是强调色实心块）
+        //
+        // 设计稿这里是 34×34、圆角 12 的浅色玻璃方块 + 深色图标
+        // （画板上的图标其实是「两条带滑块的横线」，语义就是设置，
+        //  这里保留齿轮路径 —— 车的屏幕小，齿轮比 tune 更好认）。
+        // 点击命中区（avatarRect）与回调 `onAvatar` 一点没变。
+        drawSettingsTile(canvas, ink, cy)
+
+        // 驾驶模式胶囊（玻璃底 + 强调色圆点 + 文案）
+        drawAssistChip(canvas, ink, cy)
+
+        // 正中翻页点。⚠️ 宿主（LauncherView）已经加了**可点击的** PageDotsView，
+        // 两者画在同一行会叠在一起，所以这里只在「没有兄弟 PageDotsView」时
+        // 才按设计稿补这一组（例如预览 / 单测 / 其它宿主）。
+        if (!hasSiblingPageDots()) drawPageDots(canvas, ink, cy)
+
+        // 右侧：全部裸元素（从右往左：时间 → 油量% → 油量图标 → 连接图标 → 天气 → 位置）
+        drawRightRow(canvas, ink, cy)
+    }
+
+    /**
+     * 左上角设置入口：34×34、圆角 12 的**玻璃方块** + 深色齿轮。
+     *
+     * 第三百轮由「Skin.ACCENT 实心方块 + accentInk 齿轮」改成
+     * 「玻璃底 + ink.text 齿轮」——设计稿这一行没有任何饱和色块，
+     * 唯一带颜色的东西是驾驶胶囊里那颗状态点。
+     */
+    private fun drawSettingsTile(canvas: Canvas, ink: WallpaperContrast.Ink, cy: Float) {
+        avatarRect.set(EDGE, cy - AVATAR / 2f, EDGE + AVATAR, cy + AVATAR / 2f)
         // 按压反馈只作用在**这一小块**（围绕它自己的中心）——
-        // 状态栏其它内容不跟着动，才看得出「按的是齿轮」。
-        withPress(canvas, "avatar", avatarRect.centerX(), avatarRect.centerY()) {
-            val avatarPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Skin.ACCENT }
-            canvas.drawRoundRect(avatarRect, AVATAR_RADIUS, AVATAR_RADIUS, avatarPaint)
-            // 第123轮：原来这里画的是字母「C」（CarDesk 首字母），
-            // 用户要求「把左上角的 C 字设置入口改成一个设置图标」——
-            // 这个位置本来就是**设置入口**（点击 `onAvatar` 打开设置页），
-            // 字母 C 看不出来是干什么的，齿轮才一眼认得出。
-            //
-            // 底板（强调色方块）保留不变：它是这个入口的「按钮」外形，
-            // 点击命中区（avatarRect）也一点没变。
-            val gearPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Skin.ACCENT_INK
-                style = Paint.Style.FILL
-            }
-            canvas.drawPath(
-                gearPath(avatarRect.centerX(), avatarRect.centerY()),
-                gearPaint,
+        // 状态栏其它内容不跟着动，才看得出「按的是设置入口」。
+        withPress(canvas, "avatar", avatarRect.centerX(), cy) {
+            Glass.card(
+                canvas, avatarRect, AVATAR_RADIUS, ink.surface,
+                shadow = false, sheen = true, stroke = ink.stroke,
             )
+            iconFill.color = ink.text
+            canvas.drawPath(gearPath(avatarRect.centerX(), cy), iconFill)
         }
+    }
 
-        // 状态胶囊（第五十一轮按设计板 对齐：文字 20px `var(--text)`、
-        // 间距 18、胶囊内边距 22/12/22、指示点 12px 强调色实心圆
-        val chipX = EDGE + AVATAR + CHIP_GAP
+    /**
+     * 驾驶模式胶囊：玻璃底 + 强调色圆点 + 文案。
+     *
+     * 第三百轮：底板换成 `Glass.card`（内高光 + 1px rim），高度 34、圆角 17、
+     * 文案 14px —— 与设计稿 x74..220 的实测一致；文字仍按壁纸明暗取墨色。
+     */
+    private fun drawAssistChip(canvas: Canvas, ink: WallpaperContrast.Ink, cy: Float) {
         textPaint.textSize = CHIP_TEXT_SIZE
-        textPaint.color = Skin.TEXT
+        textPaint.color = ink.text
+        val chipX = EDGE + AVATAR + CHIP_GAP
         val chipTextW = textPaint.measureText(assistText)
         assistRect.set(
-            chipX, top + (rowH - CHIP_H) / 2f,
+            chipX, cy - CHIP_H / 2f,
             chipX + CHIP_PAD_L + CHIP_DOT + CHIP_PAD_M + chipTextW + CHIP_PAD_R,
-            top + (rowH - CHIP_H) / 2f + CHIP_H,
+            cy + CHIP_H / 2f,
         )
         val dotCx = assistRect.left + CHIP_PAD_L + CHIP_DOT / 2f
-        val dotCy = assistRect.centerY()
-        // 设计板：直径 12 的强调色实心圆（「光晕 + 内芯」双圈是旧版视觉）。
         // 胶囊（底板 + 指示点 + 文案）作为一个整体缩放，按压的落点才明确。
-        withPress(canvas, "assist", assistRect.centerX(), assistRect.centerY()) {
-            canvas.drawRoundRect(assistRect, CHIP_RADIUS, CHIP_RADIUS, chipPaint)
-            canvas.drawRoundRect(assistRect, CHIP_RADIUS, CHIP_RADIUS, chipStroke)
-            canvas.drawCircle(dotCx, dotCy, CHIP_DOT / 2f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Skin.ACCENT })
+        withPress(canvas, "assist", assistRect.centerX(), cy) {
+            Glass.card(
+                canvas, assistRect, CHIP_RADIUS, ink.surface,
+                shadow = false, sheen = true, stroke = ink.stroke,
+            )
+            iconFill.color = ink.accent
+            canvas.drawCircle(dotCx, cy, CHIP_DOT / 2f, iconFill)
             canvas.drawText(
                 assistText,
                 dotCx + CHIP_DOT / 2f + CHIP_PAD_M,
-                dotCy + CHIP_TEXT_SIZE / 3f,
+                cy + CHIP_TEXT_SIZE / 3f,
                 textPaint,
             )
         }
+    }
 
-        // 右侧图标行（从右往左排）
-        val end = width - EDGE
-        val cy = top + rowH / 2f
-        val clockW = clockPaint.measureText(clockText)
+    /**
+     * 设计稿正中的翻页点：一段 accent 长条 + 一个弱色圆点。
+     *
+     * 实测：长条 x874..895、y19..24（≈22×6，全圆端），弱色圆点在 902..908（直径 6），
+     * 整组中心 x≈888 —— 注意它**不在屏幕正中 960**，设计稿把它放在偏左的位置，
+     * 这里照抄实测值（[PAGE_DOT_CENTER_X]）。
+     *
+     * ⚠️ 不可点击 —— 真正的翻页交互由 `PageDotsView` 负责（它有命中区与切页回调）。
+     */
+    private fun drawPageDots(canvas: Canvas, ink: WallpaperContrast.Ink, cy: Float) {
+        val total = PAGE_DOT_BAR_W + PAGE_DOT_GAP + PAGE_DOT_SIZE
+        val left = PAGE_DOT_CENTER_X - total / 2f
+        val barTop = cy - PAGE_DOT_BAR_H / 2f
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.color = ink.accent
+        canvas.drawRoundRect(
+            RectF(left, barTop, left + PAGE_DOT_BAR_W, barTop + PAGE_DOT_BAR_H),
+            PAGE_DOT_BAR_H / 2f, PAGE_DOT_BAR_H / 2f, paint,
+        )
+        // 未选中的那一页：弱色小圆点（设计稿是灰调，不是白色）
+        paint.color = ink.faint
+        val dotCx = left + PAGE_DOT_BAR_W + PAGE_DOT_GAP + PAGE_DOT_SIZE / 2f
+        canvas.drawCircle(dotCx, cy, PAGE_DOT_SIZE / 2f, paint)
+    }
+
+    /**
+     * 宿主是否已经有 [PageDotsView]（它才是**可点击**的翻页指示器）。
+     *
+     * 第三百轮：设计稿要求正中有一组点，但第八十二轮起 `PageDotsView`
+     * 就画在同一行同一位置。两者叠加会变成「一条玻璃条里 3 个点，
+     * 右边又飘着 2 个点」—— 所以有它就不画，没它才补（预览 / 其它宿主）。
+     */
+    private fun hasSiblingPageDots(): Boolean {
+        val group = parent as? android.view.ViewGroup ?: return false
+        for (i in 0 until group.childCount) {
+            if (group.getChildAt(i) is PageDotsView) return true
+        }
+        return false
+    }
+
+    /**
+     * 右侧整行（**裸元素，全部无底板**，从右往左排）。
+     *
+     * 顺序与设计稿一致：时间 → 油量% → 油量图标 → 连接类图标（信号/WiFi/蓝牙/热点）
+     * → 天气（图标 + 温度）→ 位置（定位针 + 城市）。
+     *
+     * ⚠️ 油量图标保留的是**油箱**而不是画板上的电池：
+     * 这一项数据来源是 `VehicleStats.fuelPercent`（见 LauncherView 的赋值），
+     * 是油量不是电量，画成电池会误导。差异已在交付说明里列出。
+     */
+    private fun drawRightRow(canvas: Canvas, ink: WallpaperContrast.Ink, cy: Float) {
+        // 右侧边距与左侧**不一样**：画板左侧 28、右侧 ≈41（实测 17:10 的右边缘在 1877）。
+        // 这里用一个独立常量，免得为了让右边对上而把左边推歪。
+        val end = width - EDGE_RIGHT
         var x = end
+
+        // 时间（设计稿里是这一行最重的一块：17px 粗体）
+        clockPaint.textSize = CLOCK_TEXT_SIZE
+        clockPaint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         clockPaint.textAlign = Paint.Align.LEFT
-        canvas.drawText(clockText, x - clockW, cy + clockPaint.textSize / 3f, clockPaint)
+        clockPaint.color = ink.text
+        val clockW = clockPaint.measureText(clockText)
+        // 第216轮曾在这里给时钟加「描边 + 底衬」（视频壁纸可读性），
+        // **第217轮已按用户反馈全部回退**（「改得有点丑」）。
+        // 第222轮起时钟是**裸文字**，颜色跟着壁纸明暗走，不加任何装饰。
+        canvas.drawText(clockText, x - clockW, cy + CLOCK_TEXT_SIZE / 3f, clockPaint)
         x -= clockW + CLOCK_GAP
 
-        // 燃油百分比 + 图标（没有车端数据时显示默认的 `--%`）
+        // 油量百分比 + 图标（没有车端数据时显示默认的 `--%`）
         val pct = if (fuelPercent >= 0) "$fuelPercent%" else FUEL_UNKNOWN
-        fuelPaint.color = Skin.TEXT
+        fuelPaint.textSize = FUEL_TEXT_SIZE
+        fuelPaint.color = ink.text
         val pw = fuelPaint.measureText(pct)
-        canvas.drawText(pct, x - pw, cy + fuelPaint.textSize / 3f, fuelPaint)
+        canvas.drawText(pct, x - pw, cy + FUEL_TEXT_SIZE / 3f, fuelPaint)
         x -= pw + FUEL_GAP
         drawIcon(canvas, x - FUEL_ICON, cy - FUEL_ICON / 2f, FUEL_ICON) { drawFuelIcon(it, 0f, 0f) }
         x -= FUEL_ICON + ICON_GAP
@@ -351,12 +452,8 @@ class ShellStatusBar(context: Context) : View(context) {
             x -= ICON + ICON_GAP
         }
 
-        // 第八十二轮：**位置 + 天气并入右侧图标行**（原来是单独中置的一段）。
-        //
-        // 为什么挪：状态栏正中这一行要放**翻页指示圆点**（第八十二轮同时改），
-        // 两段都摆正中会互相压住。挪到右侧后，中间的空出来正好给圆点，
-        // 右边的信息密度也更高 —— 时间在最右，地区/天气在连接图标左边。
-        x -= drawLocationWeather(canvas, cy, x)
+        // 天气 + 位置：第三百轮起是**裸元素**（原来各有一个圆角胶囊底板）
+        x -= drawWeatherAndLocation(canvas, ink, cy, x)
     }
 
     /**
@@ -364,6 +461,7 @@ class ShellStatusBar(context: Context) : View(context) {
      *
      * 五个连接图标（蓝牙 / 热点 / WiFi / 信号 / 燃油）内部都是按 26×26 的坐标系
      * 硬编码的路径，这里统一用 `scale` 缩到目标尺寸，避免为了缩小而重画一遍路径。
+     *
      */
     private inline fun drawIcon(
         canvas: Canvas,
@@ -381,64 +479,68 @@ class ShellStatusBar(context: Context) : View(context) {
     }
 
     /**
-     * 「位置 + 天气」段（第四轮新增，**第八十二轮挪到右侧图标行**）。
+     * 「位置 + 天气」段（第四轮新增；**第八十二轮**挪到右侧图标行；
+     * **第三百轮**按设计稿改成**裸元素**，不再各带一个圆角胶囊底板）。
      *
-     * 状态栏左右两边本来就有内容（左边头像 + 驾驶模式胶囊，右边连接图标 +
-     * 油量 + 时钟），中间这一段是我们自加的：
      * 位置取天气链路带回来的**城市名**，天气取同一个链路的**天气文案 + 温度**，
      * 所以状态栏和第一页天气卡显示的一定是同一份数据。
      *
-     * **第八十二轮的位置口径**：这一段不再水平居中，而是**并入右侧图标行**，
-     * 排在连接图标（蓝牙）的左边。原因是状态栏正中要留给**翻页指示圆点**。
-     * 段内顺序（从右往左）：天气胶囊 → 位置胶囊，与右侧整行的「右→左」一致。
+     * 段内顺序（从左往右）：位置（定位针 + 城市）→ 天气（图标 + 温度），
+     * 与画板 `Main.png` 一致（`📍 尤奇亚 …… 4°`）。
      *
      * @param cy 状态栏这一行的中心 y
-     * @param rightX 这一段的**右边界**（左侧连接图标的左边）
+     * @param rightX 这一段的**右边界**（连接图标的左边）
      * @return 这一段占用的宽度（调用方据此继续往左排）
      */
-    private fun drawLocationWeather(canvas: Canvas, cy: Float, rightX: Float): Float {
+    private fun drawWeatherAndLocation(
+        canvas: Canvas,
+        ink: WallpaperContrast.Ink,
+        cy: Float,
+        rightX: Float,
+    ): Float {
         val hasLocation = locationText.isNotEmpty()
         val city = if (hasLocation) locationText else LOCATION_PENDING
         val temp = weatherTemp
         val tempText = if (temp != null) "$temp°" else TEMP_UNKNOWN
 
         locationPaint.textSize = LOCATION_TEXT_SIZE
-        locationPaint.color = if (hasLocation) Skin.TEXT_SOFT else Skin.TEXT_DIM
+        // 第223轮：文字跟着壁纸明暗走；第三百轮去掉底板后这一点更重要了 ——
+        // 裸字压在壁纸上，颜色选错就是「看不见」，不是「丑」。
+        locationPaint.color = if (hasLocation) ink.soft else ink.faint
         tempPaint.textSize = TEMP_TEXT_SIZE
-        tempPaint.color = if (temp != null) Skin.TEXT else Skin.TEXT_DIM
+        tempPaint.color = if (temp != null) ink.text else ink.faint
         locationPaint.textAlign = Paint.Align.LEFT
         tempPaint.textAlign = Paint.Align.LEFT
 
         val cityW = locationPaint.measureText(city)
         val tempW = tempPaint.measureText(tempText)
 
-        // 第八十二轮：**城市名过长时截断**。
-        //
-        // 为什么：这一段是**从右往左**排的，城市名越长，位置胶囊的左边界越靠左 ——
-        // 而正中（第八十二轮起）摆着翻页指示圆点。地名一长就会顶到圆点上。
-        // 所以给位置胶囊一个宽度上限，超了就截断加省略号，
-        // 保证**这一段的左边界永远在圆点右边**。
-        val maxCityW = LOC_MAX_W - (PILL_PAD_X + PIN_W + PIN_GAP + PILL_PAD_X)
+        // 城市名过长时截断（第八十二轮的老规矩：这一段是从右往左排的，
+        // 地名一长就会顶到正中的翻页点上）。
+        val maxCityW = LOC_MAX_W - (PIN_W + PIN_GAP)
         val cityText = if (cityW > maxCityW) clipEllipsis(city, maxCityW) else city
         val cityWW = if (cityW > maxCityW) locationPaint.measureText(cityText) else cityW
 
-        // 第四十九轮「浮屿」：**扁平分段胶囊行** ——
-        // 位置和天气各自一个圆角底板，两段之间留 10px 空档。
-        val locW = PILL_PAD_X + PIN_W + PIN_GAP + cityWW + PILL_PAD_X
-        val wxW = PILL_PAD_X + WX_ICON_W + WX_ICON_GAP + tempW + PILL_PAD_X
-        val total = locW + PILL_GAP + wxW
-        var right = rightX
-        val pillTop = cy - PILL_H / 2f
+        val wxW = WX_ICON_W + WX_ICON_GAP + tempW
+        val locW = PIN_W + PIN_GAP + cityWW
+        val total = locW + WEATHER_LOCATION_GAP + wxW
+        val x = rightX - total
 
-        // ① 天气胶囊（这一段的右半，紧挨连接图标）
-        val wxLeft = right - wxW
-        wxRect.set(wxLeft, pillTop, right, pillTop + PILL_H)
-        canvas.drawRoundRect(wxRect, PILL_RADIUS, PILL_RADIUS, chipPaint)
-        canvas.drawRoundRect(wxRect, PILL_RADIUS, PILL_RADIUS, chipStroke)
+        // ① 位置：定位针 + 城市名（裸）
+        //
+        // 第三百零一轮按画板 `Main.png` 调了**段内左右顺序**：画板里是
+        // 「📍 尤奇亚 …… 4°」，即**位置在左、天气在右**；旧代码把天气画在前面
+        // （从右往左排时天气恰好落在右边，看着像城市跟在温度后面），
+        // 与画板相反。
+        drawLocationPin(canvas, x + PIN_W / 2f, cy)
+        canvas.drawText(cityText, x + PIN_W + PIN_GAP, cy + LOCATION_TEXT_SIZE / 3f, locationPaint)
+
+        // ② 天气：图标 + 温度（裸）
+        //
         // 天气图标的图形是按 24×24 视觉框硬编码的（[WeatherGlyphs]），
-        // 直接画会比设计板大一圈 —— 这里按 [WX_ICON_SIZE] / 24 等比缩放，
-        // 描边也一起缩（传进去的是缩放前的值，缩放后正好落在 [WX_ICON_STROKE]）。
-        val wxCx = wxLeft + PILL_PAD_X + WX_ICON_W / 2f
+        // 这里按 [WX_ICON_SCALE] 等比缩放，描边也一起缩。
+        val wxX = x + locW + WEATHER_LOCATION_GAP
+        val wxCx = wxX + WX_ICON_W / 2f
         canvas.save()
         canvas.scale(WX_ICON_SCALE, WX_ICON_SCALE, wxCx, cy)
         WeatherGlyphs.draw(
@@ -446,20 +548,11 @@ class ShellStatusBar(context: Context) : View(context) {
             wxCx,
             cy,
             weatherSky,
-            if (temp != null) Skin.TEXT else Skin.TEXT_DIM,
+            if (temp != null) ink.text else ink.faint,
             WX_ICON_STROKE / WX_ICON_SCALE,
         )
         canvas.restore()
-        canvas.drawText(tempText, wxLeft + PILL_PAD_X + WX_ICON_W + WX_ICON_GAP, cy + TEMP_TEXT_SIZE / 3f, tempPaint)
-        right = wxLeft - PILL_GAP
-
-        // ② 位置胶囊
-        val locLeft = right - locW
-        locRect.set(locLeft, pillTop, right, pillTop + PILL_H)
-        canvas.drawRoundRect(locRect, PILL_RADIUS, PILL_RADIUS, chipPaint)
-        canvas.drawRoundRect(locRect, PILL_RADIUS, PILL_RADIUS, chipStroke)
-        drawLocationPin(canvas, locLeft + PILL_PAD_X + PIN_W / 2f, cy)
-        canvas.drawText(cityText, locLeft + PILL_PAD_X + PIN_W + PIN_GAP, cy + LOCATION_TEXT_SIZE / 3f, locationPaint)
+        canvas.drawText(tempText, wxX + WX_ICON_W + WX_ICON_GAP, cy + TEMP_TEXT_SIZE / 3f, tempPaint)
 
         return total
     }
@@ -490,7 +583,7 @@ class ShellStatusBar(context: Context) : View(context) {
             cubicTo(cx + 4.7f, cy - 6.7f, cx + 5.3f, cy + 0.7f, cx, cy + 6.7f)
             close()
         }
-        pinPaint.color = Skin.TEXT_SOFT
+        pinPaint.color = Skin.overlayTop.soft
         canvas.drawPath(p, pinPaint)
         canvas.drawCircle(cx, cy - 2.7f, 2f, pinDotPaint)
         canvas.restore()
@@ -510,7 +603,8 @@ class ShellStatusBar(context: Context) : View(context) {
             lineTo(x + 18f, y + 17f)
         }
         val paint = Paint(iconPaint)
-        paint.color = if (emphasized) Skin.ACCENT else Skin.TEXT_DIM
+        // 第222轮：图标压在壁纸上 → 用浮层墨色（深底浅字 / 浅底深字）。
+        paint.color = if (emphasized) Skin.overlayTop.accent else Skin.overlayTop.faint
         canvas.drawPath(p, paint)
         canvas.drawLine(x + 4f, y + 8f, x + 14f, y + 18f, paint)
         canvas.drawLine(x + 4f, y + 18f, x + 14f, y + 8f, paint)
@@ -524,7 +618,8 @@ class ShellStatusBar(context: Context) : View(context) {
      */
     private fun drawHotspot(canvas: Canvas, x: Float, y: Float, emphasized: Boolean) {
         val c = Paint(iconFill)
-        c.color = if (emphasized) Skin.ACCENT_LIGHT else Skin.TEXT_DIM
+        // 第222轮：同 [drawBluetooth] —— 压在壁纸上的图标跟着壁纸明暗走。
+        c.color = if (emphasized) Skin.overlayTop.accentLight else Skin.overlayTop.faint
         canvas.drawCircle(x + 13f, y + 13f, 4.5f, c)
         val arc = Paint(iconPaint)
         arc.color = c.color
@@ -547,7 +642,8 @@ class ShellStatusBar(context: Context) : View(context) {
      */
     private fun drawWifi(canvas: Canvas, x: Float, y: Float, level: Int) {
         val known = level >= 0
-        val color = if (known) Skin.TEXT else Skin.TEXT_DIM
+        // 第222轮：同 [drawBluetooth]。
+        val color = if (known) Skin.overlayTop.text else Skin.overlayTop.faint
         val c = Paint(iconFill).apply { this.color = color }
         canvas.drawCircle(x + 13f, y + 21f, 2.6f, c)
         val arcCount = if (known) level.coerceIn(0, 3) else 0
@@ -568,8 +664,9 @@ class ShellStatusBar(context: Context) : View(context) {
      */
     private fun drawCellular(canvas: Canvas, x: Float, y: Float, level: Int) {
         val known = level >= 0
-        val on = Paint(iconFill).apply { color = Skin.TEXT }
-        val off = Paint(iconFill).apply { color = Skin.TEXT_DIM }
+        // 第222轮：同 [drawBluetooth]。
+        val on = Paint(iconFill).apply { color = Skin.overlayTop.text }
+        val off = Paint(iconFill).apply { color = Skin.overlayTop.faint }
         for (i in 0..3) {
             val h = 6f + i * 5f
             canvas.drawRoundRect(
@@ -794,20 +891,44 @@ class ShellStatusBar(context: Context) : View(context) {
         //   定位针 描边形状整体 ×1.3
         // ================================================================
 
-        /** 左右边距。 */
+        /** 左边距（设置方块左边 = 29；画板实测 28，差 1px）。 */
         const val EDGE = 29f
 
-        /** 这一行元素整体的顶边距。 */
-        const val ROW_TOP = 17f
+        /**
+         * 右边距（第三百轮）。
+         *
+         * 画板这一行是**左右不对称**的：左边距 28，右边距约 41
+         * （时间「17:10」的右边缘实测在 1877，屏宽 1920）。
+         * 共用 [EDGE] 会让整行右侧多出 12px 空隙。
+         */
+        const val EDGE_RIGHT = 41f
 
-        /** 这一行的高度（元素的垂直中心线 = ROW_TOP + ROW_H / 2）。 */
-        const val ROW_H = 43f
+        /**
+         * 这一行元素整体的顶边距。
+         *
+         * 第三百轮：17 → **5**（设计稿实测元素 y5..38）。
+         * 行内的垂直中心随之从 38.5 上移到 21.5 —— 状态栏下面因此留出一条空白带，
+         * 这正是画板的样子（内容区从 y73 之后才开始，中间是空的）。
+         */
+        const val ROW_TOP = 5f
 
-        /** 头像边长。 */
-        const val AVATAR = 40f
+        /**
+         * 这一行的高度（元素的垂直中心线 = ROW_TOP + ROW_H / 2）。
+         *
+         * 第三百轮：43 → **33**（设计稿元素高 34、行中心 21.5 ⇒ 5 + 33/2 = 21.5）。
+         */
+        const val ROW_H = 33f
 
-        /** 头像圆角。 */
-        const val AVATAR_RADIUS = 13f
+        /**
+         * 设置入口方块边长。
+         *
+         * 第三百轮：40 → **34**（设计稿 x28..61 / y5..38 = 34×34）。
+         * 名字仍叫 AVATAR，是为了不改 `avatarRect` / 命中区 / 回调那套既有命名。
+         */
+        const val AVATAR = 34f
+
+        /** 设置入口方块圆角（设计稿 ≈12）。 */
+        const val AVATAR_RADIUS = 12f
 
         /**
          * 齿轮图标的**齿尖半径**（设计 px）。
@@ -815,41 +936,42 @@ class ShellStatusBar(context: Context) : View(context) {
          * 第123轮：这里原来是一个字母「C」的字号（21px），
          * 现在改成设置图标 —— 齿轮外径 23px（= 2×11.5），
          * 跟原来字母的视觉大小（21px 粗体）差不多，不改变这一格的视觉分量。
+         * 第三百轮方块缩到 34 ⇒ 齿轮外径同步收到 17（半径 8.6）。
          */
-        const val AVATAR_GEAR_R = 11.5f
+        const val AVATAR_GEAR_R = 8.6f
 
         /** 齿轮的**齿根半径**（齿轮身的外沿）。 */
-        const val AVATAR_GEAR_BODY_R = 8f
+        const val AVATAR_GEAR_BODY_R = 6.2f
 
         /** 齿轮的**中心孔半径**。 */
-        const val AVATAR_GEAR_HOLE_R = 3.8f
+        const val AVATAR_GEAR_HOLE_R = 2.6f
 
-        /** 头像与状态胶囊之间的距离（第五十一轮按设计板 18 改；布局是 22）。 */
+        /** 设置方块与驾驶胶囊之间的距离（第五十一轮按设计板 18 改；布局是 22）。 */
         const val CHIP_GAP = 12f
 
-        /** 状态胶囊高度（44）。 */
+        /** 驾驶胶囊高度（设计稿实测 34）。 */
         const val CHIP_H = 34f
 
-        /** 状态胶囊圆角（= 高的一半 → 胶囊形）。 */
+        /** 驾驶胶囊圆角（= 高的一半 → 胶囊形）。 */
         const val CHIP_RADIUS = 17f
 
-        /** 胶囊里状态点直径（设计板 12px 强调色实心圆）。 */
-        const val CHIP_DOT = 10f
+        /** 胶囊里状态点直径（第三百轮按设计稿收到 8）。 */
+        const val CHIP_DOT = 8f
 
-        /** 胶囊左内边距（设计板 22）。 */
-        const val CHIP_PAD_L = 16f
+        /** 胶囊左内边距。 */
+        const val CHIP_PAD_L = 14f
 
-        /** 胶囊里状态点与文案之间的距离（设计板 12）。 */
-        const val CHIP_PAD_M = 9f
+        /** 胶囊里状态点与文案之间的距离。 */
+        const val CHIP_PAD_M = 8f
 
-        /** 胶囊右内边距（设计板 22）。 */
-        const val CHIP_PAD_R = 16f
+        /** 胶囊右内边距。 */
+        const val CHIP_PAD_R = 14f
 
-        /** 胶囊文案字号（设计板 20px）。 */
-        const val CHIP_TEXT_SIZE = 17f
+        /** 胶囊文案字号（第三百轮：17 → 14，对齐设计稿）。 */
+        const val CHIP_TEXT_SIZE = 14f
 
-        /** 连接图标的边长（蓝牙 / 热点 / WiFi / 信号）。 */
-        const val ICON = 22f
+        /** 连接图标的边长（蓝牙 / 热点 / WiFi / 信号）。第三百轮：22 → 18。 */
+        const val ICON = 18f
 
         /**
          * 图标内部路径的基准尺寸（缩放用）。
@@ -860,23 +982,29 @@ class ShellStatusBar(context: Context) : View(context) {
          */
         const val ICON_BASE = 26f
 
-        /** 连接图标之间的距离（相邻图标的 `marginStart = 22`）。 */
-        const val ICON_GAP = 18f
+        /** 连接图标之间的距离。第三百轮：18 → 14。 */
+        const val ICON_GAP = 14f
 
-        /** 燃油图标的边长（24×24）。 */
-        const val FUEL_ICON = 21f
+        /** 油量图标的边长（24×24 视觉框）。第三百轮：21 → 18。 */
+        const val FUEL_ICON = 18f
 
-        /** 燃油图标与燃油百分比之间的距离（6）。 */
-        const val FUEL_GAP = 14f
+        /** 油量图标与百分比之间的距离。第三百轮：14 → 12。 */
+        const val FUEL_GAP = 12f
 
-        /** 燃油百分比与时钟之间的距离（18）。 */
-        const val CLOCK_GAP = 18f
+        /** 油量百分比与时钟之间的距离。第三百轮：18 → 16。 */
+        const val CLOCK_GAP = 16f
+
+        /** 时钟字号（第三百轮新增：设计稿里 17:10 是这一行最重的一块，17px 粗体）。 */
+        const val CLOCK_TEXT_SIZE = 17f
+
+        /** 油量百分比字号（第三百轮新增，14 = 与其它文字同一档）。 */
+        const val FUEL_TEXT_SIZE = 14f
 
         /**
          * 顶部渐变遮罩的高度。
          *
-         * = 状态栏那一行的高度（含顶边距）—— 遮罩**正好盖住状态栏那一行**，
-         * 不会碰到下面的页面内容（第四十四轮起导航页内容从 90 开始）。
+         * 第四十九轮「浮屿」起**不再画遮罩**（[onDraw] 里已删掉），
+         * 常量保留是为了不动外部引用（若有）。
          */
         const val SCRIM_H = ROW_TOP + ROW_H
 
@@ -906,72 +1034,81 @@ class ShellStatusBar(context: Context) : View(context) {
         /** [weatherTemp] 的「无数据」哨兵值（只用于日志）。 */
         const val TEMP_UNKNOWN_VALUE = -1
 
-        /** 城市名字号。 */
-        const val LOCATION_TEXT_SIZE = 17f
+        /** 城市名字号（第三百轮：17 → 14）。 */
+        const val LOCATION_TEXT_SIZE = 14f
 
-        /** 温度字号。 */
-        const val TEMP_TEXT_SIZE = 22f
+        /** 温度字号（第三百轮：22 → 14；裸元素后和城市名同一档）。 */
+        const val TEMP_TEXT_SIZE = 14f
 
-        // -------------------------------------------------- 扁平分段胶囊（第四十九轮「浮屿」）
+        // -------------------------------------------------- 翻页点（第三百轮新增）
 
-        /** 分段胶囊的高度。 */
-        const val PILL_H = 34f
+        /**
+         * 翻页点：accent 长条宽 / 高、与弱色圆点之间的间隙、圆点直径。
+         *
+         * 全部来自设计稿实测：长条 x874..895 / y19..24（22×6），圆点直径 6，
+         * 组中心 x≈888（**不在屏幕正中** —— 画板就是这样，照抄）。
+         */
+        const val PAGE_DOT_BAR_W = 22f
+        const val PAGE_DOT_BAR_H = 6f
+        const val PAGE_DOT_GAP = 8f
+        const val PAGE_DOT_SIZE = 6f
+        const val PAGE_DOT_CENTER_X = 888f
 
-        /** 分段胶囊的圆角（半高 → 视觉上完全圆）。 */
-        const val PILL_RADIUS = 17f
+        /** 定位针占位宽。第三百轮：18 → 14（裸元素里不需要胶囊内边距）。 */
+        const val PIN_W = 14f
 
-        /** 分段胶囊的左右内边距。 */
-        const val PILL_PAD_X = 16f
-
-        /** 两段胶囊之间的间隙。 */
-        const val PILL_GAP = 8f
-
-        /** 定位针占位宽。 */
-        const val PIN_W = 18f
-
-        /** 定位针与城市名之间的间距。 */
-        const val PIN_GAP = 8f
+        /** 定位针与城市名之间的间距。第三百轮：8 → 6。 */
+        const val PIN_GAP = 6f
 
         /**
          * 定位针的放大倍数（第六十三轮）。
          *
          * 定位针的路径是按固定坐标画的水滴（高 13.4），字与图标放大后
          * 它显得偏小 —— 这里整体乘一个倍数，描边宽度随之一起放大。
+         * 第三百轮字缩到 14，倍数回到 1.0（不再放大）。
          */
-        const val PIN_SCALE = 1.3f
+        const val PIN_SCALE = 1.0f
 
-        /** 城市名与分隔点之间的间距。 */
+        /** 城市名与分隔点之间的间距（当前未使用，保留）。 */
         const val SEP_W = 17f
 
         /**
-         * 位置胶囊的**最大宽度**（第八十二轮）。
+         * 位置文案的**最大宽度**。
          *
-         * 位置 + 天气是**从右往左**排的，城市名越长，位置胶囊的左边界越靠左 ——
-         * 而状态栏正中（第八十二轮起）摆着翻页指示圆点，地名一长就会顶上去。
+         * 位置 + 天气是**从右往左**排的，城市名越长，这一段的左边界越靠左 ——
+         * 而状态栏正中摆着翻页指示圆点，地名一长就会顶上去。
          * 所以给一个宽度上限，超了就把地名截断加省略号。
          *
-         * 取 300 的理由：按 [LOCATION_TEXT_SIZE] = 17 算，
-         * 中文大约 14 个字 / 英文大约 28 个字符 ——
-         * 正常城市名（「北京」「Shanghai」）远够不着这个上限，不会被截。
+         * 第三百轮：300 → 260。字号从 17 收到 14、又去掉了两侧胶囊内边距，
+         * 260 已经够 18 个中文字（正常城市名远够不着）。
          */
-        const val LOC_MAX_W = 300f
+        const val LOC_MAX_W = 260f
 
         /** 分隔点半径。 */
         const val SEP_DOT_R = 1.1f
 
-        /** 天气图标占位宽。 */
-        const val WX_ICON_W = 21f
+        /** 天气图标占位宽（第三百轮：21 → 16）。 */
+        const val WX_ICON_W = 16f
 
-        /** 天气图标与温度之间的间距。 */
-        const val WX_ICON_GAP = 8f
+        /** 天气图标与温度之间的间距（第三百轮：8 → 4）。 */
+        const val WX_ICON_GAP = 4f
 
-        /** 天气图标的显示边长（设计板 16px → 第六十三轮放大到 21px）。 */
-        const val WX_ICON_SIZE = 21f
+        /** 天气图标的显示边长（第三百轮：21 → 16）。 */
+        const val WX_ICON_SIZE = 16f
 
         /** 天气图标缩放比（[WeatherGlyphs] 的图形按 24×24 视觉框硬编码）。 */
         const val WX_ICON_SCALE = WX_ICON_SIZE / 24f
 
         /** 天气图标描边（缩放后的实际宽度，设计 px）。 */
-        const val WX_ICON_STROKE = 1.9f
+        const val WX_ICON_STROKE = 1.7f
+
+        /**
+         * 天气组与位置组之间的空档（第三百轮）。
+         *
+         * 设计稿实测：位置（定位针 + 「尤奇亚」）在 x≈1280..1400，
+         * 天气（☀ 4°）从 x≈1420 起 —— 中间约 20。取 16，
+         * 给「城市名英文变长」留一点缓冲。
+         */
+        const val WEATHER_LOCATION_GAP = 16f
     }
 }
