@@ -91,8 +91,8 @@ import com.cardesk.launcher.core.car3d.Car3dDebugPose
  * `✕` 和「我知道了」都是 `onClose?.invoke()`（和改前的 `addClose` 完全一致），
  * 「撤窗 + 本轮不再打扰」的逻辑在 `LauncherView`，不经过本类。
  *
- * @param carModel 仍由上层传入（保留参数是为了**不改调用点**）；
- *   自绘车模不依赖车型资产，所以这个值在本轮之后不再被使用。
+ * @param carModel 车型（`Prefs.carModel`）。第 253 轮起用于**实车俯视车模**
+ *   （`Car3dPainter` + `VIEW_CARDTOP`），资产缺失时回退 2D 自绘。
  */
 class DoorAlertDialog(
     context: Context,
@@ -105,7 +105,7 @@ class DoorAlertDialog(
     carModel: String,
 ) : DialogSheet(context, pal, PANEL_W, PANEL_H, DoorAlert.title(openItems.size), PANEL_LEFT, PANEL_TOP) {
 
-    /** 车模（俯视极简车，自绘；开着的位置用 accent 高亮）。 */
+    /** 车模（实车俯视 3D；资产缺失时才回退自绘 2D 车）。 */
     private val car = DoorCarView(context, pal)
 
     /**
@@ -142,7 +142,14 @@ class DoorAlertDialog(
     init {
         // 画板圆角 28；`DialogSheet` 默认用 `Shape.CARD`（24，且会被卡片风格改），
         // 所以这里用同一个 `Skin.flat` 重建一次背景 —— 只有圆角不同，填充/描边照旧。
-        sheet.background = Skin.flat(SHEET_RADIUS)
+        // 面板底：玻璃化之后 `Skin.flat` 用的是 78% 的 `surfaceStrong`，
+        // 而我们的「模糊底」只糊了壁纸、糊不到页面内容 —— 播放中的歌词会**清楚地**
+        // 透在面板上（截图肉眼可见「一起踏…座春秋」）。弹窗只要一张纸的观感，
+        // 所以这里把 alpha 提到 94%，仍保留 sheen/描边/阴影的玻璃质感。
+        sheet.background = Skin.flat(
+            SHEET_RADIUS,
+            fill = (Skin.SHEET_FILL and 0x00FFFFFF) or (0xF2 shl 24),
+        )
 
         titleView = Ui.text(context, DoorAlert.title(openItems.size), TITLE_SP, pal.text, bold = true)
         place(titleView, SIDE, TITLE_TOP, ROW_W, -2)
@@ -183,12 +190,14 @@ class DoorAlertDialog(
         windowsOpen: BooleanArray?,
         hoodClosed: Boolean?,
         trunkClosed: Boolean?,
-        @Suppress("UNUSED_PARAMETER") carModel: String,
+        carModel: String,
     ) {
         car.doorsClosed = doorsClosed
         car.windowsOpen = windowsOpen
         car.hoodClosed = hoodClosed
         car.trunkClosed = trunkClosed
+        car.carModel = carModel
+        car.applyPose(doorsClosed, windowsOpen, hoodClosed, trunkClosed)
         car.invalidate()
 
         // 标题跟着未关处数走（第188轮）：之前标题是构造时算死的，
@@ -379,6 +388,42 @@ private class CloseGlyphView(context: Context, private val pal: Palette) : View(
  */
 private class DoorCarView(context: Context, private val pal: Palette) : View(context) {
 
+    /**
+     * 实车俯视车模（第 253 轮）。
+     *
+     * 原来这里是**自绘的 2D 圆角车身 + 四个轮胎**：与首页车况卡、车辆详情页用的
+     * `Car3dPainter` 完全不是一套东西，同一台车在两个地方长得不一样。
+     * 现在统一走 3D 资产（`VIEW_CARDTOP`），姿态跟着门/窗/前后备零件走；
+     * 资产缺失（老车型 / 关闭了车模设置）时仍回退到下面的自绘路径。
+     */
+    private val car3d = Car3dPainter.Scene(this)
+    private var dir: String? = null
+
+    /** 车型（来自 `Prefs.carModel`，由 [DoorAlertDialog.render] 每次同步）。 */
+    var carModel: String = com.cardesk.launcher.core.CarModels.MODEL_03
+        set(value) {
+            if (field == value) return
+            field = value
+            dir = com.cardesk.launcher.core.CarModels.assetDir(value)
+            invalidate()
+        }
+
+    /** 按车门/车窗/引擎盖/后备箱状态摆姿态（开着的位置由资产里的开门图体现）。 */
+    fun applyPose(
+        doorsClosed: List<Boolean?>?,
+        windowsOpen: BooleanArray?,
+        hoodClosed: Boolean?,
+        trunkClosed: Boolean?,
+    ) {
+        car3d.setPose(
+            context,
+            dir,
+            CarPose.of(doorsClosed, windowsOpen, hoodClosed, trunkClosed),
+            rich = true,
+            view = Car3dAssets.VIEW_CARDTOP,
+        )
+    }
+
     /** 四门：`true` = 关，`false` = 开，`null` = 读不到（不画高亮）。 */
     var doorsClosed: List<Boolean?>? = null
 
@@ -397,6 +442,14 @@ private class DoorCarView(context: Context, private val pal: Palette) : View(con
         val w = width.toFloat()
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
+
+        // 先试实车车模：画出来了就不再画下面的 2D 车身。
+        // 槽位 220×250 与 cardtop 资产 264×356 比例不同，必须 fit=true 等比放进矩形，
+        // 否则车会被横向拉扁。
+        if (car3d.paint(canvas, context, Car3dAssets.VIEW_CARDTOP, RectF(0f, 0f, w, h), fit = true)) {
+            return
+        }
+
         val cx = w / 2f
 
         // 车身占槽位 41%×92%：220×250 的槽位 ⇒ 90×230，加上两侧各 12 的轮胎

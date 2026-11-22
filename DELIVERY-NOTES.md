@@ -457,3 +457,23 @@
 - 前轴比例 `0.35 → 0.18`（相对车模 rect 高度，约上移 50px），后排保持 `0.69`。
 - 效果：前排两组落到车头两侧（与「车况 / 详情」同一带的下方），后排仍在后轮两侧，四个值更像围着车头车尾布局。
 - 验证：`assembleSystem` 成功、`testSystemUnitTest` **2666 / 0 / 0**、`logcat -b crash` 本应用 0 条。
+
+### 20. 第 253 轮：开门弹窗的车模换成实车 3D
+
+| 项 | 改法 |
+|---|---|
+| 车模 | `ui/dialogs/DoorAlertDialog.kt` 的 `DoorCarView` 内嵌 `Car3dPainter.Scene`，走 `Car3dAssets.VIEW_CARDTOP`（与首页车况卡、车辆详情页同一套资产） |
+| 姿态 | 新增 `applyPose(...)`：`CarPose.of(doorsClosed, windowsOpen, hoodClosed, trunkClosed)`，开着的门由资产里的开门图体现（截图里左前门是开着的） |
+| 车型 | `render()` 里把上层传入的 `carModel` 写进 `DoorCarView.carModel`（原来这个参数被标了 `UNUSED_PARAMETER` 丢掉） |
+| 回退 | 资产缺失 / `Car3dSettings.enabled=false` 时 `paint()` 返回 false，仍画原来的 2D 自绘车身 |
+| 等比 | 槽位 220×250 与 cardtop 资产 264×356 比例不同，用 `fit = true` 等比放进矩形，不拉扁 |
+| 面板 | 顺手把弹窗面板 alpha 提到 94%：玻璃化后 78% 的 `surfaceStrong` 会让播放中的歌词**清楚地**透在面板上（我们的模糊底只糊壁纸、糊不到页面内容） |
+
+验证：临时把 `MockVehicleGateway.simDoorsClosed` 改成左前门开（截图后已还原）→ 弹窗弹「有车门未关 / 左前门 还没关好，请检查」，车模为实车俯视 3D、左前门开启；还原后重装无弹窗、首页正常。
+
+| 判据 | 结果 |
+|---|---|
+| 编译 | `assembleSystem` 通过 |
+| 单测 | `testSystemUnitTest` **2666 / 0 / 0** |
+| 实机 | cardesk28（5560）装机，`logcat -b crash` 本应用 **0** 条 |
+| 截图 | `/tmp/door3d2.png`（弹窗）、`/tmp/final253.png`（还原后首页） |
