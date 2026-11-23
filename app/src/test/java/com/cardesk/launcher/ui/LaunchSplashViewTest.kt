@@ -81,19 +81,38 @@ class LaunchSplashViewTest {
         assertNear("左下", 0xFF03060C.toInt(), bmp.getPixel(300, 900), 8)
     }
 
+    private fun lum(c: Int): Double =
+        0.2126 * Color.red(c) + 0.7152 * Color.green(c) + 0.0722 * Color.blue(c)
+
     @Test
-    fun `圆环 品牌字 进度条都在画板位置`() {
+    fun `圆环在 66px 半径处且描边 6px 品牌字有墨迹`() {
         val bmp = render(night = true)
-        val bg = bmp.getPixel(400, 540)
-        // 环心 (960, 461)，r=66：正上方环带应明显亮于背景。
-        val ring = bmp.getPixel(960, (461 - 66).coerceAtLeast(0))
-        assertNotEquals("圆心正上方应该是圆环轨道/弧，不该与背景同色", bg, ring)
-        // 品牌字墨迹：字带 (y 570..690) 里要有比背景亮的像素。
+        // 环心在 x=960；沿竖直方向扫上半区最亮的行 = 环顶。
+        var peakY = -1
+        var peak = 0.0
+        for (y in 250 until 560) {
+            val l = lum(bmp.getPixel(960, y))
+            if (l > peak) {
+                peak = l
+                peakY = y
+            }
+        }
+        assertTrue("环顶没找到亮带", peakY > 0)
+        val bg = lum(bmp.getPixel(120, 540))
+        assertTrue("环顶亮度应明显高于背景：peak=$peak bg=$bg", peak - bg > 10)
+        // 量描边**实心**部分：外侧还有一圈 2.6 倍的柔光，阈值放太低会把光晕算进带宽。
+        val core = bg + (peak - bg) * 0.55
+        var band = 0
+        for (y in peakY - 12..peakY + 12) {
+            if (lum(bmp.getPixel(960, y)) > core) band++
+        }
+        assertTrue("描边带宽应约 6px（实测 $band）", band in 3..14)
+
+        // 品牌字墨迹：字带里要有比背景亮的像素。
         var ink = 0
-        for (y in 570 until 690) {
+        for (y in 560 until 700) {
             for (x in 700 until 1220) {
-                val c = bmp.getPixel(x, y)
-                if (Color.red(c) + Color.green(c) + Color.blue(c) > 260) ink++
+                if (lum(bmp.getPixel(x, y)) > bg + 60) ink++
             }
         }
         assertTrue("品牌字没画出来（ink=$ink）", ink > 800)
@@ -107,6 +126,12 @@ class LaunchSplashViewTest {
         assertEquals(66f, LaunchSplashView.RING_R, 0.01f)
         assertEquals(320f, LaunchSplashView.BAR_W, 0.01f)
         assertEquals(62f, LaunchSplashView.WORDMARK_SP, 0.01f)
+        // 光带用强调色（画板 `var(--accent)`），不是弧的渐变端色 —— 第 256 轮验收的 P1 就是取错了这里。
+        assertEquals(0xFF00A9A0.toInt(), LaunchSplashView.barSweepColor(false))
+        assertEquals(0xFF16C2B2.toInt(), LaunchSplashView.barSweepColor(true))
+        // 光带底轨两版都是 rgba(255,255,255,.10)。
+        assertEquals(0x1AFFFFFF, LaunchSplashView.barTrackColor(false))
+        assertEquals(0x1AFFFFFF, LaunchSplashView.barTrackColor(true))
         // 日/夜两版的弧色都按画板给（日 teal→blue、夜 blue→teal）。
         assertEquals(0xFF00A9A0.toInt(), LaunchSplashView.arcColors(false).first)
         assertEquals(0xFF4FC3F7.toInt(), LaunchSplashView.arcColors(false).second)

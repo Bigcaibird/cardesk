@@ -539,3 +539,9 @@ crash 缓冲 0。截图 `docs/ui-redesign/round5/19-splash-day.png`、`20-splash
 1. 进程起来**之前**的系统 starting window 仍是静态深色 `#05080F`（`windowBackground`），
    API 28 没有 themed splash，做不到「系统冷启动第一帧就分日夜」；进程起来后的 1.6 秒才是这两版。
 2. 品牌字宽 mine 302px vs 画板 321px（Roboto Medium vs SF Pro 600，约 −6%），不引第三方字体。
+
+**独立验收（`/Users/roy/Documents/desktopapp/cardesk-ui/验收报告-启动动画.md`）**：首轮判 1 条 P1 ——
+进度条光带取了「弧的渐变端色」而不是画板的 `var(--accent)`（日 `#4FC3F7`@.7 应为 `#00A9A0`@.7、夜 `#7BE0D6`@.85 应为 `#16C2B2`@.85）。
+已修：`LaunchSplashView.accent()` 改读新增的 `DAY_BAR_SWEEP / NIGHT_BAR_SWEEP`，底轨两版统一 `0x1AFFFFFF`（画板 `rgba(255,255,255,.10)`），
+并补 `barSweepColor()` 公开取值 + 单测断言；环的断言也从「环内 8px 一点」改成沿中线扫描环顶、量描边实心带宽（避开 2.6 倍柔光）。
+其余核验项全 PASS，整屏平均色差（验收人独立口径）日 **1.091/255**、夜 **1.111/255**；背景链路「画板→资产→实机截图」meanAbs 0.002。

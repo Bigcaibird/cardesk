@@ -11443,3 +11443,16 @@ D CarDesk/NavUI: 承载面重建，判不准 task 在哪个屏，按「没黑」
 
 判据：整屏平均色差日间 1.32/255、夜间 1.18/255（夜间取样逐点相同）；`testSystemUnitTest` **2670 / 0 / 0**；
 日间冷启动 `splashGone=555ms`；截图 `docs/ui-redesign/round5/19-splash-day.png`、`20-splash-night.png`。
+
+## 第257轮 · 启动页验收修正：光带改强调色
+
+第256轮的独立验收发现 1 条 P1：进度条光带用了圆环渐变端色（日 `#4FC3F7`、夜 `#7BE0D6`），
+画板里光带是 `var(--accent)`（日 `#00A9A0`、夜 `#16C2B2`），透明度 .7/.85 本来就对，只错色相。
+
+- `LaunchSplashView.accent()` 改读 `DAY_BAR_SWEEP / NIGHT_BAR_SWEEP`；
+- 光带底轨两版统一 `0x1AFFFFFF`（画板 `rgba(255,255,255,.10)`），与圆环轨道色分开；
+- 新增 `barSweepColor(night)` 公开取值，单测断言「光带=强调色」「底轨=白 10%」；
+- 环断言改成沿中线扫描环顶 + 量描边实心带宽（原来取样点在环内 8px，不画环也会过）。
+
+判据：`testSystemUnitTest` **2670 / 0 / 0**；出包 4314 / 1.0.1218。
+

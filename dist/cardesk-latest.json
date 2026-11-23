@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1217",
-  "versionCode": 4313,
-  "tag": "v1.0.1217",
-  "name": "CarDesk 4313 / 1.0.1217-system",
-  "notes": "启动页新增日/夜双版（对齐设计 b01/b02）：背景按画板烘焙、120° 缺口圆环 + CarDesk 字标 + 不确定式进度条；启动期间不再露出全局 Dock。",
-  "publishedAt": "2026-11-23T03:06:05Z",
+  "version": "1.0.1218",
+  "versionCode": 4314,
+  "tag": "v1.0.1218",
+  "name": "CarDesk 4314 / 1.0.1218-system",
+  "notes": "启动页：进度条光带改用强调色（日 #00A9A0 / 夜 #16C2B2）、底轨统一白 10%，与设计 b01/b02 完全一致。",
+  "publishedAt": "2026-11-23T03:36:39Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4313.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4313.apk",
-    "size": 4093617,
-    "sha256": "4f196cc211470755c0f21e35477d98fb3bd6a49dc11f9dde0c2cfe1b006b66d6"
+    "name": "CarDesk-platform-ecarx-cardesk-4314.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4314.apk",
+    "size": 4093657,
+    "sha256": "66be9bc3513118c340bf6ad017219435787d573cc5f83173cf8e48c7f54138fb"
   }
 }

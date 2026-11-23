@@ -302,8 +302,13 @@ class LaunchSplashView(context: Context) : View(context) {
         barSweepPaint.shader = null
     }
 
-    /** 进度条光带用的强调色。 */
-    private fun accent(): Int = if (night) NIGHT_ARC_TO else DAY_ARC_TO
+    /**
+     * 进度条光带用的**强调色**。
+     *
+     * 注意别用圆环那套渐变 —— 画板里光带是 `var(--accent)`（日 #00A9A0 / 夜 #16C2B2），
+     * 弧才是青→蓝渐变。第 256 轮验收就是在这里取了 `ARC_TO`，日间峰值偏成 (119,205,244)。
+     */
+    private fun accent(): Int = if (night) NIGHT_BAR_SWEEP else DAY_BAR_SWEEP
 
     companion object {
         const val DESIGN_W = 1920f
@@ -346,6 +351,10 @@ class LaunchSplashView(context: Context) : View(context) {
         const val DAY_DOT = 0x5700968E.toInt() // rgba(0,150,142,.34)
         const val DAY_BAR_TRACK = 0x1AFFFFFF
 
+        /** 光带峰值色（画板 `var(--accent)`），透明度由 [BAR_SWEEP_ALPHA_DAY]/[BAR_SWEEP_ALPHA_NIGHT] 叠。 */
+        const val DAY_BAR_SWEEP = 0xFF00A9A0.toInt()
+        const val NIGHT_BAR_SWEEP = 0xFF16C2B2.toInt()
+
         // 夜间（画板 b02）
         const val NIGHT_ARC_FROM = 0xFF4FC3F7.toInt()
         const val NIGHT_ARC_TO = 0xFF7BE0D6.toInt()
@@ -353,7 +362,7 @@ class LaunchSplashView(context: Context) : View(context) {
         const val NIGHT_SUBTITLE = 0xFF6F8394.toInt()
         const val NIGHT_TRACK = 0x244FC3F7.toInt() // rgba(79,195,247,.14)
         const val NIGHT_DOT = 0x734FC3F7.toInt() // rgba(79,195,247,.45)
-        const val NIGHT_BAR_TRACK = 0x244FC3F7
+        const val NIGHT_BAR_TRACK = 0x1AFFFFFF
 
         const val BAR_SWEEP_ALPHA_DAY = 179 // 0.70
         const val BAR_SWEEP_ALPHA_NIGHT = 217 // 0.85
@@ -363,6 +372,9 @@ class LaunchSplashView(context: Context) : View(context) {
 
         /** 画板上的进度条轨道色（测试用）。 */
         fun barTrackColor(night: Boolean): Int = if (night) NIGHT_BAR_TRACK else DAY_BAR_TRACK
+
+        /** 光带峰值色（画板 `var(--accent)`；不是弧的渐变端色）。 */
+        fun barSweepColor(night: Boolean): Int = if (night) NIGHT_BAR_SWEEP else DAY_BAR_SWEEP
 
         /** 画板上的圆心点色（测试用）。 */
         fun dotColor(night: Boolean): Int = if (night) NIGHT_DOT else DAY_DOT
