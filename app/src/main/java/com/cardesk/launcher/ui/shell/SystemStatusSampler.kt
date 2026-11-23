@@ -69,6 +69,14 @@ class SystemStatusSampler(private val context: Context) {
     private var lastSignature: String? = null
 
     /**
+     * 最近一次采样的 WiFi 原始 RSSI（实车闪屏诊断，第三百零三轮）。
+     * 不进快照签名（签名含原值会每 2 秒都变、日志刷屏），
+     * 只在「签名变了」时随日志带出来，用于判断是不是档位边缘抖动。
+     */
+    @Volatile
+    private var lastWifiRawRssi: Int = Int.MIN_VALUE
+
+    /**
      * 启动采样。
      *
      * @param listener 变化回调（**主线程**）
@@ -107,7 +115,13 @@ class SystemStatusSampler(private val context: Context) {
                 val sig = snapshot.signature()
                 if (sig != lastSignature) {
                     lastSignature = sig
-                    Logx.i(LogTags.SYS, "系统状态变化", "status" to sig)
+                    val rssi = lastWifiRawRssi
+                    // 实车闪屏诊断（第三百零三轮）：签名变化日志带原始 RSSI。
+                    Logx.i(
+                        LogTags.SYS, "系统状态变化",
+                        "status" to sig,
+                        "wifiRssi" to (if (rssi == Int.MIN_VALUE) "n/a" else rssi),
+                    )
                     // 回调到**主线程**（状态栏是 View，只能在主线程改）。
                     main.post {
                         if (running) listener.onStatus(snapshot)
@@ -131,6 +145,10 @@ class SystemStatusSampler(private val context: Context) {
         val hotspot = readHotspot()
         val bt = readBluetooth()
         val mobile = readMobile()
+        // 排障场景（第三百零三轮实车闪屏诊断）：档位签名在两档间抖动时
+        // （WiFi RSSI 在档位边缘来回跳），图标区周期性闪。
+        // 原始 RSSI 只进这条日志（不进签名），用来判断「是不是边缘抖动」。
+        lastWifiRawRssi = wifi.rawRssi
         return SystemStatusPolicy.Snapshot(
             wifiKnown = wifi.known,
             wifiConnected = wifi.connected,
@@ -150,6 +168,8 @@ class SystemStatusSampler(private val context: Context) {
         val known: Boolean,
         val connected: Boolean,
         val level: Int,
+        /** 原始 RSSI（dBm），只在诊断日志里出现，不进快照签名。 */
+        val rawRssi: Int = Int.MIN_VALUE,
     )
 
     /** WiFi：连没连 + 信号等级。 */
@@ -170,7 +190,7 @@ class SystemStatusSampler(private val context: Context) {
         } else {
             SystemStatusPolicy.LEVEL_UNKNOWN
         }
-        return WifiRead(known = true, connected = true, level = level)
+        return WifiRead(known = true, connected = true, level = level, rawRssi = rssi)
     }
 
     /**

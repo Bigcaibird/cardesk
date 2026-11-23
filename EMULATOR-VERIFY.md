@@ -1,5 +1,11 @@
 # CarDesk 模拟器验证记录
 
+> **⚠️ 已过时（2026-11-23）**：本文件描述的是 `cardesk28`(5560) 时代的历史验证记录。
+> 现在的**唯一验证环境**是车机复原 AVD `Lynkco_820A_car15_arm64`（端口 **5572**），
+> 见工作区根 `../AGENTS.md` §1 与 `../Lynkco-AAOS28-820A-share-202611161049/docs/CAR-AVD-RESTORE.md`；
+> 一条命令：`cd ../Lynkco-AAOS28-820A-share-202611161049 && bash tools/car-avd-up.sh --mock-vehicle`。
+> 下文保留作历史参考，**不再作为验证依据**。
+
 环境：macOS arm64 + Android SDK（本仓库 `toolchain/sdk`），AVD `cardesk28` = API 28 / `default`(AOSP, 平台签名) / arm64-v8a，
 1920×1080 @160dpi（正好命中对标 App 的 820A 判定），headless（`-no-window -gpu swiftshader_indirect`）。
 

@@ -286,29 +286,29 @@ class StatusBarLocationWeatherTest {
         val bar = newBar()
         val bmp = render(bar)
 
-        // 第三百轮按设计稿重排：边距 29、顶边距 5、行高 33（行底 38）。
+        // 第三百零二轮放大：边距 29 不变、顶边距 5 → 8、行高 33 → 39（行中心 27.5）。
         assertEquals(29f, com.cardesk.launcher.ui.shell.ShellStatusBar.EDGE, 0.01f)
-        assertEquals(5f, com.cardesk.launcher.ui.shell.ShellStatusBar.ROW_TOP, 0.01f)
-        assertEquals(33f, com.cardesk.launcher.ui.shell.ShellStatusBar.ROW_H, 0.01f)
+        assertEquals(8f, com.cardesk.launcher.ui.shell.ShellStatusBar.ROW_TOP, 0.01f)
+        assertEquals(39f, com.cardesk.launcher.ui.shell.ShellStatusBar.ROW_H, 0.01f)
 
-        // 左上设置入口：34×34 玻璃方块，在行内垂直居中（y 4.5~38.5）
-        assertEquals(34f, com.cardesk.launcher.ui.shell.ShellStatusBar.AVATAR, 0.01f)
-        val avatarRows = (0 until 80).count { contentAt(bmp, 45, it) }
-        assertTrue("头像应该占满约 34 行（34×34），实际 $avatarRows", avatarRows in 33..35)
-        assertTrue("头像应该画在 x=29~63 / y=4.5~38.5", contentAt(bmp, 45, 21))
-        assertFalse("头像右边（间距 12）不该有内容", contentAt(bmp, 66, 21))
-        assertFalse("头像不该纵向超过 y=38.5", contentAt(bmp, 45, 41))
+        // 左上设置入口：46×46 玻璃方块（34 ×1.35），在行内垂直居中（y 4.5~50.5）
+        assertEquals(46f, com.cardesk.launcher.ui.shell.ShellStatusBar.AVATAR, 0.01f)
+        val avatarRows = (0 until 80).count { contentAt(bmp, 52, it) }
+        assertTrue("头像应该占满约 46 行（46×46），实际 $avatarRows", avatarRows in 45..47)
+        assertTrue("头像应该画在 x=29~75 / y=4.5~50.5", contentAt(bmp, 52, 27))
+        assertFalse("头像右边（间距 14）不该有内容", contentAt(bmp, 80, 27))
+        assertFalse("头像不该纵向超过 y=50.5", contentAt(bmp, 52, 54))
 
-        // 驾驶胶囊仍然高 34，从 x=75（29 + 34 + 12）开始
-        assertEquals(34f, com.cardesk.launcher.ui.shell.ShellStatusBar.CHIP_H, 0.01f)
-        assertTrue("驾驶模式胶囊应该画在 x=75 之后", content(bmp, 76, 6, 300, 38) > 0)
+        // 驾驶胶囊仍然随行放大到 46，从 x=89（29 + 46 + 14）开始
+        assertEquals(46f, com.cardesk.launcher.ui.shell.ShellStatusBar.CHIP_H, 0.01f)
+        assertTrue("驾驶模式胶囊应该画在 x=89 之后", content(bmp, 90, 6, 320, 50) > 0)
 
-        // 时钟字号 17（第三百轮定稿）：墨迹行数按字号收缩
-        assertEquals(17f, com.cardesk.launcher.ui.shell.ShellStatusBar.CLOCK_TEXT_SIZE, 0.01f)
+        // 时钟字号 24（第三百零二轮定稿）：墨迹行数按字号放大
+        assertEquals(24f, com.cardesk.launcher.ui.shell.ShellStatusBar.CLOCK_TEXT_SIZE, 0.01f)
         val clockRows = (0 until 80).count { y -> (1805..1885).any { contentAt(bmp, it, y) } }
-        assertTrue("时钟字号 17px 的墨迹行数应该在 11~15 之间，实际 $clockRows", clockRows in 11..15)
+        assertTrue("时钟字号 24px 的墨迹行数应该在 16~22 之间，实际 $clockRows", clockRows in 16..22)
 
-        // 连接图标 22 → 18
-        assertEquals(18f, com.cardesk.launcher.ui.shell.ShellStatusBar.ICON, 0.01f)
+        // 连接图标 18 → 25
+        assertEquals(25f, com.cardesk.launcher.ui.shell.ShellStatusBar.ICON, 0.01f)
     }
 }

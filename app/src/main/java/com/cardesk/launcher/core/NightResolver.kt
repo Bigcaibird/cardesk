@@ -86,6 +86,51 @@ object NightResolver {
     }
 
     /**
+     * 六个信号源 + 解析结果的**全量快照**（实车闪屏诊断，第三百零三轮）。
+     *
+     * 用户反馈：装了 UI 重设计版后实车屏幕闪烁 —— 六源判据里只要有两个源
+     * 在临界值上反复交替（最典型的是**光感通道**在阈值附近抖、或高德信号
+     * 与车端 dayMode 打架），桌面就会每秒整桌重建（[resolveNight] →
+     * `applyTheme` → `build`），看起来就是闪屏。
+     *
+     * 快照把**每个源的原始值**都带出来，上车导出诊断包后一眼看出：
+     * - 哪个源是 null（读不到，走了回落）；
+     * - 哪个源在两次快照之间变了但解析结果没变（源抖动被优先级吸收）；
+     * - 解析结果本身在翻转（= 闪屏根因实锤）。
+     *
+     * 注意：会再读一遍车控通道（一次 binder 往返），**只给低频心跳用**
+     * （30 秒一条），不要放进每秒循环。
+     */
+    fun snapshotSignals(prefs: Prefs, context: Context?): List<Pair<String, Any?>> {
+        val lightNight = com.cardesk.launcher.vehicle.AdaptapiDayNight.nightUi()
+        val sysNight = systemNightMode(context)
+        val carNight = carDayModeNight(sysNight)
+        val minute = minuteOfDay()
+        val result = DayNight.resolveNightUi(
+            enabled = prefs.dayNightEnabled,
+            mode = prefs.dayNightMode,
+            minuteOfDay = minute,
+            dayStartMin = prefs.dayStartMin,
+            nightStartMin = prefs.nightStartMin,
+            amapNightUi = amapNightUi,
+            sensorNightUi = lightNight,
+            carNightUi = carNight,
+            systemNightUi = sysNight,
+            lastAppliedNightUi = prefs.lastAppliedNight(),
+        )
+        return listOf(
+            "night" to result,
+            "amap" to amapNightUi,
+            "sensor" to lightNight,
+            "car" to carNight,
+            "system" to sysNight,
+            "minute" to minute,
+            "enabled" to prefs.dayNightEnabled,
+            "mode" to prefs.dayNightMode,
+        )
+    }
+
+    /**
      * 车机日间模式功能值（`538247424`）。
      *
      * 真车上这个值**恒为 AUTO**，而 AUTO 的明暗只能从光感通道拿 ——

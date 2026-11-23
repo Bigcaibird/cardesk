@@ -71,6 +71,27 @@ import java.util.Locale
  * 行高常量 [ROW_TOP] / [ROW_H] 也按实测改了（5 / 33 → 行中心 21.5）：
  * `PageDotsView` 直接引用这两个常量来纵向居中，行一改它自动跟着对齐，
  * 这正是第八十二轮把几何集中到这里的用意。
+ *
+ * **第三百零二轮：整行文字与图标放大 1.3~1.5 倍**（用户反馈「状态栏留白多，
+ * 但图标和文字较小」）。
+ * 口径 = **字号 / 图标 / 胶囊等内容元素统一放大 1.3~1.5 倍**（时钟这种最重的
+ * 元素放最多 ×1.41，小图标 ×1.39，正文文字 ×1.36），左右边距 [EDGE] /
+ * [EDGE_RIGHT] 不动（设计稿的左右对齐框架保持），行中心随 [ROW_TOP] /
+ * [ROW_H] 从 21.5 下移到 27.5 —— 放大后的元素（最高 46）既不顶出屏幕上沿，
+ * 也不压到下方内容区（内容从 y73 开始，行底 50.5，还留 22 的空隙）。
+ * 间距只随字号微调（[ICON_GAP] 14→16 等），**不按倍数放大** ——
+ * 留白要收窄正是本轮的目的。
+ *
+ * **第三百零三轮：实车「屏幕右侧闪」诊断日志**（用户反馈：装了 UI 重设计版后
+ * 实车屏幕右侧有闪烁，用的是静态壁纸）。
+ * 只加观测、不改行为：
+ * - [invalidateCount] 观测口 —— `refresh()` 每秒会把 [assistText] /
+ *   [fuelPercent] / [clockText] / [rangeText] 各赋值一次，而这几个 setter
+ *   是**无条件 invalidate**，状态栏整行每秒至少重绘一次；
+ *   心跳里打这个计数就能确认「每分钟重绘多少次」；
+ * - [fuelPercent] / [clockText] / [rangeText] **值真的变化**时各打一条 INFO
+ *   （[assistText] 本来就有）—— 车端数据在「有值↔null」间抖动会让右段
+ *   `--%`↔`62%` 跳变，诊断包里直接能看到抖动节奏。
  */
 class ShellStatusBar(context: Context) : View(context) {
 
@@ -94,7 +115,17 @@ class ShellStatusBar(context: Context) : View(context) {
      * （`android:text="--%"`）。
      */
     var fuelPercent: Int = FUEL_UNKNOWN_VALUE
-        set(v) { field = v; invalidate() }
+        set(v) {
+            val changed = field != v
+            field = v
+            // 排障场景（第三百零三轮）：实车「屏幕右侧闪」——
+            // 车端油量数据在「有值↔null」间抖动会让这段文字每秒跳变。
+            // 值变了才打，抖动节奏在诊断包里一目了然。
+            if (changed) {
+                Logx.i(LogTags.SYS, "状态栏油量变化", "fuel" to v)
+            }
+            invalidate()
+        }
 
     /**
      * 连接类图标（蜂窝 / WiFi / 热点 / 蓝牙）的**真实状态**（第138轮）。
@@ -125,10 +156,27 @@ class ShellStatusBar(context: Context) : View(context) {
 
     /** 时钟文案（外部直接给字符串时用这个）。 */
     var clockText: String = "20:35"
-        set(v) { field = v; invalidate() }
+        set(v) {
+            val changed = field != v
+            field = v
+            // 排障场景（第三百零三轮）：时钟每秒被赋值一次，但文案一分钟才变一次；
+            // 变了才落一条，用于确认「时钟刷新节奏正常」。
+            if (changed) {
+                Logx.d(LogTags.DOCK, "状态栏时钟变化", "clock" to v)
+            }
+            invalidate()
+        }
 
     var rangeText: String = ""
-        set(v) { field = v; invalidate() }
+        set(v) {
+            val changed = field != v
+            field = v
+            // 排障场景（第三百零三轮）：续航文案抖动（值↔空）也是右段闪烁候选。
+            if (changed) {
+                Logx.d(LogTags.DOCK, "状态栏续航变化", "range" to v)
+            }
+            invalidate()
+        }
 
     // -------------------------------------------------- 位置 + 天气（第四轮新增）
 
@@ -187,6 +235,28 @@ class ShellStatusBar(context: Context) : View(context) {
     /** 点头像 / 点状态胶囊。 */
     var onAvatar: (() -> Unit)? = null
     var onAssist: (() -> Unit)? = null
+
+    /**
+     * `invalidate()` 被调用的次数（**观测口，第三百零三轮实车闪屏诊断**）。
+     *
+     * `refresh()` 每秒把 [assistText] / [fuelPercent] / [clockText] /
+     * [rangeText] 各赋值一次而这几个 setter 是无条件 invalidate ⇒
+     * 正常节奏就是**每秒至少 1 次**整行重绘；
+     * 若车端数据抖动，这个数字会涨得更快（比如每秒 2 次）。
+     * 诊断心跳每 30 秒读一次这个计数，涨速异常就是右段闪烁的直接证据。
+     *
+     * 覆写 `invalidate()` 计数（而不是问 View 的 dirty 状态）——
+     * dirty 标志会被 layout / draw / 换肤等各路径置位，数不清来源；
+     * 这里数的是「这一行的重绘请求来了多少次」。
+     * 同一个模式在 `BackgroundView.invalidateCountForTest` 已有先例。
+     */
+    var invalidateCount: Long = 0L
+        private set
+
+    override fun invalidate() {
+        super.invalidate()
+        invalidateCount++
+    }
 
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Skin.TEXT
@@ -309,11 +379,13 @@ class ShellStatusBar(context: Context) : View(context) {
     }
 
     /**
-     * 左上角设置入口：34×34、圆角 12 的**玻璃方块** + 深色齿轮。
+     * 左上角设置入口：**玻璃方块** + 齿轮。
      *
      * 第三百轮由「Skin.ACCENT 实心方块 + accentInk 齿轮」改成
      * 「玻璃底 + ink.text 齿轮」——设计稿这一行没有任何饱和色块，
      * 唯一带颜色的东西是驾驶胶囊里那颗状态点。
+     * 第三百零二轮：方块 34 → 46、齿轮随行内元素一起放大（见 [AVATAR]）。
+     * 点击命中区（avatarRect）与回调 `onAvatar` 语义不变。
      */
     private fun drawSettingsTile(canvas: Canvas, ink: WallpaperContrast.Ink, cy: Float) {
         avatarRect.set(EDGE, cy - AVATAR / 2f, EDGE + AVATAR, cy + AVATAR / 2f)
@@ -890,6 +962,25 @@ class ShellStatusBar(context: Context) : View(context) {
         //   位置/天气胶囊 高 29 → 34、内边距 15 → 16、字号 13/17 → 17/22
         //   定位针 描边形状整体 ×1.3
         // ================================================================
+        //
+        // 第三百零二轮：**行内文字 / 图标 / 胶囊整体放大 1.3~1.5 倍**
+        // （用户反馈「留白多，但图标和文字较小」）。
+        //
+        // 口径（每项 = 第三百轮值 × 放大倍数后取整）：
+        //   行带 ROW_TOP 5 → 8、ROW_H 33 → 39（行中心 21.5 → 27.5，
+        //     容纳放大后的 46 高元素；行底 47，内容区仍从 73 起）
+        //   设置方块 34 → 46（×1.35），圆角 12 → 16，
+        //     齿轮外径半径 8.6 → 11.6 / 齿根 6.2 → 8.4 / 中心孔 2.6 → 3.5
+        //   驾驶胶囊 高 34 → 46、圆角 17 → 23、状态点 8 → 11、
+        //     内边距 14/8/14 → 18/11/18、文案 14 → 19（×1.36）
+        //   连接图标 18 → 25（×1.39），相邻间距 14 → 16
+        //   燃油图标 18 → 25、燃油百分比 14 → 19、间距 12 → 13
+        //   时钟 17 → 24（×1.41，这一行最重的元素放最多）、与油量间距 16 → 18
+        //   城市名 / 温度 14 → 19，定位针占位 14 → 20、PIN_SCALE 1.0 → 1.45
+        //   天气图标 16 → 22（×1.375）、描边 1.7 → 2.3、与温度间距 4 → 6
+        //   城市名最大宽 260 → 320（字号大了，上限同步放宽）
+        //   间距类（ICON_GAP / CLOCK_GAP 等）只微调不翻倍 —— 收窄留白是本轮目的
+        // ================================================================
 
         /** 左边距（设置方块左边 = 29；画板实测 28，差 1px）。 */
         const val EDGE = 29f
@@ -907,28 +998,31 @@ class ShellStatusBar(context: Context) : View(context) {
          * 这一行元素整体的顶边距。
          *
          * 第三百轮：17 → **5**（设计稿实测元素 y5..38）。
-         * 行内的垂直中心随之从 38.5 上移到 21.5 —— 状态栏下面因此留出一条空白带，
-         * 这正是画板的样子（内容区从 y73 之后才开始，中间是空的）。
+         * 第三百零二轮：5 → **8** —— 行内元素放大到 46 高之后，
+         * 行中心随 [ROW_H] 一起下移，元素上沿才不顶出屏幕（最高元素 y4.5 起）。
          */
-        const val ROW_TOP = 5f
+        const val ROW_TOP = 8f
 
         /**
          * 这一行的高度（元素的垂直中心线 = ROW_TOP + ROW_H / 2）。
          *
          * 第三百轮：43 → **33**（设计稿元素高 34、行中心 21.5 ⇒ 5 + 33/2 = 21.5）。
+         * 第三百零二轮：33 → **39**（行中心 27.5 —— 放大后的 46 高元素
+         * 落在 y4.5..50.5，下方内容区仍从 73 开始，互不挤压）。
          */
-        const val ROW_H = 33f
+        const val ROW_H = 39f
 
         /**
          * 设置入口方块边长。
          *
          * 第三百轮：40 → **34**（设计稿 x28..61 / y5..38 = 34×34）。
+         * 第三百零二轮：34 → **46**（×1.35，随行内元素一起放大）。
          * 名字仍叫 AVATAR，是为了不改 `avatarRect` / 命中区 / 回调那套既有命名。
          */
-        const val AVATAR = 34f
+        const val AVATAR = 46f
 
-        /** 设置入口方块圆角（设计稿 ≈12）。 */
-        const val AVATAR_RADIUS = 12f
+        /** 设置入口方块圆角（设计稿 ≈12；第三百零二轮随方块 ×1.35 → 16）。 */
+        const val AVATAR_RADIUS = 16f
 
         /**
          * 齿轮图标的**齿尖半径**（设计 px）。
@@ -937,41 +1031,42 @@ class ShellStatusBar(context: Context) : View(context) {
          * 现在改成设置图标 —— 齿轮外径 23px（= 2×11.5），
          * 跟原来字母的视觉大小（21px 粗体）差不多，不改变这一格的视觉分量。
          * 第三百轮方块缩到 34 ⇒ 齿轮外径同步收到 17（半径 8.6）。
+         * 第三百零二轮：随方块 ×1.35 → 外径 23.2（半径 11.6）。
          */
-        const val AVATAR_GEAR_R = 8.6f
+        const val AVATAR_GEAR_R = 11.6f
 
-        /** 齿轮的**齿根半径**（齿轮身的外沿）。 */
-        const val AVATAR_GEAR_BODY_R = 6.2f
+        /** 齿轮的**齿根半径**（齿轮身的外沿；第三百零二轮 6.2 → 8.4）。 */
+        const val AVATAR_GEAR_BODY_R = 8.4f
 
-        /** 齿轮的**中心孔半径**。 */
-        const val AVATAR_GEAR_HOLE_R = 2.6f
+        /** 齿轮的**中心孔半径**（第三百零二轮 2.6 → 3.5）。 */
+        const val AVATAR_GEAR_HOLE_R = 3.5f
 
         /** 设置方块与驾驶胶囊之间的距离（第五十一轮按设计板 18 改；布局是 22）。 */
-        const val CHIP_GAP = 12f
+        const val CHIP_GAP = 14f
 
-        /** 驾驶胶囊高度（设计稿实测 34）。 */
-        const val CHIP_H = 34f
+        /** 驾驶胶囊高度（设计稿实测 34；第三百零二轮随行内元素 ×1.35 → 46）。 */
+        const val CHIP_H = 46f
 
         /** 驾驶胶囊圆角（= 高的一半 → 胶囊形）。 */
-        const val CHIP_RADIUS = 17f
+        const val CHIP_RADIUS = 23f
 
-        /** 胶囊里状态点直径（第三百轮按设计稿收到 8）。 */
-        const val CHIP_DOT = 8f
+        /** 胶囊里状态点直径（第三百轮按设计稿收到 8；第三百零二轮 ×1.35 → 11）。 */
+        const val CHIP_DOT = 11f
 
-        /** 胶囊左内边距。 */
-        const val CHIP_PAD_L = 14f
+        /** 胶囊左内边距（第三百零二轮 14 → 18）。 */
+        const val CHIP_PAD_L = 18f
 
-        /** 胶囊里状态点与文案之间的距离。 */
-        const val CHIP_PAD_M = 8f
+        /** 胶囊里状态点与文案之间的距离（第三百零二轮 8 → 11）。 */
+        const val CHIP_PAD_M = 11f
 
-        /** 胶囊右内边距。 */
-        const val CHIP_PAD_R = 14f
+        /** 胶囊右内边距（第三百零二轮 14 → 18）。 */
+        const val CHIP_PAD_R = 18f
 
-        /** 胶囊文案字号（第三百轮：17 → 14，对齐设计稿）。 */
-        const val CHIP_TEXT_SIZE = 14f
+        /** 胶囊文案字号（第三百轮：17 → 14；第三百零二轮 ×1.36 → 19）。 */
+        const val CHIP_TEXT_SIZE = 19f
 
-        /** 连接图标的边长（蓝牙 / 热点 / WiFi / 信号）。第三百轮：22 → 18。 */
-        const val ICON = 18f
+        /** 连接图标的边长（蓝牙 / 热点 / WiFi / 信号）。第三百轮：22 → 18；第三百零二轮 ×1.39 → 25。 */
+        const val ICON = 25f
 
         /**
          * 图标内部路径的基准尺寸（缩放用）。
@@ -982,23 +1077,26 @@ class ShellStatusBar(context: Context) : View(context) {
          */
         const val ICON_BASE = 26f
 
-        /** 连接图标之间的距离。第三百轮：18 → 14。 */
-        const val ICON_GAP = 14f
+        /** 连接图标之间的距离。第三百轮：18 → 14；第三百零二轮微调 → 16。 */
+        const val ICON_GAP = 16f
 
-        /** 油量图标的边长（24×24 视觉框）。第三百轮：21 → 18。 */
-        const val FUEL_ICON = 18f
+        /** 油量图标的边长（24×24 视觉框）。第三百轮：21 → 18；第三百零二轮 ×1.39 → 25。 */
+        const val FUEL_ICON = 25f
 
-        /** 油量图标与百分比之间的距离。第三百轮：14 → 12。 */
-        const val FUEL_GAP = 12f
+        /** 油量图标与百分比之间的距离。第三百轮：14 → 12；第三百零二轮微调 → 13。 */
+        const val FUEL_GAP = 13f
 
-        /** 油量百分比与时钟之间的距离。第三百轮：18 → 16。 */
-        const val CLOCK_GAP = 16f
+        /** 油量百分比与时钟之间的距离。第三百轮：18 → 16；第三百零二轮微调 → 18。 */
+        const val CLOCK_GAP = 18f
 
-        /** 时钟字号（第三百轮新增：设计稿里 17:10 是这一行最重的一块，17px 粗体）。 */
-        const val CLOCK_TEXT_SIZE = 17f
+        /**
+         * 时钟字号（第三百轮新增：设计稿里 17:10 是这一行最重的一块，17px 粗体）。
+         * 第三百零二轮 ×1.41 → 24 —— 放大倍数里给得最足的一项。
+         */
+        const val CLOCK_TEXT_SIZE = 24f
 
-        /** 油量百分比字号（第三百轮新增，14 = 与其它文字同一档）。 */
-        const val FUEL_TEXT_SIZE = 14f
+        /** 油量百分比字号（第三百轮新增，14 = 与其它文字同一档；第三百零二轮 → 19）。 */
+        const val FUEL_TEXT_SIZE = 19f
 
         /**
          * 顶部渐变遮罩的高度。
@@ -1034,11 +1132,11 @@ class ShellStatusBar(context: Context) : View(context) {
         /** [weatherTemp] 的「无数据」哨兵值（只用于日志）。 */
         const val TEMP_UNKNOWN_VALUE = -1
 
-        /** 城市名字号（第三百轮：17 → 14）。 */
-        const val LOCATION_TEXT_SIZE = 14f
+        /** 城市名字号（第三百轮：17 → 14；第三百零二轮 ×1.36 → 19）。 */
+        const val LOCATION_TEXT_SIZE = 19f
 
-        /** 温度字号（第三百轮：22 → 14；裸元素后和城市名同一档）。 */
-        const val TEMP_TEXT_SIZE = 14f
+        /** 温度字号（第三百轮：22 → 14；裸元素后和城市名同一档；第三百零二轮 → 19）。 */
+        const val TEMP_TEXT_SIZE = 19f
 
         // -------------------------------------------------- 翻页点（第三百轮新增）
 
@@ -1047,18 +1145,20 @@ class ShellStatusBar(context: Context) : View(context) {
          *
          * 全部来自设计稿实测：长条 x874..895 / y19..24（22×6），圆点直径 6，
          * 组中心 x≈888（**不在屏幕正中** —— 画板就是这样，照抄）。
+         * 第三百零二轮随整行放大 ×1.35：长条 30×8、圆点 8、间隙 10
+         * （仅「没有 PageDotsView 宿主」时的兜底绘制用）。
          */
-        const val PAGE_DOT_BAR_W = 22f
-        const val PAGE_DOT_BAR_H = 6f
-        const val PAGE_DOT_GAP = 8f
-        const val PAGE_DOT_SIZE = 6f
+        const val PAGE_DOT_BAR_W = 30f
+        const val PAGE_DOT_BAR_H = 8f
+        const val PAGE_DOT_GAP = 10f
+        const val PAGE_DOT_SIZE = 8f
         const val PAGE_DOT_CENTER_X = 888f
 
-        /** 定位针占位宽。第三百轮：18 → 14（裸元素里不需要胶囊内边距）。 */
-        const val PIN_W = 14f
+        /** 定位针占位宽。第三百轮：18 → 14（裸元素里不需要胶囊内边距）；第三百零二轮 → 20。 */
+        const val PIN_W = 20f
 
-        /** 定位针与城市名之间的间距。第三百轮：8 → 6。 */
-        const val PIN_GAP = 6f
+        /** 定位针与城市名之间的间距。第三百轮：8 → 6；第三百零二轮微调 → 7。 */
+        const val PIN_GAP = 7f
 
         /**
          * 定位针的放大倍数（第六十三轮）。
@@ -1066,8 +1166,9 @@ class ShellStatusBar(context: Context) : View(context) {
          * 定位针的路径是按固定坐标画的水滴（高 13.4），字与图标放大后
          * 它显得偏小 —— 这里整体乘一个倍数，描边宽度随之一起放大。
          * 第三百轮字缩到 14，倍数回到 1.0（不再放大）。
+         * 第三百零二轮字放大到 19 ⇒ 倍数 1.45（水滴高 13.4 → 19.4，与文字同档）。
          */
-        const val PIN_SCALE = 1.0f
+        const val PIN_SCALE = 1.45f
 
         /** 城市名与分隔点之间的间距（当前未使用，保留）。 */
         const val SEP_W = 17f
@@ -1081,26 +1182,27 @@ class ShellStatusBar(context: Context) : View(context) {
          *
          * 第三百轮：300 → 260。字号从 17 收到 14、又去掉了两侧胶囊内边距，
          * 260 已经够 18 个中文字（正常城市名远够不着）。
+         * 第三百零二轮：字号放大到 19 ⇒ 上限同步放宽到 320（仍够 16 个中文字）。
          */
-        const val LOC_MAX_W = 260f
+        const val LOC_MAX_W = 320f
 
         /** 分隔点半径。 */
         const val SEP_DOT_R = 1.1f
 
-        /** 天气图标占位宽（第三百轮：21 → 16）。 */
-        const val WX_ICON_W = 16f
+        /** 天气图标占位宽（第三百轮：21 → 16；第三百零二轮 ×1.375 → 22）。 */
+        const val WX_ICON_W = 22f
 
-        /** 天气图标与温度之间的间距（第三百轮：8 → 4）。 */
-        const val WX_ICON_GAP = 4f
+        /** 天气图标与温度之间的间距（第三百轮：8 → 4；第三百零二轮微调 → 6）。 */
+        const val WX_ICON_GAP = 6f
 
-        /** 天气图标的显示边长（第三百轮：21 → 16）。 */
-        const val WX_ICON_SIZE = 16f
+        /** 天气图标的显示边长（第三百轮：21 → 16；第三百零二轮 ×1.375 → 22）。 */
+        const val WX_ICON_SIZE = 22f
 
         /** 天气图标缩放比（[WeatherGlyphs] 的图形按 24×24 视觉框硬编码）。 */
         const val WX_ICON_SCALE = WX_ICON_SIZE / 24f
 
-        /** 天气图标描边（缩放后的实际宽度，设计 px）。 */
-        const val WX_ICON_STROKE = 1.7f
+        /** 天气图标描边（缩放后的实际宽度，设计 px；第三百零二轮 1.7 → 2.3，随图标等比）。 */
+        const val WX_ICON_STROKE = 2.3f
 
         /**
          * 天气组与位置组之间的空档（第三百轮）。
@@ -1108,7 +1210,8 @@ class ShellStatusBar(context: Context) : View(context) {
          * 设计稿实测：位置（定位针 + 「尤奇亚」）在 x≈1280..1400，
          * 天气（☀ 4°）从 x≈1420 起 —— 中间约 20。取 16，
          * 给「城市名英文变长」留一点缓冲。
+         * 第三百零二轮随整行微调 → 18。
          */
-        const val WEATHER_LOCATION_GAP = 16f
+        const val WEATHER_LOCATION_GAP = 18f
     }
 }
