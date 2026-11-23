@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1218",
-  "versionCode": 4314,
-  "tag": "v1.0.1218",
-  "name": "CarDesk 4314 / 1.0.1218-system",
-  "notes": "启动页：进度条光带改用强调色（日 #00A9A0 / 夜 #16C2B2）、底轨统一白 10%，与设计 b01/b02 完全一致。",
-  "publishedAt": "2026-11-23T03:36:39Z",
+  "version": "1.0.1219",
+  "versionCode": 4315,
+  "tag": "v1.0.1219",
+  "name": "CarDesk 4315 / 1.0.1219-system",
+  "notes": "第三百零二~四轮：状态栏内容放大、玻璃模糊迁到 RenderScript + 后台线程、实车闪屏诊断日志\n\n· 状态栏：行内文字/图标统一放大 1.35 倍（头像、胶囊、图标、时钟、定位与温度），间距略微收紧把留白用起来；行高只做最小调整，不再整体拉高。\n· 玻璃模糊：从主线程的 3 遍盒式改成 RenderScript 真高斯 + 后台线程，壁纸/日夜切换时不再卡主线程（模拟器实测 68ms → 0ms，车机收益更大）；RS 不可用时自动回退原算法。\n· 诊断：新增实车闪屏的可观测日志（诊断心跳 / 日夜态变化 / Wi-Fi 档位 / 玻璃重算次数），设置 → 诊断日志 → 导出诊断包即可取回。",
+  "publishedAt": "2026-11-23T12:48:24Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4314.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4314.apk",
-    "size": 4093657,
-    "sha256": "66be9bc3513118c340bf6ad017219435787d573cc5f83173cf8e48c7f54138fb"
+    "name": "CarDesk-platform-ecarx-cardesk-4315.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4315.apk",
+    "size": 4101453,
+    "sha256": "8b5107d7284c7dbd84dab1df76d2bad73659ed3ee40c0a9d3b436636548b7554"
   }
 }

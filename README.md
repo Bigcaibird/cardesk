@@ -228,9 +228,9 @@ python3 tools/publish_r2.py --bucket file \
 
 | 项 | 值 |
 | --- | --- |
-| 当前版本 | `1.0.1211-system`（versionCode **4307**，第230轮） |
+| 当前版本 | `1.0.1219-system`（versionCode **4315**，第三百零二~四轮） |
 | GitHub Release | [`v1.0.1177`](https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1177) —— 最新一次 GitHub 发布；更新的版本只走 R2 |
-| R2 上传 | **已上传 4307**（`https://file.chuxi.bid/cardesk/latest.json` + `cardesk/CarDesk-platform-ecarx-cardesk-4307.apk`，回读校验一致） |
+| R2 上传 | **已上传 4315**（`https://file.chuxi.bid/cardesk/latest.json` + `cardesk/CarDesk-platform-ecarx-cardesk-4315.apk`，回读校验一致；APK SHA-256 `8b5107d7…4b7554`） |
 
 各轮产物与发布记录见 [CHANGELOG.md](CHANGELOG.md)。
 
