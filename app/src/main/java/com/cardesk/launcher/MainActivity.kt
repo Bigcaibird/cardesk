@@ -261,8 +261,10 @@ class MainActivity : Activity() {
      */
     private fun showSplash() {
         val container = FrameLayout(this)
-        container.setBackgroundColor(0xFF05080F.toInt())
         val splashView = LaunchSplashView(this)
+        // 第二百五十六轮：启动页有日/夜两版，根容器底色跟着走 ——
+        // 淡出时如果还有一帧露出来，见到的应该是同一套配色，而不是夜里的深蓝。
+        container.setBackgroundColor(LaunchSplashView.backdropColor(splashView.night))
         container.addView(
             splashView,
             FrameLayout.LayoutParams(
@@ -272,6 +274,10 @@ class MainActivity : Activity() {
         )
         root = container
         splash = splashView
+        // 全局 Dock 是**独立窗口**（`CarDesk 全局 Dock`），会盖在启动页上面 ——
+        // 实测不抑制时「启动中」的画面底部会露出一条已经就绪的 Dock，像画错了。
+        // 启动页淡完再放开（见 [fadeOutSplash]）。
+        GlobalDockService.setSuppressed(true)
         setContentView(container)
         StartupTrace.mark("window")
 
@@ -505,6 +511,7 @@ class MainActivity : Activity() {
         if (current == null) {
             // 没有启动页（异常路径）也照样做「桌面完全启动后」的动作，
             // 否则画中画永远不会承载。
+            GlobalDockService.setSuppressed(false)
             onDesktopReady()
             launcher?.let { startHeavyStartup(it) }
             return
@@ -521,6 +528,8 @@ class MainActivity : Activity() {
                 // 以前只能拿 `desktopReady` 近似（它在那之前还夹着 8 秒重活），
                 // 数字对不上「用户盯了多久启动页」。
                 StartupTrace.mark("splashGone")
+                // 启动页已经不在屏幕上，全局 Dock 可以出来了。
+                GlobalDockService.setSuppressed(false)
                 // 关键：不能写 `current.post { ... }` ——
                 // 启动页刚被摘掉，已经脱离窗口，那个 Runnable 永远不会执行
                 // （见 [mainHandler] 的注释）。

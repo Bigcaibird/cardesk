@@ -507,3 +507,35 @@
 
 面板四边都比上一版小（900×840 → 760×720），内容同比缩小，车模仍居中。
 验证：临时左前门开 → 面板 760×720 居中；还原后无弹窗；`testSystemUnitTest` **2666 / 0 / 0**。
+
+### 23. 第 256 轮：启动动画日/夜双版（画板 b01 / b02）
+
+设计新增了 `b01-boot-day` / `b02-boot-night` 两块启动画面，本轮把它实现进 `LaunchSplashView`。
+
+| 项 | 实现 |
+|---|---|
+| 背景 | **画板原样烘焙**成 960×540 PNG：`assets/splash/splash_day.png`（226KB）、`splash_night.png`（100KB），运行时 `drawBitmap` 铺满 |
+| 圆环 | 168×168、`r=66`、描边 6、**120° 缺口弧**（`ARC_SWEEP=120f`）+ 2.6 倍宽 70 alpha 外发光 + 圆心点 `r=7` |
+| 品牌字 | `CarDesk` 62px、字距 `.20em`（Canvas `letterSpacing` 末字后也留距 ⇒ 右移半字距再居中） |
+| 副文案 | 「正在启动桌面…」22px、字距 `.06em`，色取画板 |
+| 进度条 | 320×3 圆角轨道 + 120 宽双向透明渐变光带，**不确定式**（不显示百分比），1400ms 一轮 |
+| 节奏 | 转圈 1400ms/圈、光带 1400ms/轮、淡入 200ms（**墙钟**，不用 Animator —— 桌面构造会占满主线程） |
+| 配色解析 | 构造时问一次 `NightResolver.resolve(Prefs, ctx)`，与桌面首帧同一个解析器；日志 `CarDesk/App: 启动页配色 night=… resolveMs=…` |
+
+**为什么背景用烘焙图**：画板背景是 8 层 CSS 渐变（两条椭圆径向 + 158° 线性 + 4 处高光 + 2 个 blur 圆），
+Canvas 复刻时 CSS 的 `radial-gradient(circle,…)` 半径按 farthest-corner 取，逐层逼近后左上青绿区仍差 34/255、肉眼发白。
+直接按画板渲染背景层（隐藏内容列与说明文字）再缩放，是唯一能像素级对齐的做法。
+实测整屏平均色差：**日间 1.32/255、夜间 1.18/255**；夜间三个取样点与画板**逐点相同**。
+
+**一个真实缺陷（已修）**：`CarDesk 全局 Dock` 是独立窗口，启动页盖不住它 ——
+「启动中」画面底部会露出一条已就绪的 Dock。现在 `showSplash()` 里 `GlobalDockService.setSuppressed(true)`，
+`splashGone` 之后放开（无启动页的异常路径也放开）。修完底部已是启动页底色（日 `(158,199,235)`、夜 `(3,6,11)`）。
+
+**判据**：`assembleSystem` 通过；`testSystemUnitTest` **2670 / 0 / 0**（新增 `LaunchSplashViewTest` 4 条）；
+日间冷启动 `splashGone=555ms`、`total=1614ms`，桌面正常出现、焦点 `com.ecarx.cardesk/...MainActivity`、
+crash 缓冲 0。截图 `docs/ui-redesign/round5/19-splash-day.png`、`20-splash-night.png`。
+
+**诚实边界**：
+1. 进程起来**之前**的系统 starting window 仍是静态深色 `#05080F`（`windowBackground`），
+   API 28 没有 themed splash，做不到「系统冷启动第一帧就分日夜」；进程起来后的 1.6 秒才是这两版。
+2. 品牌字宽 mine 302px vs 画板 321px（Roboto Medium vs SF Pro 600，约 −6%），不引第三方字体。

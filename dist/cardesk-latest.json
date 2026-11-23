@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "1.0.1216",
-  "versionCode": 4312,
-  "tag": "v1.0.1216",
-  "name": "CarDesk 4312 / 1.0.1216-system",
-  "notes": "开门弹窗改成接近正方形（760×720）并屏幕居中；6 处未关时说明两行、6 枚胶囊仍排一行。",
-  "publishedAt": "2026-11-22T14:41:07Z",
+  "version": "1.0.1217",
+  "versionCode": 4313,
+  "tag": "v1.0.1217",
+  "name": "CarDesk 4313 / 1.0.1217-system",
+  "notes": "启动页新增日/夜双版（对齐设计 b01/b02）：背景按画板烘焙、120° 缺口圆环 + CarDesk 字标 + 不确定式进度条；启动期间不再露出全局 Dock。",
+  "publishedAt": "2026-11-23T03:06:05Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4312.apk",
-    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4312.apk",
-    "size": 3762391,
-    "sha256": "c7f4c2fb235283c97e79c1e1a91f4bef35a31166324e276d6d912a86d229ba6d"
+    "name": "CarDesk-platform-ecarx-cardesk-4313.apk",
+    "url": "cardesk/CarDesk-platform-ecarx-cardesk-4313.apk",
+    "size": 4093617,
+    "sha256": "4f196cc211470755c0f21e35477d98fb3bd6a49dc11f9dde0c2cfe1b006b66d6"
   }
 }

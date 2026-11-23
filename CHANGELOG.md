@@ -11427,3 +11427,19 @@ D CarDesk/NavUI: 承载面重建，判不准 task 在哪个屏，按「没黑」
 | 其他 | 右上 ✕ 热区 56；胶囊仍左对齐（`WrapRow.centerLines = false`） |
 
 判据：`assembleSystem` 通过、`testSystemUnitTest` **2666 / 0 / 0**（`DoorAlertDialogLayoutTest` 同步为新面板尺寸），实机左前门开时面板 760×720 居中。
+
+## 第256轮 · 启动动画日/夜双版（画板 b01 / b02）
+
+> 设计新增了日夜两版启动画面，`LaunchSplashView` 由「深色渐变 + 单色弧」重写为完整启动页。
+
+| 项 | 实现 |
+|---|---|
+| 背景 | 画板原样烘焙 960×540 PNG（`assets/splash/splash_day.png` / `splash_night.png`），`drawBitmap` 铺满 |
+| 圆环 | 168×168、r=66、描边 6、120° 缺口弧 + 外发光 + 圆心点 |
+| 文字 | `CarDesk` 62px/字距 .20em；「正在启动桌面…」22px/字距 .06em |
+| 进度条 | 320×3 不确定式（120 宽光带 1400ms 一轮），不显示百分比 |
+| 配色 | 构造时 `NightResolver` 解析一次（与桌面同一解析器），根容器底色跟着走 |
+| Dock | 启动页期间抑制全局 Dock（独立窗口会盖在启动页上），`splashGone` 后放开 |
+
+判据：整屏平均色差日间 1.32/255、夜间 1.18/255（夜间取样逐点相同）；`testSystemUnitTest` **2670 / 0 / 0**；
+日间冷启动 `splashGone=555ms`；截图 `docs/ui-redesign/round5/19-splash-day.png`、`20-splash-night.png`。
