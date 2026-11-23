@@ -1,0 +1,119 @@
+CarDesk · 车控桌面
+
+Copyright (c) 2026 roy.wang (GitHub: Bigcaibird)
+Repository: https://github.com/Bigcaibird/cardesk
+
+Required Notice: CarDesk — https://github.com/Bigcaibird/cardesk
+
+---
+
+本软件按 **PolyForm Noncommercial License 1.0.0**（下称「基础许可」）授权，
+并附加下文「附加署名要求」一节；两者同时适用。
+
+- **非商业用途免费**：个人使用、学习、研究、改装自己的车机、非商业开源项目、
+  以及学校 / 公益 / 政府 / 公共研究机构的使用，都可以自由地使用、修改、合并、
+  发布和分发本软件及其衍生作品。
+- **商业用途需授权**：将本软件或其衍生作品用于商业产品、商业服务，或以营利为目的
+  分发，未获作者书面授权前不被许可。商业授权请联系作者：
+  GitHub Issue（https://github.com/Bigcaibird/cardesk/issues）或 328576666@qq.com。
+
+===============================================================================
+附加署名要求（Attribution Requirement）
+===============================================================================
+
+1. 你以任何形式分发本软件、其修改版或衍生作品（源码或二进制）时，必须在显著位置
+   保留本文件开头的版权声明、`Required Notice:` 行以及本 LICENSE 文件，并在文档
+   （README / 关于页面 / 发布说明）中声明来源，例如：
+
+       本项目基于 CarDesk（https://github.com/Bigcaibird/cardesk）开发。
+
+2. 不得删除、隐藏或篡改源码与交付物中已有的作者署名、版本信息与
+   `Required Notice:` 行。
+3. 以源码形式再发布修改版时，须在同一目录保留本 LICENSE 文件（含下面的
+   PolyForm 正式条款全文），使接收者同样受本许可约束。
+
+Attribution Requirement (English, same effect):
+When you distribute this software or any modified or derivative work, keep the
+copyright notice and the `Required Notice:` line above, keep this LICENSE file,
+and state the origin in your documentation, for example:
+"Based on CarDesk (https://github.com/Bigcaibird/cardesk)."
+Do not remove or obscure existing attribution, and include this LICENSE file with
+any source redistribution.
+
+===============================================================================
+PolyForm Noncommercial License 1.0.0（基础许可，正式条款全文，原样引用）
+===============================================================================
+
+# PolyForm Noncommercial License 1.0.0
+
+<https://polyformproject.org/licenses/noncommercial/1.0.0>
+
+## Acceptance
+
+In order to get any license under these terms, you must agree to them as both strict obligations and conditions to all your licenses.
+
+## Copyright License
+
+The licensor grants you a copyright license for the software to do everything you might do with the software that would otherwise infringe the licensor's copyright in it for any permitted purpose.  However, you may only distribute the software according to [Distribution License](#distribution-license) and make changes or new works based on the software according to [Changes and New Works License](#changes-and-new-works-license).
+
+## Distribution License
+
+The licensor grants you an additional copyright license to distribute copies of the software.  Your license to distribute covers distributing the software with changes and new works permitted by [Changes and New Works License](#changes-and-new-works-license).
+
+## Notices
+
+You must ensure that anyone who gets a copy of any part of the software from you also gets a copy of these terms or the URL for them above, as well as copies of any plain-text lines beginning with `Required Notice:` that the licensor provided with the software.  For example:
+
+> Required Notice: Copyright Yoyodyne, Inc. (http://example.com)
+
+## Changes and New Works License
+
+The licensor grants you an additional copyright license to make changes and new works based on the software for any permitted purpose.
+
+## Patent License
+
+The licensor grants you a patent license for the software that covers patent claims the licensor can license, or becomes able to license, that you would infringe by using the software.
+
+## Noncommercial Purposes
+
+Any noncommercial purpose is a permitted purpose.
+
+## Personal Uses
+
+Personal use for research, experiment, and testing for the benefit of public knowledge, personal study, private entertainment, hobby projects, amateur pursuits, or religious observance, without any anticipated commercial application, is use for a permitted purpose.
+
+## Noncommercial Organizations
+
+Use by any charitable organization, educational institution, public research organization, public safety or health organization, environmental protection organization, or government institution is use for a permitted purpose regardless of the source of funding or obligations resulting from the funding.
+
+## Fair Use
+
+You may have "fair use" rights for the software under the law. These terms do not limit them.
+
+## No Other Rights
+
+These terms do not allow you to sublicense or transfer any of your licenses to anyone else, or prevent the licensor from granting licenses to anyone else.  These terms do not imply any other licenses.
+
+## Patent Defense
+
+If you make any written claim that the software infringes or contributes to infringement of any patent, your patent license for the software granted under these terms ends immediately. If your company makes such a claim, your patent license ends immediately for work on behalf of your company.
+
+## Violations
+
+The first time you are notified in writing that you have violated any of these terms, or done anything with the software not covered by your licenses, your licenses can nonetheless continue if you come into full compliance with these terms, and take practical steps to correct past violations, within 32 days of receiving notice.  Otherwise, all your licenses end immediately.
+
+## No Liability
+
+***As far as the law allows, the software comes as is, without any warranty or condition, and the licensor will not be liable to you for any damages arising out of these terms or the use or nature of the software, under any kind of legal claim.***
+
+## Definitions
+
+The **licensor** is the individual or entity offering these terms, and the **software** is the software the licensor makes available under these terms.
+
+**You** refers to the individual or entity agreeing to these terms.
+
+**Your company** is any legal entity, sole proprietorship, or other kind of organization that you work for, plus all organizations that have control over, are under the control of, or are under common control with that organization.  **Control** means ownership of substantially all the assets of an entity, or the power to direct its management and policies by vote, contract, or otherwise.  Control can be direct or indirect.
+
+**Your licenses** are all the licenses granted to you for the software under these terms.
+
+**Use** means anything you do with the software requiring one of your licenses.

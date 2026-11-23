@@ -258,6 +258,7 @@ cardesk/
 ├── emu-verify/                          模拟器验证记录与截图
 ├── dist/                                交付产物（APK 不入库，走 GitHub Release）
 ├── version.properties                   versionCode / versionName（唯一来源）
+├── LICENSE                              许可条款（PolyForm Noncommercial + 署名要求）
 └── CHANGELOG.md                         逐轮开发记录
 ```
 
@@ -265,8 +266,22 @@ cardesk/
 
 ## 许可
 
-本仓库**暂未附带 LICENSE 文件**：在作者补充许可条款之前，请勿将本项目视为已授予
-再分发或商用授权；二次开发或分发前请先与作者确认。
+本仓库采用 **[PolyForm Noncommercial License 1.0.0](LICENSE)** + **附加署名要求**，
+全文见 [`LICENSE`](LICENSE)。一句话：**只要不是商业用途，随便用、随便改、随便分发，
+但要保留署名并声明来源。**
 
-3D 车模来自领克官方线上展厅（hall.lynkco.com.cn）公开资产，仅供本 App 个人自用，
-官方未声明授权，请勿商用再分发。
+| 场景 | 是否允许 |
+| --- | --- |
+| 个人使用 / 学习 / 研究 / 改装自己的车机 / 非商业开源项目 | ✅ 免费，可任意使用、修改、分发 |
+| 学校、公益、政府、公共研究机构等非商业组织 | ✅ 免费（`PolyForm Noncommercial` 明列） |
+| 商业产品、商业服务、以营利为目的分发 | ❌ 需作者书面授权（[Issue](https://github.com/Bigcaibird/cardesk/issues) / 328576666@qq.com） |
+
+**署名要求**：分发本软件或其衍生作品（源码或二进制）时，保留版权声明与
+`Required Notice:` 行，并在文档（README / 关于页面 / 发布说明）里声明来源，例如：
+
+```
+本项目基于 CarDesk（https://github.com/Bigcaibird/cardesk）开发。
+```
+
+3D 车模来自领克官方线上展厅（hall.lynkco.com.cn）公开资产；本项目自身已限定非商业用途，
+**车模资产不得单独提取再分发或商用**，官方未声明授权。
