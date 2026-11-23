@@ -247,4 +247,141 @@ class QqBroadcastTest {
         assertEquals("十五", meta.album)
         assertEquals("", LrcParser.parseMeta(null).title)
     }
+
+    // ---------------------------------------- 收藏回报的采纳判定（第二轮二三）
+
+    // 2026-11-23 cardesk28 + QQ 3.14.0.4 真机抓包：
+    // {"method":"update_fav","data":{"key_title":"看见","key_artist":[{"singer":"陈鸿宇&游戏科学&8082Audio"}],
+    //   "key_album":"《黑神话：悟空》游戏音乐精选集","key_is_fav":0}}
+    // 送达路径 TmePush（服务器推送，实测一次延迟 61 秒），且同一条会发两遍。
+
+    @Test
+    fun `解析实测抓到的update_fav报文`() {
+        val raw = """{"module":"play","command":{"method":"update_fav","data":""" +
+            """{"key_title":"看见","key_artist":[{"singer":"陈鸿宇&游戏科学&8082Audio"}],""" +
+            """"key_album":"《黑神话：悟空》游戏音乐精选集","key_is_fav":0}}}"""
+        val p = QqBroadcast.parse(raw)!!
+        assertEquals("update_fav", p.method)
+        assertEquals("看见", p.title)
+        assertTrue(p.hasSong)
+        assertEquals(0, p.favorite)
+        assertTrue(p.favoriteKnown)
+        assertFalse(p.favorited)
+    }
+
+    @Test
+    fun `迟到的旧歌收藏回报必须丢弃`() {
+        // 用户取消了 A 歌的收藏 → 61 秒后回报才到 → 期间已经切到 B 歌。
+        // 旧逻辑把 A 的 fav=0 写进 B 的心形 —— 「收藏态大概率显示不对」的主因。
+        assertEquals(
+            MediaActions.FavReportVerdict.DROP_STALE_SONG,
+            MediaActions.favoriteReportVerdict(
+                payloadTitle = "看见",
+                currentTitle = "青花",
+                incomingFavorited = false,
+                pendingTarget = null,
+                echoGrace = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `当前歌的收藏回报正常采纳`() {
+        assertEquals(
+            MediaActions.FavReportVerdict.APPLY,
+            MediaActions.favoriteReportVerdict(
+                payloadTitle = "青花",
+                currentTitle = "青花",
+                incomingFavorited = true,
+                pendingTarget = null,
+                echoGrace = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `报文没带歌名时按当前歌采纳`() {
+        assertEquals(
+            MediaActions.FavReportVerdict.APPLY,
+            MediaActions.favoriteReportVerdict(
+                payloadTitle = "",
+                currentTitle = "青花",
+                incomingFavorited = true,
+                pendingTarget = null,
+                echoGrace = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `卡片还没有曲目时不判旧歌`() {
+        assertEquals(
+            MediaActions.FavReportVerdict.APPLY,
+            MediaActions.favoriteReportVerdict(
+                payloadTitle = "看见",
+                currentTitle = "",
+                incomingFavorited = false,
+                pendingTarget = null,
+                echoGrace = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `歌名首尾空格不影响匹配`() {
+        assertEquals(
+            MediaActions.FavReportVerdict.APPLY,
+            MediaActions.favoriteReportVerdict(
+                payloadTitle = " 青花 ",
+                currentTitle = "青花",
+                incomingFavorited = true,
+                pendingTarget = null,
+                echoGrace = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `挂起窗口内与目标相反的回报按回声丢弃`() {
+        // 刚下发「取消收藏」(target=false)，服务器推送的迟到旧值 (fav=true) 先到。
+        assertEquals(
+            MediaActions.FavReportVerdict.DROP_ECHO,
+            MediaActions.favoriteReportVerdict(
+                payloadTitle = "青花",
+                currentTitle = "青花",
+                incomingFavorited = true,
+                pendingTarget = false,
+                echoGrace = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `挂起窗口内与目标一致的回报提前确认`() {
+        assertEquals(
+            MediaActions.FavReportVerdict.APPLY,
+            MediaActions.favoriteReportVerdict(
+                payloadTitle = "青花",
+                currentTitle = "青花",
+                incomingFavorited = false,
+                pendingTarget = false,
+                echoGrace = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `宽限窗过后矛盾回报照常采纳`() {
+        // 用户直接在 QQ 音乐自己的界面点了收藏 —— 那是真实的新状态，不能挡。
+        assertEquals(
+            MediaActions.FavReportVerdict.APPLY,
+            MediaActions.favoriteReportVerdict(
+                payloadTitle = "青花",
+                currentTitle = "青花",
+                incomingFavorited = true,
+                pendingTarget = false,
+                echoGrace = false,
+            ),
+        )
+    }
 }

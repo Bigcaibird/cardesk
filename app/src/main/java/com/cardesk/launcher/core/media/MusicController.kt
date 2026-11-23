@@ -298,6 +298,10 @@ class MusicController private constructor() {
         setFavoriteState(MediaActions.FavoriteState.UNKNOWN)
         // 换歌了 → 上一首歌挂起的乐观更新没有意义。
         cancelPendingFavorite()
+        // 换歌了 → 上一首歌的指令目标/回滚快照一并作废（第二轮二三）：
+        // onFavoriteResult 再带着旧歌的结果来，也不能写进新歌的状态。
+        lastFavoriteTarget = null
+        favoriteStateBeforeSend = null
         // 播放模式是**播放器级**的（不是歌曲级）→ 换歌不该清它。
     }
 
@@ -370,6 +374,15 @@ class MusicController private constructor() {
     private var favoriteStateBeforeSend: MediaActions.FavoriteState? = null
 
     /**
+     * 上一次**成功下发**收藏指令的时刻（第二轮二三）。
+     *
+     * QQ 的收藏回报走服务器推送、会迟到且乱序（实测 61 秒）——
+     * 刚下发之后的短暂窗口里，与目标相反的回报是**上一次切换的回声**，
+     * 不能让它把心形打回去。宽限窗长度见 [FAVORITE_ECHO_GRACE_MS]。
+     */
+    private var lastFavoriteSentAt = 0L
+
+    /**
      * **收藏 / 取消收藏**当前歌曲（第一九五轮）。
      *
      * ## 三态在这里怎么用
@@ -406,6 +419,7 @@ class MusicController private constructor() {
         if (ok) {
             // **不立即乐观更新** —— 等播放器的权威回报（QQ 的 `update_fav` 广播 /
             // 网易云重发的 metadata）。没人回报时才在 [OPTIMISTIC_FAVORITE_MS] 后兜底。
+            lastFavoriteSentAt = System.currentTimeMillis()
             scheduleOptimisticFavorite(target)
         }
         return ok
@@ -1651,7 +1665,12 @@ class MusicController private constructor() {
         )
 
         // ——歌名 / 歌手 / 进度：合成曲目（没有会话时，这是唯一的来源）——
-        if (payload.hasSong) {
+        //
+        // `update_fav` **不是播放事件**：它只回报收藏态，绝不能拿它合成/切换曲目 ——
+        // 它走 TME 服务器推送、延迟可达分钟级（第二轮二三实测 61 秒），
+        // 迟到的旧歌 update_fav 会把整个卡片拖回上一首。
+        val isFavEvent = payload.method == "update_fav"
+        if (payload.hasSong && !isFavEvent) {
             applyQqBroadcastTrack(payload)
         }
 
@@ -1666,9 +1685,52 @@ class MusicController private constructor() {
         //
         // 放在 [applyQqBroadcastTrack] **之后**：换歌时那里会先把收藏态复位成「不知道」，
         // 这里再把**这首歌**的收藏态写进去。
-        setFavoriteState(
-            MediaActions.mergeFavorite(favoriteState, MediaActions.favoriteFromRaw(payload.favorite)),
-        )
+        //
+        // ——第二轮二三：收藏回报的**采纳判定**——
+        //
+        // 迟到的旧歌回报（key_title 对不上当前曲目）不能写到当前心形上；
+        // 挂起指令未决时，与目标相反的回报是上一次切换的回声（推送乱序），同样丢弃。
+        val fav = MediaActions.favoriteFromRaw(payload.favorite)
+        if (fav.known) {
+            val now = System.currentTimeMillis()
+            val echoGrace = pendingFavorite != null ||
+                now - lastFavoriteSentAt < FAVORITE_ECHO_GRACE_MS
+            when (
+                MediaActions.favoriteReportVerdict(
+                    payloadTitle = payload.title,
+                    currentTitle = currentTitle,
+                    incomingFavorited = fav.isFavorited,
+                    pendingTarget = lastFavoriteTarget,
+                    echoGrace = echoGrace,
+                )
+            ) {
+                MediaActions.FavReportVerdict.DROP_STALE_SONG ->
+                    Logx.i(
+                        LogTags.MEDIA, "丢弃迟到的收藏回报（歌名已换）",
+                        "method" to payload.method,
+                        "payloadTitle" to payload.title,
+                        "currentTitle" to currentTitle,
+                        "fav" to payload.favorite,
+                    )
+                MediaActions.FavReportVerdict.DROP_ECHO ->
+                    Logx.i(
+                        LogTags.MEDIA, "丢弃收藏回声（与挂起目标相反）",
+                        "method" to payload.method,
+                        "fav" to payload.favorite,
+                        "target" to lastFavoriteTarget,
+                    )
+                MediaActions.FavReportVerdict.APPLY -> {
+                    // 报文确认到了 → 不再需要乐观兜底（避免它之后又把旧目标写回来）。
+                    cancelPendingFavorite()
+                    setFavoriteState(fav)
+                }
+            }
+        } else {
+            // 没带 key_is_fav → 维持现状。
+            // 注意**不要**在这里调 setFavoriteState：它会把挂起的乐观更新
+            // 当成「权威回报到了」误杀（QQ 的 update_lyric/update_state 一秒一条，
+            // 无脑调用 = 乐观兜底永远轮不到落地）。
+        }
 
         // ——喂给原车媒体桥：方控要靠它才能被原车接管——
         pushBroadcastToBridge(payload)
@@ -2064,6 +2126,16 @@ class MusicController private constructor() {
          * - 这个间隔只是**兜底**（万一某个播放器不回报），不是等待时间。
          */
         const val OPTIMISTIC_FAVORITE_MS = 600L
+
+        /**
+         * 收藏「回声宽限窗」（第二轮二三）。
+         *
+         * QQ 的收藏回报走服务器推送、会迟到且乱序（实测 61 秒、同一条发两遍）——
+         * 刚下发收藏指令之后这个窗口内，与目标相反的回报按**上一次切换的回声**
+         * 丢弃（[MediaActions.favoriteReportVerdict]）。窗口过后照常采纳
+         * （比如用户直接在 QQ 音乐自己的界面上点了收藏）。
+         */
+        const val FAVORITE_ECHO_GRACE_MS = 5_000L
 
         /**
          * 「上次歌曲」落盘的最小间隔。

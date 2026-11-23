@@ -11459,3 +11459,60 @@ D CarDesk/NavUI: 承载面重建，判不准 task 在哪个屏，按「没黑」
 补强（同轮）：`LaunchSplashViewTest` 从 4 条加到 6 条 —— 新增「圆环上下描边间距 ≈138px（= 2r + 描边）」与「在 Bitmap 上取光带峰值像素、按绿通道反解覆盖率后校验红/蓝通道」，
 后者能真正抓住 drawBar 取错颜色（不是只断言常量访问器）。全量 **2672 / 0 / 0**。
 
+## 第258轮 · QQ 音乐收藏回报的迟到/乱序防护（修「收藏态大概率显示不对」）
+
+**现象**（用户报障）：音乐卡在 QQ 音乐上「很大概率不能正确显示/同步收藏状态」——
+收藏了的心形显示空心、切歌后心形状态错乱。
+
+**根因**（2026-11-23 cardesk28 + QQ 3.14.0.4 真机抓包，logcat 原文）：
+
+- `update_fav` 的载荷**自带 `key_title`**：
+  `{"method":"update_fav","data":{"key_title":"看见",…,"key_is_fav":0}}`；
+- 它的送达路径是 **TME 服务器推送**（`TmePush: T5M-RemoteDataImpl: push request:
+  t.push.report.message`）→ 延迟 = 网络往返，实测一次 **61 秒**；
+- QQ 会把同一条 `update_fav` **发两遍**（.694/.698 两条一模一样）。
+
+旧逻辑（第一九五轮）把任何广播里的 `key_is_fav` 无条件写到当前心形上，于是：
+
+1. **跨歌污染**：取消收藏 A 歌 → A 的回报迟到 → 期间切到 B 歌 → A 的
+   `fav=0` 写进 B 的心形 → 「已收藏」显示成「未收藏」；
+2. **整卡翻回旧歌**（无会话路径，真车 QQ 无可用 MediaSession，正是此路径）：
+   迟到的 `update_fav(A)` 被 `applyQqBroadcastTrack` 合成为当前曲目，
+   整张卡片翻回 A 歌；
+3. **乐观窗口竞态**：600ms 乐观窗内，矛盾回声把心形打回旧值再弹回 → 闪烁。
+
+**改法**（判定收进纯函数，控制器只做接线）：
+
+- `MediaActions.favoriteReportVerdict()`（新增，纯 Kotlin 可单测）：
+  一条带 `key_is_fav` 的回报按三种裁决处理 ——
+  `APPLY`（采纳）/ `DROP_STALE_SONG`（`key_title` 与当前曲目都对得上但**不相等**
+  → 迟到的旧歌回报，丢弃）/ `DROP_ECHO`（挂起指令未决或距上次下发
+  不足 `FAVORITE_ECHO_GRACE_MS=5s`，与目标相反 → 上一次切换的回声，丢弃）；
+- `MusicController.handleQqLyricBroadcast()`：收藏回报先过判定再写心形；
+  `update_fav` **不再合成/切换曲目**（它不是播放事件，只回报收藏态）；
+- `toggleFavorite()` 成功下发后记 `lastFavoriteSentAt`（回声宽限窗起点）；
+- `resetActionStateOnSongChange()` 换歌时把 `lastFavoriteTarget` /
+  `favoriteStateBeforeSend` 一并作废（旧歌的指令结果不许写进新歌）；
+- 未带 `key_is_fav` 的广播**不再调用** `setFavoriteState` ——
+  它有「权威回报到了 → 取消挂起乐观更新」的副作用，而 QQ 的
+  `update_lyric`/`update_state` 一秒一条，无脑调用会让乐观兜底永远落不了地。
+
+**实测**（判据机 `emulator-5560` cardesk28 + 真 QQ 3.14.0.4、`emulator-5572` 领克 car15）：
+
+| 场景 | 修复前 | 修复后 |
+|---|---|---|
+| 真机点心形（戒网） | — | 下发 → **64ms** `update_fav` 权威确认（old=true new=false），重复回报无闪烁 |
+| 注入迟到旧歌回报（看见→当前戒网） | 心形被点亮（错） | `丢弃迟到的收藏回报（歌名已换） payloadTitle=看见 currentTitle=戒网 fav=1` |
+| 注入同歌回报（戒网 fav=1） | — | `收藏态变化 old=false new=true`，心形实心红 |
+| car15 无会话：`update_song`(看见,fav=1) | — | 合成曲目 + 收藏态 unknown→true |
+| car15 无会话：迟到 `update_fav`(青花,fav=0) | 整卡翻回青花 | 丢弃，卡片仍是看见 |
+
+单测 `QqBroadcastTest` 新增 9 条（含实测 `update_fav` 报文解析与三种裁决），
+全量 `testSystemUnitTest` **2681 / 0 / 0**。
+
+限制：云端应用商店的 QQ 2.8.0.5 是 **armeabi-v7a 专用包**（53 个 v7a .so），
+cardesk28 / car15 镜像都是 arm64-only（`zygote64_32` 但无 32 位 linker 与
+`/system/lib`）→ 装不上（`INSTALL_FAILED_NO_MATCHING_ABIS`）；验证用同协议族的
+3.14.0.4（arm64）真包 + 按 2.8.x 报文形状（1.9.8.22 反编译所得，与 3.14 抓包一致）
+注入。真车（820A，32 位兼容）装云端 2.8.0.5 后的复测待实车 ADB 恢复后进行。
+

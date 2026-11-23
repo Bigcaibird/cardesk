@@ -423,6 +423,72 @@ object MediaActions {
         else -> FavoriteState.NOT_FAVORITED
     }
 
+    // ------------------------------------------------- QQ 收藏回报的采纳判定（第二轮二三）
+
+    /**
+     * 一条带 `key_is_fav` 的 QQ 广播（`update_fav` / `update_song` / …），
+     * 它的**收藏部分**该不该写到当前心形上。
+     */
+    enum class FavReportVerdict {
+        /** 采纳（写心形；若它就是挂起指令的确认，顺手取消挂起的乐观更新）。 */
+        APPLY,
+
+        /** 丢弃 —— 报文里的 `key_title` 是**上一首歌**（回报走服务器推送，迟到几分钟），
+         *  它的收藏态绝不能写到当前这首歌的心形上。 */
+        DROP_STALE_SONG,
+
+        /** 丢弃 —— 我们刚下发的收藏指令还没被确认，
+         *  这条与目标相反的回报是**上一次切换的迟到回声**（推送乱序）。 */
+        DROP_ECHO,
+    }
+
+    /**
+     * 判定一条 QQ 收藏回报怎么处理（纯逻辑，可单测）。
+     *
+     * ## 为什么要做这个判定（第二轮二三，修「收藏态大概率显示不对」）
+     *
+     * 实测抓包（2026-11-23，cardesk28 + QQ 3.14.0.4）：
+     *
+     * - `update_fav` 的载荷**自带 `key_title`** ——
+     *   `{"method":"update_fav","data":{"key_title":"看见",…,"key_is_fav":0}}`；
+     * - 它的送达路径是 **TME 服务器推送**（`TmePush: T5M-RemoteDataImpl: push
+     *   request: t.push.report.message`）→ 延迟 = 网络往返，
+     *   模拟器实测一次 **61 秒**；
+     * - QQ 会把同一条 `update_fav` **发两遍**（重复广播）。
+     *
+     * 旧逻辑无条件把 `key_is_fav` 写到当前心形上 → 用户取消收藏 A 歌后
+     * 切到 B 歌（已收藏），A 的迟到回报把 B 的心形冲成「未收藏」——
+     * 这就是「在 QQ 音乐上收藏态大概率显示/同步不对」的主因。
+     *
+     * @param payloadTitle 报文里的 `key_title`（空 = 报文没带歌名）
+     * @param currentTitle 当前正在显示的曲目标题（空 = 还没有曲目）
+     * @param incomingFavorited 报文里 `key_is_fav` 的值（true = 已收藏）
+     * @param pendingTarget 刚下发的收藏指令目标态（null = 没有挂起的指令）
+     * @param echoGrace 是否仍在「回声宽限窗」内
+     *   （挂起乐观更新未决，或距上次下发不足 [MusicController.FAVORITE_ECHO_GRACE_MS]）
+     */
+    fun favoriteReportVerdict(
+        payloadTitle: String,
+        currentTitle: String,
+        incomingFavorited: Boolean,
+        pendingTarget: Boolean?,
+        echoGrace: Boolean,
+    ): FavReportVerdict {
+        val pt = payloadTitle.trim()
+        val ct = currentTitle.trim()
+        // 迟到的旧歌回报：歌名两边都有、但对不上 → 丢弃。
+        // 任一边为空（报文没带歌名 / 卡片还没有曲目）→ 无法判定，按当前歌处理。
+        if (pt.isNotEmpty() && ct.isNotEmpty() && pt != ct) {
+            return FavReportVerdict.DROP_STALE_SONG
+        }
+        // 挂起指令未决（或刚下发不久）时，与目标相反的回报是上一次切换的回声。
+        // 与目标一致 → 这就是我们要的确认（APPLY，调用方会取消挂起的乐观更新）。
+        if (echoGrace && pendingTarget != null && incomingFavorited != pendingTarget) {
+            return FavReportVerdict.DROP_ECHO
+        }
+        return FavReportVerdict.APPLY
+    }
+
     // ---------------------------------------------------------------- 网易云编码
 
     /**
