@@ -545,3 +545,6 @@ crash 缓冲 0。截图 `docs/ui-redesign/round5/19-splash-day.png`、`20-splash
 已修：`LaunchSplashView.accent()` 改读新增的 `DAY_BAR_SWEEP / NIGHT_BAR_SWEEP`，底轨两版统一 `0x1AFFFFFF`（画板 `rgba(255,255,255,.10)`），
 并补 `barSweepColor()` 公开取值 + 单测断言；环的断言也从「环内 8px 一点」改成沿中线扫描环顶、量描边实心带宽（避开 2.6 倍柔光）。
 其余核验项全 PASS，整屏平均色差（验收人独立口径）日 **1.091/255**、夜 **1.111/255**；背景链路「画板→资产→实机截图」meanAbs 0.002。
+补强（同轮）：`LaunchSplashViewTest` 由 4 条扩到 6 条 —— 环的半径断言改成量上下描边的像素间距（≈138px），
+光带断言改成在 Bitmap 上取峰值像素、反解覆盖率后校验红/蓝通道（改回取弧色会红/蓝各偏 ~40，必然失败）；全量 2672/0/0。
+
