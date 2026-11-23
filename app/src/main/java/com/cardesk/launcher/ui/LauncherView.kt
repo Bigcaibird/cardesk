@@ -110,6 +110,14 @@ class LauncherView(context: Context) : FrameLayout(context) {
          */
         const val BODY_REFRESH_MIN_INTERVAL_MS = 400L
 
+        /**
+         * 诊断心跳间隔（毫秒，第三百零三轮实车闪屏诊断）。
+         *
+         * 30 秒一条 INFO「诊断心跳」（见 [maybeDiagHeartbeat]），
+         * 把 refresh/状态栏重绘/玻璃重发布计数和日夜六源一次带出。
+         */
+        const val DIAG_HEARTBEAT_INTERVAL_MS = 30_000L
+
         /** 驾驶模式切换成功后，快捷面板停留一下再自动关闭。 */
         const val DRIVE_MODE_CLOSE_DELAY_MS = 700L
 
@@ -747,6 +755,58 @@ class LauncherView(context: Context) : FrameLayout(context) {
     /** 上一次「车身状态变化」触发的立即刷新时刻（`SystemClock.uptimeMillis()`）。 */
     private var lastBodyRefreshAt = 0L
 
+    // ------------------------------------------------------------------
+    // 实车闪屏诊断（第三百零三轮）：30 秒一条心跳，全部候选根因一屏可读
+    // ------------------------------------------------------------------
+
+    /** refresh() 被执行的累计次数（诊断心跳用）。 */
+    private var diagRefreshCount = 0L
+
+    /** 上一次诊断心跳的时刻（`SystemClock.uptimeMillis()`）。 */
+    private var diagHeartbeatAt = 0L
+
+    /**
+     * 诊断心跳（**30 秒一条**，INFO 落盘，上车导出诊断包直接可读）。
+     *
+     * 用户反馈：装了 UI 重设计版后实车屏幕右侧闪烁。候选根因四条链路
+     * （日夜信号抖动 / 状态栏每秒重绘 / WiFi 档位抖动 / 玻璃底重发布）
+     * 在一条日志里同时给出：
+     *
+     * | 字段 | 看什么 |
+     * |---|---|
+     * | `refresh` | refresh 累计次数（涨速应 ≈ 每秒 1 次） |
+     * | `statusInvalidate` | 状态栏重绘次数（正常 ≈ refresh 同速；明显更快 = 状态栏在抖） |
+     * | `glassPublish` | 玻璃底重发布次数（正常几乎不涨；高频涨 = 卡片玻璃在闪） |
+     * | `glassBlur` / `glassDrop` | 后台模糊完成 / 被新请求作废的次数（第三百零四轮；`drop` 涨得快 = 壁纸/日夜在抖） |
+     * | `rs` | 玻璃模糊是否用上了 RenderScript 真高斯（false = 老 ROM 回退盒式） |
+     * | `night` / `amap` / `sensor` / `car` / `system` / `minute` | 日夜六源快照（两次心跳间 `night` 翻转 = 整桌重建实锤） |
+     * | `page` / `videoPass` | 当前页 / 视频壁纸让路态（排除路线切换类闪） |
+     *
+     * 这条心跳本身**只写日志不重绘**，不会加剧闪烁。
+     */
+    private fun maybeDiagHeartbeat() {
+        val nowMs = android.os.SystemClock.uptimeMillis()
+        if (nowMs - diagHeartbeatAt < DIAG_HEARTBEAT_INTERVAL_MS) return
+        val first = diagHeartbeatAt == 0L
+        diagHeartbeatAt = nowMs
+        if (first) return // 首轮只记基线，不打（桌面刚起来各计数都是 0）
+        val extras = mutableListOf<Pair<String, Any?>>(
+            "refresh" to diagRefreshCount,
+            "statusInvalidate" to (if (::statusBar.isInitialized) statusBar.invalidateCount else -1L),
+            "glassPublish" to com.cardesk.launcher.core.Glass.publishCount,
+            "glassBlur" to com.cardesk.launcher.core.Glass.blurCount,
+            "glassDrop" to com.cardesk.launcher.core.Glass.blurDropCount,
+            "rs" to com.cardesk.launcher.core.Glass.rsAvailable,
+            "page" to page,
+            "videoPass" to background.videoPassthrough,
+        )
+        // 日夜六源快照（会多一次车控 binder 读，30 秒一次可接受）。
+        runCatching {
+            com.cardesk.launcher.core.NightResolver.snapshotSignals(prefs, context)
+        }.onSuccess { sig -> extras.addAll(sig) }
+        Logx.i(LogTags.APP, "诊断心跳", *extras.toTypedArray())
+    }
+
     private val ticker = object : Runnable {
         override fun run() {
             refresh()
@@ -1272,6 +1332,8 @@ class LauncherView(context: Context) : FrameLayout(context) {
         // 第222轮：**壁纸亮度变了 → 重算浮层墨色**（状态栏 / 天气块 / 中心歌词
         // 这些直接压在壁纸上的元素，颜色跟着壁纸明暗走）。
         background.onBackdropChanged = { applyWallpaperBackdrop() }
+        // 第三百零四轮：玻璃底图改为**后台线程**模糊，算完要显式把画玻璃的层标脏。
+        background.onGlassChanged = { invalidateGlassLayers() }
         // 第139轮：换肤重建时，旧的画中画承载面**不拆** —— 先「摘」下来，交给新的承载面接着用。
         //
         // 第十二轮的修法是「重建前先 `release` 旧承载面」，它解决的是两件事：
@@ -2480,14 +2542,19 @@ class LauncherView(context: Context) : FrameLayout(context) {
         val night = com.cardesk.launcher.core.NightResolver.resolve(prefs, context)
         val last = prefs.lastAppliedNight()
         if (last != night) {
+            // 实车闪屏诊断（第三百零三轮）：翻转是**整桌重建**的触发点
+            // （applyTheme → build），如果它高频发生就是闪屏根因。
+            // 所以这条日志把**全部六源**一次带全（快照里 sensor/car/
+            // system 都在），锁定是哪个源在临界值上抖。
+            val sig = runCatching {
+                com.cardesk.launcher.core.NightResolver.snapshotSignals(prefs, context)
+            }.getOrDefault(emptyList())
             Logx.i(
                 LogTags.THEME,
                 "日夜态变化",
                 "night" to night,
                 "was" to last,
-                "enabled" to prefs.dayNightEnabled,
-                "mode" to prefs.dayNightMode,
-                "amap" to com.cardesk.launcher.core.NightResolver.amapNightUi,
+                *sig.toTypedArray(),
             )
             prefs.setLastAppliedNight(night)
         }
@@ -4773,6 +4840,23 @@ fun toggleCam360() {
     }
 
     /**
+     * 第三百零四轮：玻璃底图（模糊背景）算完并发布之后，让所有**画玻璃的层**重画一次。
+     *
+     * 模糊挪到后台线程之后，[com.cardesk.launcher.core.Glass.publish] 不再发生在
+     * 主线程的绘制流程里，所以必须显式标脏；否则卡片会继续用旧底图，
+     * 直到下一次别的原因触发重绘（壁纸切换后看起来"半天不生效"）。
+     *
+     * 覆盖范围 = `Glass.card(` 的三个使用者所在的层：
+     * 状态栏（含天气块）、底栏、翻页圆点条、场景页。
+     */
+    private fun invalidateGlassLayers() {
+        if (::statusBar.isInitialized) statusBar.invalidate()
+        if (::dock.isInitialized) dock.invalidate()
+        if (::dots.isInitialized) dots.invalidate()
+        if (::scenePage.isInitialized) scenePage.invalidate()
+    }
+
+    /**
      * 壁纸亮度的唯一入口（第222轮）。
      *
      * 静态 / 自定义壁纸由 [BackgroundView] 算完抛过来；
@@ -5208,6 +5292,11 @@ fun toggleCam360() {
 
     private fun refresh() {
         if (!::statusBar.isInitialized) return
+        // 实车闪屏诊断（第三百零三轮）：心跳放在日夜检查**之前**——
+        // 即便这轮触发了整桌重建（applyDayNightIfChanged 返回 true），
+        // 计数与心跳也已经发生，节奏不会被「return」吞掉。
+        diagRefreshCount++
+        maybeDiagHeartbeat()
         if (applyDayNightIfChanged()) return
         // 第222轮：视频壁纸的亮度（画面在独立图层上，只能直接拷视频的 Surface）。
         sampleVideoBackdropIfNeeded()

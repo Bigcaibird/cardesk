@@ -278,13 +278,25 @@ class BackgroundView(context: Context) : View(context) {
     }
 
     /**
-     * 把**整屏背景**（底色 + 壁纸）画进一张 1/4 缩略图、盒式模糊后发布给
+     * 把**整屏背景**（底色 + 壁纸）画进一张 1/4 缩略图、模糊后发布给
      * [com.cardesk.launcher.core.Glass]（第242轮「液态玻璃」）。
      *
      * 只在壁纸 / 日夜变化时算一次；卡片绘制时按自己的矩形从这张图里取区域，
      * 所以「卡片下面透出来的模糊背景」位置是对的。
+     *
+     * ## 第三百零四轮：模糊挪到后台线程 + RS 快速路径
+     *
+     * 实测这段在主线程要 **68ms**（车机 820A 上估计 150~400ms）：它只在壁纸/
+     * 日夜变化时跑，冷方法永远拿不到 JIT（APK 是 `quicken` 编译级别），
+     * 所以每次切换都卡一帧以上。现在分两种情况：
+     *
+     * | 时机 | 做法 | 原因 |
+     * |---|---|---|
+     * | **首帧**（还没有玻璃底图） | 就地**同步** 3 遍盒式 | 异步的话首帧卡片会先以纯半透明出现、随后"跳"成模糊玻璃 = 一眼可见的闪；且 RS 上下文初始化 86ms 不能放主线程，这里只走盒式 |
+     * | 之后（壁纸/日夜变化） | [Glass.blurAsync] 后台线程（RS 真高斯 → 回退盒式），算完回调 [onGlassChanged] | 不占主线程；RS 实测 1ms/张 |
      */
     private fun refreshGlass() {
+        val glassStartMs = android.os.SystemClock.uptimeMillis()
         val night = palette.night
         val bw = (com.cardesk.launcher.core.Design.W * com.cardesk.launcher.core.Glass.SCALE).toInt()
         val bh = (com.cardesk.launcher.core.Design.H * com.cardesk.launcher.core.Glass.SCALE).toInt()
@@ -292,6 +304,8 @@ class BackgroundView(context: Context) : View(context) {
         val raw = runCatching {
             android.graphics.Bitmap.createBitmap(bw, bh, android.graphics.Bitmap.Config.ARGB_8888)
         }.getOrNull() ?: return
+        val radius = (com.cardesk.launcher.core.Glass.BLUR_DESIGN * com.cardesk.launcher.core.Glass.SCALE).toInt()
+            .coerceAtLeast(1)
         try {
             val canvas = android.graphics.Canvas(raw)
             canvas.drawColor(palette.bgTop)
@@ -302,14 +316,58 @@ class BackgroundView(context: Context) : View(context) {
             }
             // 卡片取样必须与屏幕上看到的一致：L0 的渐变与柔光也要画进去。
             drawDesignWash(canvas, bw.toFloat(), bh.toFloat(), night)
-            val radius = (com.cardesk.launcher.core.Glass.BLUR_DESIGN * com.cardesk.launcher.core.Glass.SCALE).toInt()
-                .coerceAtLeast(1)
-            val blurred = com.cardesk.launcher.core.Glass.boxBlur(raw, radius)
-            com.cardesk.launcher.core.Glass.publish(blurred)
-        } finally {
+        } catch (t: Throwable) {
+            com.cardesk.launcher.core.log.Logx.w(
+                com.cardesk.launcher.core.log.LogTags.SCENE, "玻璃底图绘制失败", "err" to t.toString(),
+            )
             raw.recycle()
+            return
+        }
+
+        val glass = com.cardesk.launcher.core.Glass
+        // 首帧：同步盒式（保证第一帧就是模糊玻璃，见上面 kDoc 的表）。
+        if (glass.backdrop == null) {
+            val blurStartMs = android.os.SystemClock.uptimeMillis()
+            val blurred = glass.boxBlur(raw, radius)
+            val blurMs = android.os.SystemClock.uptimeMillis() - blurStartMs
+            if (blurred !== raw) raw.recycle()
+            glass.publish(blurred)
+            com.cardesk.launcher.core.log.Logx.i(
+                com.cardesk.launcher.core.log.LogTags.SCENE,
+                "玻璃底图耗时",
+                "via" to "box-sync",
+                "blur" to blurMs,
+                "total" to (android.os.SystemClock.uptimeMillis() - glassStartMs),
+                "size" to "${bw}x$bh",
+                "radius" to radius,
+            )
+            return
+        }
+
+        // 之后：后台线程（raw 的所有权交给 Glass.blurAsync）。
+        val queued = glass.blurAsync(context, raw, radius) {
+            onGlassChanged?.invoke()
+        }
+        if (!queued) {
+            // 线程没起来（极少见）：就地同步兜底，别让玻璃底图一直停在上一次。
+            val blurred = glass.boxBlur(raw, radius)
+            if (blurred !== raw) raw.recycle()
+            glass.publish(blurred)
+            onGlassChanged?.invoke()
+            com.cardesk.launcher.core.log.Logx.w(
+                com.cardesk.launcher.core.log.LogTags.SCENE, "玻璃模糊线程未启动，同步兜底",
+            )
         }
     }
+
+    /**
+     * 玻璃底图**算完并发布**之后的回调（第三百零四轮）。
+     *
+     * 模糊挪到后台线程后，[com.cardesk.launcher.core.Glass.publish] 不再发生在
+     * 主线程的绘制流程里，所以必须显式把画玻璃的层标脏 ——
+     * 否则卡片会继续用旧底图，直到下一次别的原因触发重绘（看起来像"切换不生效"）。
+     */
+    var onGlassChanged: (() -> Unit)? = null
 
     /** 采样用的代理图（小图即可，构图等比）。 */
     private fun proxyBitmap(): android.graphics.Bitmap? = runCatching {
