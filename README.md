@@ -237,9 +237,12 @@ python3 tools/publish_r2.py --bucket file --channel stable \
 
 | 项 | 值 |
 | --- | --- |
-| 当前版本 | `1.0.1219-system`（versionCode **4315**，第三百零二~四轮） |
-| GitHub Release | [`v1.0.1219`](https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1219) —— 最新一次 GitHub 发布（带 APK 附件）；车机在线更新仍读 R2 清单 |
-| R2 上传 | **已上传 4315**（`https://file.chuxi.bid/cardesk/latest.json` + `cardesk/CarDesk-platform-ecarx-cardesk-4315.apk`，回读校验一致；APK SHA-256 `8b5107d7…4b7554`） |
+| 仓库当前版本 | `1.0.1224-preview`（versionCode **4320**，第三百零九轮 / 开发版） |
+| 正式版通道 | `1.0.1219-system`（versionCode **4315**）—— `https://file.chuxi.bid/cardesk/latest.json` + `cardesk/CarDesk-platform-ecarx-cardesk-4315.apk`，未变 |
+| 开发版通道 | `1.0.1224-preview`（versionCode **4320**）—— `https://file.chuxi.bid/cardesk/preview/latest.json` + `cardesk/preview/CarDesk-platform-ecarx-cardesk-4320-preview.apk`（SHA-256 `f320e80a…84f7fe`，回读校验一致） |
+| GitHub Release | [`v1.0.1219`](https://github.com/Bigcaibird/cardesk/releases/tag/v1.0.1219) —— 最近一次 GitHub 发布（带 APK 附件）；车机在线更新读 R2 清单 |
+
+> 第三百零九轮起出包分**开发版（默认）/ 正式版**两条通道，App 里「设置 → 在线更新 → 更新渠道」选哪条就查哪条清单；两条通道各自独立，互不打扰。
 
 各轮产物与发布记录见 [CHANGELOG.md](CHANGELOG.md)。
 
