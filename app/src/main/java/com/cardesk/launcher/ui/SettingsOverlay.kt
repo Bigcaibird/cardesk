@@ -275,6 +275,14 @@ class SettingsOverlay(
     /** 删除已导入的视频壁纸（第207轮）。 */
     var onDeleteVideoWallpaper: (() -> Unit)? = null
 
+    // ---------------------------------------------------------------- 第三百一十八轮：夜间视频
+    /** 点「导入夜间视频…」（应用内视频选择器）。 */
+    var onPickNightVideoWallpaper: (() -> Unit)? = null
+    /** 点「用系统选择器导入夜间…」。 */
+    var onImportNightVideoWallpaper: (() -> Unit)? = null
+    /** 点「删除夜间视频」。 */
+    var onDeleteNightVideoWallpaper: (() -> Unit)? = null
+
     /**
      * 卡片风格改了（第五十八轮）：透明度 / 颜色 / 圆角。
      *
@@ -3016,11 +3024,27 @@ class SettingsOverlay(
                     logSetting("design_video_wallpaper_enabled", "视频壁纸", !on, on, LogTags.SETTING)
                     onVideoWallpaperChange?.invoke(on)
                 }
-                if (hasVideo) {
-                    note("已导入 ${com.cardesk.launcher.core.VideoWallpaper.sizeBytes(context) / 1024 / 1024} MB 视频")
-                } else {
-                    note("还没有导入视频")
-                }
+                // 第三百一十八轮：日夜各一段视频（夜间是**可选**的，没有就用日间那段）。
+                // 状态用 kvRow（原始数据），不占用「说明文字」白名单。
+                val hasNightVideo = com.cardesk.launcher.core.VideoWallpaper.hasNight(context)
+                kvRow(
+                    "日间视频",
+                    if (hasVideo) {
+                        "${com.cardesk.launcher.core.VideoWallpaper.sizeBytes(context) / 1024 / 1024} MB"
+                    } else {
+                        "未导入"
+                    },
+                    hasVideo,
+                )
+                kvRow(
+                    "夜间视频",
+                    if (hasNightVideo) {
+                        "${com.cardesk.launcher.core.VideoWallpaper.nightSizeBytes(context) / 1024 / 1024} MB"
+                    } else {
+                        "未导入 · 夜间沿用日间"
+                    },
+                    hasNightVideo,
+                )
                 // 画板 s07「视频壁纸」是并排两枚白按钮。
                 // 左「导入视频…」走**应用内**选择器（第219轮：实车上系统选择器秒退且不带 uri，
                 // 所以主路径换成自己列视频）；右「用系统选择器导入…」保留为**备选**。
@@ -3035,6 +3059,16 @@ class SettingsOverlay(
                         onDeleteVideoWallpaper?.invoke()
                     }
                 }
+                // 第三百一十八轮：夜间版单列两个按钮（导入 / 删除），
+                // 白天那两枚按钮的行为**不变**（导入日间版）。
+                actionPair(
+                    if (hasNightVideo) "更换夜间视频…" else "导入夜间视频…",
+                    if (hasNightVideo) "删除夜间视频" else "用系统选择器导入夜间…",
+                    onLeft = { onPickNightVideoWallpaper?.invoke() },
+                    onRight = {
+                        if (hasNightVideo) onDeleteNightVideoWallpaper?.invoke() else onImportNightVideoWallpaper?.invoke()
+                    },
+                )
             }
         }
 

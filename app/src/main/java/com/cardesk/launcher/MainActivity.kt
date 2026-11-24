@@ -816,6 +816,8 @@ class MainActivity : Activity() {
         Logx.i(LogTags.APP, "onStart")
         HomeForeground.isOnScreen = true
         GlobalDockService.onHomeOnScreen(true)
+        // 第三百一十八轮：回到前台，视频壁纸接着播（后台时是暂停的）。
+        whenLauncherReady { view -> view.resumeVideoWallpaper() }
     }
 
     /**
@@ -827,6 +829,8 @@ class MainActivity : Activity() {
         Logx.i(LogTags.APP, "onStop")
         HomeForeground.isOnScreen = false
         GlobalDockService.onHomeOnScreen(false)
+        // 第三百一十八轮：窗口离开屏幕 ⇒ 暂停视频（别再占解码器、别再耗电）。
+        whenLauncherReady { view -> view.pauseVideoWallpaper() }
         super.onStop()
     }
 
@@ -1253,7 +1257,8 @@ class MainActivity : Activity() {
             launcher?.onWallpaperPicked(uri)
             return
         }
-        if (requestCode == REQ_VIDEO_WALLPAPER) {
+        if (requestCode == REQ_VIDEO_WALLPAPER || requestCode == REQ_VIDEO_WALLPAPER_NIGHT) {
+            val nightVideo = requestCode == REQ_VIDEO_WALLPAPER_NIGHT
             // 第218轮：uri **多级兜底**。
             //
             // 实车诊断包实测（领克 AAOS 820A）：
@@ -1281,7 +1286,7 @@ class MainActivity : Activity() {
                     android.widget.Toast.LENGTH_SHORT,
                 ).show()
             }
-            launcher?.onVideoWallpaperPicked(uri)
+            launcher?.onVideoWallpaperPicked(uri, nightVideo)
             return
         }
         @Suppress("DEPRECATION")
@@ -1294,7 +1299,7 @@ class MainActivity : Activity() {
      * 用 `ACTION_OPEN_DOCUMENT` + 视频类型（不需要存储权限），
      * 结果在 [onActivityResult] 里回到 [LauncherView.onVideoWallpaperPicked]。
      */
-    fun startVideoWallpaperImport() {
+    fun startVideoWallpaperImport(night: Boolean = false) {
         // 第218轮：**降级链**。
         //
         // 实车诊断包实测：领克车机上 `ACTION_OPEN_DOCUMENT` + 「视频通配类型」
@@ -1318,7 +1323,10 @@ class MainActivity : Activity() {
                 continue
             }
             try {
-                startActivityForResult(intent, REQ_VIDEO_WALLPAPER)
+                startActivityForResult(
+                    intent,
+                    if (night) REQ_VIDEO_WALLPAPER_NIGHT else REQ_VIDEO_WALLPAPER,
+                )
                 com.cardesk.launcher.core.log.Logx.i(
                     com.cardesk.launcher.core.log.LogTags.SETTING,
                     "视频壁纸：已拉起选择器",
@@ -1353,6 +1361,9 @@ class MainActivity : Activity() {
 
         /** 系统相册选视频壁纸的请求码（第207轮）。 */
         private const val REQ_VIDEO_WALLPAPER = 0x5102
+
+        /** 第三百一十八轮：夜间版视频的请求码。 */
+        private const val REQ_VIDEO_WALLPAPER_NIGHT = 0x5103
 
         /**
          * 当前活着的桌面 Activity（全局 Dock 要把动作递进来时用）。

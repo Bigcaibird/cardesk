@@ -2611,6 +2611,10 @@ class LauncherView(context: Context) : FrameLayout(context) {
         Logx.i(LogTags.THEME, "主题切换", "night" to pal.night, "wasNight" to old.night, "accent" to prefs.accentColor)
         // 桌面换了日夜 → 告诉高德一声（跟随高德时除外，见 [pushDayNightToAmap]）。
         pushDayNightToAmap(pal.night)
+        // 第三百一十八轮：日夜切换时换视频（有夜间版才换；没有就继续播日间那段）。
+        if (old.night != pal.night || videoNightPlaying != pal.night) {
+            maybeSwitchVideoForNight()
+        }
         build()
     }
 
@@ -4174,6 +4178,10 @@ fun toggleCam360() {
         overlay.onImportVideoWallpaper = { requestVideoWallpaperImport() }
         overlay.onPickVideoWallpaper = { openVideoPicker() }
         overlay.onDeleteVideoWallpaper = { deleteVideoWallpaper() }
+        // 第三百一十八轮：夜间版视频（可选）。
+        overlay.onPickNightVideoWallpaper = { openVideoPicker(night = true) }
+        overlay.onImportNightVideoWallpaper = { requestVideoWallpaperImport(night = true) }
+        overlay.onDeleteNightVideoWallpaper = { deleteNightVideoWallpaper() }
         // 卡片风格（第五十八轮）：透明度 / 颜色 / 圆角 → 桌面重算 token 并刷新。
         overlay.onCardStyleChange = { applyCardStyle() }
         overlay.onShowCardColor = { showCardColorPicker() }
@@ -4291,7 +4299,12 @@ fun toggleCam360() {
     fun startVideoWallpaper() {
         // 第208轮：旧版本把视频存在 `filesDir`（媒体服务读不到），先尝试迁移。
         com.cardesk.launcher.core.VideoWallpaper.migrateLegacyFile(context.applicationContext)
-        val file = com.cardesk.launcher.core.VideoWallpaper.file(context.applicationContext)
+        // 第三百一十八轮：日/夜各一段视频（夜间版没导入就用日间版，不黑屏）。
+        val nightNow = videoNightOverride ?: runCatching {
+            com.cardesk.launcher.core.NightResolver.resolve(prefs, context)
+        }.getOrDefault(false)
+        val file = com.cardesk.launcher.core.VideoWallpaper.videoFile(context.applicationContext, nightNow)
+        videoNightPlaying = nightNow
         if (!file.isFile || file.length() <= 0L) {
             com.cardesk.launcher.core.log.Logx.w(
                 com.cardesk.launcher.core.log.LogTags.SETTING,
@@ -4302,6 +4315,9 @@ fun toggleCam360() {
             detachVideoWallpaperLayer()
             return
         }
+        // 第三百一十八轮：**先把画面交回静态壁纸**（图层隐藏），等新播放器首帧就绪再显示。
+        // 以前是直接释放旧播放器、图层保持可见 ⇒ 起播那一瞬露黑。
+        concealVideoWallpaperLayer("准备起播")
         // 第208轮：先把上一个播放器释放掉（层先留着 —— 下面还要用它起播）。
         releaseVideoPlayer()
         // 第214轮：**先**把窗口切成半透明，再挂视频层。
@@ -4435,7 +4451,22 @@ fun toggleCam360() {
      * - `TextureView`：`Surface(surfaceTexture)`（**拉模式**，帧被画进窗口 buffer）。
      */
     private fun prepareVideoWallpaper() {
-        val file = com.cardesk.launcher.core.VideoWallpaper.file(context.applicationContext)
+        // 第三百一十八轮：日/夜各一段视频 —— 这里和 [startVideoWallpaper] 必须用**同一套**
+        // 选文件逻辑，否则「检查的是夜间版、播的还是日间版」。
+        val nightNow = videoNightOverride ?: runCatching {
+            com.cardesk.launcher.core.NightResolver.resolve(prefs, context)
+        }.getOrDefault(false)
+        // override 只作用于这一次切换，用完就清掉（否则之后按时间切回白天时会拿错版本）。
+        videoNightOverride = null
+        val file = com.cardesk.launcher.core.VideoWallpaper.videoFile(context.applicationContext, nightNow)
+        videoNightPlaying = nightNow
+        com.cardesk.launcher.core.log.Logx.i(
+            com.cardesk.launcher.core.log.LogTags.SETTING,
+            "视频壁纸：选文件",
+            "night" to nightNow,
+            "file" to file.name,
+            "bytes" to file.length(),
+        )
         if (!file.isFile || file.length() <= 0L) {
             detachVideoWallpaperLayer()
             return
@@ -4444,6 +4475,9 @@ fun toggleCam360() {
         var mp: android.media.MediaPlayer? = null
         try {
             mp = android.media.MediaPlayer()
+            // 第三百一十八轮：视频壁纸**必须静音**。
+            // 导入的视频大多带音轨，不静音就会在车机上外放（壁纸不该发声）。
+            runCatching { mp.setVolume(0f, 0f) }
             // 第208轮：直接给路径 —— 视频文件放在**外部应用目录**
             // （标签 sdcardfs），媒体服务读得到。
             // 放在 `filesDir` 的话，平台签名包的目录标签是 `system_app_data_file`，
@@ -4466,13 +4500,25 @@ fun toggleCam360() {
                 videoSurface = android.view.Surface(st)
                 mp.setSurface(videoSurface!!)
             }
-            // 第208轮：视频分辨率多半不是 1920×1080，让它按比例铺满壁纸区。
+            // 第三百一十八轮：`WITH_CROPPING` 居中裁剪铺满（原来是 `SCALE_TO_FIT`，
+            // 非 16:9 的视频会在左右/上下留黑边 ⇒ 居中裁剪铺满）。
             runCatching {
-                mp.setVideoScalingMode(android.media.MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT)
+                mp.setVideoScalingMode(
+                    android.media.MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING,
+                )
+            }
+            // 第三百一十八轮：**首帧闸门** —— 解码器真的把第一帧推上屏（what==3）再显示图层。
+            mp.setOnInfoListener { player, what, _ ->
+                if (player === videoPlayer && what == android.media.MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) {
+                    revealVideoWallpaper("首帧就绪")
+                }
+                false
             }
             // 第208轮：`setLooping` 挪到 prepare 成功之后。
             mp.setOnPreparedListener {
-                videoWallpaperView.visibility = View.VISIBLE
+                // 第三百一十八轮：这里**只起播、不显示图层**。
+                // 显示交给首帧闸门（`MEDIA_INFO_VIDEO_RENDERING_START` → [revealVideoWallpaper]），
+                // 中途露黑的问题就是这样消掉的。
                 it.isLooping = true
                 // 第227轮：**接着上次的位置播**（surface 换过之后重建播放器时）。
                 // 不 seek 回去的话，视频会「跳回开头」重播一遍。
@@ -4489,20 +4535,10 @@ fun toggleCam360() {
                 }
                 videoResumePositionMs = 0L
                 videoSurfaceLost = false
-                // 第208轮：视频层在「壁纸」之上、「桌面内容」之下 ——
-                // 壁纸层不用画（让路），桌面卡片照常画在视频之上。
-                // 第214轮：`videoPassthrough` 的 setter 自带 `invalidate()`，
-                // 改完这一帧就会真的把壁纸擦掉（原来留着旧壁纸，画面透不出来）。
-                background.videoPassthrough = true
-                // 第214轮：`SurfaceView` 后端下，窗口 buffer 在视频那块区域必须透明，
-                // 视频才能从「窗口之下」透上来（详见 [applyVideoWindowFormat]）。
-                videoWallpaperActive = true
-                applyDesktopBackground(android.graphics.Color.TRANSPARENT)
                 it.start()
-                // 第231轮：起播就立刻采一次亮度，别等下一个 3 秒窗口 ——
-                // 那 3 秒里日间主题的深字会直接压在暗色视频上。
-                videoBackdropAtMs = 0L
-                handler.post { sampleVideoBackdropIfNeeded() }
+                // 第三百一十八轮：有的车机不发 `MEDIA_INFO_VIDEO_RENDERING_START`，
+                // 2 秒兜底直接把图层显示出来（总比一直看不见强）。
+                armVideoRevealFallback()
                 // 第225轮（临时诊断，验证完就删）：视频层到底有没有挂上、窗口是不是不透明。
                 com.cardesk.launcher.core.log.Logx.i(
                     com.cardesk.launcher.core.log.LogTags.SETTING,
@@ -4539,22 +4575,20 @@ fun toggleCam360() {
                     )
                     return@setOnErrorListener true
                 }
-                com.cardesk.launcher.core.log.Logx.w(
-                    com.cardesk.launcher.core.log.LogTags.SETTING,
-                    "视频壁纸播放出错，退回静态壁纸",
-                    "what" to what,
-                    "extra" to extra,
-                )
-                prefs.videoWallpaperEnabled = false
-                prefs.videoWallpaper = false
-                detachVideoWallpaperLayer()
-                background.videoPassthrough = false
-                applyVideoWindowFormat(false)
-                applyDesktopBackground(0xFF05080F.toInt())
+                // 第三百一十八轮：先重试（解码器偶发错误很常见），重试完还不行才退回静态。
+                handleVideoPlaybackError(what, extra)
                 true
             }
-            mp.prepareAsync()
+            // 第三百一十八轮：**先登记播放器、再 prepare** —— `onInfo` 里要靠它判归属
+            // （旧播放器的迟到回调不能把新图层显示出来）。
             videoPlayer = mp
+            videoPreparedOnce = false
+            videoFrameRevealed = false
+            // 起播期间壁纸照常画（passthrough=false）⇒ 解码器还在预热时看到的是壁纸，不是黑。
+            setVideoLayerVisibility(visible = false)
+            background.videoPassthrough = false
+            applyDesktopBackground(0xFF05080F.toInt())
+            mp.prepareAsync()
             prefs.videoWallpaper = true
             prefs.videoWallpaperEnabled = true
             background.custom = false
@@ -4581,6 +4615,13 @@ fun toggleCam360() {
             applyDesktopBackground(0xFF05080F.toInt())
         }
     }
+
+    /** 第三百一十八轮：首帧闸门兜底（毫秒）。 */
+    private val VIDEO_REVEAL_FALLBACK_MS = 2_000L
+
+    /** 第三百一十八轮：解码失败的重试次数与间隔。 */
+    private val VIDEO_MAX_RETRIES = 2
+    private val VIDEO_RETRY_DELAYS_MS = longArrayOf(800L, 2_000L)
 
     /** 第214轮：后端名字（写进日志，方便实车复测时确认走的哪条路）。 */
     private fun videoBackendName(): String =
@@ -4668,7 +4709,285 @@ fun toggleCam360() {
      */
     private var videoWallpaperActive = false
 
+    // ---------------------------------------------------------------- 第三百一十八轮：视频壁纸
+    /** 图层是否已经「显示出来」（首帧闸门过了）。 */
+    private var videoFrameRevealed = false
+
+    /** 首帧闸门的超时兜底（有的车机不发 `MEDIA_INFO_VIDEO_RENDERING_START`）。 */
+    private var videoRevealPost: Runnable? = null
+
+    /** 本次播放器是否已经 prepared 过（诊断用）。 */
+    private var videoPreparedOnce = false
+
+    /** 当前播的是不是夜间版。 */
+    private var videoNightPlaying = false
+
+    /**
+     * 第三百一十八轮：日夜切换时指定的版本（null = 按当前时间/光感重新判断）。
+     *
+     * 「立即切换」是**手动**改变外观，`NightResolver.resolve()` 仍按时间算（例如 19 点时
+     * 算白天）⇒ 只用 resolver 会又选回日间片。这条 override 由 [maybeSwitchVideoForNight]
+     * 写入，[prepareVideoWallpaper] 消费一次后清空。
+     */
+    private var videoNightOverride: Boolean? = null
+
+    /** 解码失败重试次数（第三百一十八轮）。 */
+    private var videoRetryCount = 0
+
+    /** 是不是被 Activity 生命周期暂停的（前台恢复时只恢复这种情况）。 */
+    private var videoPausedByLifecycle = false
+
+    /**
+     * 播放器释放的**后台线程**。
+     *
+     * `MediaPlayer.release()` 要等解码器/audio 线程收尾，在主线程做会卡几十毫秒
+     * （切壁纸时能感觉到掉帧）。这里丢到单线程 executor 上做，代际号保证顺序。
+     */
+    private var videoCodecExecutor: java.util.concurrent.ExecutorService? = null
+
+    /** 释放代际：每次释放 +1，防止「旧的释放」把新播放器弄坏。 */
+    private var videoReleaseGeneration = 0
+
     /** 第208轮：把视频壁纸层摘掉（完全不参与渲染）。 */
+    /**
+     * 第三百一十八轮：控制视频图层的可见性 —— **两种后端语义不同**。
+     *
+     * - `SurfaceView`：一旦 `INVISIBLE`/`GONE`，系统就**不再为它创建 surface**
+     *   ⇒ 解码器没有上屏的地方，`surfaceCreated` 永远不来，首帧闸门会卡死。
+     *   所以它必须一直保持 `VISIBLE`，隐藏靠「把壁纸画上去盖住」（`passthrough=false`）。
+     * - `TextureView`：帧是画进窗口 buffer 的（没有独立 surface），`INVISIBLE` 才是真的不画。
+     */
+    private fun setVideoLayerVisibility(visible: Boolean) {
+        if (videoBackend == com.cardesk.launcher.core.VideoWallpaper.BACKEND_SURFACE_VIEW) {
+            videoWallpaperView.visibility = View.VISIBLE
+        } else {
+            videoWallpaperView.visibility = if (visible) View.VISIBLE else View.INVISIBLE
+        }
+    }
+
+    /**
+     * 第三百一十八轮：把视频图层**显示出来**（首帧闸门通过 / 超时兜底）。
+     *
+     * 幂等：已经显示过就直接返回。
+     */
+    private fun revealVideoWallpaper(reason: String) {
+        if (videoFrameRevealed) return
+        if (videoPlayer == null) return
+        videoFrameRevealed = true
+        cancelVideoRevealFallback()
+        setVideoLayerVisibility(visible = true)
+        // 视频层在「壁纸」之上、「桌面内容」之下 —— 壁纸层让路，桌面卡片照常画在视频之上。
+        // `videoPassthrough` 的 setter 自带 `invalidate()`，改完这一帧就会真的把壁纸擦掉。
+        background.videoPassthrough = true
+        // `SurfaceView` 后端下，窗口 buffer 在视频那块区域必须透明（见 [applyVideoWindowFormat]）。
+        videoWallpaperActive = true
+        applyDesktopBackground(android.graphics.Color.TRANSPARENT)
+        // 第231轮：起播就立刻采一次亮度，别等下一个 3 秒窗口 ——
+        // 那 3 秒里日间主题的深字会直接压在暗色视频上。
+        videoBackdropAtMs = 0L
+        handler.post { sampleVideoBackdropIfNeeded() }
+        com.cardesk.launcher.core.log.Logx.i(
+            com.cardesk.launcher.core.log.LogTags.SETTING,
+            "视频壁纸图层已显示",
+            "reason" to reason,
+            "night" to videoNightPlaying,
+            "backend" to videoBackendName(),
+        )
+    }
+
+    /** 第三百一十八轮：首帧闸门的超时兜底。 */
+    private fun armVideoRevealFallback() {
+        cancelVideoRevealFallback()
+        val runnable = Runnable {
+            videoRevealPost = null
+            if (videoFrameRevealed) return@Runnable
+            // 第三百一十八轮：等不到首帧时，先问一句「这台机器到底解不解得出这段视频」。
+            // 解不出来的素材（例如宽度不是 16 的倍数、level 超出软解能力）一帧都不给，
+            // 这时直接按兜底显示就是**永久黑背景** —— 比不显示视频更糟。
+            val ctx = context.applicationContext
+            val nightNow = videoNightPlaying
+            val playing = videoPlayer
+            Thread({
+                val decodable = runCatching {
+                    com.cardesk.launcher.core.VideoProbe.decodeCheck(
+                        com.cardesk.launcher.core.VideoWallpaper.videoFile(ctx, nightNow),
+                    )
+                }.getOrDefault(false)
+                handler.post {
+                    // 探测期间可能已经换过视频/换过日夜/被关掉。
+                    if (videoPlayer !== playing || videoFrameRevealed) return@post
+                    if (decodable) {
+                        com.cardesk.launcher.core.log.Logx.w(
+                            com.cardesk.launcher.core.log.LogTags.SETTING,
+                            "视频壁纸：没等到首帧回调（探测可解码），按兜底显示",
+                        )
+                        revealVideoWallpaper("首帧超时兜底")
+                    } else {
+                        handleUndecodableVideo()
+                    }
+                }
+            }, "cardesk-video-probe").start()
+        }
+        videoRevealPost = runnable
+        handler.postDelayed(runnable, VIDEO_REVEAL_FALLBACK_MS)
+    }
+
+    /**
+     * 第三百一十八轮：视频解不出画面时退场（避免永久黑背景）。
+     *
+     * 与「解码器偶发报错」不同，这种是**素材本身解不出**，重试没有意义：
+     * 直接停掉视频壁纸、切回静态壁纸，并把开关关掉（否则下次开机又黑一次）。
+     */
+    private fun handleUndecodableVideo() {
+        com.cardesk.launcher.core.log.Logx.w(
+            com.cardesk.launcher.core.log.LogTags.SETTING,
+            "视频壁纸：这段视频解不出画面，切回静态壁纸",
+            "night" to videoNightPlaying,
+        )
+        stopVideoWallpaper()
+        Toast.makeText(context, "这段视频车机解不出画面，已切回静态壁纸", Toast.LENGTH_LONG).show()
+    }
+
+    private fun cancelVideoRevealFallback() {
+        videoRevealPost?.let { handler.removeCallbacks(it) }
+        videoRevealPost = null
+    }
+
+    /**
+     * 第三百一十八轮：把视频图层**藏掉**，画面交回静态壁纸（切视频/切日夜时用）。
+     *
+     * 藏掉时必须把 `videoPassthrough` 关掉，否则壁纸层还在让路 ⇒ 露黑。
+     */
+    private fun concealVideoWallpaperLayer(reason: String) {
+        cancelVideoRevealFallback()
+        videoFrameRevealed = false
+        // 第三百一十八轮：`SurfaceView` 后端不能 INVISIBLE（会掐掉 surface）⇒ 走辅助函数。
+        setVideoLayerVisibility(visible = false)
+        videoWallpaperActive = false
+        // `background` 是 `val`（构造时就建好了）⇒ 直接改。
+        background.videoPassthrough = false
+        applyDesktopBackground(0xFF05080F.toInt())
+        com.cardesk.launcher.core.log.Logx.i(
+            com.cardesk.launcher.core.log.LogTags.SETTING,
+            "视频壁纸图层已隐藏",
+            "reason" to reason,
+        )
+    }
+
+    /**
+     * 第三百一十八轮：解码失败的处理 —— 先重试，重试完还失败才退回静态壁纸。
+     *
+     * 解码器偶发错误很常见（切 surface、解码器被别的应用抢走），
+     * 以前第一次失败就把视频壁纸整个关掉、还要用户去设置里重新打开。
+     */
+    private fun handleVideoPlaybackError(what: Int, extra: Int) {
+        if (videoSurfaceLost) {
+            com.cardesk.launcher.core.log.Logx.w(
+                com.cardesk.launcher.core.log.LogTags.SETTING,
+                "视频壁纸：surface 丢失期间的报错，等新 surface 接上",
+                "what" to what,
+                "extra" to extra,
+            )
+            return
+        }
+        val attempt = videoRetryCount
+        if (attempt < VIDEO_MAX_RETRIES) {
+            videoRetryCount = attempt + 1
+            val delay = VIDEO_RETRY_DELAYS_MS[attempt]
+            com.cardesk.launcher.core.log.Logx.w(
+                com.cardesk.launcher.core.log.LogTags.SETTING,
+                "视频壁纸播放出错，稍后重试",
+                "what" to what,
+                "extra" to extra,
+                "attempt" to videoRetryCount,
+                "delayMs" to delay,
+            )
+            concealVideoWallpaperLayer("播放出错，等待重试")
+            handler.postDelayed({
+                if (prefs.videoWallpaperEnabled) {
+                    videoStarted = false
+                    videoResumePositionMs = 0L
+                    startVideoWallpaper()
+                }
+            }, delay)
+            return
+        }
+        com.cardesk.launcher.core.log.Logx.w(
+            com.cardesk.launcher.core.log.LogTags.SETTING,
+            "视频壁纸重试仍失败，退回静态壁纸",
+            "what" to what,
+            "extra" to extra,
+            "attempts" to videoRetryCount,
+        )
+        videoRetryCount = 0
+        prefs.videoWallpaperEnabled = false
+        prefs.videoWallpaper = false
+        detachVideoWallpaperLayer()
+        background.videoPassthrough = false
+        applyVideoWindowFormat(false)
+        applyDesktopBackground(0xFF05080F.toInt())
+    }
+
+    /**
+     * 第三百一十八轮：后台时暂停视频（以前全屏导航盖住桌面时仍在解码，白耗电+占解码器）。
+     *
+     * 只在视频**正在播**的时候暂停；不释放播放器（回来时直接 start 接着播，不重解码）。
+     */
+    fun pauseVideoWallpaper() {
+        val mp = videoPlayer ?: return
+        if (!videoWallpaperActive && !videoFrameRevealed) return
+        runCatching { if (mp.isPlaying) mp.pause() }
+        videoPausedByLifecycle = true
+        com.cardesk.launcher.core.log.Logx.i(
+            com.cardesk.launcher.core.log.LogTags.SETTING,
+            "视频壁纸：后台暂停",
+        )
+    }
+
+    /** 第三百一十八轮：回到前台时接着播。 */
+    fun resumeVideoWallpaper() {
+        if (!videoPausedByLifecycle) return
+        videoPausedByLifecycle = false
+        val mp = videoPlayer ?: return
+        runCatching { if (!mp.isPlaying) mp.start() }
+        com.cardesk.launcher.core.log.Logx.i(
+            com.cardesk.launcher.core.log.LogTags.SETTING,
+            "视频壁纸：回到前台继续播放",
+        )
+    }
+
+    /**
+     * 第三百一十八轮：日夜切换时换视频（有夜间版才换）。
+     *
+     * 做法：先隐藏图层（画面交回静态壁纸）→ 释放旧播放器 → 重新 prepare 另一段。
+     * 不做双播放器交叉淡入（车机上双解码不划算）。
+     */
+    private fun maybeSwitchVideoForNight() {
+        if (!prefs.videoWallpaperEnabled || videoPlayer == null) return
+        val nightNow = pal.night
+        if (nightNow == videoNightPlaying) return
+        val hasNight = com.cardesk.launcher.core.VideoWallpaper.hasNight(context.applicationContext)
+        // 没有夜间版 ⇒ 继续播那段日间视频，不用重启。
+        if (!hasNight) {
+            videoNightPlaying = nightNow
+            return
+        }
+        com.cardesk.launcher.core.log.Logx.i(
+            com.cardesk.launcher.core.log.LogTags.SETTING,
+            "视频壁纸：日夜切换，换一段视频",
+            "night" to nightNow,
+        )
+        concealVideoWallpaperLayer("日夜切换")
+        detachVideoWallpaperLayer()
+        releaseVideoPlayer()
+        videoStarted = false
+        videoResumePositionMs = 0L
+        videoRetryCount = 0
+        // 「立即切换」改的是外观本身，不能再用时间推出来的日夜去选片。
+        videoNightOverride = nightNow
+        startVideoWallpaper()
+    }
+
     private fun detachVideoWallpaperLayer() {
         pendingVideoWallpaperStart = false
         if (!videoLayerAttached) return
@@ -4700,6 +5019,7 @@ fun toggleCam360() {
         // 第208轮：连同「等 Surface 就绪再起播」的挂起请求一起取消 ——
         // 否则用户关了视频壁纸，Surface 稍后就绪时又自己播起来。
         pendingVideoWallpaperStart = false
+        videoNightOverride = null
         releaseVideoPlayer()
         detachVideoWallpaperLayer()
         // 恢复壁纸层与桌面底色（视频走的时候它们要让路）
@@ -4724,11 +5044,29 @@ fun toggleCam360() {
      * 如果这里顺手把层关掉，SurfaceTexture 刚建好就被销毁，起播必然失败。
      */
     private fun releaseVideoPlayer() {
-        videoPlayer?.let {
-            runCatching { it.stop() }
-            runCatching { it.release() }
-        }
+        // 第三百一十八轮：先把引用摘下来，真正的 stop/release 丢到后台线程做
+        // （`MediaPlayer.release()` 会等解码线程收尾，主线程做会掉帧）。
+        val old = videoPlayer
         videoPlayer = null
+        if (old != null) {
+            val generation = ++videoReleaseGeneration
+            val executor = videoCodecExecutor
+                ?: java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+                    Thread(r, "cardesk-video-codec").also { it.isDaemon = true }
+                }.also { videoCodecExecutor = it }
+            runCatching {
+                executor.execute {
+                    if (generation <= videoReleaseGeneration) {
+                        runCatching { old.stop() }
+                        runCatching { old.release() }
+                    }
+                }
+            }.onFailure {
+                // executor 已经关了（Activity 销毁）⇒ 只能就地放掉。
+                runCatching { old.stop() }
+                runCatching { old.release() }
+            }
+        }
         // 第208轮：播放器放掉之后，Surface 才能放 ——
         // 顺序反了会让解码器正在用的 surface 提前断开。
         runCatching { videoSurface?.release() }
@@ -4745,7 +5083,7 @@ fun toggleCam360() {
     }
 
     /** 视频壁纸选完后的结果：后台拷贝 + 落盘。 */
-    fun onVideoWallpaperPicked(uri: android.net.Uri?) {
+    fun onVideoWallpaperPicked(uri: android.net.Uri?, night: Boolean = false) {
         com.cardesk.launcher.core.log.Logx.i(
             com.cardesk.launcher.core.log.LogTags.SETTING,
             "视频壁纸：进入导入处理",
@@ -4760,23 +5098,46 @@ fun toggleCam360() {
         // （自动启动的是 `kotlin.concurrent.thread { … }`）。
         // 以前漏了 `.start()`，导入线程从来没跑过 —— 选完视频毫无反应。
         Thread {
-            val ok = com.cardesk.launcher.core.VideoWallpaper
-                .importFromUri(context.applicationContext, uri)
+            val ctx = context.applicationContext
+            // 第三百一十八轮：**先校验再导入**。
+            // 以前是先覆盖目标文件、再校验、不合格再删 —— 用户原来那段能用的视频
+            // 会被一起删掉（实测：导入一个解不出画面的文件，日间视频直接没了）。
+            val temp = copyUriToCache(ctx, uri)
+            val verdict = temp?.let { com.cardesk.launcher.core.VideoProbe.validate(it) }
+            val ok = if (verdict is com.cardesk.launcher.core.VideoSpec.Verdict.Reject || temp == null) {
+                false
+            } else {
+                com.cardesk.launcher.core.VideoWallpaper.importFromFile(ctx, temp, night)
+            }
+            temp?.let { runCatching { it.delete() } }
+            val rejected = verdict is com.cardesk.launcher.core.VideoSpec.Verdict.Reject
+            if (rejected) {
+                com.cardesk.launcher.core.log.Logx.w(
+                    com.cardesk.launcher.core.log.LogTags.SETTING,
+                    "视频壁纸：导入被拒绝（这台车解不出画面）",
+                    "reason" to (verdict as com.cardesk.launcher.core.VideoSpec.Verdict.Reject).reason,
+                    "night" to night,
+                )
+            }
             post {
-                if (ok) {
+                if (ok && !rejected) {
                     startVideoWallpaper()
-                    toast("视频壁纸已启用")
-                    refreshSettingsWallpaper()
+                    toast(when {
+                        night -> "夜间视频已导入"
+                        verdict is com.cardesk.launcher.core.VideoSpec.Verdict.Warn -> verdict.reason
+                        else -> "视频壁纸已启用"
+                    })
                 } else {
-                    toast("视频壁纸导入失败")
+                    toast((verdict as? com.cardesk.launcher.core.VideoSpec.Verdict.Reject)?.reason ?: "视频壁纸导入失败")
                 }
+                refreshSettingsWallpaper()
             }
         }.start()
     }
 
     /** 打开系统相册选视频（第218轮的降级链，仍保留作**备选**）。 */
-    private fun requestVideoWallpaperImport() {
-        (context as? com.cardesk.launcher.MainActivity)?.startVideoWallpaperImport()
+    private fun requestVideoWallpaperImport(night: Boolean = false) {
+        (context as? com.cardesk.launcher.MainActivity)?.startVideoWallpaperImport(night)
     }
 
     // ---------------------------------------------------------- 应用内视频库（第219轮）
@@ -4801,7 +5162,7 @@ fun toggleCam360() {
      * 车机上本包是 **uid 1000 系统应用** ⇒ 权限天然可用；
      * 普通安装（AVD 上就是这样）则要**运行时**申请。
      */
-    fun openVideoPicker() {
+    fun openVideoPicker(night: Boolean = false) {
         if (videoPicker?.isOpen == true) return
         // 设置页先关掉，避免两层浮层叠着。
         closeSettings()
@@ -4814,8 +5175,8 @@ fun toggleCam360() {
         }
 
         val overlay = videoPicker ?: VideoPickerOverlay(context).also { videoPicker = it }
-        overlay.onPick = { item -> importVideoFromLibrary(item) }
-        overlay.onUseSystemPicker = { requestVideoWallpaperImport() }
+        overlay.onPick = { item -> importVideoFromLibrary(item, night) }
+        overlay.onUseSystemPicker = { requestVideoWallpaperImport(night) }
         if (overlay.parent == null) {
             content.addView(overlay, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         }
@@ -4827,20 +5188,39 @@ fun toggleCam360() {
      *
      * 与 [onVideoWallpaperPicked] 是同一套流程，只是数据来源是**文件**而不是 content Uri。
      */
-    private fun importVideoFromLibrary(item: com.cardesk.launcher.core.VideoLibrary.Item) {
+    private fun importVideoFromLibrary(
+        item: com.cardesk.launcher.core.VideoLibrary.Item,
+        night: Boolean = false,
+    ) {
         toast("正在导入视频壁纸…")
         val path = item.path
         Thread {
-            val ok = com.cardesk.launcher.core.VideoWallpaper
-                .importFromFile(context.applicationContext, java.io.File(path))
+            val ctx = context.applicationContext
+            val source = java.io.File(path)
+            // 第三百一十八轮：**先校验源文件再导入** —— 不合格就不动已经能用的那一份。
+            val verdict = com.cardesk.launcher.core.VideoProbe.validate(source)
+            val rejected = verdict is com.cardesk.launcher.core.VideoSpec.Verdict.Reject
+            if (rejected) {
+                com.cardesk.launcher.core.log.Logx.w(
+                    com.cardesk.launcher.core.log.LogTags.SETTING,
+                    "视频壁纸：导入被拒绝（这台车解不出画面）",
+                    "reason" to (verdict as com.cardesk.launcher.core.VideoSpec.Verdict.Reject).reason,
+                    "night" to night,
+                )
+            }
+            val ok = if (rejected) false else com.cardesk.launcher.core.VideoWallpaper.importFromFile(ctx, source, night)
             post {
-                if (ok) {
+                if (ok && !rejected) {
                     startVideoWallpaper()
-                    toast("视频壁纸已启用")
-                    refreshSettingsWallpaper()
+                    toast(when {
+                        night -> "夜间视频已导入"
+                        verdict is com.cardesk.launcher.core.VideoSpec.Verdict.Warn -> verdict.reason
+                        else -> "视频壁纸已启用"
+                    })
                 } else {
-                    toast("视频壁纸导入失败")
+                    toast((verdict as? com.cardesk.launcher.core.VideoSpec.Verdict.Reject)?.reason ?: "视频壁纸导入失败")
                 }
+                refreshSettingsWallpaper()
             }
         }.start()
     }
@@ -4851,6 +5231,56 @@ fun toggleCam360() {
         com.cardesk.launcher.core.VideoWallpaper.delete(context.applicationContext)
         toast("视频壁纸已删除")
         refreshSettingsWallpaper()
+    }
+
+    /** 第三百一十八轮：只删夜间版（日间那段继续用）。 */
+    private fun deleteNightVideoWallpaper() {
+        com.cardesk.launcher.core.VideoWallpaper.deleteNight(context.applicationContext)
+        toast("夜间视频已删除")
+        // 正在播夜间版 ⇒ 换回日间版。
+        if (videoNightPlaying && prefs.videoWallpaperEnabled) {
+            startVideoWallpaper()
+        }
+        refreshSettingsWallpaper()
+    }
+
+    /**
+     * 第三百一十八轮：把 content Uri 抄进缓存目录（**只用于导入前校验**）。
+     *
+     * 校验要按路径读视频（`MediaCodec` 只吃文件/`FileDescriptor`），
+     * 而系统选择器给的是 `content://`；先落一份临时文件，校验完就删。
+     */
+    private fun copyUriToCache(ctx: android.content.Context, uri: android.net.Uri): java.io.File? {
+        val dir = java.io.File(ctx.cacheDir, "video-import")
+        dir.mkdirs()
+        val temp = java.io.File(dir, "probe-${System.currentTimeMillis()}.mp4")
+        return try {
+            val input = ctx.contentResolver.openInputStream(uri) ?: return null
+            input.use { src ->
+                java.io.FileOutputStream(temp).use { sink ->
+                    val buf = ByteArray(256 * 1024)
+                    while (true) {
+                        val n = src.read(buf)
+                        if (n <= 0) break
+                        sink.write(buf, 0, n)
+                    }
+                }
+            }
+            if (temp.length() <= 0L) {
+                temp.delete()
+                null
+            } else {
+                temp
+            }
+        } catch (e: Throwable) {
+            runCatching { temp.delete() }
+            com.cardesk.launcher.core.log.Logx.w(
+                com.cardesk.launcher.core.log.LogTags.SETTING,
+                "视频壁纸：导入前拷贝失败",
+                e,
+            )
+            null
+        }
     }
 
     // ---------------------------------------------------------- 自定义壁纸（第 105 轮）
@@ -6234,6 +6664,9 @@ fun toggleCam360() {
     }
 
     override fun onDetachedFromWindow() {
+        // 第三百一十八轮：视频解码 executor 关掉（Activity 销毁，不需要再复用）。
+        videoCodecExecutor?.shutdown()
+        videoCodecExecutor = null
         MusicController.get().removeListener(mediaListener)
         MusicController.get().removeActionStateListener(actionStateListener)
         // 第211轮：这一句会**连壁纸轮播心跳一起清掉** ——

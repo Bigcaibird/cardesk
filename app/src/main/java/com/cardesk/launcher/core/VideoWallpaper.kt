@@ -38,7 +38,17 @@ object VideoWallpaper {
     const val MAX_BYTES: Long = 64L * 1024 * 1024
 
     private const val DIR = "video_wallpaper"
-    private const val FILE = "wallpaper.mp4"
+
+    /** 日间版（也就是老版本唯一的那个文件，文件名保持不变，存量用户不用迁移）。 */
+    private const val FILE_DAY = "wallpaper.mp4"
+
+    /**
+     * 夜间版（第三百一十八轮）。
+     *
+     * 「日夜各一段视频」是**可选**的：没导入夜间版时，夜间继续用日间版，
+     * 不会黑屏（见 [VideoSpec.chooseFile]）。
+     */
+    private const val FILE_NIGHT = "wallpaper_night.mp4"
 
     /**
      * 视频文件所在目录。
@@ -71,8 +81,36 @@ object VideoWallpaper {
         return base
     }
 
-    /** 落盘的视频文件。 */
-    fun file(context: Context): File = File(dir(context), FILE)
+    /** 落盘的**日间版**视频文件（老调用方一直用的是这一个）。 */
+    fun file(context: Context): File = dayFile(context)
+
+    /** 日间版文件。 */
+    fun dayFile(context: Context): File = File(dir(context), FILE_DAY)
+
+    /** 夜间版文件（第三百一十八轮）。 */
+    fun nightFile(context: Context): File = File(dir(context), FILE_NIGHT)
+
+    /**
+     * 当前该播的那个文件：夜间且有夜间版 ⇒ 夜间版，否则日间版。
+     *
+     * 选择规则在 [VideoSpec.chooseFile] 里（纯函数，可单测）。
+     */
+    fun videoFile(context: Context, night: Boolean): File {
+        val chosen = VideoSpec.chooseFile(dayFile(context), nightFile(context), night)
+        return chosen ?: dayFile(context)
+    }
+
+    /** 是否导入过**夜间版**。 */
+    fun hasNight(context: Context): Boolean {
+        val f = nightFile(context)
+        return f.isFile && f.length() > 0
+    }
+
+    /** 夜间版的字节数（没导入就 0）。 */
+    fun nightSizeBytes(context: Context): Long {
+        val f = nightFile(context)
+        return if (f.isFile) f.length() else 0L
+    }
 
     /**
      * 旧版本把视频存在 `filesDir`（媒体服务读不到），这里做一次**迁移**。
@@ -80,9 +118,9 @@ object VideoWallpaper {
      * 迁移过就不用再管旧文件；失败也不影响新路径。
      */
     fun migrateLegacyFile(context: Context) {
-        val legacy = File(File(context.filesDir, DIR), FILE)
+        val legacy = File(File(context.filesDir, DIR), FILE_DAY)
         if (!legacy.isFile || legacy.length() <= 0L) return
-        val target = file(context)
+        val target = dayFile(context)
         if (target.isFile && target.length() > 0L) return
         runCatching {
             target.parentFile?.mkdirs()
@@ -109,7 +147,7 @@ object VideoWallpaper {
      *
      * 失败都返回 false 并写日志，调用方只需要提示用户。
      */
-    fun importFromUri(context: Context, uri: Uri): Boolean {
+    fun importFromUri(context: Context, uri: Uri, night: Boolean = false): Boolean {
         return try {
             Logx.i(LogTags.SETTING, "视频壁纸：开始导入", "uri" to uri.toString())
             val resolver = context.contentResolver
@@ -119,9 +157,9 @@ object VideoWallpaper {
                 Logx.w(LogTags.SETTING, "视频壁纸导入失败：打不开视频")
                 return false
             }
-            copyToWallpaper(context, input)
+            copyToWallpaper(context, input, night)
         } catch (e: Exception) {
-            runCatching { file(context).delete() }
+            // 第三百一十八轮：失败时**不动**已导入的旧壁纸（原子改名保证了它还在）。
             Logx.w(LogTags.SETTING, "视频壁纸导入失败", e)
             false
         }
@@ -135,7 +173,7 @@ object VideoWallpaper {
      *
      * @param file 视频文件（车机上是共享存储里的绝对路径）。
      */
-    fun importFromFile(context: Context, file: File): Boolean {
+    fun importFromFile(context: Context, file: File, night: Boolean = false): Boolean {
         return try {
             Logx.i(
                 LogTags.SETTING,
@@ -148,9 +186,9 @@ object VideoWallpaper {
                 return false
             }
             val input = FileInputStream(file)
-            copyToWallpaper(context, input)
+            copyToWallpaper(context, input, night)
         } catch (e: Exception) {
-            runCatching { file(context).delete() }
+            // 第三百一十八轮：失败时**不动**已导入的旧壁纸（原子改名保证了它还在）。
             Logx.w(LogTags.SETTING, "视频壁纸导入失败", e)
             false
         }
@@ -162,11 +200,11 @@ object VideoWallpaper {
      * 先写临时文件，成功了再改名 —— 避免中途失败留下一个半截文件
      * （下次启动会拿它去播，MediaPlayer 直接报错）。
      */
-    private fun copyToWallpaper(context: Context, input: InputStream): Boolean {
+    private fun copyToWallpaper(context: Context, input: InputStream, night: Boolean): Boolean {
+        val out = videoFile(context, night)
+        out.parentFile?.mkdirs()
+        val tmp = File(out.parentFile, "${out.name}.tmp")
         return try {
-            val out = file(context)
-            out.parentFile?.mkdirs()
-            val tmp = File(out.parentFile, "$FILE.tmp")
             var total = 0L
             input.use { src ->
                 FileOutputStream(tmp).use { sink ->
@@ -204,20 +242,29 @@ object VideoWallpaper {
             )
             true
         } catch (e: Exception) {
-            runCatching { file(context).delete() }
+            // 只清这次的临时文件：目标文件要么还是旧壁纸、要么已经被原子改名换成新的。
+            runCatching { tmp.delete() }
             Logx.w(LogTags.SETTING, "视频壁纸导入失败", e)
             false
         }
     }
 
-    /** 删除视频壁纸（文件）。 */
+    /** 删除视频壁纸（日间 + 夜间两份都删）。 */
     fun delete(context: Context) {
-        runCatching { file(context).delete() }
-        runCatching { File(file(context).parentFile, "$FILE.tmp").delete() }
+        deleteNight(context)
+        deleteFile(dayFile(context))
         // 旧目录（媒体服务读不到的那份）也一起清掉。
-        val legacy = File(File(context.filesDir, DIR), FILE)
-        runCatching { legacy.delete() }
-        runCatching { File(legacy.parentFile, "$FILE.tmp").delete() }
+        deleteFile(File(File(context.filesDir, DIR), FILE_DAY))
+    }
+
+    /** 只删**夜间版**（第三百一十八轮）。 */
+    fun deleteNight(context: Context) {
+        deleteFile(nightFile(context))
+    }
+
+    private fun deleteFile(file: File) {
+        runCatching { file.delete() }
+        runCatching { File(file.parentFile, "${file.name}.tmp").delete() }
     }
 
     // ------------------------------------------------------------------ 纯函数（可单测）
