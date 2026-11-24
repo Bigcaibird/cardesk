@@ -159,12 +159,16 @@ object Car3dSettings {
 }
 
 /**
- * `car3d` 资产仓库：`assets/car3d/<dir>/model.json` + 位图（懒加载 + 小 LRU）。
+ * `car3d` 资产仓库：`car3d/<dir>/model.json` + 位图（懒加载 + 小 LRU）。
+ *
+ * **APK 不再内置车模图**：所有资产来自远端资源包（`CarModelRemote` 装到
+ * `filesDir/car3d-models/`，源目录是 `assets-src/car3d/`，发布成 `car-models/` 下的 zip 包）。
+ * 没装过/断网时这里取不到图，调用方回退 `CarTopPainter` 的自绘俯视车模。
  *
  * ## 目录结构（规范 §2）
  *
  * ```
- * assets/car3d/lynk01/
+ * car3d/lynk01/
  *   model.json
  *   top/closed.webp  top/lf.webp  top/all.webp  top/win.webp  top/trunk.webp ...
  *   top/anim_lf_0.webp ... anim_win_2.webp ... anim_trunk_5.webp
@@ -180,7 +184,8 @@ object Car3dSettings {
  *    最多 [MAX_BYTES] 字节（卡片 79×158≈50KB、弹窗 251×448≈450KB，够两边各留几帧）；
  * 3. **失败永久**：[model] 解析失败 → 该车型目录**永久**返回 null；
  *    某张图缺失 → 记进 [missing]（不再重试 IO）；
- *    连 `top/closed` 都找不到 → [broken] 记死，调用方永久回退 `CarTopPainter`。
+ *    连 `top/closed` 都找不到 → [broken] 记死，调用方永久回退 `CarTopPainter`
+ *    —— 直到资源包补齐后调一次 [reset]（见 `CarModelAutoSync.onUpdated` 的接线）。
  *
  * 全部方法都应只在主线程（绘制线程）调用；内部仍用 `synchronized` 兜住测试/预览的多线程。
  */

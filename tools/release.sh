@@ -36,9 +36,9 @@
 #
 # 第一九五轮起收紧：
 # - 包名**固定**为 `com.ecarx.cardesk`（自有包名）——
-#   不再出 `com.ecarx.qq.tool` 那个「替换参考 App」的版本
+#   不再出 `com.ecarx.qq.tool` 那个「替换原车桌面」的版本
 #   （`app/build.gradle.kts` 里 `assembleSystem` 不带 `-PcardeskPackage`
-#   时的默认行为）。要替换参考 App 的话自己单独构建，别走发布脚本。
+#   时的默认行为）。要替换原车桌面的话自己单独构建，别走发布脚本。
 # - 单测跑 **system 变体**（`testSystemUnitTest`），
 #   不再跑 debug 变体 —— 出的是 system 包，测的也该是 system。
 #

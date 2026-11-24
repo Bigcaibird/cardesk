@@ -4270,10 +4270,8 @@ class SettingsOverlay(
             note("当前：车模资产不含${missingViews.joinToString("、")}图，选中会先按 3/4 侧视显示")
         }
         }  // showViewRow
-        // 第三百一十轮：车模图支持远端资源包。
-        //
-        // 默认仍然用内置资产（首次安装、断网都照常显示）；点一次「检查更新」就能把更新的
-        // 高清图拉到本地缓存，之后解码优先读缓存、缓存缺失再回退内置资产。
+        // 第三百一十轮：车模图支持远端资源包；第三百一十二轮起 APK 不再内置车模图
+        // （首次安装/断网先用自绘俯视车模，启动时后台自动补齐，补齐后免重启换写实图）。
         //
         // 放在「写实车模」这一页，是因为它改的就是写实车模用的那套图；
         // 把它塞进「在线更新」会让用户以为整个桌面在升级（那页是换 APK 的）。
@@ -4286,9 +4284,9 @@ class SettingsOverlay(
         kvRow(
             "本地资源包",
             if (installed.isEmpty()) {
-                "内置资产"
+                "未安装（启动时自动补齐）"
             } else {
-                "${installed.size} 个车型 · 当前 " + if (currentVer > 0) "v$currentVer" else "内置"
+                "${installed.size} 个车型 · 当前 v$currentVer"
             },
             installed.isNotEmpty(),
         )

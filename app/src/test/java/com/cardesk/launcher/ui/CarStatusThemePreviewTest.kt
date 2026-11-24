@@ -25,6 +25,8 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import com.cardesk.launcher.core.car3d.TestCarAssets
+import org.junit.Rule
 
 /**
  * 车况卡 / 弹窗页的**日夜对比**预览图。
@@ -41,6 +43,7 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [34], qualifiers = "w1920dp-h1080dp-land")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class CarStatusThemePreviewTest {
+    @get:Rule val carAssets = TestCarAssets.Rule()
 
     private val dir: File = File("../preview").apply { mkdirs() }
 

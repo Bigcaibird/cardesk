@@ -35,6 +35,8 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import com.cardesk.launcher.core.car3d.TestCarAssets
+import org.junit.Rule
 
 /**
  * 第163轮：写实车模（car3d）的**静态状态**预览图。
@@ -49,6 +51,7 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [34], qualifiers = "w1920dp-h1080dp-land")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class Car3dPreviewTest {
+    @get:Rule val carAssets = TestCarAssets.Rule()
 
     private val cardRegion = Rect(1488, 376, 1876, 756)
     private val tireCardRegion = Rect(1086, 780, 1436, 930)

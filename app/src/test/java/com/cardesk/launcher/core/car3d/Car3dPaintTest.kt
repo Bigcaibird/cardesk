@@ -21,6 +21,7 @@ import org.robolectric.Robolectric
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.junit.Rule
 
 /**
  * [Car3dPainter] 的绘制契约测试（Robolectric 离屏，真实解码占位资产）。
@@ -35,6 +36,7 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [34], qualifiers = "w1920dp-h1080dp-land")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class Car3dPaintTest {
+    @get:Rule val carAssets = TestCarAssets.Rule()
 
     private val context: Context get() = RuntimeEnvironment.getApplication()
 

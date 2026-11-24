@@ -3,9 +3,9 @@
 
 约定（与 analysis/领克01写实车模-烘焙管线与运行时规范.md 对齐）：
   view  设计槽位        slot 文件名前缀                 安装到
-  top   280x500          dialog-<W>x<H>-<state>          assets/car3d/<model>/top/
-  card   88x176          card-<W>x<H>-<state>            assets/car3d/<model>/card/
-  hero  680x380          hero-<W>x<H>-<state>            assets/car3d/<model>/hero/<color>/
+  top   280x500          dialog-<W>x<H>-<state>          assets-src/car3d/<model>/top/
+  card   88x176          card-<W>x<H>-<state>            assets-src/car3d/<model>/card/
+  hero  680x380          hero-<W>x<H>-<state>            assets-src/car3d/<model>/hero/<color>/
   动画   top 家族        dialog-*-anim_<kind>_<i>        assets/.../top/anim_<kind>_<i>.webp
 
 车漆多色：hero 家族按颜色分目录。深灰是主版（文件名不带后缀），

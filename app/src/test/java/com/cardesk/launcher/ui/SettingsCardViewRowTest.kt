@@ -9,6 +9,8 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import com.cardesk.launcher.core.car3d.TestCarAssets
+import org.junit.Rule
 
 /**
  * 第179轮：「车况卡视角」设置行在纯俯视资产下整行隐藏。
@@ -20,6 +22,7 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w1920dp-h1080dp-land")
 class SettingsCardViewRowTest {
+    @get:Rule val carAssets = TestCarAssets.Rule()
 
     private fun model(views: Map<String, Car3dAssets.ViewSpec>): Car3dAssets.Model =
         Car3dAssets.Model(

@@ -8,7 +8,7 @@
 
 - 让运行时（`core/car3d/*`）从第一天起就能接真实资产目录结构跑通；
 - 让 Robolectric 的 preview 截图能**看出**「哪扇门开、哪扇窗开、尾门开」；
-- 总量 < 200KB（真实烘焙图之后原地替换 `assets/car3d/lynk01/` 即可）。
+- 总量 < 200KB（真实烘焙图之后原地替换 `assets-src/car3d/lynk01/` 即可）。
 
 风格刻意做得极简：车身轮廓 + 玻璃/门/轮/灯色块。不做抗锯齿之外的任何修饰。
 
@@ -19,9 +19,9 @@
 
 产物：
 
-    app/src/main/assets/car3d/lynk01/model.json
-    app/src/main/assets/car3d/lynk01/top/<state>.png
-    app/src/main/assets/car3d/lynk01/top/anim_<kind>_<i>.png
+    assets-src/car3d/lynk01/model.json
+    assets-src/car3d/lynk01/top/<state>.png
+    assets-src/car3d/lynk01/top/anim_<kind>_<i>.png
 """
 
 import json
@@ -34,7 +34,7 @@ from PIL import Image, ImageDraw
 W, H = 280, 500
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.normpath(os.path.join(ROOT, "..", "..", "app", "src", "main", "assets", "car3d", "lynk01"))
+OUT = os.path.normpath(os.path.join(ROOT, "..", "..", "assets-src", "car3d", "lynk01"))
 TOP = os.path.join(OUT, "top")
 
 # 配色取 `core/CarColors.kt` 的夜间一套（车漆/玻璃/轮胎），开状态用橙色高亮。

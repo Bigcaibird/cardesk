@@ -17,6 +17,8 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import com.cardesk.launcher.core.car3d.TestCarAssets
+import org.junit.Rule
 
 /**
  * 第189轮：「车门未关」弹窗里的**车模被拉变形**的回归。
@@ -42,6 +44,7 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [34], qualifiers = "w1920dp-h1080dp-land")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class CarTopStatusViewAspectTest {
+    @get:Rule val carAssets = TestCarAssets.Rule()
 
     @Before
     fun setUp() {

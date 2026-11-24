@@ -4,7 +4,7 @@
 
 ## 为什么要有这个脚本
 
-车模图片（`app/src/main/assets/car3d/<dir>/`，每个 360K~430K）不跟着 APK 走，
+车模图片（`assets-src/car3d/<dir>/`，每个 360K~430K）**不跟着 APK 走**
 而是作为**独立资源包**放到公开对象存储上，App 按车型单独下载/更新（见
 `core/car3d/CarModelRemote.kt`）。这里负责把它们打成可直接下载的产物：
 
@@ -52,7 +52,7 @@ FORMAT = "cardesk.carmodels/1"
 INDEX_VERSION = 1
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_ASSETS = os.path.join(REPO_ROOT, "app", "src", "main", "assets", "car3d")
+DEFAULT_ASSETS = os.path.join(REPO_ROOT, "assets-src", "car3d")
 DEFAULT_OUT = os.path.join(REPO_ROOT, "dist", "car-models")
 DEFAULT_ACCOUNT_ID = "889bd2a63b8928674c13e38148873176"
 DEFAULT_BUCKET = "file"
@@ -289,7 +289,7 @@ def main(argv=None):
     parser.add_argument(
         "--assets-dir",
         default=DEFAULT_ASSETS,
-        help="车模资产根目录（默认 app/src/main/assets/car3d）",
+        help="车模资产根目录（默认 assets-src/car3d）",
     )
     parser.add_argument(
         "--out-dir",

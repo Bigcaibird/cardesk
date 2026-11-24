@@ -13,6 +13,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.junit.Rule
 
 /**
  * 俯视 32 态资产（第179轮）的合约测试。
@@ -30,6 +31,7 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [34], qualifiers = "w1920dp-h1080dp-land")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class Car3dAssetOrientationTest {
+    @get:Rule val carAssets = TestCarAssets.Rule()
 
     private val context: Context get() = RuntimeEnvironment.getApplication()
 

@@ -231,16 +231,39 @@ object CarModelRemote {
 
     // ------------------------------------------------------------ 读取（绘制/解析路径）
 
+    /**
+     * 丢弃进程内的磁盘状态镜像（`versions.json` / 各目录 `version.json` / 远端索引缓存）。
+     *
+     * 只有「绕过本对象直接改缓存目录」时才需要：单元测试把车模夹具拷进缓存目录后调它，
+     * 再走正常解码路径。运行时代码不调用（所有写入都经过本对象的安装流程）。
+     */
+    fun invalidateCache() {
+        synchronized(lock) {
+            versionsCache = null
+            dirVersions.clear()
+        }
+        indexCache = null
+        indexFetchedAt = 0L
+    }
+
     /** 车模缓存根目录（`filesDir/car3d-models`）。 */
     fun cacheRoot(context: Context): File = File(context.filesDir, CACHE_DIR)
 
     /**
-     * 统一资产入口：**已安装的远端缓存优先，否则回退内置 assets**。
+     * 统一资产入口：**已安装的远端缓存优先**。
+     *
+     * APK 不再内置车模，所以「没装过」时这里会抛 `IOException`；调用方
+     * （[com.cardesk.launcher.core.car3d.Car3dAssets]）把它当作缺图处理，最终回退
+     * [com.cardesk.launcher.core.CarTopPainter] 的自绘俯视车模 —— 首装/断网时桌面
+     * 不会空窗，自动补齐完成后调 [Car3dAssets.reset] 换成写实车模。
+     *
+     * 末尾仍保留 `assets.open` 兜底：万一将来有人把某个车型重新塞回 assets，
+     * 这条通路照旧可用（现在 assets 里没有 `car3d/` 目录，必定抛 `IOException`）。
      *
      * @param logicalPath assets 逻辑路径，如 `car3d/lynk01/model.json`、
      *   `car3d/lynk01/cardtop/dark/closed.webp`（必须以 `car3d/` 开头）。
-     * @return 可被 `.use {}` 正常关闭的流；缓存命中返回 [FileInputStream]，否则
-     *   `AssetManager.open`（文件不存在时抛 `IOException`，与直接读 assets 一致）。
+     * @return 可被 `.use {}` 正常关闭的流；缓存命中返回 [FileInputStream]，
+     *   否则抛 `IOException`。
      */
     fun openStream(context: Context, logicalPath: String): InputStream {
         val local = localFile(context, logicalPath)
@@ -249,7 +272,7 @@ object CarModelRemote {
                 return FileInputStream(local)
             } catch (t: Throwable) {
                 // 缓存文件突然不可读（被清理/权限异常）：不能让绘制崩，退回内置资源
-                Logx.w(LogTags.CAR3D, "缓存车模读取失败，回退内置资产", t, "path" to logicalPath)
+                Logx.w(LogTags.CAR3D, "缓存车模读取失败，改走 assets 兜底", t, "path" to logicalPath)
             }
         }
         return context.assets.open(logicalPath)

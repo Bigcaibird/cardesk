@@ -22,6 +22,8 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import com.cardesk.launcher.core.car3d.TestCarAssets
+import org.junit.Rule
 
 /**
  * 第166轮：**车况卡 C 版**（3/4 写实 hero + 三行摘要，整卡可点）。
@@ -34,6 +36,7 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [34], qualifiers = "w1920dp-h1080dp-land")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class Car3dScenePageTest {
+    @get:Rule val carAssets = TestCarAssets.Rule()
 
     /** 车况卡区域（与 `ScenePage.CAR_STATUS_CARD_*` 一致）。 */
     private val cardRegion = RectF(1488f, 376f, 1876f, 756f)
