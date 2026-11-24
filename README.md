@@ -200,26 +200,35 @@ $GRADLE testSystemUnitTest --offline
 
 ### 出包
 
+第三百零九轮起出包分**两条更新通道**，App 里「设置 → 在线更新 → 更新渠道」选哪条就查哪条清单：
+
+| 通道 | 命令 | versionName | 产物 | R2 位置 |
+| --- | --- | --- | --- | --- |
+| **开发版**（默认） | `bash tools/release.sh` | `1.0.1224-preview` | `dist/CarDesk-platform-ecarx-cardesk-4320-preview.apk` | `cardesk/preview/…`、`cardesk/preview/latest.json` |
+| **正式版** | `bash tools/release.sh --stable` | `1.0.1224-system` | `dist/CarDesk-platform-ecarx-cardesk-4320.apk` | `cardesk/…`、`cardesk/latest.json` |
+
 ```bash
+# 开发版（默认）：versionName 以 -preview 收尾，更新清单落 dist/cardesk-latest-preview.json
 bash tools/release.sh --notes-file tools/notes-r197.md
+
+# 正式版：versionName 保持 -system 后缀，更新清单落 dist/cardesk-latest.json
+bash tools/release.sh --stable --notes-file tools/notes-r197.md
 ```
 
 `tools/release.sh` 会自动：版本号 +1 → 干净目录全量构建 + 跑单测 →
-校验包名 / versionCode / **平台证书指纹** → 算 SHA-256 → 落 `dist/` →
-重写更新清单 `dist/cardesk-latest.json`。
+校验包名 / versionCode / versionName（含通道后缀）/ **平台证书指纹** →
+算 SHA-256 → 落 `dist/` → 重写对应通道的更新清单。
 
-产物：
-
-```
-dist/CarDesk-platform-ecarx-cardesk-<versionCode>.apk
-dist/cardesk-latest.json        # R2 更新清单（App 在线更新读它）
-```
-
-上传到 R2（凭据只从环境变量读）：
+上传到 R2（凭据只从环境变量读；`--channel` 决定对象前缀与清单 key）：
 
 ```bash
 export R2_AK=... R2_SK=...
-python3 tools/publish_r2.py --bucket file \
+# 开发版
+python3 tools/publish_r2.py --bucket file --channel preview \
+  --apk dist/CarDesk-platform-ecarx-cardesk-<versionCode>-preview.apk \
+  --manifest dist/cardesk-latest-preview.json
+# 正式版
+python3 tools/publish_r2.py --bucket file --channel stable \
   --apk dist/CarDesk-platform-ecarx-cardesk-<versionCode>.apk \
   --manifest dist/cardesk-latest.json
 ```

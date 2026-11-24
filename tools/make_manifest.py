@@ -23,6 +23,8 @@ import sys
 
 # 清单里 apk.url 是相对路径时，App 按「域名根 + key」拼地址
 DEFAULT_KEY_PREFIX = "cardesk"
+# 第三百零九轮：更新分两条通道 —— 开发版的对象前缀 / 清单路径
+PREVIEW_KEY_PREFIX = "cardesk/preview"
 
 
 def sha256_of(path):
@@ -43,7 +45,17 @@ def main():
     ap.add_argument("--notes", default="", help="更新说明（直接给文本）")
     ap.add_argument("--notes-file", default="", help="更新说明文件（存在时优先于 --notes）")
     ap.add_argument("--key", default="", help="R2 对象 key，默认 <prefix>/<apk 文件名>")
-    ap.add_argument("--key-prefix", default=DEFAULT_KEY_PREFIX, help="对象 key 前缀，默认 cardesk")
+    ap.add_argument(
+        "--key-prefix",
+        default="",
+        help="对象 key 前缀（默认按 --channel：正式版 cardesk / 开发版 cardesk/preview）",
+    )
+    ap.add_argument(
+        "--channel",
+        default="stable",
+        choices=["stable", "preview"],
+        help="更新通道：stable=正式版（默认）/ preview=开发版",
+    )
     ap.add_argument("--published-at", default="", help="发布时间（ISO8601，默认取当前 UTC）")
     ap.add_argument("--out", required=True, help="输出清单路径")
     args = ap.parse_args()
@@ -56,7 +68,10 @@ def main():
         with open(args.notes_file, "r", encoding="utf-8") as f:
             notes = f.read().strip()
 
-    key = args.key or f"{args.key_prefix}/{os.path.basename(args.apk)}"
+    prefix = args.key_prefix or (
+        PREVIEW_KEY_PREFIX if args.channel == "preview" else DEFAULT_KEY_PREFIX
+    )
+    key = args.key or f"{prefix}/{os.path.basename(args.apk)}"
 
     published_at = args.published_at
     if not published_at:
@@ -65,6 +80,8 @@ def main():
 
     manifest = {
         "schema": 1,
+        # 第三百零九轮：通道写进清单，App 里能核对「我查的是哪条通道」（排障用）
+        "channel": args.channel,
         "version": args.version,
         "versionCode": args.code,
         "tag": args.tag or ("v" + args.version),
@@ -86,7 +103,7 @@ def main():
         json.dump(manifest, f, ensure_ascii=False, indent=2)
         f.write("\n")
 
-    print(f"== 清单：{args.out}")
+    print(f"== 清单：{args.out}（通道 {args.channel}）")
     print(f"== 对象 key：{key}")
     print(f"== APK：{manifest['apk']['size']} 字节，sha256 {manifest['apk']['sha256']}")
 

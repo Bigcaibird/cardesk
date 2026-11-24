@@ -163,10 +163,33 @@ def main():
     ap.add_argument("--bucket", required=True)
     ap.add_argument("--apk", default="", help="要上传的 APK")
     ap.add_argument("--manifest", default="", help="要上传的更新清单 JSON")
-    ap.add_argument("--key-prefix", default="cardesk", help="APK 的对象 key 前缀")
-    ap.add_argument("--manifest-key", default="cardesk/latest.json")
+    ap.add_argument(
+        "--channel",
+        default="stable",
+        choices=["stable", "preview"],
+        help="更新通道：stable=正式版（默认，cardesk/）/ preview=开发版（cardesk/preview/）",
+    )
+    ap.add_argument(
+        "--key-prefix",
+        default="",
+        help="APK 的对象 key 前缀（默认按 --channel：cardesk 或 cardesk/preview）",
+    )
+    ap.add_argument(
+        "--manifest-key",
+        default="",
+        help="清单的对象 key（默认按 --channel：cardesk/latest.json 或 cardesk/preview/latest.json）",
+    )
     ap.add_argument("--dry-run", action="store_true", help="只打印要传什么，不真的上传")
     args = ap.parse_args()
+
+    # 第三百零九轮：两条通道各自一套前缀 —— 正式版在 cardesk/，
+    # 开发版整体挪进 cardesk/preview/（清单 + 安装包同一层，互不覆盖）。
+    if args.channel == "preview":
+        args.key_prefix = args.key_prefix or "cardesk/preview"
+        args.manifest_key = args.manifest_key or "cardesk/preview/latest.json"
+    else:
+        args.key_prefix = args.key_prefix or "cardesk"
+        args.manifest_key = args.manifest_key or "cardesk/latest.json"
 
     ak = os.environ.get("R2_AK", "")
     sk = os.environ.get("R2_SK", "")

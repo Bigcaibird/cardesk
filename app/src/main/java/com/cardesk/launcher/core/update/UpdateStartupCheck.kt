@@ -42,7 +42,8 @@ object UpdateStartupCheck {
         checked = true
         val app = context.applicationContext
         Thread({
-            val result = runCatching { AppUpdate.check(app) }.getOrElse {
+            val channel = AppUpdate.normalizeChannel(prefs.updateChannel)
+            val result = runCatching { AppUpdate.check(app, channel) }.getOrElse {
                 Logx.w(LogTags.SETTING, "启动检查更新失败", it)
                 return@Thread
             }
@@ -52,6 +53,7 @@ object UpdateStartupCheck {
                     if (shouldPrompt(code, prefs.updateSkippedVersionCode)) {
                         Logx.event(
                             LogTags.SETTING, "启动检测到新版本",
+                            "channel" to AppUpdate.channelLabel(channel),
                             "version" to result.release.version, "versionCode" to code,
                         )
                         Handler(Looper.getMainLooper()).post { onAvailable(result.release) }
@@ -60,7 +62,8 @@ object UpdateStartupCheck {
                     }
                 }
                 is AppUpdate.CheckResult.UpToDate -> Logx.i(
-                    LogTags.SETTING, "启动检查更新：已是最新", "current" to result.current,
+                    LogTags.SETTING, "启动检查更新：已是最新",
+                    "channel" to AppUpdate.channelLabel(channel), "current" to result.current,
                 )
                 is AppUpdate.CheckResult.Failed -> Logx.w(
                     LogTags.SETTING, "启动检查更新失败（静默）", "reason" to result.reason,

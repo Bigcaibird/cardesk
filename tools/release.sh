@@ -11,12 +11,24 @@
 #   5) 重写 dist/README.md（当前版本 + 目录里其它 APK 是旧包）
 #
 # 用法：
-#   tools/release.sh                                  # 升版本号 + 出包（默认）
+#   tools/release.sh                                  # 升版本号 + 出**开发版**（默认，第三百零九轮起）
+#   tools/release.sh --stable                         # 升版本号 + 出**正式版**
+#   tools/release.sh --preview                        # 明确指定开发版（同默认）
 #   tools/release.sh --no-bump                        # 不升版本号（重出同一版）
 #   tools/release.sh --no-test                        # 跳过单测（不推荐）
 #   tools/release.sh --code 4200 --name 1.0.1104      # 指定版本号（不自动 +1）
 #   tools/release.sh --notes "这轮更新了什么"          # 写进 R2 更新清单的更新说明
 #   tools/release.sh --notes-file notes.md            # 更新说明从文件读（优先于 --notes）
+#
+# ## 两条更新通道（第三百零九轮）
+#
+# | 通道 | versionName | 产物 | R2 |
+# | --- | --- | --- | --- |
+# | 开发版（默认） | `1.0.1224-preview` | `CarDesk-platform-ecarx-cardesk-4320-preview.apk` | `cardesk/preview/…`、`cardesk/preview/latest.json` |
+# | 正式版（`--stable`） | `1.0.1224-system` | `CarDesk-platform-ecarx-cardesk-4320.apk` | `cardesk/…`、`cardesk/latest.json` |
+#
+# App 端「设置 → 在线更新 → 更新渠道」选哪条就查哪条清单；
+# 两条独立，正式版用户不会被开发版弹窗打扰。
 #
 # ## 出什么包
 #
@@ -51,6 +63,8 @@ AAPT2="${CARDESK_AAPT2:-$TOOLCHAIN/sdk/build-tools/34.0.0/aapt2}"
 PACKAGE="com.ecarx.cardesk"
 BUMP=1
 RUN_TEST=1
+# 第三百零九轮：默认出**开发版**（用户要求）；`--stable` 才发正式版。
+CHANNEL="preview"
 FORCE_CODE=""
 FORCE_NAME=""
 NOTES=""
@@ -60,6 +74,14 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --no-bump) BUMP=0 ;;
         --no-test) RUN_TEST=0 ;;
+        --stable)  CHANNEL="stable" ;;
+        --preview) CHANNEL="preview" ;;
+        --channel)
+            case "$2" in
+                stable|preview) CHANNEL="$2" ;;
+                *) echo "--channel 只能是 stable / preview" >&2; exit 2 ;;
+            esac
+            shift ;;
         --package)
             # 第一九五轮：包名锁死成 com.ecarx.cardesk。
             # 传同一个值当没传；传别的直接拒绝（别让「替换版」从发布脚本里溜出去）。
@@ -73,7 +95,7 @@ while [ $# -gt 0 ]; do
         --name)    FORCE_NAME="$2"; shift ;;
         --notes)   NOTES="$2"; shift ;;
         --notes-file) NOTES_FILE="$2"; shift ;;
-        -h|--help) sed -n '2,34p' "${BASH_SOURCE[0]}"; exit 0 ;;
+        -h|--help) sed -n '2,50p' "${BASH_SOURCE[0]}"; exit 0 ;;
         *) echo "未知参数：$1" >&2; exit 2 ;;
     esac
     shift
@@ -91,6 +113,9 @@ CURRENT_NAME="$(read_prop versionName)"
 [ -n "$CURRENT_CODE" ] || { echo "version.properties 里没有 versionCode" >&2; exit 1; }
 
 # ---------------------------------------------------------------- 1) 升版本号
+# 注意顺序：先把「基础版本号」定下来，再按通道决定 versionName 后缀，
+# **最后**才写回 version.properties —— 否则开发版会把不带 -preview 的名字写进仓库。
+WROTE_VERSION=0
 if [ -n "$FORCE_CODE" ]; then
     CODE="$FORCE_CODE"
     NAME="${FORCE_NAME:-1.0.$((CODE - 3096))}"
@@ -98,17 +123,42 @@ if [ -n "$FORCE_CODE" ]; then
 elif [ "$BUMP" -eq 1 ]; then
     CODE=$((CURRENT_CODE + 1))
     NAME="1.0.$((CODE - 3096))"
-    echo "== 版本号自动 +1：$CURRENT_CODE → $CODE（versionName $NAME）"
-    # 写回版本文件：保留注释头，只把最后两行换成新版本号
+    WROTE_VERSION=1
+    echo "== 版本号自动 +1：$CURRENT_CODE → $CODE（基础版本号 $NAME）"
+else
+    CODE="$CURRENT_CODE"
+    # 上次是开发版（…-preview）时，重出正式版要把后缀剥掉
+    NAME="${FORCE_NAME:-${CURRENT_NAME%-preview}}"
+    echo "== 不升版本号，沿用 $CODE / $NAME"
+fi
+
+# 开发版：versionName 以 -preview 收尾，并且**不再**追加 buildType 的 -system
+# （传空的 cardeskSystemSuffix，见 app/build.gradle.kts）——
+# 最终 versionName 就是 `1.0.1224-preview`，与 R2 清单里的 version 完全一致。
+if [ "$CHANNEL" = "preview" ]; then
+    case "$NAME" in
+        *-preview) : ;;
+        *) NAME="$NAME-preview" ;;
+    esac
+    SUFFIX_PROP="-PcardeskSystemSuffix="
+    CHANNEL_LABEL="开发版"
+    MANIFEST_NAME="cardesk-latest-preview.json"
+    R2_PREFIX="cardesk/preview"
+else
+    SUFFIX_PROP=""
+    CHANNEL_LABEL="正式版"
+    MANIFEST_NAME="cardesk-latest.json"
+    R2_PREFIX="cardesk"
+fi
+
+# 写回版本文件：保留注释头，只把最后两行换成新版本号（开发版带 -preview）
+if [ "$WROTE_VERSION" -eq 1 ]; then
     TMP_V="$(mktemp)"
     awk '!/^versionCode=/ && !/^versionName=/' "$VERSION_FILE" > "$TMP_V"
     printf 'versionCode=%s\nversionName=%s\n' "$CODE" "$NAME" >> "$TMP_V"
     mv "$TMP_V" "$VERSION_FILE"
-else
-    CODE="$CURRENT_CODE"
-    NAME="${FORCE_NAME:-$CURRENT_NAME}"
-    echo "== 不升版本号，沿用 $CODE / $NAME"
 fi
+echo "== 更新通道：$CHANNEL_LABEL（versionCode $CODE / versionName $NAME）"
 
 # ---------------------------------------------------------------- 2) 干净构建目录
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/cardesk-release-XXXXXX")"
@@ -129,11 +179,13 @@ if [ "$RUN_TEST" -eq 1 ]; then
     # 不再跑 debug 变体。
     "$GRADLE" clean assembleSystem testSystemUnitTest \
         -PcardeskPackage="$PACKAGE" -PcardeskVersionCode="$CODE" -PcardeskVersionName="$NAME" \
+        $SUFFIX_PROP \
         --no-daemon --console=plain
 else
     echo "== 全量构建（跳过单测）"
     "$GRADLE" clean assembleSystem \
         -PcardeskPackage="$PACKAGE" -PcardeskVersionCode="$CODE" -PcardeskVersionName="$NAME" \
+        $SUFFIX_PROP \
         --no-daemon --console=plain
 fi
 
@@ -150,6 +202,11 @@ esac
 case "$BADGING" in
     *"versionCode='$CODE'"*) : ;;
     *) echo "versionCode 对不上（期望 $CODE）" >&2; exit 1 ;;
+esac
+# 第三百零九轮：通道要能从 versionName 一眼看出来（诊断包/更新弹窗都靠它）
+case "$BADGING" in
+    *"versionName='$NAME'"*) : ;;
+    *) echo "versionName 对不上（期望 $NAME；通道 $CHANNEL_LABEL）" >&2; exit 1 ;;
 esac
 
 # ---------------------------------------------------------------- 3.5) 平台证书校验
@@ -194,7 +251,11 @@ mkdir -p "$DIST"
 # 与开发包（debug 签名）、以及 uni-launcher 的实车包（UNI-Launcher-*.apk）
 # 一眼能分开 —— 两个 app 同一张证书、不同应用与包名。
 SHORT_PKG="$(echo "${PACKAGE#com.}" | tr '.' '-')"
-OUT_NAME="CarDesk-platform-${SHORT_PKG}-${CODE}.apk"
+if [ "$CHANNEL" = "preview" ]; then
+    OUT_NAME="CarDesk-platform-${SHORT_PKG}-${CODE}-preview.apk"
+else
+    OUT_NAME="CarDesk-platform-${SHORT_PKG}-${CODE}.apk"
+fi
 OUT="$DIST/$OUT_NAME"
 cp "$APK" "$OUT"
 SHA="$(sha256 "$OUT")"
@@ -204,7 +265,7 @@ echo "== SHA-256：$SHA"
 # ---------------------------------------------------------------- 4.1) R2 更新清单
 # App 的「在线更新」从 Cloudflare R2 拉这个清单（解析见 core/update/R2Release.kt）。
 # 清单里的 apk.url 是 **R2 对象 key**，和上传时用的 key 完全一致。
-MANIFEST="$DIST/cardesk-latest.json"
+MANIFEST="$DIST/$MANIFEST_NAME"
 if [ -n "$NOTES_FILE" ] && [ ! -f "$NOTES_FILE" ]; then
     echo "更新说明文件不存在：$NOTES_FILE" >&2
     exit 1
@@ -219,9 +280,10 @@ python3 "$REPO/tools/make_manifest.py" \
     --version "$NAME" \
     --code "$CODE" \
     --tag "v$NAME" \
-    --name "CarDesk $CODE / $NAME-system" \
+    --name "CarDesk $CODE / $NAME${CHANNEL_LABEL:+（$CHANNEL_LABEL）}" \
     --notes "$NOTES" \
     --notes-file "$NOTES_FILE" \
+    --channel "$CHANNEL" \
     --out "$MANIFEST"
 
 # ---------------------------------------------------------------- 5) 重写 dist/README.md
@@ -234,7 +296,9 @@ python3 "$REPO/tools/make_manifest.py" \
     echo
     echo "| 文件 | 包名 | versionCode | versionName | 签名 | SHA-256 |"
     echo "| --- | --- | --- | --- | --- | --- |"
-    echo "| \`$OUT_NAME\` | \`$PACKAGE\` | **$CODE** | \`$NAME-system\` | AOSP platform 签名 | \`$SHA\` |"
+    echo "| \`$OUT_NAME\` | \`$PACKAGE\` | **$CODE** | \`$NAME\` | AOSP platform 签名 | \`$SHA\` |"
+    echo
+    echo "> 更新通道：**$CHANNEL_LABEL**（\`$CHANNEL\`）—— R2 清单 \`$R2_PREFIX/latest.json\`"
     echo
     echo "> 这是**唯一需要安装**的包。装到 \`/system/priv-app/<dir>/\` 后重启。"
     echo
@@ -257,10 +321,16 @@ echo
 echo "==================== 出包完成 ===================="
 echo "文件        : $OUT_NAME"
 echo "包名        : $PACKAGE"
+echo "通道        : $CHANNEL_LABEL（$CHANNEL）"
 echo "versionCode : $CODE"
-echo "versionName : $NAME-system"
+echo "versionName : $NAME"
 echo "签名        : AOSP platform（SHA-256 $GOT_CERT）"
 echo "SHA-256     : $SHA"
 echo "R2 清单     : $MANIFEST"
-echo "R2 对象 key : cardesk/$OUT_NAME"
+echo "R2 对象 key : $R2_PREFIX/$OUT_NAME"
+echo
+echo "上传："
+echo "  set -a; . ./R2.txt; set +a"
+echo "  python3 tools/publish_r2.py --bucket file --channel $CHANNEL \\"
+echo "      --apk $OUT --manifest $MANIFEST"
 echo "===================================================="

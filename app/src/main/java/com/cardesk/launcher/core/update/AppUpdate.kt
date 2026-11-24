@@ -51,8 +51,47 @@ object AppUpdate {
     /** 更新清单的路径（R2 对象 key）。 */
     const val MANIFEST_PATH = "cardesk/latest.json"
 
-    /** 更新清单的完整地址（App 每次「检查更新」就拉这一个文件）。 */
+    /** 正式版更新清单的完整地址（App 每次「检查更新」就拉这一个文件）。 */
     const val MANIFEST_URL = "https://$R2_HOST/$MANIFEST_PATH"
+
+    // ------------------------------------------------------------------ 更新通道
+
+    /**
+     * 更新通道：**正式版**（`stable`）。
+     *
+     * 第三百零九轮起更新分两条通道，用户可以在「设置 → 在线更新 → 更新渠道」里选：
+     * - 正式版：只发**验证过的稳定包**（`cardesk/latest.json`）；
+     * - 开发版：`-preview` 包，功能更新更早、可能不稳（`cardesk/preview/latest.json`）。
+     *
+     * 两条通道各自一份清单、各自一套安装包，互不干扰 ——
+     * 选正式版的用户不会被开发版弹窗打扰，反之亦然。
+     */
+    const val CHANNEL_STABLE = "stable"
+
+    /** 更新通道：**开发版**（`preview`）。 */
+    const val CHANNEL_PREVIEW = "preview"
+
+    /** 开发版更新清单的路径（R2 对象 key）。 */
+    const val MANIFEST_PATH_PREVIEW = "cardesk/preview/latest.json"
+
+    /** 把任意输入归一成已知通道（空/未知一律当正式版，别让脏数据把用户带到开发版）。 */
+    fun normalizeChannel(raw: String?): String =
+        if (raw?.trim()?.equals(CHANNEL_PREVIEW, ignoreCase = true) == true) {
+            CHANNEL_PREVIEW
+        } else {
+            CHANNEL_STABLE
+        }
+
+    /** 通道的中文名（设置页 / 更新弹窗展示用）。 */
+    fun channelLabel(raw: String?): String =
+        if (normalizeChannel(raw) == CHANNEL_PREVIEW) "开发版" else "正式版"
+
+    /** 通道对应的清单路径（R2 对象 key）。 */
+    fun manifestPath(raw: String?): String =
+        if (normalizeChannel(raw) == CHANNEL_PREVIEW) MANIFEST_PATH_PREVIEW else MANIFEST_PATH
+
+    /** 通道对应的清单完整地址。 */
+    fun manifestUrl(raw: String?): String = "https://$R2_HOST/${manifestPath(raw)}"
 
     /** 域名根（清单里写相对地址时按它拼开）。 */
     const val R2_ROOT_URL = "https://$R2_HOST/"
@@ -117,8 +156,13 @@ object AppUpdate {
      *
      * @return 解析好的清单；**网络失败抛 IOException**，清单结构不对返回 null。
      */
-    fun fetchRelease(context: Context, timeoutMs: Int = 10_000): R2Release? {
-        val conn = URL(MANIFEST_URL).openConnection() as HttpURLConnection
+    fun fetchRelease(
+        context: Context,
+        channel: String = CHANNEL_STABLE,
+        timeoutMs: Int = 10_000,
+    ): R2Release? {
+        val url = manifestUrl(channel)
+        val conn = URL(url).openConnection() as HttpURLConnection
         conn.connectTimeout = timeoutMs
         conn.readTimeout = timeoutMs
         conn.instanceFollowRedirects = true
@@ -140,28 +184,34 @@ object AppUpdate {
      * 清单里只放**一个**最新版本，所以这里不需要「挑最新」那一步；
      * 跟本地比的时候优先比 `versionCode`，清单没给才退回比版本号字符串。
      */
-    fun check(context: Context): CheckResult {
+    fun check(context: Context, channel: String = CHANNEL_STABLE): CheckResult {
+        val ch = normalizeChannel(channel)
+        val url = manifestUrl(ch)
+        val label = channelLabel(ch)
         val current = currentVersionName(context)
         val currentCode = currentVersionCode(context)
         return try {
-            val release = fetchRelease(context)
+            val release = fetchRelease(context, ch)
             if (release == null) {
-                Logx.w(LogTags.SETTING, "检查更新：清单读不懂", "url" to MANIFEST_URL)
+                Logx.w(LogTags.SETTING, "检查更新：清单读不懂", "url" to url, "channel" to ch)
                 return CheckResult.Failed("更新清单读不懂（格式不对）")
             }
             if (isNewer(release, current, currentCode)) {
                 Logx.i(
                     LogTags.SETTING, "检查更新：有新版本",
-                    "current" to current, "latest" to release.version,
+                    "channel" to label, "current" to current, "latest" to release.version,
                     "apk" to (release.apk?.name ?: ""),
                 )
                 CheckResult.Available(release, current)
             } else {
-                Logx.i(LogTags.SETTING, "检查更新：已是最新", "current" to current, "latest" to release.version)
+                Logx.i(
+                    LogTags.SETTING, "检查更新：已是最新",
+                    "channel" to label, "current" to current, "latest" to release.version,
+                )
                 CheckResult.UpToDate(current, release.version)
             }
         } catch (t: Throwable) {
-            Logx.w(LogTags.SETTING, "检查更新失败", t, "url" to MANIFEST_URL)
+            Logx.w(LogTags.SETTING, "检查更新失败", t, "url" to url, "channel" to ch)
             CheckResult.Failed(t.message ?: "网络异常")
         }
     }

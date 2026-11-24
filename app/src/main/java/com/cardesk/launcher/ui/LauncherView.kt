@@ -1236,7 +1236,12 @@ class LauncherView(context: Context) : FrameLayout(context) {
         dialog.onUpdate = {
             closeOverlayDialog(dialog)
             Logx.event(LogTags.SETTING, "启动更新：用户选择立即更新", "version" to release.version)
-            val update = com.cardesk.launcher.ui.dialogs.UpdateDialog(context, pal, autoDownload = release)
+            val update = com.cardesk.launcher.ui.dialogs.UpdateDialog(
+                context,
+                pal,
+                autoDownload = release,
+                channel = prefs.updateChannel,
+            )
             update.onClose = { closeOverlayDialog(update) }
             showOverlayDialog(update)
         }
@@ -4028,7 +4033,11 @@ fun toggleCam360() {
         }
         overlay.onShowClusterLyricColor = { slot -> showClusterLyricColorPicker(slot) }
         overlay.onShowUpdate = {
-            val dialog = com.cardesk.launcher.ui.dialogs.UpdateDialog(context, pal)
+            val dialog = com.cardesk.launcher.ui.dialogs.UpdateDialog(
+                context,
+                pal,
+                channel = prefs.updateChannel,
+            )
             dialog.onClose = { closeOverlayDialog(dialog) }
             showOverlayDialog(dialog)
         }

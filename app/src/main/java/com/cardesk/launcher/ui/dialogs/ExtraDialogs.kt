@@ -371,6 +371,13 @@ class UpdateDialog(
     pal: Palette,
     /** 非空 = 打开就自动下载这个版本（启动检测到新版、用户点「立即更新」时用）。 */
     private val autoDownload: R2Release? = null,
+    /**
+     * 更新通道（第三百零九轮）：`stable` 正式版 / `preview` 开发版。
+     *
+     * 由设置页的「更新渠道」下拉决定，存在 [com.cardesk.launcher.core.Prefs.updateChannel]；
+     * 这里只读不管写 —— 弹窗里换通道会让人以为「换个源再查」，实际会丢当前检查状态。
+     */
+    private val channel: String = AppUpdate.CHANNEL_STABLE,
 ) :
     DialogSheet(context, pal, 860, 720, "在线更新") {
 
@@ -396,7 +403,13 @@ class UpdateDialog(
         content.addView(section("更新详情"))
         // 这几行都用可换行高度 —— `note()` 是给单行标签用的，长了会被裁掉
         content.addView(line("当前版本：${AppUpdate.versionLabel(context)}"), Ui.linear(-1, -2))
-        content.addView(line("更新源：Cloudflare R2 · ${AppUpdate.R2_HOST}"), Ui.linear(-1, -2))
+        content.addView(
+            line(
+                "更新源：Cloudflare R2 · ${AppUpdate.R2_HOST}" +
+                    "（${AppUpdate.channelLabel(channel)}）",
+            ),
+            Ui.linear(-1, -2),
+        )
         content.addView(status, Ui.linear(-1, 36))
         // 详情放滚动区里 —— release 说明可能很长，不能把按钮顶出面板
         val detailScroll = ScrollView(context)
@@ -439,9 +452,13 @@ class UpdateDialog(
         downloadBtn?.let { footer.removeView(it) }
         downloadBtn = null
         // 排障场景：用户点了检查更新 —— 记下这次是**手动**触发
-        Logx.event(LogTags.SETTING, "检查更新（手动触发）", "url" to AppUpdate.MANIFEST_URL)
+        Logx.event(
+            LogTags.SETTING, "检查更新（手动触发）",
+            "channel" to AppUpdate.channelLabel(channel),
+            "url" to AppUpdate.manifestUrl(channel),
+        )
         Thread {
-            val result = AppUpdate.check(context)
+            val result = AppUpdate.check(context, channel)
             handler.post { onChecked(result) }
         }.start()
     }
@@ -450,7 +467,7 @@ class UpdateDialog(
         when (result) {
             is AppUpdate.CheckResult.UpToDate -> {
                 setStatus("状态：已是最新版本（${result.current}）")
-                detail.text = "线上最新：${result.latestVersion}\n${AppUpdate.MANIFEST_URL}"
+                detail.text = "线上最新：${result.latestVersion}\n${AppUpdate.manifestUrl(channel)}"
             }
             is AppUpdate.CheckResult.Available -> {
                 val r = result.release

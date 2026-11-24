@@ -651,6 +651,19 @@ class Prefs(context: Context) {
         set(value) = setStringValue("recent_locked", value.filter { it.isNotBlank() }.joinToString(","))
 
     /**
+     * 在线更新渠道（第三百零九轮，`update_channel`）。
+     *
+     * - `stable` = **正式版**：只查 `cardesk/latest.json`（默认）；
+     * - `preview` = **开发版**：查 `cardesk/preview/latest.json`（`-preview` 包）。
+     *
+     * 存在本地偏好里：车机常年不联网重启也没关系，选一次就一直生效。
+     * 未知/空值一律当正式版（见 [com.cardesk.launcher.core.update.AppUpdate.normalizeChannel]）。
+     */
+    var updateChannel: String
+        get() = stringValue("update_channel", "stable")
+        set(value) = setStringValue("update_channel", value)
+
+    /**
      * 启动更新检测里用户点过「稍后」的版本号（第九十八轮，`update_skipped_code`）。
      *
      * 同一个版本不再重复弹窗；发新版（versionCode 变了）会重新询问。

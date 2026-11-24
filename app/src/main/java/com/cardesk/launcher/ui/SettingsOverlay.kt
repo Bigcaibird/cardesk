@@ -5366,7 +5366,40 @@ class SettingsOverlay(
  */
     private fun pageUpdate() {
         section("更新通道")
-        kvRow("更新源", "Cloudflare R2 · file.chuxi.bid", true)
+        // 第三百零九轮：更新分两条通道 —— 正式版 / 开发版。
+        // 选哪条就查哪条清单（R2 上是两份独立清单、两套包），
+        // 正式版用户不会被开发版的更新弹窗打扰，反之亦然。
+        val channels = listOf(
+            com.cardesk.launcher.core.update.AppUpdate.CHANNEL_STABLE to "正式版",
+            com.cardesk.launcher.core.update.AppUpdate.CHANNEL_PREVIEW to "开发版",
+        )
+        val currentChannel = com.cardesk.launcher.core.update.AppUpdate.normalizeChannel(
+            prefs.updateChannel,
+        )
+        dropdownRow(
+            label = "更新渠道",
+            options = channels.map { it.second },
+            selectedIndex = channels.indexOfFirst { it.first == currentChannel }.coerceAtLeast(0),
+        ) { index ->
+            val picked = channels.getOrNull(index)?.first
+                ?: com.cardesk.launcher.core.update.AppUpdate.CHANNEL_STABLE
+            prefs.updateChannel = picked
+            logSetting(
+                "update_channel", "更新渠道", currentChannel, picked,
+                tag = LogTags.SETTING,
+                "label" to com.cardesk.launcher.core.update.AppUpdate.channelLabel(picked),
+                "manifest" to com.cardesk.launcher.core.update.AppUpdate.manifestPath(picked),
+            )
+            onApply?.invoke()
+            // 「更新源」那行要跟着换 → 重画这一页（下拉此刻已收起，重建最省心）。
+            select(selectedKey)
+        }
+        note("正式版只推验证过的稳定包；开发版更新更早、可能不稳（版本号带 -preview）")
+        kvRow(
+            "更新源",
+            "Cloudflare R2 · " + com.cardesk.launcher.core.update.AppUpdate.manifestPath(currentChannel),
+            true,
+        )
         kvRow("当前版本", com.cardesk.launcher.core.update.AppUpdate.versionLabel(context), true)
         actionButton("检查更新", primary = true, full = true) {
             // 排障场景：点了检查更新没反应 —— 记下打开更新对话框

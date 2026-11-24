@@ -90,7 +90,11 @@ android {
                 signingConfig = signingConfigs.getByName("platform")
             }
             applicationIdSuffix = ""
-            versionNameSuffix = "-system"
+            // 第三百零九轮：在线更新分「正式版 / 开发版」两条通道，开发版的
+            // versionName 用 `-preview` 收尾（诊断包、更新弹窗、设置页一眼能分开）。
+            // 发布脚本 `tools/release.sh` 出开发版时传 `-PcardeskSystemSuffix=-preview`；
+            // 手动 `assembleSystem` 不传，保持仓库既有约定 `-system`。
+            versionNameSuffix = (project.findProperty("cardeskSystemSuffix") as String?) ?: "-system"
         }
     }
 
