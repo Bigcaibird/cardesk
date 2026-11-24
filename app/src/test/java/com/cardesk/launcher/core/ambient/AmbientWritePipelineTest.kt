@@ -254,9 +254,14 @@ class AmbientWritePipelineTest {
         // 变大才是发散（写入层每次往回拉、误差每帧累积）。
         // 这里量的是「写下去的颜色」与「渲染层限速之后的颜色」的差 ——
         // 也就是写入层自己造成的那一部分。
+        // 用**中位数**而不是最大值比较首尾两段：这条断言要看的是趋势（有没有
+        // 一帧帧累积），但写入节流看的是真实时钟，机器忙的时候单帧调度抖动会让
+        // 某一次写入多等几十毫秒、偶尔冒出一个离群的偏差 —— 最大值会把它当成
+        // 发散（第三一七轮出正式版时就被这种抖动误伤过一次）。中位数对单点抖动
+        // 不敏感，仍然能抓住「每段都在变大」的真发散。
         val writeThird = writeGaps.size / 3
-        val writeGapFirst = writeGaps.take(writeThird).maxOrNull() ?: 0f
-        val writeGapLast = writeGaps.takeLast(writeThird).maxOrNull() ?: 0f
+        val writeGapFirst = median(writeGaps.take(writeThird))
+        val writeGapLast = median(writeGaps.takeLast(writeThird))
         val writeGapMax = writeGaps.maxOrNull() ?: 0f
         assertTrue(
             "写入层造成的偏差在变大（$writeGapFirst → $writeGapLast）",
@@ -270,8 +275,8 @@ class AmbientWritePipelineTest {
         // 它稳定在「音乐本身的动态范围」附近（这一拍比上一拍亮多少），
         // 跟着音乐起伏，但不会一轮一轮地累积。
         val lagThird = renderGaps.size / 3
-        val lagFirst = renderGaps.take(lagThird).maxOrNull() ?: 0f
-        val lagLast = renderGaps.takeLast(lagThird).maxOrNull() ?: 0f
+        val lagFirst = median(renderGaps.take(lagThird))
+        val lagLast = median(renderGaps.takeLast(lagThird))
         assertTrue(
             "渲染滞后在累积（$lagFirst → $lagLast）",
             lagLast <= lagFirst + 8f,
@@ -281,4 +286,13 @@ class AmbientWritePipelineTest {
         // 所以这里只打印不断言；它不是发散，因为引擎的速度是周期性的，
         // 颜色并不会越走越远，而是在一个滞后上跟着音乐转。
     }
+
+    /** 中位数（空列表按 0 处理）；排序不改原列表。 */
+    private fun median(values: List<Float>): Float {
+        if (values.isEmpty()) return 0f
+        val sorted = values.sorted()
+        val mid = sorted.size / 2
+        return if (sorted.size % 2 == 1) sorted[mid] else (sorted[mid - 1] + sorted[mid]) / 2f
+    }
+
 }

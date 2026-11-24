@@ -145,11 +145,16 @@ if [ "$CHANNEL" = "preview" ]; then
     MANIFEST_NAME="cardesk-latest-preview.json"
     R2_PREFIX="cardesk/preview"
 else
-    SUFFIX_PROP=""
+    # 正式版也传空后缀（第三一七轮起用户要求：正式版 versionName 不带 `-system`）。
+    # 不传的话 buildType 会按默认值追加 `-system`（见 app/build.gradle.kts）。
+    SUFFIX_PROP="-PcardeskSystemSuffix="
     CHANNEL_LABEL="正式版"
     MANIFEST_NAME="cardesk-latest.json"
     R2_PREFIX="cardesk"
 fi
+
+# 校验/摘要里用的「实际装出来的 versionName」= 基础版本号（两条通道都不带后缀）。
+NAME_IN_APK="$NAME"
 
 # 写回版本文件：保留注释头，只把最后两行换成新版本号（开发版带 -preview）
 if [ "$WROTE_VERSION" -eq 1 ]; then
@@ -206,8 +211,8 @@ case "$BADGING" in
 esac
 # 第三百零九轮：通道要能从 versionName 一眼看出来（诊断包/更新弹窗都靠它）
 case "$BADGING" in
-    *"versionName='$NAME'"*) : ;;
-    *) echo "versionName 对不上（期望 $NAME；通道 $CHANNEL_LABEL）" >&2; exit 1 ;;
+    *"versionName='$NAME_IN_APK'"*) : ;;
+    *) echo "versionName 对不上（期望 $NAME_IN_APK；通道 $CHANNEL_LABEL）" >&2; exit 1 ;;
 esac
 
 # ---------------------------------------------------------------- 3.5) 平台证书校验
@@ -297,7 +302,7 @@ python3 "$REPO/tools/make_manifest.py" \
     echo
     echo "| 文件 | 包名 | versionCode | versionName | 签名 | SHA-256 |"
     echo "| --- | --- | --- | --- | --- | --- |"
-    echo "| \`$OUT_NAME\` | \`$PACKAGE\` | **$CODE** | \`$NAME\` | AOSP platform 签名 | \`$SHA\` |"
+    echo "| \`$OUT_NAME\` | \`$PACKAGE\` | **$CODE** | \`$NAME_IN_APK\` | AOSP platform 签名 | \`$SHA\` |"
     echo
     echo "> 更新通道：**$CHANNEL_LABEL**（\`$CHANNEL\`）—— R2 清单 \`$R2_PREFIX/latest.json\`"
     echo
@@ -324,7 +329,7 @@ echo "文件        : $OUT_NAME"
 echo "包名        : $PACKAGE"
 echo "通道        : $CHANNEL_LABEL（$CHANNEL）"
 echo "versionCode : $CODE"
-echo "versionName : $NAME"
+echo "versionName : $NAME_IN_APK"
 echo "签名        : AOSP platform（SHA-256 $GOT_CERT）"
 echo "SHA-256     : $SHA"
 echo "R2 清单     : $MANIFEST"
