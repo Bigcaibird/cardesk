@@ -114,3 +114,15 @@
 `vehicle/HvacIds.kt`、`core/log/LogTags.kt`、`ui/pages/VehiclePage.kt`、`ui/pages/ScenePage.kt`、
 `app/src/test/.../SettingsDeadItemsTest.kt`（360 五项由「不该出现」翻成「必须有执行端」）、
 `README.md`、`version.properties`、`.gitignore`。
+
+## 截图
+
+`emu-verify/shots-r310/`
+
+| 文件 | 内容 |
+| --- | --- |
+| `r310-01-scene-altitude.png` | 场景页天气块下方「海拔 42 m」 |
+| `r310-02-vehicle-altitude.png` | 车辆信息页「续航与油量」卡第三行「海拔 42 m」 |
+| `r310-03-carmodel-settings.png` | 设置 → 车辆信息 → 车模资源包（版本行 + 检查按钮） |
+| `r310-04-camera360-top.png` | 设置 → 车控 → 360 环影上半（总开关 / 视角延迟 / 按键视角 / 倒车 / R→D / D 挡视角） |
+| `r310-05-camera360-bottom.png` | 360 环影下半（N·P 关闭 / 雷达图形触发 / 模拟挡位（调试）/ 模拟雷达（调试）） |
