@@ -6,6 +6,7 @@ import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.os.Handler
 import android.os.Looper
@@ -3901,8 +3902,17 @@ fun toggleCam360() {
         // 之前 Dock 一直露在设置面板下面，面板底边与 Dock 之间还压着一条桌面内容。
         dock.visibility = View.GONE
         // 画板里设置页底部没有 Dock：桌面自己的 Dock 设 GONE 还不够，
-        // 屏幕上那条是**另一个窗口**（`GlobalDockService`）画出来的，必须让它一起让位。
-        com.cardesk.launcher.core.dock.GlobalDockService.setSuppressed(true)
+        // 屏幕上那条是**另一个窗口**（`GlobalDockService`）画出来的。
+        //
+        // 第三百零五轮：让它「让出内容但别让出窗口」—— 实车预留区路径下，
+        // 原车 CarNavigationBar 就画在我们面板下面，窗口一隐身底部 112px
+        // 立刻露出原车 Dock（用户 m01073 第 2 点）。
+        // 先铺单色兜底（不能让原车栏露出来哪怕一帧），设置页画上去之后再
+        // [captureSettingsBottomCover] 用真实像素替换，接缝彻底消失。
+        com.cardesk.launcher.core.dock.GlobalDockService.setSuppressed(
+            true,
+            coverColor = bottomCoverColor(),
+        )
         val overlay = SettingsOverlay(context, prefs, pal)
         overlay.onClose = { closeSettings() }
         overlay.onApply = { onSettingsApplied() }
@@ -4021,6 +4031,8 @@ fun toggleCam360() {
         applyDockVisibility()
         // 面板上滑 + 遮罩淡入（200ms / 180ms）。
         overlay.playOpen()
+        // 画完一帧后把接缝上方那条真实像素拷给全局 Dock 当底图（第三百零五轮）。
+        captureSettingsBottomCover()
     }
 
     private fun closeSettings() {
@@ -5146,6 +5158,97 @@ fun toggleCam360() {
         // 把当前状态推给高德，让地图跟桌面一致
         // （跟随高德模式下不推，见 [pushDayNightToAmap]）。
         pushDayNightToAmap(pal.night)
+    }
+
+    /**
+     * 第三百零五轮：给全局 Dock 的「空白占位」采一个底色。
+     *
+     * 设置页打开时，屏幕底部那 112px 由 `GlobalDockService` 的窗口画
+     * （它盖在原车 `CarNavigationBar` 上）。让位时内容藏掉、但窗口得留着盖住原车栏，
+     * 于是需要一层**和上面画面接得上的底**。
+     *
+     * ## 为什么不是直接取玻璃底图
+     *
+     * 第一版取的是 [com.cardesk.launcher.core.Glass.backdrop] 最底部 1/10 的平均色，
+     * 实机截图一量：底条 `(11,21,30)`、接缝上方壁纸 `(24,30,39)` —— **暗了 13/255**，
+     * 底部能看到一条横带。差别来自两处：玻璃底图是**压暗过**的，而且设置页在上面
+     * 又盖了一层 26% 暗罩。
+     *
+     * 现在的口径：
+     * 1. 取**壁纸最底部**的本色（[com.cardesk.launcher.ui.widget.BackgroundView.bottomWallpaperColor]，
+     *    不含任何蒙层）；
+     * 2. 按设置页那层暗罩（[SettingsOverlay.SHELL_SCRIM_ALPHA] / 主题 `scrim` 色）混合一遍 ——
+     *    得到的就是「壁纸被暗罩压过」的样子，正是接缝上方那块的颜色。
+     *
+     * @return 混合后的颜色；拿不到壁纸色（视频壁纸 / 图还没解好）时返回 0，
+     *   调用方会退回默认的不透明底栏色。
+     */
+    private fun bottomCoverColor(): Int {
+        val wall = runCatching { background.bottomWallpaperColor() }.getOrDefault(0)
+        if (wall == 0) return 0
+        return runCatching {
+            val a = SettingsOverlay.SHELL_SCRIM_ALPHA / 255f
+            val scrim = pal.scrim
+            fun mix(c: Int, s: Int): Int =
+                (c * (1f - a) + s * a).toInt().coerceIn(0, 255)
+            android.graphics.Color.rgb(
+                mix(android.graphics.Color.red(wall), android.graphics.Color.red(scrim)),
+                mix(android.graphics.Color.green(wall), android.graphics.Color.green(scrim)),
+                mix(android.graphics.Color.blue(wall), android.graphics.Color.blue(scrim)),
+            )
+        }.getOrDefault(0)
+    }
+
+    /**
+     * 第三百零五轮第三版：设置页画上去之后，把**接缝上方那条真实像素**拷下来，
+     * 交给全局 Dock 当空白占位的底图 —— 和上面的画面逐像素一致，接缝彻底消失。
+     *
+     * ## 为什么不再「裁背景视图」
+     *
+     * 前两版都失败在同一个点上：桌面背景在窗口里的实际尺寸 / 缩放口径和设计坐标
+     * 不是 1:1（窗口 1920×968、设计 1920×1080），裁出来的那条实测比真实像素
+     * **暗 10~20 级**，屏幕上仍是一道横带。`PixelCopy` 拿的是**合成后的窗口内容**
+     * （含设置页暗罩、含所有父层缩放），不依赖任何坐标换算。
+     *
+     * 拿不到（窗口没画好 / 被安全策略拒绝）就保持 [bottomCoverColor] 的单色兜底。
+     */
+    private fun captureSettingsBottomCover() {
+        val w = width
+        val h = height
+        if (w <= 0 || h <= 0) return
+        val designW = com.cardesk.launcher.core.dock.GlobalDockService.designBarWidth().coerceAtLeast(1)
+        val designH = com.cardesk.launcher.core.dock.GlobalDockService.designBarHeight().coerceAtLeast(1)
+        val band = (designH * (w.toFloat() / designW)).toInt().coerceIn(1, h)
+        // 等设置页真正画到屏幕上（playOpen 有 ~200ms 入场动画）
+        postDelayed({
+            if (settings == null) return@postDelayed
+            val win = (context as? android.app.Activity)?.window ?: return@postDelayed
+            val rect = android.graphics.Rect(0, h - band, w, h)
+            val bmp = runCatching {
+                Bitmap.createBitmap(rect.width(), rect.height(), Bitmap.Config.ARGB_8888)
+            }.getOrNull() ?: return@postDelayed
+            val ok = runCatching {
+                android.view.PixelCopy.request(
+                    win,
+                    rect,
+                    bmp,
+                    { result ->
+                        if (result == android.view.PixelCopy.SUCCESS && settings != null) {
+                            com.cardesk.launcher.core.dock.GlobalDockService.setSuppressed(
+                                true,
+                                coverColor = bottomCoverColor(),
+                                coverBitmap = bmp,
+                            )
+                        } else {
+                            bmp.recycle()
+                        }
+                    },
+                    android.os.Handler(android.os.Looper.getMainLooper()),
+                )
+                true
+            }.getOrDefault(false)
+            if (!ok) bmp.recycle()
+        }, 260L)
     }
 
     private fun applyDockVisibility() {

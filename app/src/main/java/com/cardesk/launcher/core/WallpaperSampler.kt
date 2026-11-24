@@ -82,6 +82,17 @@ object WallpaperSampler {
     val CENTER_REGION = Region(left = 0.25f, top = 0.34f, right = 0.75f, bottom = 0.62f)
 
     /**
+     * 画面**最底部一条**（第三百零五轮）：「全局 Dock 空白占位」的取色区。
+     *
+     * 设置页 / 启动页会把自己的 Dock 窗口交给一条**空白底条**（见
+     * [com.cardesk.launcher.core.dock.GlobalDockService] 的 `applyBlank`），
+     * 那条要和它上面露出来的壁纸接得上 —— 接缝差 10 级亮度都看得出来。
+     *
+     * 只取最底下 6%：再往上就混进内容区的渐变了。
+     */
+    val BOTTOM_REGION = Region(left = 0f, top = 0.94f, right = 1f, bottom = 1f)
+
+    /**
      * **视频壁纸**专用的顶部区（第231轮）：只覆盖文字真正会压到的地方。
      *
      * 为什么不能沿用 [TOP_REGION]（哪怕它的注释就是按这个意图写的）：

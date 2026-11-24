@@ -278,6 +278,51 @@ class BackgroundView(context: Context) : View(context) {
     }
 
     /**
+     * 背景**最底部一条**的底色（**不含**任何蒙层，就是壁纸本身）。
+     *
+     * ## 第三百零五轮：给「全局 Dock 空白占位」取色
+     *
+     * 设置页 / 启动页会把屏幕最下面那条 112px 交给一条空白底窗
+     * （见 [com.cardesk.launcher.core.dock.GlobalDockService] 的 `applyBlank`）——
+     * 它盖在原车 `CarNavigationBar` 上面，颜色必须和它上面露出来的壁纸**接得上**，
+     * 否则屏幕底部会留一道明显的色差接缝（实测差了 13/255 就看得出来）。
+     *
+     * 口径与 [refreshBackdrop] 一致：自定义壁纸走源图 + 「等比填满 + 居中裁切」
+     * 的映射；预设壁纸画进 192×108 代理图再采样。只是区域换成
+     * [com.cardesk.launcher.core.WallpaperSampler.BOTTOM_REGION]。
+     *
+     * @return ARGB；拿不到（图还没解好 / 空）返回 0
+     */
+    fun bottomWallpaperColor(): Int {
+        val night = palette.night
+        val region = com.cardesk.launcher.core.WallpaperSampler.BOTTOM_REGION
+        if (custom) {
+            val bmp = customBitmap
+            if (bmp == null || bmp.isRecycled) return 0
+            val rect = com.cardesk.launcher.core.WallpaperSampler.sourceRectFor(
+                bmp.width, bmp.height,
+                width.toFloat().coerceAtLeast(1f), height.toFloat().coerceAtLeast(1f),
+                region,
+            )
+            return com.cardesk.launcher.core.WallpaperSampler.averageColorInRect(
+                bmp, rect, night, 0.97f,
+            ) ?: 0
+        }
+        val proxy = proxyBitmap() ?: return 0
+        return try {
+            val canvas = Canvas(proxy)
+            WallpaperRenderer.drawDirect(
+                canvas, Wallpapers.spec(wallpaper), proxy.width.toFloat(), proxy.height.toFloat(), night,
+            )
+            com.cardesk.launcher.core.WallpaperSampler.averageColor(proxy, region, false) ?: 0
+        } catch (t: Throwable) {
+            0
+        } finally {
+            proxy.recycle()
+        }
+    }
+
+    /**
      * 把**整屏背景**（底色 + 壁纸）画进一张 1/4 缩略图、模糊后发布给
      * [com.cardesk.launcher.core.Glass]（第242轮「液态玻璃」）。
      *

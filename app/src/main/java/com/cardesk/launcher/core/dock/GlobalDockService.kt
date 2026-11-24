@@ -9,7 +9,9 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.graphics.PixelFormat
+import android.graphics.drawable.BitmapDrawable
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -79,6 +81,17 @@ import kotlin.math.roundToInt
  * - 否则（**默认路径**，也是模拟器/普通安装包上唯一能跑的路径）：
  *   `TYPE_APPLICATION_OVERLAY`(2038)，需要 `SYSTEM_ALERT_WINDOW`。
  *   拿不到 2024（普通签名的包会抛 `SecurityException`）时这里会自动退回 2038。
+ *
+ * ## 第三百零五轮：让位不能让窗口
+ *
+ * 设置页 / 启动页整屏覆盖时，这条窗口**不能**跟着隐身 —— 实车 m01073 的证据是：
+ * 预留区路径下原车 `CarNavigationBar` 和我们这个 2024 面板占同一段
+ * `[0,968][1920,1080]`，它全靠面板的**不透明底**盖着；旧逻辑一 `INVISIBLE`，
+ * 底部 112px 立刻露出原车 Dock（用户第 2 点）。
+ *
+ * 所以让位改成了「空白占位」（[applyBlank]）：窗口留 VISIBLE 继续盖住原车栏，
+ * 只把 Dock 内容 `GONE`，底图由调用方用 `PixelCopy` 拷「接缝上方那条真实像素」
+ * 进来（`LauncherView.captureSettingsBottomCover`），与上面的画面逐像素连续。
  */
 class GlobalDockService : Service() {
 
@@ -116,6 +129,21 @@ class GlobalDockService : Service() {
 
     /** 当前是不是可见（`root.visibility` 的缓存，避免重复 setVisibility）。 */
     private var showing = false
+
+    /**
+     * 第三百零五轮：「空白占位」态 —— 让位但**窗口仍然盖住原车导航栏**。
+     *
+     * 只在「预留区生效（2024 面板）」时才可能为真，见 [updateVisibility]。
+     */
+    private var blank = false
+
+    /**
+     * 当前**已经贴在窗口上**的那张占位底图（[blank] 态用）。
+     *
+     * 换图 / 退出占位时用它把旧 Bitmap 回收掉 —— `PixelCopy` 每开一次设置页
+     * 就产出一张 1920×112 的图（约 860KB），不回收会一直涨。
+     */
+    private var appliedCoverBitmap: Bitmap? = null
 
     /** 这次窗口用的是不是 2024（导航栏面板）。 */
     private var nativeInsets = false
@@ -504,18 +532,38 @@ class GlobalDockService : Service() {
         // 第205轮：沉浸 App 前台时不再彻底隐藏，而是「收起」——
         // 窗口留着接上滑手势，内容藏起来、底透明，画面仍然全屏。
         val collapseNow = !want && immersiveAppForeground && !homeForeground
-        if (want) {
-            applyDockVisible(true)
-        } else if (collapseNow) {
-            if (!collapsed) applyCollapsed()
-        } else {
-            applyDockVisible(false)
+        // 第三百零五轮：让位（设置页 / 启动页）时**不能让窗口消失**。
+        //
+        // 实车 m01073：设置页打开时原车 Dock 会露出来。根因就是这里 ——
+        // 预留区路径下原车 `CarNavigationBar` 与我们这个 2024 面板占同一段
+        // [0,968][1920,1080]，它靠面板的**不透明底**盖住；而 [suppressed]
+        // 一开，旧逻辑直接 `INVISIBLE` ⇒ 底部 112px 立即露出原车 Dock。
+        // 现在改成「空白占位」：窗口留 VISIBLE、铺一层与背景同色的不透明底、
+        // Dock 内容 GONE（不画按钮、也不吃按键）。
+        val blankNow = !want && !collapseNow && suppressed && nativeInsets
+        when {
+            want -> {
+                blank = false
+                applyDockVisible(true)
+            }
+            blankNow -> applyBlank()
+            collapseNow -> {
+                blank = false
+                if (!collapsed) applyCollapsed()
+            }
+            else -> {
+                blank = false
+                applyDockVisible(false)
+            }
         }
-        showing = want
+        // 空白占位虽然不画 Dock，但**确实盖在原车栏上** ——
+        // `isShowing()` 要对桌面报「盖着」，否则桌面会把自绘 Dock 又放出来。
+        showing = want || blankNow
         Logx.i(
             LogTags.DOCK,
             "全局 Dock 可见性",
             "visible" to want,
+            "blank" to blankNow,
             "collapsed" to collapsed,
             "homeForeground" to homeForeground,
             "immersiveApp" to immersiveAppForeground,
@@ -530,10 +578,60 @@ class GlobalDockService : Service() {
         collapsed = false
         if (wasCollapsed && visible) applyGeometry()
         view.visibility = if (visible) View.VISIBLE else View.INVISIBLE
-        (view as? android.view.ViewGroup)?.setBackgroundColor(
-            if (visible) OPAQUE_BAR_COLOR else android.graphics.Color.TRANSPARENT,
-        )
+        applyRootBackground(null, if (visible) OPAQUE_BAR_COLOR else android.graphics.Color.TRANSPARENT)
         dock?.visibility = if (visible) View.VISIBLE else View.GONE
+    }
+
+    /**
+     * 给窗口（root）铺背景，并回收上一张占位底图。
+     *
+     * 必须先换背景再回收：`BitmapDrawable` 被替换掉之后旧 Bitmap 才没人引用。
+     * 全程在 UI 线程（[root] 的绘制线程）上做，中间不会插进一次 draw。
+     */
+    private fun applyRootBackground(bitmap: Bitmap?, color: Int) {
+        val view = root ?: return
+        val vg = view as? android.view.ViewGroup ?: return
+        if (bitmap != null && !bitmap.isRecycled) {
+            vg.background = BitmapDrawable(view.resources, bitmap)
+        } else {
+            vg.setBackgroundColor(color)
+        }
+        val old = appliedCoverBitmap
+        appliedCoverBitmap = bitmap
+        if (old != null && old !== bitmap && !old.isRecycled) old.recycle()
+    }
+
+    /**
+     * 空白占位态（第三百零五轮）：让位但**仍然盖住原车导航栏**。
+     *
+     * 设置页 / 启动页整屏覆盖时，画板里底部那条是「背景」，没有 Dock；
+     * 但实车上原车 `CarNavigationBar` 就画在下面 —— 我们一让位它就露出来
+     * （用户 m01073 第 2 点）。所以这里不退场，只把**内容**藏掉：
+     *
+     * | 项 | 值 |
+     * |---|---|
+     * | 窗口 | 保持 `VISIBLE`、整条 112px（收起态要先还原几何） |
+     * | 底图 | 调用方给的「背景图」（[suppressedCoverBitmap]）优先；没有就用底色（[suppressedCoverColor]），再缺省 [OPAQUE_BAR_COLOR] |
+     * | Dock 内容 | `GONE` —— 不画按钮，也不响应按键 |
+     *
+     * 底图由 `LauncherView.showSettings()` 用 **`PixelCopy`** 从窗口合成结果里拷
+     * 「接缝上方那条真实像素」送进来（[LauncherView.captureSettingsBottomCover]）——
+     * 和上面的画面逐像素一致，接缝彻底看不到。拿不到时退回单色
+     * （[suppressedCoverColor]，实测与接缝上方差 10~13/255，只作兜底）。
+     */
+    private fun applyBlank() {
+        val view = root ?: return
+        val wasCollapsed = collapsed
+        cancelCollapse()
+        collapsed = false
+        if (wasCollapsed) applyGeometry()
+        blank = true
+        view.visibility = View.VISIBLE
+        applyRootBackground(
+            suppressedCoverBitmap,
+            if (suppressedCoverColor != 0) suppressedCoverColor else OPAQUE_BAR_COLOR,
+        )
+        dock?.visibility = View.GONE
     }
 
     /**
@@ -559,7 +657,7 @@ class GlobalDockService : Service() {
                     .onFailure { Logx.w(LogTags.DOCK, "收起态窗口缩放失败", it) }
             }
         }
-        (view as? android.view.ViewGroup)?.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        applyRootBackground(null, android.graphics.Color.TRANSPARENT)
         dock?.visibility = View.GONE
     }
 
@@ -860,6 +958,10 @@ class GlobalDockService : Service() {
     /** 发 HOME intent 回桌面。 */
     private fun goHome() {
         Logx.event(LogTags.DOCK, "全局 Dock：回桌面")
+        // 第三百零五轮：桌面已经在前台时不要再发 HOME intent ——
+        // 系统会把桌面走一轮 onPause→onResume（实车 08:44 日志里成对出现），
+        // 用户看到的就是「按一下闪一下」。画中画全屏的还原走进程内直调。
+        if (homeForeground && MainActivity.onExternalHomeInProcess()) return
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
         }
@@ -876,6 +978,17 @@ class GlobalDockService : Service() {
      */
     private fun toLauncher(action: String) {
         Logx.event(LogTags.DOCK, "全局 Dock：回桌面执行动作", "action" to action)
+        // 第三百零五轮：桌面**已经在前台**时不要再 startActivity。
+        //
+        // 实车 m01073 的证据：每按一次 Dock 键都是
+        // `[EVT] 回桌面执行动作` → 50ms 后 `onPause` → **2ms 后 `onResume`**
+        // （08:44:20.478/.480 起连续 8 次）。窗口并没有真的被别的 App 盖住，
+        // 就是这次多余的 startActivity 让系统重排了一轮窗口 ——
+        // 用户说的「操作时闪一下」正是它。改成进程内直调后这一轮彻底消失。
+        if (homeForeground && MainActivity.dispatchDockAction(action)) {
+            Logx.event(LogTags.DOCK, "全局 Dock：桌面已在前台，进程内分发", "action" to action)
+            return
+        }
         val intent = Intent(this, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             putExtra(MainActivity.EXTRA_ACTION, action)
@@ -1164,18 +1277,71 @@ class GlobalDockService : Service() {
         private var suppressed = false
 
         /**
-         * 设置页打开 / 关闭时调用：让全局 Dock 临时让位。
+         * 空白占位（[suppressed]）时铺的底色 —— 0 表示用 [OPAQUE_BAR_COLOR]。
+         *
+         * 第三百零五轮：设置页 / 启动页都会传各自的背景色进来，
+         * 让底部这条和上面的画面接得上（见 [applyBlank]）。
+         */
+        @Volatile
+        private var suppressedCoverColor = 0
+
+        /**
+         * 空白占位时铺的**底图**（优先于 [suppressedCoverColor]）。
+         *
+         * 第三百零五轮：由 `LauncherView.captureSettingsBottomCover()` 用
+         * `PixelCopy` 从窗口合成结果里拷「接缝上方那条真实像素」进来 ——
+         * 和上面的画面逐像素一致，比单色彻底（壁纸底部有渐变 / 暗角）。
+         */
+        @Volatile
+        private var suppressedCoverBitmap: Bitmap? = null
+
+        /**
+         * 设置页 / 启动页打开时调用：让全局 Dock **让出内容**（而不是让出窗口）。
+         *
+         * 预留区生效（2024 面板）时窗口会退回「空白占位」态继续盖住原车导航栏，
+         * 见 [applyBlank]；没有预留区（2038 悬浮窗）时才真的隐身。
+         *
+         * @param coverColor 空白占位的底色；0 = 用默认不透明底栏色。
+         * @param coverBitmap 空白占位的底图（优先于 [coverColor]）。所有权交给服务：
+         *   被下一张替换 / 退出占位时由服务回收，调用方不要再碰它。
          *
          * 服务没在跑（开关关闭 / 没权限）时是空操作。
          */
-        fun setSuppressed(on: Boolean) {
-            if (suppressed == on) return
+        fun setSuppressed(
+            on: Boolean,
+            coverColor: Int = 0,
+            coverBitmap: Bitmap? = null,
+        ) {
+            if (suppressed == on) {
+                // 已让位时只更新底图/底色（设置页与启动页颜色不同，但通常不会同时开）
+                if (!on || (suppressedCoverColor == coverColor && suppressedCoverBitmap === coverBitmap)) return
+                suppressedCoverColor = coverColor
+                suppressedCoverBitmap = coverBitmap
+                val running = active ?: return
+                running.main.post { running.updateVisibility() }
+                return
+            }
             suppressed = on
+            suppressedCoverColor = if (on) coverColor else 0
+            suppressedCoverBitmap = if (on) coverBitmap else null
             val svc = active
-            Logx.i(LogTags.DOCK, "全局 Dock 抑制切换", "suppressed" to on, "active" to (svc != null))
+            Logx.i(
+                LogTags.DOCK,
+                "全局 Dock 抑制切换",
+                "suppressed" to on,
+                "active" to (svc != null),
+                "coverColor" to if (on) Integer.toHexString(coverColor) else "-",
+                "coverBitmap" to (if (on && coverBitmap != null) "${coverBitmap.width}x${coverBitmap.height}" else "-"),
+            )
             if (svc == null) return
             svc.main.post { svc.updateVisibility() }
         }
+
+        /** 设计层宽度（全局 Dock 的坐标系宽 = 1920），给调用方裁底图用。 */
+        fun designBarWidth(): Int = DESIGN_WIDTH
+
+        /** 设计层高度（全局 Dock 的高 = 112），给调用方裁底图用。 */
+        fun designBarHeight(): Int = DESIGN_BAR_HEIGHT
 
         /** 全局 Dock 当前是否真的画在屏幕上（[showing] 是 updateVisibility 的结论）。 */
         fun isShowing(): Boolean = active?.showing == true

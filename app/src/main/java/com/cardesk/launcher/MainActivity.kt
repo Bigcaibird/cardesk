@@ -1,6 +1,7 @@
 package com.cardesk.launcher
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
@@ -277,7 +278,10 @@ class MainActivity : Activity() {
         // 全局 Dock 是**独立窗口**（`CarDesk 全局 Dock`），会盖在启动页上面 ——
         // 实测不抑制时「启动中」的画面底部会露出一条已经就绪的 Dock，像画错了。
         // 启动页淡完再放开（见 [fadeOutSplash]）。
-        GlobalDockService.setSuppressed(true)
+        //
+        // 第三百零五轮：让位只让**内容**（预留区生效时窗口还要继续盖住原车导航栏），
+        // 所以把启动页的底色一起传下去，底部那条才会跟启动页连成一片。
+        GlobalDockService.setSuppressed(true, LaunchSplashView.backdropColor(splashView.night))
         setContentView(container)
         StartupTrace.mark("window")
 
@@ -829,6 +833,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         Logx.i(LogTags.APP, "onResume")
+        logTopTasks("onResume")
         hideSystemUi()
         // 从系统「通知使用权」页返回时再判一次：授权成功就不该再跳
         // 从系统「应用权限」页返回时也再判一次定位。
@@ -854,8 +859,39 @@ class MainActivity : Activity() {
         ensureGlobalDockStarted()
     }
 
+    /**
+     * 第三百零五轮：把当前栈顶任务打进日志（闪屏排查用）。
+     *
+     * 桌面是 `uid 1000` 系统应用，`getRunningTasks` 在车机上可用；拿不到就只记一条 W，
+     * 不影响任何行为。读到的形如 `21:com.autonavi.amapauto/.MainActivity`，
+     * 下次有闪屏时的诊断包里就能直接看到「那一刻最上面是谁」。
+     */
+    private fun logTopTasks(reason: String) {
+        runCatching {
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+            @Suppress("DEPRECATION")
+            val tasks = am.getRunningTasks(3)
+            val top = tasks.joinToString(" | ") { t ->
+                val a = t.topActivity
+                "${t.id}:${a?.packageName}/${a?.className}"
+            }
+            Logx.i(
+                LogTags.APP,
+                "前台任务快照",
+                "when" to reason,
+                "top" to top,
+                "hasFocus" to hasWindowFocus(),
+            )
+        }.onFailure { Logx.w(LogTags.APP, "前台任务快照失败", it) }
+    }
+
     override fun onPause() {
         Logx.i(LogTags.APP, "onPause")
+        // 第三百零五轮：闪屏排查 —— 记下「谁把焦点抢走了」。
+        // 实车 m01073 的日志里，切页 / 双指横滑时会出现成对的 onPause→onResume
+        // （82ms ~ 1.5s），窗口却一直亮着；光看 onPause 分不清是
+        // 画中画承载面抢焦点（第144轮已知）还是别的 App 真的盖上来了。
+        logTopTasks("onPause")
         // 桌面退到后台 → 全局窗口该出来了（别的应用现在是前台）。
         GlobalDockService.onHomeForeground(false)
         // 第130轮：桌面不在前台 → 画中画不做黑屏自愈（别把用户的应用抢回画中画）。
@@ -893,22 +929,43 @@ class MainActivity : Activity() {
             val isHome = intent?.categories?.contains(Intent.CATEGORY_HOME) == true
             if (isHome) {
                 Logx.event(LogTags.DOCK, "外部 HOME intent")
-                whenLauncherReady { view ->
-                    view.post {
-                        runCatching { view.handleExternalHome() }
-                            .onFailure { Logx.w(LogTags.DOCK, "外部 HOME 处理失败", it) }
-                    }
-                }
+                runExternalHome()
             }
             return
         }
         // 动作是一次性的：同一个 Intent 再被系统复用时不该重复执行。
         runCatching { intent.removeExtra(EXTRA_ACTION) }
-        Logx.event(LogTags.DOCK, "全局 Dock 带回桌面动作", "action" to action)
+        runDockAction(action, fromIntent = true)
+    }
+
+    /**
+     * 执行全局 Dock 带回的动作（intent 路径与进程内路径共用）。
+     *
+     * 第三百零五轮：桌面已经在前台时，全局 Dock 走**进程内直调**（[dispatchDockAction]），
+     * 不再 `startActivity` —— 那会让桌面白走一轮 `onPause→onResume`，
+     * 实车上表现为「按一下 Dock 闪一下」。
+     */
+    private fun runDockAction(action: String, fromIntent: Boolean) {
+        Logx.event(
+            LogTags.DOCK,
+            "全局 Dock 带回桌面动作",
+            "action" to action,
+            "inProcess" to !fromIntent,
+        )
         whenLauncherReady { view ->
             view.post {
                 runCatching { view.handleGlobalDockAction(action) }
                     .onFailure { Logx.w(LogTags.DOCK, "全局 Dock 动作执行失败", it, "action" to action) }
+            }
+        }
+    }
+
+    /** 外部 HOME（系统 HOME intent / 全局 Dock 主页键）：画中画全屏时先还原。 */
+    private fun runExternalHome() {
+        whenLauncherReady { view ->
+            view.post {
+                runCatching { view.handleExternalHome() }
+                    .onFailure { Logx.w(LogTags.DOCK, "外部 HOME 处理失败", it) }
             }
         }
     }
@@ -1287,6 +1344,41 @@ class MainActivity : Activity() {
         fun onExternalHome() {
             val act = instance ?: return
             act.launcher?.handleExternalHome()
+        }
+
+        /**
+         * 第三百零五轮：全局 Dock 的「回桌面执行动作」——**进程内直调**。
+         *
+         * 桌面本来就在前台时，再 `startActivity(MainActivity)` 会让系统把桌面
+         * 走一轮 `onPause → onResume`（实车 m01073 日志里成对出现，每次按键一对），
+         * 窗口重排一帧，用户看到的就是闪一下。这里直接回到桌面自己的消息队列里执行。
+         *
+         * @return true 表示已经交给桌面；false 表示桌面不在（调用方退回 `startActivity`）。
+         */
+        @JvmStatic
+        fun dispatchDockAction(action: String): Boolean {
+            val act = instance ?: return false
+            if (act.isFinishing) return false
+            act.runOnUiThread {
+                runCatching { act.runDockAction(action, fromIntent = false) }
+                    .onFailure { Logx.w(LogTags.DOCK, "全局 Dock 进程内分发失败", it, "action" to action) }
+            }
+            return true
+        }
+
+        /**
+         * 同 [onExternalHome]，但**回 boolean** —— 全局 Dock 的 `goHome()`
+         * 在桌面已经在前台时用它替代 HOME intent（同样是为了少一轮 pause/resume）。
+         */
+        @JvmStatic
+        fun onExternalHomeInProcess(): Boolean {
+            val act = instance ?: return false
+            if (act.isFinishing) return false
+            act.runOnUiThread {
+                runCatching { act.runExternalHome() }
+                    .onFailure { Logx.w(LogTags.DOCK, "外部 HOME 进程内分发失败", it) }
+            }
+            return true
         }
 
         /**

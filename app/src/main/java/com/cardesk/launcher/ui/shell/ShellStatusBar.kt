@@ -86,12 +86,17 @@ import java.util.Locale
  * 实车屏幕右侧有闪烁，用的是静态壁纸）。
  * 只加观测、不改行为：
  * - [invalidateCount] 观测口 —— `refresh()` 每秒会把 [assistText] /
- *   [fuelPercent] / [clockText] / [rangeText] 各赋值一次，而这几个 setter
- *   是**无条件 invalidate**，状态栏整行每秒至少重绘一次；
+ *   [fuelPercent] / [clockText] / [rangeText] 各赋值一次，而第三百零三轮之前
+ *   这几个 setter 是**无条件 invalidate**（实测 AVD/实车都是每秒 4 次重绘）；
  *   心跳里打这个计数就能确认「每分钟重绘多少次」；
  * - [fuelPercent] / [clockText] / [rangeText] **值真的变化**时各打一条 INFO
  *   （[assistText] 本来就有）—— 车端数据在「有值↔null」间抖动会让右段
  *   `--%`↔`62%` 跳变，诊断包里直接能看到抖动节奏。
+ *
+ * **第三百零五轮：改为「值不变就不重绘」**。实车日志量出来的比例是
+ * `statusInvalidate / refresh = 4.02`（每 30s +120 次重绘、只有 +30 次刷新），
+ * 也就是右下角那块**玻璃条每秒被重画 4 遍** —— 慢 GPU 上就是右段闪烁的来源之一。
+ * 现在四个 setter 只在 `changed` 时才 invalidate，稳态下每秒只剩时钟那一次。
  */
 class ShellStatusBar(context: Context) : View(context) {
 
@@ -106,8 +111,11 @@ class ShellStatusBar(context: Context) : View(context) {
             // 排障场景：「驾驶模式胶囊不更新」——胶囊文案变化落盘。
             if (changed) {
                 Logx.i(LogTags.DOCK, "状态栏驾驶模式胶囊变化", "assist" to v)
+                // 第三百零五轮：值没变就不要 invalidate —— 状态栏整行是 Canvas 自绘，
+                // 每秒被 refresh() 赋值一次，无条件重绘等于每秒给玻璃条重画 4 遍，
+                // 慢 GPU（车机 820A）上就是右段闪烁的来源之一。
+                invalidate()
             }
-            invalidate()
         }
 
     /**
@@ -123,8 +131,8 @@ class ShellStatusBar(context: Context) : View(context) {
             // 值变了才打，抖动节奏在诊断包里一目了然。
             if (changed) {
                 Logx.i(LogTags.SYS, "状态栏油量变化", "fuel" to v)
+                invalidate()
             }
-            invalidate()
         }
 
     /**
@@ -163,8 +171,8 @@ class ShellStatusBar(context: Context) : View(context) {
             // 变了才落一条，用于确认「时钟刷新节奏正常」。
             if (changed) {
                 Logx.d(LogTags.DOCK, "状态栏时钟变化", "clock" to v)
+                invalidate()
             }
-            invalidate()
         }
 
     var rangeText: String = ""
@@ -174,8 +182,8 @@ class ShellStatusBar(context: Context) : View(context) {
             // 排障场景（第三百零三轮）：续航文案抖动（值↔空）也是右段闪烁候选。
             if (changed) {
                 Logx.d(LogTags.DOCK, "状态栏续航变化", "range" to v)
+                invalidate()
             }
-            invalidate()
         }
 
     // -------------------------------------------------- 位置 + 天气（第四轮新增）
