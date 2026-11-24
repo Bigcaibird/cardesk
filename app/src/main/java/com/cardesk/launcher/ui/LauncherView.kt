@@ -3798,14 +3798,6 @@ fun toggleCam360() {
         }.apply { name = "cardesk-oem-policy" }.start()
     }
 
-    /** 按键映射（dialog_custom_keys 等价物）。 */
-    fun showKeys() {
-        val dialog = com.cardesk.launcher.ui.dialogs.KeysDialog(context, pal, prefs)
-        dialog.onChanged = { refresh() }
-        dialog.onClose = { closeOverlayDialog(dialog) }
-        showOverlayDialog(dialog)
-    }
-
     /** 新建计划任务（dialog_task_editor 等价物）。 */
     fun newTask() = showTaskEditor(null)
 
@@ -4095,12 +4087,6 @@ fun toggleCam360() {
             showOverlayDialog(dialog)
         }
         overlay.onShowAccent = { showAccentPicker() }
-        overlay.onShowKeys = {
-            val dialog = com.cardesk.launcher.ui.dialogs.KeysDialog(context, pal, prefs)
-            dialog.onChanged = { refresh() }
-            dialog.onClose = { closeOverlayDialog(dialog) }
-            showOverlayDialog(dialog)
-        }
         overlay.onShowStatusApps = {
             showStatusApps()
         }

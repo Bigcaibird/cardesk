@@ -12,7 +12,6 @@ import com.cardesk.launcher.core.OemKeyProtocol
 import com.cardesk.launcher.core.OemKeyProtocol.Press
 import com.cardesk.launcher.core.Palettes
 import com.cardesk.launcher.core.Prefs
-import com.cardesk.launcher.ui.dialogs.KeysDialog
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -217,24 +216,31 @@ class KeyChannelBroadcastTest {
 
     @Test
     fun `设置页自检按钮能把事件喂进执行端`() {
-        prefs.voiceLongAction = Prefs.ACTION_360_TOGGLE
-        OemKeyRuntime.attach(app, prefs, executor)
+        // 第三百一十五轮：按键增强面板已合并进设置页 —— 自检按钮就在「按键增强」页底部
+        prefs.keysEnhanced = true
+        prefs.mediaPrevLongAction = Prefs.ACTION_360_TOGGLE
         val activity: Activity = Robolectric.buildActivity(Activity::class.java).setup().get()
-        val dialog = KeysDialog(activity, Palettes.night, prefs)
+        // 挂执行端要在 Activity 建好之后：MainActivity 会把桌面自己的执行端挂上去，
+        // 这里换成用例的执行端，才能数到 toggles
+        OemKeyRuntime.attach(activity, prefs, executor)
+        val overlay = SettingsOverlay(activity, prefs, Palettes.night)
+        // select 是私有的：直接把设置页切到「按键增强」页
+        SettingsOverlay::class.java
+            .getDeclaredMethod("select", String::class.java)
+            .apply { isAccessible = true }
+            .invoke(overlay, "keys")
+        shadowOf(Looper.getMainLooper()).idle()
 
-        val texts = collectTexts(dialog)
-        assertTrue("缺少「方控广播」分组", texts.contains("方控广播"))
-        assertTrue("缺少单击自测按钮", texts.any { it == "自测：单击" })
-        assertTrue("缺少长按自测按钮", texts.any { it == "自测：长按" })
-        assertTrue("缺少媒体长按自测按钮", texts.any { it == "自测：媒体长按" })
-        assertTrue(
-            "自检卡片应显示最近一次方控按键",
-            texts.any { it.startsWith("最近按键：") },
-        )
+        val texts = collectTexts(overlay)
+        assertTrue("缺少「按键通路」分组", texts.contains("按键通路（车机广播）"))
+        assertTrue("缺少最近按键诊断行", texts.contains("最近按键"))
+        assertTrue("缺少单击自测按钮", texts.contains("单击"))
+        assertTrue("缺少长按自测按钮", texts.contains("长按"))
+        assertTrue("缺少媒体长按自测按钮", texts.contains("媒体长按"))
 
-        // 点「自测：长按」⇒ 走长按动作
-        val button = findTextView(dialog) { it.text == "自测：长按" }
-        assertTrue("找不到自测按钮", button != null)
+        // 点「媒体长按」⇒ 走媒体键长按动作（上一曲 = 360 开关）
+        val button = findTextView(overlay) { it.text == "媒体长按" }
+        assertTrue("找不到媒体长按自测按钮", button != null)
         button!!.performClick()
         shadowOf(Looper.getMainLooper()).idle()
         assertEquals(1, toggles)

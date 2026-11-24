@@ -140,7 +140,9 @@ class DesignParityRenderTest {
         shot("09-color.png")
         call(launcher, "onBack")
 
-        call(launcher, "showKeys")
+        // 第三百一十五轮：按键增强面板已合并进设置页的「按键增强」页
+        call(launcher, "showSettings")
+        selectSettingsPage(launcher, "keys")
         shot("10-keys.png")
         call(launcher, "onBack")
 
@@ -596,6 +598,16 @@ class DesignParityRenderTest {
         val types = args.map { it!!::class.javaPrimitiveType ?: it.javaClass }.toTypedArray()
         launcher.javaClass.getDeclaredMethod(name, *types).apply { isAccessible = true }
             .invoke(launcher, *args)
+    }
+
+    /** 让设置页切到指定子页（按键增强页 = "keys"）。 */
+    private fun selectSettingsPage(launcher: LauncherView, key: String) {
+        val overlay = findField<com.cardesk.launcher.ui.SettingsOverlay>(launcher, "settings") ?: return
+        com.cardesk.launcher.ui.SettingsOverlay::class.java
+            .getDeclaredMethod("select", String::class.java)
+            .apply { isAccessible = true }
+            .invoke(overlay, key)
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
     }
 
     private fun findScenePage(launcher: LauncherView): com.cardesk.launcher.ui.pages.ScenePage? =

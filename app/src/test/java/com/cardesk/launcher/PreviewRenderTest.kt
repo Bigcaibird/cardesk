@@ -180,7 +180,9 @@ class PreviewRenderTest {
         call(launcher, "showStatusApps")
         shot("17-app-picker.png")
         call(launcher, "onBack")
-        call(launcher, "showKeys")
+        // 第三百一十五轮：按键增强面板已合并进设置页的「按键增强」页
+        call(launcher, "showSettings")
+        selectSettingsPage(launcher, "keys")
         shot("18-keys.png")
         call(launcher, "onBack")
         assertNotNull(launcher)
@@ -651,6 +653,16 @@ class PreviewRenderTest {
     }
 
     /** 从 LauncherView 里取场景页（字段是 private，用反射拿）。 */
+    /** 让设置页切到指定子页（按键增强页 = "keys"）。 */
+    private fun selectSettingsPage(launcher: LauncherView, key: String) {
+        val overlay = findField<com.cardesk.launcher.ui.SettingsOverlay>(launcher, "settings") ?: return
+        com.cardesk.launcher.ui.SettingsOverlay::class.java
+            .getDeclaredMethod("select", String::class.java)
+            .apply { isAccessible = true }
+            .invoke(overlay, key)
+        shadowOf(android.os.Looper.getMainLooper()).idle()
+    }
+
     private fun findScenePage(launcher: LauncherView): com.cardesk.launcher.ui.pages.ScenePage? {
         val f = LauncherView::class.java.getDeclaredField("scenePage")
         f.isAccessible = true

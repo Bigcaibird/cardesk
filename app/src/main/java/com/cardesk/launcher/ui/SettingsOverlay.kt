@@ -36,6 +36,7 @@ import com.cardesk.launcher.core.NavSlots
 import com.cardesk.launcher.core.OemDockPolicy
 import com.cardesk.launcher.core.Palette
 import com.cardesk.launcher.core.Palettes
+import com.cardesk.launcher.core.OemKeyProtocol
 import com.cardesk.launcher.core.Prefs
 import com.cardesk.launcher.core.media.MusicController
 import com.cardesk.launcher.core.ScheduledTasks
@@ -88,7 +89,7 @@ import com.cardesk.launcher.vehicle.VinReader
  * | 画板 | 改了什么 |
  * |---|---|
  * | s01 启动与开机 | 删掉重复的「启动后」小标题（`bootCaption` 整块移除）与左栏底部的 VIN /「开源与声明」（画板没有；合规入口仍在「关于」页 `select("about")`）；「目标驾驶模式」三个 chips 改成**右对齐**并去掉「模式」后缀（`DriveMode.UI_MODE_LABELS.map { removeSuffix("模式") }`，落盘仍用 `UI_MODE_VALUES`，语义不变）；补回画板底部的说明「关闭「桌面开机启动」后…」 |
- * | s02 按键增强 | 行高按画板收紧（开关行 [KEY_SWITCH_ROW_H] 96 / 按键行 [KEY_ROW_H] 104 / 驾驶模式块 [KEY_MODE_ROW_H] 110），底部「打开按键增强面板…」不再被面板裁掉（[KEY_PANEL_BTN_H] 56 + 上 12 下 16，画板完整 y986..1025）；所有「单击 / 双击 / 长按」chips 右对齐 |
+ * | s02 按键增强 | 行高按画板收紧（开关行 [KEY_SWITCH_ROW_H] 96 / 按键行 [KEY_ROW_H] 104 / 驾驶模式块 [KEY_MODE_ROW_H] 110）；第三百一十五轮起底部改为「按键通路」自检区（最近按键 + 单击/长按/媒体长按自测），不再有第二个编辑器入口 |
  * | s05 媒体源 | 单列 9 行 → **两列**（左 5 右 4，按列填充，[MEDIA_COL_W] 685）；右侧状态改成**胶囊**（绿「已安装」/ 灰「未安装」/ 蓝「兜底来源」，[pillTag]），**不再显示包名** |
  * | s06 日夜模式 | 补「同步方式」分区标签；三张模式卡 96 → [CARD_CHOICE_H] 90 高、间距 12 → [CARD_CHOICE_GAP] 20，对齐画板 y316..406；「切换时间」分区标签保留（仅在「跟随时间」时出现） |
  * | s07 壁纸 | 整页改**两栏**（[WALLPAPER_COL_W] 598）：左栏 当前壁纸 / 自定义壁纸 / 导入照片…，右栏 3×3 预设 / 壁纸轮播 / 视频壁纸；空态框改**虚线**边框、高度按画板 300 |
@@ -236,7 +237,6 @@ class SettingsOverlay(
      * @param true = 选**副画**的应用（`pip2_app`），false = 主画（`pip_app`）。
      */
     var onShowPipPicker: ((Boolean) -> Unit)? = null
-    var onShowKeys: (() -> Unit)? = null
 
     /**
      * 壁纸被换掉（第五十七轮）。
@@ -2150,10 +2150,10 @@ class SettingsOverlay(
      * ## 行高是画板的紧凑档，不是 128
      *
      * 画板这页量出来是 93 / 106 / 112 —— 六行 128 会把 884px 的视口撑爆，
-     * 底部那枚「打开按键增强面板…」被面板裁掉半截
-     * （验收报告：画板按钮完整落在 y986..1025，实现里只剩上半截）。
+     * 底部那块「按键通路」自检区被面板裁掉半截（验收报告：画板按钮
+     * 完整落在 y986..1025，实现里只剩上半截）。
      * 现在逐行收窄（开关行 96、键位行 104、目标驾驶模式那行 110），
-     * 再加按钮 56 + 上 12 / 下 16 的间距，合计 882，正好落在面板内。
+     * 再加自检区的高度，合计落在面板内。
      *
      * ## chips 右对齐
      *
@@ -2187,14 +2187,37 @@ class SettingsOverlay(
         keySlot("下一曲", prefs.mediaNextLongAction, { prefs.mediaNextLongAction = it }, prefs.mediaNextLongMode) {
             prefs.mediaNextLongMode = it
         }
-        // 不用 [actionButton]：它的高度写死 64、上下外边距 18/24，
-        // 这一页按画板要 56 高、上 12 / 下 16 才落得进面板（见上面的行高说明）。
-        val open = makeButton("打开按键增强面板…", primary = false, danger = false, full = true)
-        open.setOnClickListener { onShowKeys?.invoke() }
-        hostCol.addView(open, LinearLayout.LayoutParams(-1, KEY_PANEL_BTN_H).also {
-            it.topMargin = KEY_PANEL_BTN_TOP
-            it.bottomMargin = KEY_PANEL_BTN_BOTTOM
-        })
+        // 第三百一十五轮：车机方控走**广播**（不是 KeyEvent），真车上又没法用 adb
+        // 模拟按键（shell 没权限）。所以这一页自己带一块「按键通路」自检：
+        // 显示最近一次收到的按键，并能往执行端灌一次单击 / 长按，
+        // 用来在车上确认「配置 → 手势 → 动作」这条链是通的。
+        //
+        // 原来这里是一枚「打开按键增强面板…」按钮，点开的是一个**同样的编辑器**
+        // （相同五项、同一组 prefs），属重复入口，已合并到本页。
+        section("按键通路（车机广播）")
+        val lastKey = prefs.stringValue(KeyActionExecutor.KEY_DIAG_LAST, "")
+        kvRow(
+            "最近按键",
+            if (lastKey.isEmpty()) "还没收到（在车上按一下语音键）" else lastKey,
+            ok = lastKey.isNotEmpty(),
+        )
+        chipRow("自测", listOf("单击", "长按", "媒体长按"), -1, height = KEY_ROW_H) { idx ->
+            val press = if (idx == 0) OemKeyProtocol.Press.CLICK else OemKeyProtocol.Press.LONG
+            val code = if (idx == 2) OemKeyProtocol.KEY_R_MEDIA_PREV else OemKeyProtocol.KEY_R_VOICE_ASSIST
+            Logx.event(LogTags.KEYS, "按键增强自测", "press" to press.name)
+            val handled = OemKeyRuntime.dispatch(
+                context = context.applicationContext ?: context,
+                event = OemKeyProtocol.OemKeyEvent(
+                    keyCode = code,
+                    press = press,
+                    sourceAction = "selftest",
+                ),
+                path = "selftest",
+            )
+            Logx.i(LogTags.KEYS, "按键增强自测结果", "press" to press.name, "handled" to handled)
+            // 诊断行要跟着更新：整页重建一次（值没变的地方重建代价可以接受）
+            select(selectedKey)
+        }
     }
 
     /**
@@ -6155,7 +6178,7 @@ class SettingsOverlay(
         /**
          * 紧凑行高（画板 s02 按键增强 106 / 112、s07 轮播区 76、s11 右栏 78）。
          *
-         * 这些页面的画板行高**不是 128**：s02 底部那枚「打开按键增强面板…」
+         * 这些页面的画板行高**不是 128**：s02 底部那块「按键通路」自检区
          * 之所以被面板裁掉，就是因为六行 128 把 884px 的视口撑爆了。
          * 按画板量出来的档位收窄，按钮才落回面板内（画板 y986..1025）。
          */
@@ -6216,13 +6239,6 @@ class SettingsOverlay(
 
         /** 「目标驾驶模式」那行（画板 113，多一行副标题）。 */
         const val KEY_MODE_ROW_H = 110
-
-        /** 底部「打开按键增强面板…」按钮的高度（画板 39，取 56 保证可点）。 */
-        const val KEY_PANEL_BTN_H = 56
-
-        /** 该按钮的上 / 下外边距（画板按钮上沿 986、行底 968 ⇒ 上 18，下留 16 收尾）。 */
-        const val KEY_PANEL_BTN_TOP = 12
-        const val KEY_PANEL_BTN_BOTTOM = 16
 
         // ---- s05 媒体源 --------------------------------------------------------
 
