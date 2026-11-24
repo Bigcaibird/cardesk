@@ -66,12 +66,13 @@ object LogTags {
     const val CLUSTER = "CarDesk/Cluster"
     const val CAR3D = "CarDesk/Car3d"
     const val ALT = "CarDesk/Alt"
+    const val HOME = "CarDesk/Home"
     const val LOG = "CarDesk/Log"
 
     /** 全部 tag（导出诊断包时列出，方便排查「哪个域没日志」）。 */
     val ALL: List<String> = listOf(
         APP, VEHICLE, HVAC, CAM360, WINDOW, SIGNAL, MEDIA, AMBIENT, MUSIC_UI, NAV_UI,
         SCENE, DOCK, DRAWER, SETTING, TASK, LAN, APK_STORE, WEATHER, KEYS, SYS, THEME, FLOAT,
-        CLUSTER, CAR3D, ALT, LOG,
+        CLUSTER, CAR3D, ALT, HOME, LOG,
     )
 }

@@ -928,8 +928,24 @@ class MainActivity : Activity() {
             // 非全屏时保持老行为（只拉前台、不动页号）。
             val isHome = intent?.categories?.contains(Intent.CATEGORY_HOME) == true
             if (isHome) {
-                Logx.event(LogTags.DOCK, "外部 HOME intent")
-                runExternalHome()
+                // 第三百一十七轮：先过一次 Home 手势判定（双击 → 本项目最近任务）。
+                // 这条是兜底路径：车机 Input 通道拦不到 Home 时，系统每次按压都会把
+                // 桌面拉起来并给一条 CATEGORY_HOME 的 intent，就在这里数按压次数。
+                val homeAction = runCatching {
+                    com.cardesk.launcher.core.HomeKeyRuntime.onHomeIntent(
+                        applicationContext,
+                        com.cardesk.launcher.core.Prefs(applicationContext),
+                    )
+                }.getOrElse {
+                    Logx.w(LogTags.HOME, "Home 手势判定失败", it)
+                    com.cardesk.launcher.core.HomeKeyPolicy.Action.NONE
+                }
+                Logx.event(LogTags.DOCK, "外部 HOME intent", "homeAction" to homeAction.name)
+                if (homeAction == com.cardesk.launcher.core.HomeKeyPolicy.Action.SHOW_RECENTS) {
+                    runExternalHomeDouble()
+                } else {
+                    runExternalHome()
+                }
             }
             return
         }
@@ -956,6 +972,16 @@ class MainActivity : Activity() {
             view.post {
                 runCatching { view.handleGlobalDockAction(action) }
                     .onFailure { Logx.w(LogTags.DOCK, "全局 Dock 动作执行失败", it, "action" to action) }
+            }
+        }
+    }
+
+    /** 外部 HOME 键双击（第317轮）：把动作转给桌面，打开本项目最近任务。 */
+    private fun runExternalHomeDouble() {
+        whenLauncherReady { view ->
+            view.post {
+                runCatching { view.handleExternalHomeDouble() }
+                    .onFailure { Logx.w(LogTags.HOME, "外部双击 Home 处理失败", it) }
             }
         }
     }

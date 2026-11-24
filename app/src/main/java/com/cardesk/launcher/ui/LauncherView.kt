@@ -619,6 +619,9 @@ class LauncherView(context: Context) : FrameLayout(context) {
     /** 导航引导数据源。 */
     private var navGuideSource: com.cardesk.launcher.core.nav.AmapDesktopGuide? = null
 
+    /** 车机 Input 通道的 Home 键接管（第三百一十七轮）；null = 未启动。 */
+    private var homeKeyInterceptor: com.cardesk.launcher.vehicle.HomeKeyInterceptor? = null
+
     /**
      * 状态栏连接状态采样器（第138轮）。
      *
@@ -1037,6 +1040,34 @@ class LauncherView(context: Context) : FrameLayout(context) {
         runCatching { com.cardesk.launcher.ui.OemKeyRegistry.start(context.applicationContext) }
             .onFailure { Logx.w(LogTags.KEYS, "方控广播动态注册失败", it) }
         mark("svc:oemkey")
+
+        // 第三百一十七轮：Home 键双击 → 本项目最近任务。
+        //
+        // 两条入口共用 HomeKeyRuntime 的手势机：
+        //   1) 车机 Input 通道拦截（HomeKeyInterceptor，能看到并吃掉框架之前的按键）；
+        //   2) HOME intent 兜底（MainActivity.onNewIntent，系统已经把桌面拉起来）。
+        // 出口放在这里，所以「回桌面 / 打开最近任务」永远作用在活着的桌面上。
+        runCatching {
+            com.cardesk.launcher.core.HomeKeyRuntime.onGoHome = {
+                runCatching {
+                    bringHomeToFront()
+                    handleExternalHome()
+                }.onFailure { Logx.w(LogTags.HOME, "Home 键回桌面失败", it) }
+            }
+            com.cardesk.launcher.core.HomeKeyRuntime.onShowRecents = {
+                runCatching {
+                    bringHomeToFront()
+                    showRecents()
+                }.onFailure { Logx.w(LogTags.HOME, "Home 键打开最近任务失败", it) }
+            }
+            val interceptor = com.cardesk.launcher.vehicle.HomeKeyInterceptor(
+                context.applicationContext,
+                prefs,
+            )
+            homeKeyInterceptor = interceptor
+            interceptor.start()
+        }.onFailure { Logx.w(LogTags.HOME, "Home 键接管启动失败", it) }
+        mark("svc:homekey")
 
         // 导航引导数据源：没有导航时不显示任何东西（`visibility="gone"`）。
         runCatching {
@@ -2398,6 +2429,30 @@ class LauncherView(context: Context) : FrameLayout(context) {
      * 第九十五轮 C3：不再退回 HOME（HOME 就是本桌面，等于「点了没反应」），
      * 改成打开本应用自己的最近任务页；平台签名不可用时给明确提示。
      */
+    /**
+     * 把桌面任务带到前台（Home 键接管时用）。
+     *
+     * 用**显式 intent + REORDER_TO_FRONT**，而不是发 HOME intent：
+     * 发 HOME 会让 `MainActivity` 又收到一次 CATEGORY_HOME、被当成第二次按压，
+     * 双击判定会自己把自己的动作当成新按键。
+     */
+    private fun bringHomeToFront() {
+        runCatching {
+            val intent = android.content.Intent(context, com.cardesk.launcher.MainActivity::class.java)
+                .addFlags(
+                    android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                        android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT,
+                )
+            context.startActivity(intent)
+        }.onFailure { Logx.w(LogTags.HOME, "桌面带到前台失败", it) }
+    }
+
+    /** 外部 HOME 键双击：打开本项目的最近任务页（MAIN 只做 recruiting，动作在这里）。 */
+    fun handleExternalHomeDouble() {
+        Logx.event(LogTags.HOME, "外部双击 Home：打开最近任务")
+        runCatching { showRecents() }.onFailure { Logx.w(LogTags.HOME, "打开最近任务失败", it) }
+    }
+
     private fun showRecents() {
         Logx.event(LogTags.APP, "打开最近任务")
         if (recentTasksPage != null) return
@@ -6150,6 +6205,11 @@ fun toggleCam360() {
         if (servicesStarted) {
             runCatching { com.cardesk.launcher.ui.OemKeyRegistry.start(context.applicationContext) }
         }
+        // Home 键接管也跟窗口生命周期起停（幂等）。
+        homeKeyInterceptor?.start()
+        com.cardesk.launcher.core.HomeKeyRuntime.interceptorActive = homeKeyInterceptor?.active == true
+        com.cardesk.launcher.core.HomeKeyRuntime.interceptorStatus =
+            homeKeyInterceptor?.statusText ?: "未启动"
         // 第138轮：状态栏连接类图标（蜂窝 / WiFi / 热点 / 蓝牙）按**真实状态**显示。
         // 采样器跟窗口生命周期起停 —— 后台时不用采（车机本来就在省电）。
         startSystemStatusSampling()
@@ -6188,6 +6248,12 @@ fun toggleCam360() {
         com.cardesk.launcher.core.car3d.CarModelAutoSync.onUpdated = null
         com.cardesk.launcher.core.car3d.CarModelAutoSync.stop()
         com.cardesk.launcher.ui.OemKeyRegistry.stop(context.applicationContext)
+        // Home 键接管一起收掉：进程还活着时不该继续替系统处理 Home。
+        homeKeyInterceptor?.stop()
+        homeKeyInterceptor = null
+        com.cardesk.launcher.core.HomeKeyRuntime.onGoHome = null
+        com.cardesk.launcher.core.HomeKeyRuntime.onShowRecents = null
+        com.cardesk.launcher.core.HomeKeyRuntime.reset()
         // 第138轮：连接状态采样一起停（后台线程 + 定时器都收掉）。
         systemStatusSampler?.stop()
         systemStatusSampler = null

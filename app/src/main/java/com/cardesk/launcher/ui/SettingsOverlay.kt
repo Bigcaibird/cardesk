@@ -2218,6 +2218,59 @@ class SettingsOverlay(
             // 诊断行要跟着更新：整页重建一次（值没变的地方重建代价可以接受）
             select(selectedKey)
         }
+
+        // 第三百一十七轮：Home 键双击。
+        //
+        // 车机上 Home 键短按回桌面是系统行为，双击默认开**车机自己的**最近任务。
+        // 这里把双击改成打开本项目的最近任务页；接管状态与最近一次 Home 事件都
+        // 显示出来，方便在车上判断「拦截通道有没有生效、走的是哪条路」。
+        section("Home 键")
+        switchRow(
+            "双击 Home 打开最近任务",
+            prefs.flag(com.cardesk.launcher.core.HomeKeyRuntime.KEY_DOUBLE_RECENTS, true),
+            height = KEY_SWITCH_ROW_H,
+        ) {
+            val from = prefs.flag(com.cardesk.launcher.core.HomeKeyRuntime.KEY_DOUBLE_RECENTS, true)
+            prefs.setFlag(com.cardesk.launcher.core.HomeKeyRuntime.KEY_DOUBLE_RECENTS, it)
+            Logx.event(LogTags.HOME, "双击 Home 开关变更", "from" to from, "to" to it)
+            com.cardesk.launcher.core.HomeKeyRuntime.reset()
+        }
+        kvRow(
+            "Home 键接管",
+            com.cardesk.launcher.core.HomeKeyRuntime.interceptorStatus,
+            ok = com.cardesk.launcher.core.HomeKeyRuntime.interceptorActive,
+        )
+        val lastHome = prefs.stringValue(com.cardesk.launcher.core.HomeKeyRuntime.KEY_DIAG_LAST, "")
+        kvRow(
+            "最近 Home",
+            if (lastHome.isEmpty()) "还没收到（在车上按一下 Home 键）" else lastHome,
+            ok = lastHome.isNotEmpty(),
+        )
+        chipRow("自测", listOf("单击", "双击"), -1, height = KEY_ROW_H) { idx ->
+            Logx.event(LogTags.HOME, "Home 键自测", "index" to idx)
+            val ctx = context.applicationContext ?: context
+            // 双击 = 连续两次按压：第一下只做判定（dispatch=false），否则第一下就把
+            // 设置页关掉、第二下没地方点；第二下才是真正执行的那个。
+            val presses = if (idx == 0) 1 else 2
+            repeat(presses) { i ->
+                val dispatch = i == presses - 1
+                val action = runCatching {
+                    com.cardesk.launcher.core.HomeKeyRuntime.simulate(ctx, prefs, dispatch)
+                }.getOrElse {
+                    Logx.w(LogTags.HOME, "Home 键自测失败", it)
+                    com.cardesk.launcher.core.HomeKeyPolicy.Action.NONE
+                }
+                Logx.i(
+                    LogTags.HOME,
+                    "Home 键自测结果",
+                    "index" to idx,
+                    "press" to (i + 1),
+                    "dispatch" to dispatch,
+                    "action" to action.name,
+                )
+            }
+            select(selectedKey)
+        }
     }
 
     /**
