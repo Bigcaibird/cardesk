@@ -49,9 +49,13 @@ import com.cardesk.launcher.core.log.Logx
  * 画板底不是一条渐变，而是「外层 `.cd` 三条渐变 + `::before/::after` 两个大圆盘 +
  * 内层四处高光/模糊盘」叠出来的（8 层）。CSS 的 `radial-gradient(circle, …)` 默认按
  * farthest-corner 取半径，和 Canvas `RadialGradient` 的口径不同 —— 逐层近似实测左上
- * 青绿区最大差 34/255，肉眼能看出「左上发白」。所以背景按画板原样渲染成 960×540 PNG
- * （`assets/splash/splash_day.png` / `splash_night.png`，共 320KB），运行时等比铺满；
+ * 青绿区最大差 34/255，肉眼能看出「左上发白」。所以背景按画板原样渲染成 960×540 位图
+ * （`assets/splash/splash_day.webp` / `splash_night.webp`），运行时等比铺满；
  * 圆环/文字/进度条仍是代码绘制（要转、要扫、要淡）。
+ *
+ * 编码用 **WebP q90**：底图是平滑多色渐变，lossy WebP 对它极其友好 ——
+ * 两张合计 9,578 B（PNG 时代是 326,310 B），解码后与原图肉眼无差（渐变段落不会出色带）。
+ * `BitmapFactory` 在 API 14 起就支持 WebP，不需要任何依赖；解码失败仍回落纯色底。
  *
  * 日夜只问一次 [NightResolver]（进 `onDraw` 之前就定好），不读车控、不联网、没有百分比。
  */
@@ -77,7 +81,7 @@ class LaunchSplashView(context: Context) : View(context) {
 
     /** 画板 `b01`/`b02` 的背景层（960×540，等比铺满）。缺资产时回落纯色。 */
     private val backdrop: Bitmap? = runCatching {
-        val name = if (night) "splash/splash_night.png" else "splash/splash_day.png"
+        val name = if (night) "splash/splash_night.webp" else "splash/splash_day.webp"
         context.assets.open(name).use { BitmapFactory.decodeStream(it) }
     }.getOrNull()
 
