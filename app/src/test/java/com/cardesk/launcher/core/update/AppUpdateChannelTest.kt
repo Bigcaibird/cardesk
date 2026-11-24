@@ -69,4 +69,57 @@ class AppUpdateChannelTest {
             assertEquals("开发版", AppUpdate.channelLabel(channel))
         }
     }
+
+    // ---------------------------------------------------------------- 第三百一十四轮
+
+    /** 造一个只关心版本号的清单条目（apk = null，不联网也能构造）。 */
+    private fun release(version: String, code: Long) = R2Release(
+        version = version,
+        versionCode = code,
+        tag = "v$version",
+        name = "CarDesk $code / $version",
+        notes = "",
+        publishedAt = "",
+        apk = null,
+    )
+
+    @Test
+    fun `从 versionName 判断包属于哪条通道`() {
+        // 开发版包名带 -preview 后缀（打包脚本写死）
+        assertEquals(AppUpdate.CHANNEL_PREVIEW, AppUpdate.channelOfVersionName("1.0.1230-preview"))
+        assertEquals(AppUpdate.CHANNEL_PREVIEW, AppUpdate.channelOfVersionName("1.0.1230-PREVIEW"))
+        // 正式版 / 系统变体 / 读不到都不算什么特殊分支 → 正式版
+        assertEquals(AppUpdate.CHANNEL_STABLE, AppUpdate.channelOfVersionName("1.0.1219-system"))
+        assertEquals(AppUpdate.CHANNEL_STABLE, AppUpdate.channelOfVersionName("1.0.1219"))
+        assertEquals(AppUpdate.CHANNEL_STABLE, AppUpdate.channelOfVersionName("?"))
+        assertEquals(AppUpdate.CHANNEL_STABLE, AppUpdate.channelOfVersionName(""))
+    }
+
+    @Test
+    fun `跨通道判定不比较版本号`() {
+        assertTrue(AppUpdate.isBranchSwitch(AppUpdate.CHANNEL_STABLE, AppUpdate.CHANNEL_PREVIEW))
+        assertTrue(AppUpdate.isBranchSwitch(AppUpdate.CHANNEL_PREVIEW, AppUpdate.CHANNEL_STABLE))
+        // 同通道（含大小写/空格脏值）不算跨
+        assertTrue(!AppUpdate.isBranchSwitch(AppUpdate.CHANNEL_STABLE, AppUpdate.CHANNEL_STABLE))
+        assertTrue(!AppUpdate.isBranchSwitch(" PREVIEW ", AppUpdate.CHANNEL_PREVIEW))
+        assertTrue(!AppUpdate.isBranchSwitch("", AppUpdate.CHANNEL_STABLE))
+    }
+
+    @Test
+    fun `跨通道时低版本号也算可更新`() {
+        // 装着开发版 4326、切到正式版 4315：版本号更小，但这是跨通道换包，应当可更新
+        val stable = release("1.0.1219", 4315)
+        assertTrue(!AppUpdate.shouldOffer(stable, "1.0.1230-preview", 4326, branchSwitch = false))
+        assertTrue(AppUpdate.shouldOffer(stable, "1.0.1230-preview", 4326, branchSwitch = true))
+    }
+
+    @Test
+    fun `同通道仍然按版本号判断`() {
+        // 同通道：更高才提示；相等或更低都不打扰
+        assertTrue(AppUpdate.shouldOffer(release("1.0.1231-preview", 4327), "1.0.1230-preview", 4326, false))
+        assertTrue(!AppUpdate.shouldOffer(release("1.0.1230-preview", 4326), "1.0.1230-preview", 4326, false))
+        assertTrue(!AppUpdate.shouldOffer(release("1.0.1229-preview", 4325), "1.0.1230-preview", 4326, false))
+        // 清单没给 versionCode 时退回版本号字符串比较
+        assertTrue(AppUpdate.shouldOffer(release("1.0.1231", 0), "1.0.1230-preview", 0, false))
+    }
 }

@@ -458,7 +458,8 @@ class UpdateDialog(
             "url" to AppUpdate.manifestUrl(channel),
         )
         Thread {
-            val result = AppUpdate.check(context, channel)
+            // 手动检查：允许「跨通道」直接切换（切了更新源就不比版本号大小）
+            val result = AppUpdate.check(context, channel, allowBranchSwitch = true)
             handler.post { onChecked(result) }
         }.start()
     }
@@ -472,10 +473,23 @@ class UpdateDialog(
             is AppUpdate.CheckResult.Available -> {
                 val r = result.release
                 val asset = r.apk
-                setStatus("状态：发现新版本 ${r.version}")
+                val target = AppUpdate.channelLabel(channel)
+                val installed = AppUpdate.channelLabel(AppUpdate.installedChannel(context))
+                if (result.branchSwitch) {
+                    // 跨通道换包：两条分支各自递增版本号，谁大谁小没有意义 →
+                    // 不提示「新版本」，直接给「切换到这一支」的入口。
+                    setStatus("状态：可切换到$target（${r.version}）")
+                } else {
+                    setStatus("状态：发现新版本 ${r.version}")
+                }
                 val notes = r.notes.trim().take(600)
                 detail.text = buildString {
                     append(r.name.ifBlank { r.tag.ifBlank { r.version } })
+                    if (result.branchSwitch) {
+                        append("\n\n当前安装的是$installed，选中的是$target。")
+                        append("两条通道的版本号各自递增，跨通道不比较大小，")
+                        append("这里直接把$target 的包换上来（装完版本号可能变小，属正常）。")
+                    }
                     if (asset != null) {
                         append("\n安装包：${asset.name}")
                         if (asset.size > 0) append("（${asset.size / 1024 / 1024.0f} MB）")
@@ -483,7 +497,9 @@ class UpdateDialog(
                     if (notes.isNotEmpty()) append("\n\n$notes")
                     if (asset != null) append("\n\n下载地址：${asset.url}")
                 }
-                val btn = primaryButton("下载并更新") { download(r) }
+                val btn = primaryButton(
+                    if (result.branchSwitch) "下载并切换" else "下载并更新",
+                ) { download(r, allowDowngrade = result.branchSwitch) }
                 downloadBtn = btn
                 footer.addView(btn, Ui.linear(-2, 62, 0f, 12))
             }
@@ -494,7 +510,7 @@ class UpdateDialog(
         }
     }
 
-    private fun download(release: R2Release) {
+    private fun download(release: R2Release, allowDowngrade: Boolean = false) {
         setStatus("状态：下载中…")
         bar.visibility = View.VISIBLE
         bar.progress = 0
@@ -512,7 +528,7 @@ class UpdateDialog(
                 return@Thread
             }
             handler.post { setStatus("状态：下载完成，正在安装…") }
-            val result = AppUpdate.install(context, file)
+            val result = AppUpdate.install(context, file, allowDowngrade)
             handler.post { onInstalled(result) }
         }.start()
     }

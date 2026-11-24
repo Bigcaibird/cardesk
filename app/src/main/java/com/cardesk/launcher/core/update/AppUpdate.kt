@@ -106,8 +106,18 @@ object AppUpdate {
         /** 已是最新。 */
         data class UpToDate(val current: String, val latestVersion: String) : CheckResult
 
-        /** 有新版本。 */
-        data class Available(val release: R2Release, val current: String) : CheckResult
+        /**
+         * 可以更新。
+         *
+         * @param branchSwitch true = 这次不是「比版本号更大」，而是**跨通道**换包
+         *   （装着开发版、选的正式版，或反过来）。两条通道各自递增版本号，
+         *   互相之间的大小关系没有意义，所以这种情形直接给可更新，不比较。
+         */
+        data class Available(
+            val release: R2Release,
+            val current: String,
+            val branchSwitch: Boolean = false,
+        ) : CheckResult
 
         /** 没查到（网络不通 / 清单取不到 / 返回体看不懂）。 */
         data class Failed(val reason: String) : CheckResult
@@ -141,6 +151,43 @@ object AppUpdate {
         val pi = pm.getPackageInfo(context.packageName, 0)
         if (Build.VERSION.SDK_INT >= 28) pi.longVersionCode else pi.versionCode.toLong()
     }.getOrDefault(0L)
+
+    /**
+     * 从一个包的 `versionName` 判断它属于哪条通道（纯函数，便于单测）。
+     *
+     * 约定：开发版包的版本号带 `-preview` 后缀（`1.0.1230-preview`），
+     * 正式版是 `1.0.1219-system` 这种（没有 `-preview`）。后缀由打包脚本写死，
+     * 所以判定**只看后缀**，不猜别的。
+     *
+     * @param name `versionName`；读不到时传 `?` 之类也没关系 —— 一律当正式版。
+     */
+    fun channelOfVersionName(name: String): String =
+        if (name.contains("-preview", ignoreCase = true)) CHANNEL_PREVIEW else CHANNEL_STABLE
+
+    /** 当前装着的包属于哪条通道。 */
+    fun installedChannel(context: Context): String = channelOfVersionName(currentVersionName(context))
+
+    /**
+     * 选中的通道和已装包的通道是不是**跨分支**（纯函数）。
+     *
+     * 跨分支时不能拿版本号比大小：开发版可能已经到 4326，正式版还停在 4315，
+     * 「4326 > 4315」只说明开发版发得早，不说明正式版是旧的。
+     */
+    fun isBranchSwitch(targetChannel: String, installed: String): Boolean =
+        normalizeChannel(targetChannel) != normalizeChannel(installed)
+
+    /**
+     * 这个远端版本要不要摆到用户面前（纯函数，单测直接覆盖决策本身）。
+     *
+     * - 跨分支：**直接可更新**（用户明确切换了更新源，要的就是「换上那一支的包」）；
+     * - 同分支：按 [isNewer] 的常规规则比版本号。
+     */
+    fun shouldOffer(
+        remote: R2Release,
+        localName: String,
+        localCode: Long,
+        branchSwitch: Boolean,
+    ): Boolean = branchSwitch || isNewer(remote, localName, localCode)
 
     /** 版本展示串：`1.0.1038（4134）`。 */
     fun versionLabel(context: Context): String {
@@ -183,30 +230,46 @@ object AppUpdate {
      *
      * 清单里只放**一个**最新版本，所以这里不需要「挑最新」那一步；
      * 跟本地比的时候优先比 `versionCode`，清单没给才退回比版本号字符串。
+     *
+     * @param allowBranchSwitch 是否把「跨通道」也算作可更新。用户手动检查更新时为 true：
+     *   刚在设置里把更新源从开发版切到正式版，此时 4326-preview → 4315-system 的
+     *   versionCode 是**变小**的，按常规规则会判成「已是最新」，用户就切不过去。
+     *   启动自动检测保持 false（否则每次开机都提示「可切换到另一条通道」）。
      */
-    fun check(context: Context, channel: String = CHANNEL_STABLE): CheckResult {
+    fun check(
+        context: Context,
+        channel: String = CHANNEL_STABLE,
+        allowBranchSwitch: Boolean = false,
+    ): CheckResult {
         val ch = normalizeChannel(channel)
         val url = manifestUrl(ch)
         val label = channelLabel(ch)
         val current = currentVersionName(context)
         val currentCode = currentVersionCode(context)
+        val installed = installedChannel(context)
+        val branchSwitch = allowBranchSwitch && isBranchSwitch(ch, installed)
         return try {
             val release = fetchRelease(context, ch)
             if (release == null) {
                 Logx.w(LogTags.SETTING, "检查更新：清单读不懂", "url" to url, "channel" to ch)
                 return CheckResult.Failed("更新清单读不懂（格式不对）")
             }
-            if (isNewer(release, current, currentCode)) {
+            if (shouldOffer(release, current, currentCode, branchSwitch)) {
                 Logx.i(
-                    LogTags.SETTING, "检查更新：有新版本",
-                    "channel" to label, "current" to current, "latest" to release.version,
+                    LogTags.SETTING,
+                    if (branchSwitch) "检查更新：跨通道，可直接切换" else "检查更新：有新版本",
+                    "channel" to label, "installed" to channelLabel(installed),
+                    "current" to current, "latest" to release.version,
+                    "latestCode" to release.versionCode,
                     "apk" to (release.apk?.name ?: ""),
                 )
-                CheckResult.Available(release, current)
+                CheckResult.Available(release, current, branchSwitch)
             } else {
                 Logx.i(
                     LogTags.SETTING, "检查更新：已是最新",
-                    "channel" to label, "current" to current, "latest" to release.version,
+                    "channel" to label, "installed" to channelLabel(installed),
+                    "current" to current, "latest" to release.version,
+                    "latestCode" to release.versionCode,
                 )
                 CheckResult.UpToDate(current, release.version)
             }
@@ -279,9 +342,13 @@ object AppUpdate {
      *
      * 先走**静默安装**（system 变体有 `INSTALL_PACKAGES`，装完直接生效）；
      * 静默不行就退到**系统安装器**（普通安装包唯一能走的路）。
+     *
+     * @param allowDowngrade 允许装版本号更小的包。只在**跨更新通道切换**时为 true：
+     *   两条通道各自递增版本号，切到另一条时目标包的 versionCode 可能更小，
+     *   系统默认会以 `INSTALL_FAILED_VERSION_DOWNGRADE` 拒装。
      */
-    fun install(context: Context, apk: File): InstallResult {
-        if (SystemOps.installApk(context, apk)) return InstallResult.Silent
+    fun install(context: Context, apk: File, allowDowngrade: Boolean = false): InstallResult {
+        if (SystemOps.installApk(context, apk, allowDowngrade)) return InstallResult.Silent
         // —— 回退：把 APK 放进公共目录，再叫系统安装器 ——
         val published = publishToPublic(context, apk)
         return when (published) {

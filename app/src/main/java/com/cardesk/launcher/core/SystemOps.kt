@@ -77,8 +77,13 @@ object SystemOps {
     /**
      * 用 PackageInstaller 安装 APK。需要 INSTALL_PACKAGES（system flavor / 平台签名），
      * 否则返回 false，调用方回退系统安装器。
+     *
+     * @param allowDowngrade 允许装 versionCode 更小的包（跨更新通道切换时要用）。
+     *   `InstallSessionParams.setAllowDowngrade(boolean)` 是 hidden 成员，
+     *   compileSdk 29 编不到 → 运行时反射；反射不到就按「不允许降级」继续，
+     *   装不上会由安装回执（[InstallResultReceiver]）报出真实原因。
      */
-    fun installApk(context: Context, apk: File): Boolean {
+    fun installApk(context: Context, apk: File, allowDowngrade: Boolean = false): Boolean {
         if (!apk.exists()) {
             // 排障场景：在线更新点「应用」后没动静 —— 先看 APK 到底有没有下下来
             Logx.w(LogTags.SYS, "静默安装失败：APK 文件不存在", "path" to apk.absolutePath)
@@ -97,6 +102,22 @@ object SystemOps {
         val ok = runCatching {
             val installer = context.packageManager.packageInstaller
             val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+            if (allowDowngrade) {
+                // 跨更新通道：目标包 versionCode 可能更小，系统默认拒装（INSTALL_FAILED_VERSION_DOWNGRADE）。
+                // `setAllowDowngrade` 是 hidden 成员（compileSdk 29 看不到）→ 反射设置，失败只记日志。
+                runCatching {
+                    params.javaClass
+                        .getMethod("setAllowDowngrade", Boolean::class.javaPrimitiveType)
+                        .invoke(params, true)
+                }.onFailure {
+                    Logx.w(
+                        LogTags.SYS,
+                        "设置允许降级安装失败（继续按普通安装尝试）",
+                        it,
+                        "path" to apk.absolutePath,
+                    )
+                }
+            }
             if (Build.VERSION.SDK_INT >= 31) {
                 // `setPackageSource` / `PACKAGE_SOURCE_DOWNLOADED_FILE` 是 **API 30** 才有的成员，
                 // 本项目 compileSdk 29（一致）编不到 —— 运行时用反射调，失败就跳过。
@@ -119,11 +140,15 @@ object SystemOps {
                         session.fsync(out)
                     }
                 }
+                // 结果回执：**不能带 FLAG_IMMUTABLE** —— 系统是把
+                // STATUS / STATUS_MESSAGE 当作 PendingIntent 的「fill-in intent」塞进来的，
+                // 不可变 PendingIntent 会丢掉 fill-in（实测回执变成 status=-1），
+                // 于是更新成功也弹「安装失败」。targetSdk 29 不强制要求 IMMUTABLE。
                 val callback = PendingIntent.getBroadcast(
                     context,
                     sessionId,
                     Intent(ACTION_INSTALL_COMMIT).setPackage(context.packageName),
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                    PendingIntent.FLAG_UPDATE_CURRENT,
                 )
                 session.commit(callback.intentSender)
             }
@@ -440,6 +465,13 @@ object SystemOps {
             if (intent.action != ACTION_INSTALL_COMMIT) return
             val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, -1)
             val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE).orEmpty()
+            if (status < 0) {
+                // 没有状态码 ≠ 失败：老版本的 PendingIntent 用了 FLAG_IMMUTABLE，
+                // 系统塞进来的 fill-in 被丢掉，回执就只剩一个空壳（见 installApk 的注释）。
+                // 装没装成以「包是否被替换」为准，这里只记日志、不弹失败框。
+                Logx.w(LogTags.SYS, "安装回执：没有状态码（按已提交处理，不提示失败）")
+                return
+            }
             val ok = status == PackageInstaller.STATUS_SUCCESS
             // 排障场景：静默安装到底成没成，回执状态码在这里
             if (ok) {
