@@ -1,16 +1,16 @@
 {
   "schema": 1,
   "channel": "preview",
-  "version": "1.0.1229-preview",
-  "versionCode": 4325,
-  "tag": "v1.0.1229-preview",
-  "name": "CarDesk 4325 / 1.0.1229-preview（开发版）",
-  "notes": "车模图不再随安装包发布：写实车模改为纯远端资源包（启动后台自动补齐），安装包缩小约 1MB；下载完成前显示自绘俯视车模。",
-  "publishedAt": "2026-11-24T06:03:01Z",
+  "version": "1.0.1230-preview",
+  "versionCode": 4326,
+  "tag": "v1.0.1230-preview",
+  "name": "CarDesk 4326 / 1.0.1230-preview（开发版）",
+  "notes": "启动页底图改为 WebP（体积从 326KB 降到约 9.6KB，视觉不变），安装包再缩小约 310KB。",
+  "publishedAt": "2026-11-24T06:41:03Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4325-preview.apk",
-    "url": "cardesk/preview/CarDesk-platform-ecarx-cardesk-4325-preview.apk",
-    "size": 3141407,
-    "sha256": "a6c96a5b52fe072352c91dc5229e0cde93ffc6b00a2cbe3779e9a42d7924ed1d"
+    "name": "CarDesk-platform-ecarx-cardesk-4326-preview.apk",
+    "url": "cardesk/preview/CarDesk-platform-ecarx-cardesk-4326-preview.apk",
+    "size": 2824725,
+    "sha256": "7fc91ec44aa98a778f570b536335db26592e672de36f37b644f86d288fa2a112"
   }
 }
