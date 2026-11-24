@@ -114,17 +114,24 @@ class BackgroundView(context: Context) : View(context) {
     var wallpaper: Int = Wallpapers.DEFAULT_INDEX
         set(value) {
             val next = Wallpapers.normalize(value)
-            val changed = next != field
+            // 第九批（设置页闪屏）：值没变就**整段跳过**。
+            //
+            // 设置页里改任何开关都会把壁纸下标重新赋一遍（见
+            // LauncherView.onSettingsApplied），而这个 setter 会触发
+            // refreshBackdrop() → refreshGlass()：主线程画 192×108 代理图 +
+            // 480×270 玻璃底图，车机上几十毫秒 —— 白掉一帧。
+            //
+            // 壁纸没换时画面本来就应该原封不动，跳过是安全的；
+            // 日夜换色走 palette setter（它自己会重算），不受这里影响。
+            if (next == field) return
             field = next
             // 排障场景：「壁纸切了但还是上一张」——壁纸下标变化落盘。
-            if (changed) {
-                Logx.event(
-                    LogTags.SCENE,
-                    "壁纸切换",
-                    "index" to next,
-                    "name" to Wallpapers.name(next),
-                )
-            }
+            Logx.event(
+                LogTags.SCENE,
+                "壁纸切换",
+                "index" to next,
+                "name" to Wallpapers.name(next),
+            )
             invalidate()
             // 换纸 → 浮层墨色要跟着换（第222轮）。
             refreshBackdrop()
@@ -164,6 +171,10 @@ class BackgroundView(context: Context) : View(context) {
      */
     var customBitmap: Bitmap? = null
         set(value) {
+            // 第九批（设置页闪屏）：同一张位图重复赋值不重算。
+            // 设置页每次应用设置都会把 CustomWallpaper.cachedBitmap() 再塞一遍，
+            // 而它返回的是缓存里的**同一个实例**，图没换就不该重算整屏底图。
+            if (field === value) return
             field = value
             invalidate()
             // 图解好了 → 才能采它的亮度（第222轮）。

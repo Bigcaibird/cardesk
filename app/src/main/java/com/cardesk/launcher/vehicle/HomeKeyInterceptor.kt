@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import com.cardesk.launcher.core.HomeKeyRuntime
+import com.cardesk.launcher.core.OemRecentsSuppressor
 import com.cardesk.launcher.core.Prefs
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
@@ -130,6 +131,10 @@ class HomeKeyInterceptor(
             "status" to statusText,
             "attempt" to retryIndex,
         )
+        // 接管生效后压制原车最近任务（真车上框架的双击逻辑不受 consume 影响，
+        // 会把车机自己的最近任务压上来）；接管没拿到就恢复。
+        runCatching { OemRecentsSuppressor.sync(context, prefs) }
+            .onFailure { Logx.w(LogTags.HOME, "原车最近任务同步失败", it) }
         if (!active && started) {
             val delay = RETRY_DELAYS_MS.getOrNull(retryIndex)
             if (delay != null) {
@@ -171,6 +176,8 @@ class HomeKeyInterceptor(
         accepted = IntArray(0)
         HomeKeyRuntime.interceptorActive = false
         HomeKeyRuntime.interceptorStatus = if (failure == null) "已停止" else "不可用：$failure"
+        runCatching { OemRecentsSuppressor.release(context, prefs) }
+            .onFailure { Logx.w(LogTags.HOME, "原车最近任务恢复失败", it) }
         Logx.i(LogTags.HOME, "Home 键接管已停止")
     }
 

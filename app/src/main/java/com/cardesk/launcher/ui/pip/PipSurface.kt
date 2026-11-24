@@ -1039,6 +1039,13 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
      *
      * 像素判黑**降级成辅助**：只有先证明采样能看到应用画面（`sawContent`）才认。
      *
+     * ## 长黑轮：再补一条「长时间看不见承载面」
+     *
+     * 真车实测：承载面长时间没有画面时，窗口缓冲在承载面位置是**透明的洞**，
+     * 采样是连续 BLIND（42 秒 / 14 帧），而不是连续黑帧 ⇒ 上面两条判据都够不着，
+     * 黑屏自愈永不触发。所以补一条盲帧超时判据（判据与动作都在 [PipBlackHeal]），
+     * 盲帧算不算证据由 [PipBlackHeal.blindCanMeanLost] 按当前路线与窗口透明度决定。
+     *
      * ## 分级动作
      *
      * 判据与动作在纯逻辑 [PipBlackHeal] 里，这里只负责执行。
@@ -1064,6 +1071,12 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
             taskOffDisplay = taskOff,
             consecutiveBlack = probe.consecutiveBlack,
             sinceLastHealMs = since,
+            // —— 长黑轮：长时间看不见承载面也算黑屏证据 ——
+            //
+            // 盲帧是弱证据：半透明窗口（视频壁纸）下我们永远采不到承载面，
+            // 那时的盲帧说明不了问题，所以先按当前路线与窗口透明度判断能不能认。
+            consecutiveBlind = probe.consecutiveBlind,
+            blindMeansLost = PipBlackHeal.blindCanMeanLost(activeMode, translucentWindow),
         )
         when (decision.action) {
             PipBlackHeal.Action.NONE -> return
@@ -1077,6 +1090,7 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
                     "role" to role,
                     "reason" to decision.reason,
                     "streak" to probe.consecutiveBlack,
+                    "blind" to probe.consecutiveBlind,
                     "samples" to probe.samples,
                 )
                 // 一次黑屏只自愈一次：清掉计数，也忘掉「见过非黑画面」
@@ -1093,6 +1107,7 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
                     "pkg" to packageName,
                     "role" to role,
                     "reason" to decision.reason,
+                    "blind" to probe.consecutiveBlind,
                 )
                 probe.markHealed()
                 rebuildContent()

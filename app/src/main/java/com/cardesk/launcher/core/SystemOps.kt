@@ -253,6 +253,20 @@ object SystemOps {
             )
             return false
         }
+        // 第九批（设置页闪屏）：值没变就**不要写**。
+        //
+        // 设置页里改任何一个开关都会走到这里（见 LauncherView.onSettingsApplied），
+        // 而这条写入路径是「先复位成 null，再写真值」：系统栏 / 窗口 insets 会被
+        // 重新算一遍 —— 真车上是肉眼可见的一下闪。
+        // 真车诊断日志（2026-11-24）里连续两次写入的字符串完全相同，说明多数调用
+        // 是纯冗余的：判据用**系统里的实际值**（不缓存），值真变了才写。
+        val current = runCatching {
+            Settings.Global.getString(context.contentResolver, POLICY_CONTROL)
+        }.getOrNull()
+        if (!SettingsApplyGate.shouldWritePolicy(current, value)) {
+            Logx.i(LogTags.SYS, "策略未变化，跳过写入", "policy" to value)
+            return true
+        }
         // 先复位再写真值，避免旧策略残留
         runCatching { Settings.Global.putString(context.contentResolver, POLICY_CONTROL, "null") }
         execSettingsPut(POLICY_CONTROL, value ?: "null")

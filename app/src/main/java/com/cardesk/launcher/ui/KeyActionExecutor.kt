@@ -276,39 +276,63 @@ class KeyActionExecutor(
         )
 
         if (KeyActionResolver.isVoiceKey(event.keyCode)) {
+            val clickAction = KeyActionResolver.voice(prefs, KeyActionResolver.VoiceSlot.CLICK)
+
+            // 长按：没配动作就放行（车机自己的长按语义还能用），配了才吞。
             if (event.press == OemKeyProtocol.Press.LONG) {
                 handler.removeCallbacks(oemSingleRunnable)
                 oemDetector.onLong(event.keyCode)
-                executeOrOemVoice(
-                    KeyActionResolver.voice(prefs, KeyActionResolver.VoiceSlot.LONG),
-                    "方控语音键长按",
-                )
+                val longAction = KeyActionResolver.voice(prefs, KeyActionResolver.VoiceSlot.LONG)
+                if (longAction.isNone) {
+                    Logx.i(LogTags.KEYS, "按键增强：语音键长按放行车机", "keyCode" to event.keyCode)
+                    return false
+                }
+                execute(longAction, "方控语音键长按")
                 return true
             }
+
             val gesture = oemDetector.onClick(event.keyCode, now)
-            return when (gesture.gesture) {
+            when (gesture.gesture) {
                 OemKeyGesture.Gesture.DOUBLE -> {
                     handler.removeCallbacks(oemSingleRunnable)
-                    val double = KeyActionResolver.voice(prefs, KeyActionResolver.VoiceSlot.DOUBLE)
-                    if (double.isNone) {
-                        executeOrOemVoice(
-                            KeyActionResolver.voice(prefs, KeyActionResolver.VoiceSlot.CLICK),
-                            "方控语音键双击（按单击执行）",
-                        )
-                    } else {
-                        execute(double, "方控语音键双击")
+                    val doubleAction =
+                        KeyActionResolver.voice(prefs, KeyActionResolver.VoiceSlot.DOUBLE)
+                    val target = if (doubleAction.isNone) clickAction else doubleAction
+                    if (target.isNone) {
+                        // 两个槽位都没配动作：这一下也不吞，车机自己会处理第二次单击。
+                        Logx.i(LogTags.KEYS, "按键增强：语音键双击放行车机", "keyCode" to event.keyCode)
+                        return false
                     }
-                    true
+                    execute(
+                        target,
+                        if (doubleAction.isNone) "方控语音键双击（按单击执行）" else "方控语音键双击",
+                    )
+                    return true
                 }
 
                 OemKeyGesture.Gesture.NONE -> {
-                    // 挂起，等双击窗口到期再发单击
+                    if (clickAction.isNone) {
+                        // 单击槽位没配动作 ⇒ **立刻放行**给车机自己的语音助手。
+                        //
+                        // 真车实测（2026-11-24）：以前这里先 `abortBroadcast()` 吞掉、等双击
+                        // 窗口到期再用 `ECARX_KEY_EVENT_RVOICE_EVENT` 补发；车机不认这条
+                        // 补发广播，于是语音键彻底哑掉（设置页「模拟测试」却正常，因为它
+                        // 不经广播）。现在「没配动作」= 用户就是要车机原生语音，直接放行，
+                        // 按压仍然喂给手势机，所以紧跟的第二下照样能判成双击。
+                        Logx.i(
+                            LogTags.KEYS,
+                            "按键增强：语音键单击放行车机",
+                            "keyCode" to event.keyCode,
+                        )
+                        return false
+                    }
+                    // 单击配了动作 ⇒ 必须挂起等双击窗口，窗口到期执行单击动作。
                     handler.removeCallbacks(oemSingleRunnable)
                     handler.postDelayed(oemSingleRunnable, OemKeyGesture.DOUBLE_WINDOW_MS)
-                    true
+                    return true
                 }
 
-                else -> true
+                else -> return true
             }
         }
 
@@ -381,24 +405,37 @@ class KeyActionExecutor(
      * 广播发不出去（没权限/系统没有接收方）时退回 [launchVoiceAssist]。
      */
     private fun launchOemVoice(source: String) {
-        val intent = Intent(OemKeyProtocol.ACTION_VOICE_LAUNCH)
-        intent.addCategory(Intent.CATEGORY_DEFAULT)
+        // 第三百一十九轮：**不再带 receiverPermission 发送**。
+        // 原来 `sendOrderedBroadcast(intent, PLUGIN_PERMISSION)` 的语义是「接收方必须持有
+        // 这个权限」，而车机的语音接收方并不持有它 ⇒ 广播被直接过滤掉，实车上什么都没发生。
+        // 现在按普通有序广播发，并在发之前查一次「到底有没有接收方」，没有就退回 Activity。
+        val intent = Intent(OemKeyProtocol.ACTION_VOICE_LAUNCH).apply {
+            addCategory(Intent.CATEGORY_DEFAULT)
+            // 带上与真实按键广播一致的 extras，接收方按方控事件解析时不会因为缺字段丢弃。
+            putExtra(OemKeyProtocol.EXTRA_KEY_TYPE, OemKeyProtocol.KEY_R_VOICE_ASSIST)
+            putExtra(OemKeyProtocol.EXTRA_KEY_ACTION, OemKeyProtocol.ACTION_TYPE_CLICK)
+        }
+        val receivers = runCatching {
+            context.packageManager.queryBroadcastReceivers(intent, 0).size
+        }.getOrDefault(0)
         val sent = runCatching {
-            context.sendOrderedBroadcast(intent, OemKeyProtocol.PERMISSION_VOICE_LAUNCH)
+            context.sendOrderedBroadcast(intent, null)
             true
         }.getOrElse { error ->
             Logx.w(LogTags.KEYS, "按键增强：唤起车机语音广播失败", error, "source" to source)
             false
         }
-        if (sent) {
-            Logx.i(
-                LogTags.KEYS,
-                "按键增强：唤起车机语音",
-                "source" to source,
-                "action" to OemKeyProtocol.ACTION_VOICE_LAUNCH,
-            )
-            return
-        }
+        Logx.i(
+            LogTags.KEYS,
+            "按键增强：唤起车机语音",
+            "source" to source,
+            "action" to OemKeyProtocol.ACTION_VOICE_LAUNCH,
+            "receivers" to receivers,
+            "sent" to sent,
+        )
+        if (receivers > 0) return
+        // 没有接收方 ⇒ 补发注定没人听，改用 Activity 路径兜底。
+        Logx.w(LogTags.KEYS, "按键增强：唤起车机语音没有接收方，改走 Activity", "source" to source)
         launchVoiceAssist(source)
     }
 

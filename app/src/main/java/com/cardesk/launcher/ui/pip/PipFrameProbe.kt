@@ -121,7 +121,16 @@ import com.cardesk.launcher.ui.embed.ActivityEmbed
  * 4. 连续 3 帧 → 重建承载面 → 重启高德 → 落回首页。
  *
  * 现在每帧先算**不透明像素占比**（[PipSampleGate]）：低于 [OPAQUE_RATIO_MIN]
- * 判「采样不可用」—— 既不算黑、也**清零**连续黑帧。真黑屏（窗口不透明）照常自愈。
+ * 判「采样不可用」—— **不算黑**，也**不清零**连续黑帧。
+ * 「长时间一直看不见」由 [PipBlackHeal] 的盲帧超时判据兜底；真黑屏（窗口不透明）照常自愈。
+ *
+ * ## 长黑轮：盲帧也计入「没有画面」判据
+ *
+ * 真车实测（导航应用画中画，切到其它页较久后回来仍黑）：
+ * 承载面长时间没有画面时，采样连续是 BLIND（42 秒 / 14 帧），
+ * 而旧规则在盲帧上把连续黑帧清零 ⇒ 自愈永不触发。
+ * 现在盲帧**保持**连续黑帧计数（见 [PipSampleGate.nextBlackStreak]），
+ * 并且 [PipBlackHeal] 用 [consecutiveBlind] 与 [BLIND_STREAK_LIMIT] 单独兜底。
  */
 class PipFrameProbe(private val view: View) {
 
@@ -151,7 +160,12 @@ class PipFrameProbe(private val view: View) {
     var blind: Boolean = false
         private set
 
-    /** 连续「采样不可用」的帧数（诊断用，不影响判黑）。 */
+    /**
+     * 连续「采样不可用」的帧数。
+     *
+     * 长黑轮起**参与判黑**：连续够多帧看不见承载面，且当前配置下盲帧确实代表
+     * 「没有画面」时，[PipBlackHeal] 会按盲帧超时自愈（见 [BLIND_STREAK_LIMIT]）。
+     */
     @Volatile
     var consecutiveBlind: Int = 0
         private set
@@ -343,6 +357,9 @@ class PipFrameProbe(private val view: View) {
      */
     fun markHealed() {
         consecutiveBlack = 0
+        // 长黑轮：自愈后盲帧计数也要归零，否则「刚重启完又满了」
+        // 会立刻触发下一级自愈（虽然还有冷却兜底，但没必要抢跑）。
+        consecutiveBlind = 0
         sawContent = false
         consecutiveUnsampleable = 0
         lastLoggedUnsampleable = 0
@@ -434,12 +451,14 @@ class PipFrameProbe(private val view: View) {
         )
 
         if (frame == PipSampleGate.Frame.BLIND) {
-            // 「看不见」不是「黑」：不判黑、**不累加连续黑帧**，并且清零 ——
-            // 中间夹了一帧「看不见」就不该继续往 3 帧上累。
+            // 「看不见」不是「黑」：不判黑、不累加连续黑帧；
+            // 但也**不清零** —— 盲帧不是「有画面」的证据（长黑轮：
+            // 盲帧与零星黑帧交替时，清零会让连续黑帧永远凑不满阈值）。
+            // 「长时间一直看不见」由 [PipBlackHeal] 的盲帧超时判据兜底。
             val wasBlind = blind
             blind = true
             consecutiveBlind++
-            consecutiveBlack = 0
+            consecutiveBlack = PipSampleGate.nextBlackStreak(consecutiveBlack, frame)
             if (!wasBlind) {
                 // 状态翻转 → WARN，真车诊断包里能看到「为什么这一轮不判黑」。
                 Logx.w(
@@ -603,6 +622,16 @@ class PipFrameProbe(private val view: View) {
          * 看门狗 3s 一轮 → 约 9s。避开地图加载中的短暂黑帧。
          */
         const val BLACK_STREAK_LIMIT = 3
+
+        /**
+         * 连续几帧「看不见承载面」才允许按「没有画面」自愈（长黑轮）。
+         *
+         * 看门狗 3s 一轮 → 10 帧 ≈ **30 秒**。这个值比 [BLACK_STREAK_LIMIT] 宽松得多，
+         * 因为盲帧是**弱证据**（透明洞在正常换帧时也会短暂出现）；
+         * 而且只有在「盲帧确实代表没有画面」的配置下才启用
+         * （见 [PipBlackHeal.blindCanMeanLost]），半透明窗口下永不启用。
+         */
+        const val BLIND_STREAK_LIMIT = 10
 
         /**
          * alpha 闸门：不透明像素的 alpha 下限（第224轮，实现见 [PipSampleGate]）。

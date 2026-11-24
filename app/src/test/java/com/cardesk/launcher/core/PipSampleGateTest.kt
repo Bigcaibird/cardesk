@@ -17,10 +17,19 @@ import org.junit.Test
  * → 重建承载面 → 重启高德。
  *
  * 这一组用例把「**看不见 ≠ 黑**」这条契约逐条钉死：
- * 1. 全透明 ⇒ BLIND，**不累加**连续黑帧（且清零），永不触发自愈；
+ * 1. 全透明 ⇒ BLIND，**不累加**连续黑帧；长黑轮起也**不清零**（见下）；
  * 2. 不透明且很暗 ⇒ BLACK，连续 3 帧累积到阈值；
  * 3. 不透明且有内容 ⇒ CONTENT，清零；
- * 4. 「黑 → 看不见 → 黑」的连续黑帧**不成立**（中间被打断）。
+ * 4. 「黑 → 看不见 → 黑」的连续黑帧**照常累积**（长黑轮修复：
+ *    旧规则「盲帧清零」导致承载面长期没有画面时永远凑不满 3 帧、自愈永不触发）。
+ *
+ * ## 长黑轮（真车：画中画长时间黑屏不自愈）
+ *
+ * 承载面没有画面时，窗口缓冲在承载面位置是**透明的洞** ⇒ 采样的第一表现
+ * 是 BLIND 而不是黑帧（真车 42 秒里连续 14 帧全盲，只在末尾夹 1 帧黑）。
+ * 「看不见」不是「有画面」的反证：洞和黑在用户眼里都是没画面。
+ * 所以清零只由**真正看见画面**（CONTENT）做，盲帧保持原计数不动。
+ * 盲帧单独还有一条超时兜底，在 [com.cardesk.launcher.ui.pip.PipBlackHeal] 里。
  */
 class PipSampleGateTest {
 
@@ -139,11 +148,17 @@ class PipSampleGateTest {
     }
 
     @Test
-    fun `采样不可用会清零连续黑帧`() {
+    fun `采样不可用不清零连续黑帧`() {
         assertEquals(
-            "「看不见」必须打断连续黑 —— 中间夹一帧看不见就不该继续往 3 帧上累",
-            0,
+            "长黑轮：承载面没有画面时窗口缓冲是透明的洞 ⇒ 盲帧与黑帧是同一件事的两种采样结果，" +
+                "清零只该由「真看见画面」做；否则中途夹一帧盲帧就永远凑不满 3 帧",
+            2,
             PipSampleGate.nextBlackStreak(2, PipSampleGate.Frame.BLIND),
+        )
+        assertEquals(
+            "盲帧也不会把计数往上加（它只是「不打断」）",
+            0,
+            PipSampleGate.nextBlackStreak(0, PipSampleGate.Frame.BLIND),
         )
     }
 
@@ -153,14 +168,16 @@ class PipSampleGateTest {
     }
 
     @Test
-    fun `黑 盲 黑 的序列永远到不了触发阈值`() {
-        // 视频壁纸下的真实序列：黑帧与「看不见」交替出现。
+    fun `黑 盲 交替也能累积到触发阈值`() {
+        // 长黑轮的真车序列：黑帧与「看不见」交替出现
+        //（42 秒里 14 帧全盲，末尾只夹了 1 帧黑，亮像素占比 1% 卡在 2% 阈值边）。
         var streak = 0
         repeat(10) {
             streak = PipSampleGate.nextBlackStreak(streak, PipSampleGate.Frame.BLACK)
             streak = PipSampleGate.nextBlackStreak(streak, PipSampleGate.Frame.BLIND)
         }
-        assertEquals("交替出现时连续黑帧恒为 0，永不触发自愈", 0, streak)
+        assertEquals("盲帧不清零 ⇒ 交替出现时照样每帧黑都算，累积到 10", 10, streak)
+        assertTrue("必须能到触发阈值 3 帧以上", streak >= 3)
     }
 
     // ---------------------------------------------------------------- 见过画面

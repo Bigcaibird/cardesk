@@ -1,0 +1,136 @@
+# 第三百一十九轮：真车四问题（设置页闪屏 / 画中画长黑 / 语音键 / 双击 Home）
+
+验证环境：AVD `Lynkco_820A_car15_arm64`（`emulator-5572`，API 28 / arm64 / 平台签名），包名 `com.ecarx.cardesk`。
+构建：`assembleSystem -PcardeskPackage=com.ecarx.cardesk --offline`。
+诊断来源：真车诊断包（Android 9 / 1920×968，版本 `1.0.1237-preview`），日志与判据引用见下。
+
+## 一、背景（用户报的四条）
+
+1. **设置页闪屏**：出现在「在线更新 → 检查更新」与「设置项切换」两处。
+2. **画中画长黑**：切到其它页较久后回来，画中画仍是黑屏，不自愈。
+3. **语音键**：开启按键增强后按语音键，我们的映射（双击 360 / 长按驾驶模式）不生效。
+4. **双击 Home**：我们的最近任务先出，车机自己的最近任务随后也出来（两个都弹）。
+
+## 二、逐条根因与改动
+
+### 1) 设置页闪屏
+
+真车日志里，设置项切换那一瞬间 App 侧只有两类动作（无 build / 无主题切换 / 无 onPause）：
+
+- `shell settings put global key=policy_control …` —— 而且是**连续两次写入完全相同的字符串**，
+  写入路径是「先复位成 `null`，再写真值」：两次跨进程写 + 一个 null 瞬态，系统栏与窗口 insets 会被重算一遍；
+- `玻璃模糊完成 ms=… via=rs` —— 壁纸下标被重新赋了同一个值，却照样触发
+  `refreshBackdrop()` → `refreshGlass()`（主线程画 192×108 代理图 + 480×270 玻璃底图再异步模糊）。
+
+「检查更新」那一路则**没有**任何 app 侧的壁纸/玻璃/策略/窗口事件（`AppUpdate.check` 只跑网络），
+它属于对话框覆盖层的合成变化，本轮先按「消除设置应用链的冗余动作」处理，并对该条留了诚实缺口。
+
+| 项 | 做法 |
+| --- | --- |
+| 策略写入 | `SystemOps.applyPolicyControl` 写之前回读系统实际值，相同则 `策略未变化，跳过写入` 直接返回（取消 null 复位与 shell fork） |
+| 壁纸 | `BackgroundView.wallpaper` setter 值没变整段跳过；`customBitmap` 同一实例跳过 |
+| overscan | 记录上次真写过的值，没变不再反射调用（真车上该方法本来就不对外开放） |
+| 画中画 | 只有承载面输入（双画 / 主副包名 / 全屏 / 窗口透明 / 闸口）真的变了才 `refreshPip()` |
+| 纯判定 | 新增 `core/SettingsApplyGate.kt`，把「该不该写」抽成可单测的纯函数 |
+
+### 2) 画中画长时间黑屏不自愈
+
+真车采样证据（同一段日志）：
+
+```
+画中画画面采样：重新看得见承载面 opaquePct=100 blind=14
+状态变化 black=true … brightPct=1 streak=1
+状态变化 black=false … streak=0
+看不见承载面（半透明窗口/透明洞），不判黑 opaquePct=0
+```
+
+即：承载面长时间没有画面时，采样表现是**连续 BLIND**（42 秒 / 14 帧），
+中间只夹了 1 帧「参数上接近黑」的帧；而旧规则「BLIND 既不算黑、又清零连续黑帧」，
+⇒ 连续黑帧永远凑不满 3 帧 ⇒ 自愈永不触发。另外两条权威判据在车机上也都够不着：
+调试构建拿不到别人 task 的 displayId（`HostTaskDisplay` = UNKNOWN）、
+输出面体检只看 surface 在不在、不看有没有画面。
+
+| 项 | 做法 |
+| --- | --- |
+| 盲帧语义 | `PipSampleGate.nextBlackStreak`：BLACK +1、**BLIND 保持不变**、CONTENT 清零 |
+| 新判据 | `PipBlackHeal.decide` 增加「连续盲帧超时」：10 帧（看门狗 3s ≈ 30 秒） |
+| 启用条件 | `PipBlackHeal.blindCanMeanLost(mode, translucentWindow)`：LAYER 且窗口不透明 / MIRROR 才认；半透明窗口（视频壁纸）永不认 |
+| 防误杀 | 盲帧判据要求「见过画面」或「已重发过一次启动」；自愈后盲帧计数归零；仍是一级 RELAUNCH、二级 REBUILD、之后放弃 |
+
+### 3) 语音键
+
+真车日志：`收到方控广播 keyCode=200231 press=CLICK` → 我们走了「补发唤起车机语音」，
+但车机原生语音其实**已经**被唤起了（它在广播链上排在我们之前），
+真正没发生的是**我们的映射**；设置页「模拟测试」不走广播，所以看起来正常。
+
+| 项 | 做法 |
+| --- | --- |
+| 放行 | 语音键单击/长按槽位是「无」时**立即 return false**（不 abortBroadcast），交给车机原生语音 |
+| 双击 | 只有单击槽位配了动作才挂起等双击窗口；双击成立时执行映射（`target = 双击槽位 ?: 单击槽位`） |
+| 补发 | `launchOemVoice()` 不再要求接收方持有 `com.android.systemui.permission.PLUGIN`（车机语音接收方没有该权限，旧广播会被直接过滤）；改为普通有序广播 + 带 `KEY_TYPE/ACTION_TYPE` 扩展；无接收方时回落 Activity 通路 |
+
+### 4) 双击 Home 双弹
+
+真车日志（每次按键三段）：
+
+```
+Home 键按下（Input 通道） code=3 consume=true
+Home 键动作 source=车机 Input 拦截 action=GO_HOME
+Home 键动作 source=HOME intent action=GO_HOME      ← +850~938ms 的回声
+```
+
+旧代码用 500ms 时间窗去重 HOME intent 回声，而回声要 ~850ms 才到 ⇒ 回声被当成**第二次按压**
+⇒ 单击被判成双击（打开我们的最近任务）；同时 `consume=true` 并不能阻止车机框架处理 HOME，
+车机自己的双击最近任务也照跑 ⇒ 两个最近任务都出来。
+
+| 项 | 做法 |
+| --- | --- |
+| 回声 | `HomeKeyRuntime.onHomeIntent`：`interceptorActive` 为真时**无条件**按回声忽略（删掉 500ms 窗口） |
+| 原车最近任务 | 新增 `core/OemRecentsSuppressor`：在「Home 接管生效 + 双击映射开启」时把 `com.ecarx.recents` 置为 `DISABLED_USER`（回读校验），退出/关开关/上次被杀后启动时恢复 `DEFAULT` |
+| 可见性 | 设置页「双击 Home」下方新增「原车最近任务」状态行（已压制 / 未安装 / 压制失败） |
+
+## 三、改动文件
+
+- `core/HomeKeyRuntime.kt`、`core/OemRecentsSuppressor.kt`(新)、`vehicle/HomeKeyInterceptor.kt`
+- `ui/KeyActionExecutor.kt`、`ui/SettingsOverlay.kt`、`ui/LauncherView.kt`
+- `core/SettingsApplyGate.kt`(新)、`core/SystemOps.kt`、`ui/widget/BackgroundView.kt`
+- `core/PipSampleGate.kt`、`ui/pip/PipBlackHeal.kt`、`ui/pip/PipFrameProbe.kt`、`ui/pip/PipSurface.kt`
+- 测试：`HomeKeyEchoTest`(新)、`OemRecentsSuppressorTest`(新)、`SettingsApplyGateTest`(新)、
+  `PipBlackHealLongIdleTest`(新)、`KeyChannelBroadcastTest`、`PipSampleGateTest`
+
+## 四、实测（`emulator-5572`）
+
+| 项 | 判据 | 结果 |
+| --- | --- | --- |
+| Home 单击 | `Home 键动作 source=HOME intent action=GO_HOME` | ✅ 回桌面，不再误判双击 |
+| Home 双击 | `SHOW_RECENTS … text=双击 · 最近任务` + `最近任务页打开 state=READY` | ✅ 打开我们的最近任务 |
+| 语音键单击 | `按键增强：语音键单击放行车机 keyCode=200231` | ✅ 放行 |
+| 语音键长按 | `按键增强：语音键长按放行车机 keyCode=200231` | ✅ 放行 |
+| 语音键双击 | `[EVT] 按键增强：执行动作 source=方控语音键双击` + `按键增强：切换 360` | ✅ 映射生效 |
+| 单测 | `gradle testSystemUnitTest --offline` | ✅ 见第四节末 |
+
+> 语音键那三条为验证方便，曾在**临时构建**里把「按键增强」与「双击动作」的默认值改成开启，
+> 装到 AVD 上用 `am broadcast` 打 `ecarx.intent.action.ECARX_KEY_RVOICEASSIST_EVENT`（200231 / 0=单击、1=长按）验证；
+> 验证后默认值已还原（`grep TEMP-VERIFY` 为空、`Prefs.kt` 无 diff），发版构建用的是还原后的代码。
+
+## 五、诚实缺口
+
+1. **设置页闪屏**：「在线更新 → 检查更新」那一条在诊断日志里没有任何 app 侧副作用（只跑网络），
+   本轮只能消除「设置应用链」的冗余动作（策略写、壁纸重算、画中画重挂），
+   对话框覆盖层那一下是否也闪、是否已消失，需要真车复测；AVD 上设置页开关点不到（坐标未命中），
+   该条未在 AVD 上复现。
+2. **画中画长黑**：AVD 上没有真实高德 + 车机窗口合成，盲帧判据只能靠纯逻辑单测；
+   `blindCanMeanLost` 依赖的 `PipRenderPlan` 路线在 AVD 上不产生真实 BLIND 长黑序列，
+   实车复测时请抓 `画中画画面采样` / `黑屏自愈` 这两类日志。
+3. **原车最近任务压制**：AVD 上 `com.ecarx.recents` 未安装、Home 拦截也不可用
+   （`厂商输入服务未就绪`），压制逻辑在 AVD 上是 no-op，只能靠单测 + 实车日志确认
+   （`原车最近任务：已压制 / 已恢复 / 压制失败`）。若车机不允许禁用该系统组件，
+   设置页状态行会显示「压制失败」，需要换方案（例如只在按住期间的窗口里遮挡）。
+4. **语音键**：单击/长按放行意味着「第一下仍会唤起车机语音」，这是广播链顺序决定的；
+   若希望映射动作不再伴随语音，需要另找注入通路（当前车机没有可用的拦截接口）。
+
+## 六、截图
+
+| 文件 | 内容 |
+| --- | --- |
+| `emu-verify/shots-r319/r319-01-recents.png` | 双击 Home 后打开的桌面最近任务页（发行包 4338 实拍，`最近任务页打开 state=READY`、`count=3`） |

@@ -25,7 +25,8 @@ import com.cardesk.launcher.core.log.Logx
  *
  * 两条入口共用同一个 [HomeKeyPolicy.Detector]，所以不会把「拦截一次 + intent 一次」
  * 算成双击 —— 拦截成功时系统根本不会发 HOME intent；万一固件仍然发了，这里按
- * [INTENT_IGNORE_MS] 做去重（拦截通道刚处理过就忽略 intent）。
+ * 拦截通道生效期间一律忽略 HOME intent（真车上它是 0.85~1.0s 后才到的回声，
+ * 不能当成新按压 —— 详见 [onHomeIntent]）。
  */
 object HomeKeyRuntime {
 
@@ -37,9 +38,6 @@ object HomeKeyRuntime {
 
     /** 诊断：最近一次 Home 事件（设置页展示）。 */
     const val KEY_DIAG_LAST = "home_diag_last"
-
-    /** 拦截通道刚处理过按压时，忽略 HOME intent 的时间窗（去重）。 */
-    private const val INTENT_IGNORE_MS = 500L
 
     private val detector = HomeKeyPolicy.Detector()
 
@@ -86,12 +84,25 @@ object HomeKeyRuntime {
      * @return 需要桌面执行的动作。[HomeKeyPolicy.Action.SHOW_RECENTS] 表示这次是双击。
      */
     fun onHomeIntent(context: Context, prefs: Prefs): HomeKeyPolicy.Action {
-        val now = SystemClock.uptimeMillis()
-        if (interceptorActive && now - lastInterceptAt <= INTENT_IGNORE_MS) {
-            // 拦截通道刚处理过这次按压，不重复计数。
+        if (interceptorActive) {
+            // 真车实测（2026-11-24，diagnostic 包 18:30:56–18:31:24）：
+            // Input 通道接管之后，车机框架仍会在 **约 0.85~1.0 秒**后补发一条
+            // CATEGORY_HOME（`consume=true` 只挡住了框架的一部分）。
+            // 原来用 500ms 时间窗去重，回声正好落在窗外 ⇒ 被当成「第二次按压」，
+            // 单击被判成双击、我们的最近任务莫名其妙弹出来，紧接着车机自己的
+            // 最近任务也到前台（用户看到「两个最近任务先后出现」）。
+            //
+            // 接管期间这条通道上的 HOME intent 全是回声：按压次数只由 Input
+            // 通道记账，这里一律忽略（不再用时间窗猜）。
+            Logx.d(
+                LogTags.HOME,
+                "Home intent 已按回声忽略（Input 通道接管中）",
+                "sinceInterceptMs" to (SystemClock.uptimeMillis() - lastInterceptAt),
+            )
             return HomeKeyPolicy.Action.NONE
         }
-        // 这条路上两条动作都由调用方（MainActivity / 桌面）自己落地，这里只做判定。
+        // 拦截通道不可用时才走兜底：这条路上两条动作都由调用方（MainActivity / 桌面）
+        // 自己落地，这里只做判定。
         return press(context, prefs, "HOME intent", dispatch = false)
     }
 

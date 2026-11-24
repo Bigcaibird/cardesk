@@ -29,16 +29,33 @@ package com.cardesk.launcher.core
  * ## 闸门规则
  *
  * - 不透明像素（alpha ≥ [OPAQUE_ALPHA_MIN]）占比低于 [OPAQUE_RATIO_MIN]
- *   ⇒ 这一帧判为 **[Frame.BLIND]（采样不可用）**：
- *   既不算黑、也**清零连续黑帧**（「看不见」不是「黑」，连续黑必须是**连续**的）。
+ *   ⇒ 这一帧判为 **[Frame.BLIND]（采样不可用）**：**不算黑**。
  * - 采样可用时：像素判黑成立 → [Frame.BLACK]，否则 → [Frame.CONTENT]。
  *
- * 于是半透明窗口（视频壁纸）下像素判黑**永不成立** → 不再误触发重建；
- * 窗口切回不透明后若画面真的黑了，连续黑帧能从 0 重新累积，真黑屏照常自愈。
+ * ## 长黑轮：盲帧**不清零**连续黑帧
+ *
+ * 旧规则是「盲帧既不算黑、也清零连续黑帧（连续黑必须是连续的）」。
+ * 真车实测（导航应用画中画，承载面长时间没有画面）：
+ *
+ * ```
+ * 重新看得见承载面 opaquePct=100 blind=14
+ * 状态变化 black=true opaquePct=100 maxLuma=238 avgLuma=32 brightPct=1 streak=1
+ * ```
+ *
+ * 即一段时间里**连续 14 帧（约 42 秒）全是 BLIND**，只在末尾夹了 1 帧 BLACK ——
+ * 每来一帧盲帧就把黑帧计数清零 ⇒ 连续黑帧永远凑不满阈值 ⇒ 自愈永不触发 ⇒ 永久黑屏。
+ *
+ * 「看不见」不是「有画面」的反证：透明洞和真黑在用户眼里都是「没有画面」。
+ * 所以盲帧改为**保持**连续黑帧计数（见 [nextBlackStreak]），
+ * 而「长时间看不见」本身交给 `PipBlackHeal` 的盲帧超时判据兜底 ——
+ * 那里才把它当成黑屏证据，并且只在「窗口不透明 / 镜像路线」这种
+ * 盲帧确实代表「没有画面」的配置下才认。
+ *
+ * 只有真正看得见画面（[Frame.CONTENT]）才把连续黑帧清零。
  *
  * ## 为什么抽成纯逻辑
  *
- * 阈值与「盲帧不累计」这条规则是**行为契约**，必须能在 JVM 单测里逐条钉死，
+ * 阈值与「盲帧不计黑、不清零」这条规则是**行为契约**，必须能在 JVM 单测里逐条钉死，
  * 而不是埋在 `PipFrameProbe` 的像素循环里靠人眼读。
  */
 object PipSampleGate {
@@ -112,13 +129,24 @@ object PipSampleGate {
      * 连续黑帧的下一步计数。
      *
      * - [Frame.BLACK] → +1；
-     * - 其余（有内容 / 采样不可用）→ **清零**。
+     * - [Frame.BLIND] → **保持不变**（既不加、也不清零）；
+     * - [Frame.CONTENT] → **清零**。
      *
-     * 采样不可用时清零是**必须的**：连续黑帧必须是**连续**的，
-     * 中间夹了一帧「看不见」就不该继续往 3 帧上累。
+     * ## 为什么盲帧不清零（长黑轮）
+     *
+     * 真车实测：承载面没有画面时，窗口缓冲在承载面位置是**透明的洞**，
+     * 采样恒为 BLIND；而地图加载中的暗帧会零星判成 BLACK。
+     * 两者交替时，旧规则（盲帧清零）让连续黑帧恒为 0 → 自愈永不触发。
+     *
+     * 「看不见」只说明这一帧没有证据，不是「有画面」的证据；
+     * 清零只能由真正看得见画面（[Frame.CONTENT]）来做。
+     * 「长时间一直看不见」由 `PipBlackHeal` 的盲帧超时判据单独兜底。
      */
-    fun nextBlackStreak(previous: Int, frame: Frame): Int =
-        if (frame == Frame.BLACK) previous + 1 else 0
+    fun nextBlackStreak(previous: Int, frame: Frame): Int = when (frame) {
+        Frame.BLACK -> previous + 1
+        Frame.BLIND -> previous
+        Frame.CONTENT -> 0
+    }
 
     /**
      * 「见过应用画面」的下一步状态（粘性，见 `PipFrameProbe.sawContent`）。

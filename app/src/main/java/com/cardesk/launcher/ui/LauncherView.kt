@@ -20,6 +20,7 @@ import android.widget.FrameLayout
 import android.widget.Toast
 import com.cardesk.launcher.core.Design
 import com.cardesk.launcher.core.HomeForeground
+import com.cardesk.launcher.core.SettingsApplyGate
 import com.cardesk.launcher.core.DockQuickApps
 import com.cardesk.launcher.MainActivity
 import com.cardesk.launcher.core.log.LogTags
@@ -531,6 +532,12 @@ class LauncherView(context: Context) : FrameLayout(context) {
      * 免得两个线程交叉写系统设置。
      */
     private val policyApplySeq = java.util.concurrent.atomic.AtomicInteger(0)
+    /** 上一次真的写进去的 overscan 值（[SettingsApplyGate.UNSET_OVERSCAN] = 还没写过）。 */
+    @Volatile
+    private var lastOverscanApplied: Int =
+        com.cardesk.launcher.core.SettingsApplyGate.UNSET_OVERSCAN
+    /** 上一次真正 [refreshPip] 时的画中画输入（设置应用时用来跳过无谓的重挂）。 */
+    private var lastPipInputs: com.cardesk.launcher.core.SettingsApplyGate.PipInputs? = null
     private var taskList: com.cardesk.launcher.ui.dialogs.TaskListDialog? = null
     private var taskEditor: com.cardesk.launcher.ui.dialogs.TaskEditorDialog? = null
     private var overlayDialog: View? = null
@@ -1060,6 +1067,13 @@ class LauncherView(context: Context) : FrameLayout(context) {
                     showRecents()
                 }.onFailure { Logx.w(LogTags.HOME, "Home 键打开最近任务失败", it) }
             }
+            // 上次可能是被杀的（压制状态没来得及恢复）：先恢复一次再考虑重新压制。
+            runCatching {
+                com.cardesk.launcher.core.OemRecentsSuppressor.restoreIfNeeded(
+                    context.applicationContext,
+                    prefs,
+                )
+            }.onFailure { Logx.w(LogTags.HOME, "原车最近任务恢复失败", it) }
             val interceptor = com.cardesk.launcher.vehicle.HomeKeyInterceptor(
                 context.applicationContext,
                 prefs,
@@ -3846,8 +3860,16 @@ fun toggleCam360() {
             }
             // 全局 Dock 模式下原车导航栏要么被 RRO 预留、要么被 immersive.navigation 摘掉，
             // 都不需要再靠 overscan 挪 Dock（lowerDock 与 globalDock 互斥，这里自然是 0）。
+            //
+            // 第九批（设置页闪屏）：overscan 值没变就**不再反射调用一次**。
+            // 写 overscan 要反射 `Display.setOverscan`，多数车机上这个方法不对外开放
+            // （真车日志每次都是「反射 setOverscan 不可用」）—— 值没变时重复调用
+            // 只剩异常构造 + 日志开销，没有意义。
             val overscan = if (prefs.lowerDock && !prefs.hideDock) -50 else 0
-            com.cardesk.launcher.core.SystemOps.setOverscan(context, 0, 0, 0, overscan)
+            if (SettingsApplyGate.shouldWriteOverscan(lastOverscanApplied, overscan)) {
+                com.cardesk.launcher.core.SystemOps.setOverscan(context, 0, 0, 0, overscan)
+                lastOverscanApplied = overscan
+            }
             if (prefs.hideStatus) {
                 com.cardesk.launcher.core.SystemOps.setStatusBarDisabled(context, 0x00000008 or 0x00000004)
             }
@@ -5742,7 +5764,17 @@ fun toggleCam360() {
             navPage.syncPipState(prefs.dualPip, pipFullscreen)
             navPage.secondaryPackage = prefs.pip2App.ifBlank { prefs.pipApp }
         }
-        refreshPip()
+        // 第九批（设置页闪屏）：画中画只有「输入真的变了」才重挂。
+        //
+        // 设置页里改的是壁纸轮播 / 媒体源之类时，画中画的输入（双画、主副包名、
+        // 窗口透明性、承载闸口）一个都没变 —— 以前照样 refreshPip() 一遍，
+        // 把已经挂着的承载面再走一次「选路线 + 设可见性」，白跑一趟。
+        // 判据是纯函数（见 SettingsApplyGate.shouldRefreshPip）。
+        val pipInputs = currentPipInputs()
+        if (SettingsApplyGate.shouldRefreshPip(lastPipInputs, pipInputs)) {
+            refreshPip()
+            lastPipInputs = pipInputs
+        }
         refresh()
         if (resolvePalette().night != pal.night) applyTheme()
         // 设置里改了日夜来源（跟随高德 / 跟随光感 / 跟随时间）后，
@@ -5750,6 +5782,22 @@ fun toggleCam360() {
         // （跟随高德模式下不推，见 [pushDayNightToAmap]）。
         pushDayNightToAmap(pal.night)
     }
+
+    /**
+     * 当前影响画中画承载面的输入（见 [SettingsApplyGate.PipInputs]）。
+     *
+     * 只读状态，不改任何东西 —— 用来判断「这次设置应用要不要重挂承载面」。
+     */
+    private fun currentPipInputs(): com.cardesk.launcher.core.SettingsApplyGate.PipInputs =
+        com.cardesk.launcher.core.SettingsApplyGate.PipInputs(
+            navReady = ::navPage.isInitialized,
+            hostingStarted = ::navPage.isInitialized && pipHostingGate.isStarted(),
+            dualPip = prefs.dualPip,
+            pipApp = prefs.pipApp,
+            pip2App = prefs.pip2App,
+            fullscreen = pipFullscreen,
+            translucentWindow = ::navPage.isInitialized && isWindowTranslucent(),
+        )
 
     private fun applyDockVisibility() {
         if (!::dock.isInitialized) return

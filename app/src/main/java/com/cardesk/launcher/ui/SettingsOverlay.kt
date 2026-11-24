@@ -2242,11 +2242,22 @@ class SettingsOverlay(
             prefs.setFlag(com.cardesk.launcher.core.HomeKeyRuntime.KEY_DOUBLE_RECENTS, it)
             Logx.event(LogTags.HOME, "双击 Home 开关变更", "from" to from, "to" to it)
             com.cardesk.launcher.core.HomeKeyRuntime.reset()
+            // 关掉双击映射就把车机的最近任务放回去；打开则按当前接管状态重新压制。
+            val ctx = context.applicationContext ?: context
+            runCatching {
+                com.cardesk.launcher.core.OemRecentsSuppressor.sync(ctx, prefs)
+            }.onFailure { Logx.w(LogTags.HOME, "原车最近任务同步失败", it) }
         }
         kvRow(
             "Home 键接管",
             com.cardesk.launcher.core.HomeKeyRuntime.interceptorStatus,
             ok = com.cardesk.launcher.core.HomeKeyRuntime.interceptorActive,
+        )
+        val recentsStatus = com.cardesk.launcher.core.OemRecentsSuppressor.statusText
+        kvRow(
+            "原车最近任务",
+            recentsStatus,
+            ok = recentsStatus.startsWith("已压制") || recentsStatus.contains("未安装"),
         )
         val lastHome = prefs.stringValue(com.cardesk.launcher.core.HomeKeyRuntime.KEY_DIAG_LAST, "")
         kvRow(

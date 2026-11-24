@@ -138,8 +138,10 @@ class KeyChannelBroadcastTest {
 
     @Test
     fun `两次单击在窗口内合成双击`() {
+        // 单击槽位是「无」⇒ 第一下必须放行车机（它自己去唤起语音），第二下才由我们吃掉。
+        // 见 `第三百一十九轮` 注释：真车上被吞掉的单击补发不回来，语音键会彻底哑掉。
         prefs.voiceDoubleAction = Prefs.ACTION_360_TOGGLE
-        assertTrue(oem(Press.CLICK))
+        assertFalse(oem(Press.CLICK))
         advance(150)
         assertTrue(oem(Press.CLICK))
         assertEquals(1, toggles)
@@ -160,8 +162,19 @@ class KeyChannelBroadcastTest {
     }
 
     @Test
-    fun `三个槽位都没配时不吃动作但仍吃掉广播`() {
-        assertTrue(oem(Press.CLICK))
+    fun `三个槽位都没配时放行给车机`() {
+        // 真车实测（第三百一十九轮）：单击没配动作时若吞掉广播再补发，车机不认补发
+        // ⇒ 语音键彻底没用。所以「没配动作」一律等于「用户要车机原生语音」，放行。
+        assertFalse(oem(Press.CLICK))
+        advance(cardeskWindow() + 50)
+        assertEquals(0, toggles)
+        assertTrue(executed.isEmpty())
+    }
+
+    @Test
+    fun `长按没配动作时也放行给车机`() {
+        prefs.voiceClickAction = Prefs.ACTION_360_TOGGLE
+        assertFalse(oem(Press.LONG))
         advance(cardeskWindow() + 50)
         assertEquals(0, toggles)
         assertTrue(executed.isEmpty())
