@@ -672,6 +672,9 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
         content = null
         frameProbe = null
         activeMode = null
+        // 第三百零六轮：输出面体检的缓存跟着承载面一起清掉
+        lastSurfaceHealth = null
+        surfaceLostStreak = 0
         // 第226轮：镜像路线自己建的虚拟屏要自己释放（`ActivityView.release` 管不到它）
         mirrorHost?.let { host ->
             ActivityEmbed.unbindHostedDisplay(host.view)
@@ -700,6 +703,21 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
      */
     fun setContentVisible(visible: Boolean) {
         val v = content ?: return
+        // —— 第三百零六轮：回到可见态就体检一次「承载面输出面」 ——
+        //
+        // 桌面走 onStop 时（切后台/窗口盖住），`ActivityView` 的 SurfaceView
+        // 会销毁再重建；AOSP 9 在销毁时只做 `mVirtualDisplay.setSurface(null)`，
+        // 重建时再绑回去 —— 车机上这一步实测偶尔没生效 ⇒ **task 和内容都还在，
+        // 但虚拟屏没有输出面** ⇒ 画中画是一块黑，只有「全屏一次再还原」能救。
+        //
+        // 判据（task 在不在我们虚拟屏）在 API 28 上恒为 UNKNOWN（见 ActivityEmbed
+        // 的 displayIdOfTask 注释），所以只能从「输出面还在不在」这一侧修。
+        // 这里**不重启应用**，只把 SurfaceView 现在的 surface 重新绑给 VirtualDisplay。
+        if (visible) {
+            checkDisplaySurface("可见")
+            handler.removeCallbacks(surfaceRecheck)
+            handler.postDelayed(surfaceRecheck, SURFACE_REATTACH_RETRY_MS)
+        }
         // **不要改 visibility**：实测 `INVISIBLE` 会让 `ActivityView` 把
         // VirtualDisplay 的 surface 拆掉，切回来画面**再也回不来**（一直黑）。
         // 改成「整块挪出屏外」：图层位置随 View 的 translation 走，
@@ -822,12 +840,31 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
     /** 上一次解析出来的「我们的 VirtualDisplay id」（变化时总记日志，见 [logOurDisplayId]）。 */
     private var lastOurDisplayId: Int? = null
 
+    /** 上一次「承载面输出面」体检结果（变化时才记日志，第三百零六轮）。 */
+    private var lastSurfaceHealth: Boolean? = null
+
+    /** 连续几轮发现输出面丢失且重绑不成功（到 [SURFACE_LOST_LIMIT] 就重新下发启动）。 */
+    private var surfaceLostStreak = 0
+
     private val watchdog = object : Runnable {
         override fun run() {
             handler.postDelayed(this, WATCHDOG_INTERVAL_MS)
             runCatching { checkProcess() }
                 .onFailure { Logx.w(LogTags.NAV_UI, "画中画看门狗异常", it, "role" to role) }
         }
+    }
+
+    /**
+     * 回到导航页之后**延迟再体检一次**输出面（第三百零六轮）。
+     *
+     * 为什么不能只查一次：surface 重建（SurfaceHolder 回调）与
+     * `ActivityView` 内部把 surface 绑给 VirtualDisplay 之间有**时序差**，
+     * 回到可见态那一刻可能还没绑好；500ms 后再看一次才能确认。
+     */
+    private val surfaceRecheck = Runnable {
+        if (!isShown) return@Runnable
+        runCatching { checkDisplaySurface("可见-延迟") }
+            .onFailure { Logx.w(LogTags.NAV_UI, "画中画输出面体检异常", it, "role" to role) }
     }
 
     private fun startWatchdog() {
@@ -837,6 +874,7 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
 
     private fun stopWatchdog() {
         handler.removeCallbacks(watchdog)
+        handler.removeCallbacks(surfaceRecheck)
         watchdogMisses = 0
     }
 
@@ -855,6 +893,12 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
         //
         // 桌面回到前台后（onResume）看门狗自然恢复工作，那时才该自愈。
         if (!HomeForeground.isForeground) return
+        // —— 第三百零六轮：先体检「承载面输出面」 ——
+        //
+        // 这是车机黑屏的**最常见成因**（VirtualDisplay 没有输出面），
+        // 而且**不需要重启应用**：把 surface 重新绑上就恢复（≈ 用户手动全屏→还原）。
+        // 修好了就跳过这一轮的黑屏自愈，别让后面的像素判据再折腾一次。
+        if (checkDisplaySurface("看门狗")) return
         // —— 黑屏自愈（第六十七轮）：进程活着但画面没了的情形
         checkBlackScreen()
         when (isProcessAlive(pkg)) {
@@ -875,6 +919,91 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
                 relaunch("watchdog")
             }
         }
+    }
+
+    /**
+     * 承载面输出面体检（第三百零六轮）—— **车机黑屏的不流血修法**。
+     *
+     * ## 为什么单独一条
+     *
+     * 黑屏自愈（[checkBlackScreen]）只能靠两条判据：task 的 displayId（API 28 上
+     * 恒不可用）和像素判黑（常被「窗口缓冲透明洞」挡掉）。两者都失灵时，
+     * 用户看到的就是**永久黑屏 + 只能全屏一次再还原**。
+     *
+     * 而黑屏的真身其实在**输出面**这一侧：`ActivityView` 的 VirtualDisplay
+     * 在 surface 重建后可能没把新 surface 绑回去 —— task 活着、内容还在画，
+     * 只是没人看得到。把 `SurfaceView` 现在的 surface 重新 `setSurface` 给
+     * VirtualDisplay，画面立刻回来，**高德不用重启**（路线不丢）。
+     *
+     * @param tag 日志用：哪个入口触发的体检
+     * @return true = 发现输出面丢失并已重绑（= 一次自愈）
+     */
+    private fun checkDisplaySurface(tag: String): Boolean {
+        val v = content ?: return false
+        val healthy = ActivityEmbed.displaySurfaceHealthy(v)
+        if (healthy != lastSurfaceHealth) {
+            lastSurfaceHealth = healthy
+            when (healthy) {
+                true -> Logx.d(
+                    LogTags.NAV_UI,
+                    "承载面输出面体检：健康",
+                    "tag" to tag,
+                    "pkg" to packageName,
+                    "role" to role,
+                )
+                false -> Logx.w(
+                    LogTags.NAV_UI,
+                    "承载面输出面体检：丢失（画面必黑）",
+                    "tag" to tag,
+                    "pkg" to packageName,
+                    "role" to role,
+                    // 是「绑了旧的/别的 surface」还是「根本没绑」—— 诊断包里靠这个区分。
+                    "same" to ActivityEmbed.displaySurfaceIdentitySame(v),
+                )
+                null -> Logx.w(
+                    LogTags.NAV_UI,
+                    "承载面输出面体检不可用（取不到虚拟显示器）",
+                    "tag" to tag,
+                    "pkg" to packageName,
+                    "role" to role,
+                )
+            }
+        }
+        if (healthy == null || healthy) return false
+        // 输出面确实丢了 → 先尝试重绑（不重启应用）
+        if (ActivityEmbed.reattachDisplaySurface(v, tag)) {
+            surfaceLostStreak = 0
+            // 视作一次自愈：清掉黑屏阶梯与探针计数，别让它紧接着又重启应用。
+            frameProbe?.markHealed()
+            blackHealStage = PipBlackHeal.STAGE_NONE
+            lastBlackHealAt = 0L
+            lastSurfaceHealth = true
+            Logx.w(
+                LogTags.NAV_UI,
+                "画中画承载面已自愈：重新绑上输出面",
+                "pkg" to packageName,
+                "role" to role,
+                "tag" to tag,
+            )
+            return true
+        }
+        // 重绑不上（VirtualDisplay 已失效 / surface 还没就绪）→ 连续几轮就重新下发启动。
+        // 这就是用户「全屏一次再还原」的等效动作，只是自动做。
+        surfaceLostStreak++
+        Logx.w(
+            LogTags.NAV_UI,
+            "承载面输出面丢失且重绑失败",
+            "tag" to tag,
+            "pkg" to packageName,
+            "role" to role,
+            "streak" to surfaceLostStreak,
+        )
+        if (surfaceLostStreak >= SURFACE_LOST_LIMIT) {
+            surfaceLostStreak = 0
+            relaunch("surface-lost")
+            return true
+        }
+        return false
     }
 
     /**
@@ -1548,8 +1677,22 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
         /** 看门狗检查间隔（这里放慢到 3s 降低误判影响）。 */
         const val WATCHDOG_INTERVAL_MS = 3_000L
 
+        /**
+         * 回到可见态后，延迟再体检一次输出面的时间（第三百零六轮）。
+         *
+         * 留出「SurfaceView 的 surface 重建 → ActivityView 绑给 VirtualDisplay」的时序差。
+         */
+        const val SURFACE_REATTACH_RETRY_MS = 500L
+
         /** 连续几次没找到进程才动手（是 miss 1 软恢复、miss 2 重建；这里更保守）。 */
         const val WATCHDOG_MISS_LIMIT = 3
+
+        /**
+         * 连续几轮「输出面丢失且重绑失败」才重新下发启动（第三百零六轮）。
+         *
+         * 看门狗 3s 一轮 → 3 轮 ≈ 9 秒；留出 surface 重建的时间，别一丢就重启。
+         */
+        const val SURFACE_LOST_LIMIT = 3
 
         /** 连续几帧全黑才判定「黑屏」（见 [PipBlackHeal]）。 */
         const val BLACK_STREAK_LIMIT = PipBlackHeal.BLACK_STREAK_LIMIT

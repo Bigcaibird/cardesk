@@ -7,6 +7,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.view.Surface
 import android.view.View
 import com.cardesk.launcher.core.HostTaskDisplay
 import com.cardesk.launcher.core.VirtualDisplayIdResolver
@@ -914,6 +915,130 @@ object ActivityEmbed {
         // 我们自己的窗口所在那块屏（车机是多屏的）—— 拿来排除「误把自己当成虚拟屏」
         val ownDisplayId = runCatching { view.display?.displayId }.getOrNull()
         return VirtualDisplayIdResolver.pick(candidates, ownDisplayId)
+    }
+
+    /**
+     * 取承载面的 **VirtualDisplay 对象**（第三百零六轮）。
+     *
+     * 取值顺序与 [virtualDisplayIdOf] 完全一致（同一套反射字段），
+     * 只是**返回对象本身**，用来问它「你的输出 Surface 还在吗」。
+     *
+     * ## 为什么要这个对象
+     *
+     * 车机（API 28）上「task 在不在我们的虚拟屏」判不出来（[displayIdOfTask] 的
+     * `displayId` 字段在 API 28 上根本不存在 → 恒为 UNKNOWN）；
+     * 而黑屏的真身往往不是「task 跑了」，是 **VirtualDisplay 的输出面丢了**：
+     * AOSP 9 的 `ActivityView` 在 surface 销毁时只做 `mVirtualDisplay.setSurface(null)`，
+     * surface 重建时再 `setSurface(newSurface)` —— 车机上这一步实测**偶尔没生效**
+     * ⇒ task 明明还在我们的虚拟屏上、内容也还在画，但**没有输出面** ⇒ 用户看到一块黑，
+     * 只有「全屏一次再还原」（重新下发启动、重建承载面）才能恢复。
+     *
+     * @return null = 取不到（不是 VirtualDisplay / 反射失败）
+     */
+    fun virtualDisplayOf(view: View): Any? {
+        // 1) ActivityView 自己持有的 mVirtualDisplay（AOSP 9 起在这里）
+        val own = findField(view, "mVirtualDisplay")?.let { readField(it, view) }
+        if (VirtualDisplayIdResolver.looksLikeVirtualDisplay(own)) return own
+        // 2) mHost.mVirtualDisplay（API 27 及更早）
+        val host = findField(view, "mHost")?.let { readField(it, view) }
+        if (host != null) {
+            val hostVirtual = findField(host, "mVirtualDisplay")?.let { readField(it, host) }
+            if (VirtualDisplayIdResolver.looksLikeVirtualDisplay(hostVirtual)) return hostVirtual
+        }
+        return null
+    }
+
+    /**
+     * 取这个 VirtualDisplay **当前的输出 Surface**（第三百零六轮）。
+     *
+     * `VirtualDisplay.getSurface()` 是公开 API；返回 null 表示这个虚拟屏
+     * **根本没有输出面** —— 此时它上面的内容画到哪里都没人看得到，用户看到的就是黑。
+     *
+     * @return null = 没有输出面 / 反射失败（两种情况都按「需要体检」处理）
+     */
+    fun displaySurfaceOf(virtualDisplay: Any): Surface? = runCatching {
+        virtualDisplay.javaClass.getMethod("getSurface").invoke(virtualDisplay) as? Surface
+    }.getOrNull()
+
+    /**
+     * 体检：承载面的 VirtualDisplay **现在有没有可用的输出面**（第三百零六轮）。
+     *
+     * @return true = 有且有效；false = **没有输出面**（画面必黑）；null = 判不了
+     *         （取不到 VirtualDisplay，例如透明窗口镜像路线）
+     */
+    fun displaySurfaceHealthy(view: View): Boolean? {
+        val vd = virtualDisplayOf(view) ?: return null
+        val current = displaySurfaceOf(vd) ?: return false
+        if (!current.isValid) return false
+        // 第三百零六轮（第二版）：**光 isValid 不够**。
+        //
+        // SurfaceView 的 surface 被销毁重建后，旧 Surface 对象在 GC/release 之前
+        // 仍然 `isValid() == true`；而 VirtualDisplay 还绑在**旧的那个** surface 上
+        // ⇒ 虚拟屏有内容却没画到新 surface 上 ⇒ 一块黑，判据却说「健康」。
+        // 所以必须要求「绑的就是 SurfaceView 现在的这个 surface」（同一个对象）。
+        val live = surfaceOf(view) ?: return false
+        if (!live.isValid) return false
+        return current === live
+    }
+
+    /**
+     * 诊断用：VirtualDisplay 绑的 surface 与 SurfaceView 现在的 surface
+     * **是不是同一个对象**（第三百零六轮）。
+     *
+     * @return null = 取不到；true = 同一个；false = 不是（= 绑的是旧的/别的 surface）
+     */
+    fun displaySurfaceIdentitySame(view: View): Boolean? {
+        val vd = virtualDisplayOf(view) ?: return null
+        val current = displaySurfaceOf(vd) ?: return null
+        val live = surfaceOf(view) ?: return null
+        return current === live
+    }
+
+    /**
+     * 承载面的输出面丢了就**重新绑上**（第三百零六轮，不重启应用）。
+     *
+     * ## 这是黑屏的「不流血」修法
+     *
+     * 车机上的黑屏大多是「VirtualDisplay 的输出面为 null/失效」（见 [virtualDisplayOf]），
+     * 而承载应用的 task 和内容都好好的。这时**不需要**重启高德（那会丢路线），
+     * 只要把 `SurfaceView` 现在的 surface 重新 `setSurface` 给 VirtualDisplay，
+     * 画面就立刻回来了 —— 效果等同于用户手动「全屏 → 还原」，但不打断应用。
+     *
+     * ## 只在真坏的时候动手
+     *
+     * 输出面存在且 `isValid()` 时**什么都不做**（返回 false），
+     * 避免每 3 秒的看门狗把好好的承载面反复重绑。
+     *
+     * @return true = 发现输出面丢失并已重绑（调用方应当把这当成一次自愈）
+     */
+    fun reattachDisplaySurface(view: View, tag: String): Boolean {
+        val vd = virtualDisplayOf(view) ?: return false
+        val current = displaySurfaceOf(vd)
+        val surface = surfaceOf(view) ?: return false
+        if (!surface.isValid) return false
+        // 绑的就是现在这个 surface 且有效 → 健康，不动
+        if (current != null && current.isValid && current === surface) return false
+        val ok = runCatching {
+            vd.javaClass.getMethod("setSurface", Surface::class.java).invoke(vd, surface)
+            true
+        }.getOrElse { e ->
+            Logx.w(
+                LogTags.NAV_UI,
+                "画中画承载面重绑输出面失败",
+                e,
+                "tag" to tag,
+            )
+            false
+        }
+        if (ok) {
+            Logx.w(
+                LogTags.NAV_UI,
+                "画中画承载面输出面丢失，已重新绑定",
+                "tag" to tag,
+                "wasNull" to (current == null),
+            )
+        }
+        return ok
     }
 
     /**
