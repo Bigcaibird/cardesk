@@ -66,6 +66,16 @@ object HvacIds {
     const val FUNC_360 = 0x23030100
     const val FUNC_360_VIEW = 0x23031100
 
+    /**
+     * 雷达图形（近距离障碍物示意）功能号 = 587269376 = `0x23010500`。
+     *
+     * 这个功能号**不是** 360 开关本身：车机在雷达图形出现/消失时下发它
+     * （`value != 0` = 出现，`0` = 消失）。`AdaptapiGateway` 的 watcher 只把
+     * [FUNC_360] 单独送去 `on360State`，其余功能号都会转给 `registerListener`，
+     * 所以监听这个功能号不会影响 360 的手动开关通路。
+     */
+    const val FUNC_RADAR_GRAPHICS = 0x23010500
+
     // 区域
     const val ZONE_DRIVER = 1
     const val ZONE_PASSENGER = 4

@@ -482,6 +482,19 @@ class ScenePage(context: Context) : View(context) {
             logWeatherRefresh()
         }
 
+    /**
+     * 海拔展示文案（如 `42 m`；空或 `--` 不画）。
+     *
+     * 海拔来自定位通道（[com.cardesk.launcher.core.AltitudeDesk]），异步到达，
+     * 由宿主把 `AltitudeDesk.text()` 注入；没有值时天气块下方不占位。
+     */
+    var altitudeText: String = ""
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
+
     /** 上一次已落盘的天气快照（用于去重，避免车辆信号刷新时重复打日志）。 */
     private var lastWeatherLog: Triple<String, String, Int?>? = null
 
@@ -1919,6 +1932,15 @@ class ScenePage(context: Context) : View(context) {
         text.color = ink.soft
         canvas.drawText(detail, end, top + 124f, text)
         drawWeatherIcon(canvas, end - detailW - 5f - 10f, top + 114f, weatherSky)
+
+        // 海拔：天气详情下方再一行（基线 top + 152 ≈ 227，20px 次文字，右对齐 end）。
+        // 只有拿到值才画：空 / `--` 不占位，也压不到下面 y=292 起的行程卡。
+        // 字号/字型/颜色与上面 detail 行一致，画完不用回滚绘制状态。
+        val altitude = altitudeText.trim()
+        if (altitude.isNotEmpty() && altitude != "--") {
+            text.textAlign = Paint.Align.RIGHT
+            canvas.drawText("海拔 $altitude", end, top + 152f, text)
+        }
         text.textAlign = Paint.Align.LEFT
     }
 

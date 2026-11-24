@@ -991,6 +991,30 @@ class LauncherView(context: Context) : FrameLayout(context) {
         }.onFailure { Logx.w(LogTags.WEATHER, "启动天气子系统失败", it) }
         mark("svc:weather")
 
+        // 海拔：定位通道（异步；冷启动会先回一次上次落盘的值，所以先挂回调再 start）。
+        // 变化量小于阈值不回调（见 AltitudeDesk.MIN_DELTA_M），页面不会每秒抖一次。
+        runCatching {
+            com.cardesk.launcher.core.AltitudeDesk.onChanged = { _ ->
+                // 用无参 text()：回调传 null 表示「不再新鲜」，但此时仍要显示上次数值，
+                // 不能把页面刷成 `--`（否则进地库就开始闪）。
+                val alt = com.cardesk.launcher.core.AltitudeDesk.text()
+                if (::scenePage.isInitialized) scenePage.altitudeText = alt
+                vehiclePage?.altitudeText = alt
+            }
+            com.cardesk.launcher.core.AltitudeDesk.start(context.applicationContext)
+            Logx.i(LogTags.ALT, "启动海拔采集")
+        }.onFailure { Logx.w(LogTags.ALT, "启动海拔采集失败", it) }
+        mark("svc:altitude")
+
+        // 360 环影联动：订阅挡位 / 雷达图形信号，按「设置 → 360 环影」里的配置
+        // 自动开环影并切视角（倒车 / R→D / D 挡 / 转向灯 / N·P 关闭 / 雷达触发）。
+        // 放在 startServices 而不是 init：它要往车机注册属性监听，属于「重活」。
+        runCatching {
+            com.cardesk.launcher.vehicle.Camera360Link.start(context.applicationContext, prefs)
+            Logx.i(LogTags.CAM360, "启动 360 联动")
+        }.onFailure { Logx.w(LogTags.CAM360, "启动 360 联动失败", it) }
+        mark("svc:camera360")
+
         // 导航引导数据源：没有导航时不显示任何东西（`visibility="gone"`）。
         runCatching {
             navGuideSource = com.cardesk.launcher.core.nav.AmapDesktopGuide(
@@ -3306,6 +3330,7 @@ fun toggleCam360() {
             LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
         )
         vehiclePage = page
+        page.altitudeText = com.cardesk.launcher.core.AltitudeDesk.text()
         Logx.event(LogTags.SCENE, "打开车辆页")
     }
 
@@ -6100,6 +6125,14 @@ fun toggleCam360() {
         // 第195轮：收藏态 / 播放模式变了也要刷（用户可能在播放器自己的界面里收藏了）。
         MusicController.get().addActionStateListener(actionStateListener)
         navGuideSource?.start()
+        // 窗口重新 attach：海拔采集在 detach 时停掉了，这里恢复（start 幂等）。
+        if (servicesStarted) {
+            runCatching { com.cardesk.launcher.core.AltitudeDesk.start(context.applicationContext) }
+        }
+        // 360 联动同理（detach 时 stop 过；start 内部有幂等与在途去抖）。
+        if (servicesStarted) {
+            runCatching { com.cardesk.launcher.vehicle.Camera360Link.start(context.applicationContext, prefs) }
+        }
         // 第138轮：状态栏连接类图标（蜂窝 / WiFi / 热点 / 蓝牙）按**真实状态**显示。
         // 采样器跟窗口生命周期起停 —— 后台时不用采（车机本来就在省电）。
         startSystemStatusSampling()
@@ -6132,6 +6165,9 @@ fun toggleCam360() {
         handler.removeCallbacks(carouselTicker)
         weatherDesk?.stop()
         navGuideSource?.stop()
+        com.cardesk.launcher.core.AltitudeDesk.onChanged = null
+        com.cardesk.launcher.core.AltitudeDesk.stop()
+        com.cardesk.launcher.vehicle.Camera360Link.stop()
         // 第138轮：连接状态采样一起停（后台线程 + 定时器都收掉）。
         systemStatusSampler?.stop()
         systemStatusSampler = null

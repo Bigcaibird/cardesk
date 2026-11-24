@@ -860,7 +860,7 @@ object Car3dAssets {
             val path = "$base/$name.$ext"
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             val ok = runCatching {
-                context.assets.open(path).use { BitmapFactory.decodeStream(it, null, bounds) }
+                CarModelRemote.openStream(context, path).use { BitmapFactory.decodeStream(it, null, bounds) }
             }.isSuccess
             if (!ok || bounds.outWidth <= 0 || bounds.outHeight <= 0) continue
 
@@ -871,7 +871,7 @@ object Car3dAssets {
                 inPreferredConfig = Bitmap.Config.ARGB_8888
             }
             val raw = runCatching {
-                context.assets.open(path).use { BitmapFactory.decodeStream(it, null, opts) }
+                CarModelRemote.openStream(context, path).use { BitmapFactory.decodeStream(it, null, opts) }
             }.getOrNull() ?: continue
             if (raw.width == w && raw.height == h) return raw
             val scaled = runCatching { Bitmap.createScaledBitmap(raw, w, h, true) }.getOrNull()
@@ -886,7 +886,9 @@ object Car3dAssets {
     }
 
     private fun parse(context: Context, dir: String): Model? {
-        val text = context.assets.open("car3d/$dir/model.json").bufferedReader().use { it.readText() }
+        // 与 webp 走同一个「先缓存后 assets」入口：远端装过的车型，model.json 也要用远端那份，
+        // 否则新加的视图/坐标系会和旧图对不上
+        val text = CarModelRemote.openStream(context, "car3d/$dir/model.json").bufferedReader().use { it.readText() }
         val o = JSONObject(text)
         if (o.optString("format") != FORMAT) {
             lastError = "format 不匹配：${o.optString("format")}"

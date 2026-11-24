@@ -31,6 +31,7 @@ platform-key/
 dist/*.apk
 dist/*.apk.1
 dist/*.apk_副本
+dist/car-models/
 
 # ---------------------------------------------------------------- 离屏渲染图
 # preview/ 是 PreviewRenderTest 在本机跑出来的离屏渲染截图（94 张 PNG），

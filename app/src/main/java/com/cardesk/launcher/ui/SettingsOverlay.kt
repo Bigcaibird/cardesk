@@ -3304,6 +3304,20 @@ class SettingsOverlay(
         }
     }
 
+    /**
+     * 让 360 联动按**刚落盘的新配置**重新决策一次。
+     *
+     * 联动逻辑按 `(总开关|挡位|雷达)` 去重（见 `vehicle/Camera360Policy.stateKey`），
+     * 所以改「倒车视角 / 视角延迟 / N·P 关闭 / 雷达」这类配置时它不会自己再跑一遍；
+     * 不刷的话，用户改完配置得再挂一次挡才生效，看起来像「设置没用」。
+     *
+     * 失败/未启动都无所谓：`refresh()` 在链路没起来时直接 return。
+     */
+    private fun refreshCamera360Link() {
+        runCatching { com.cardesk.launcher.vehicle.Camera360Link.refresh() }
+            .onFailure { Logx.w(LogTags.CAM360, "刷新 360 联动失败", it) }
+    }
+
     /** 360 环影。 */
     private fun pageCamera360() {
         // 第154轮：下面「视角延迟 / 按键视角」是**跟着总开关条件渲染**的
@@ -3317,6 +3331,9 @@ class SettingsOverlay(
             val from = prefs.camera360Enabled
             prefs.camera360Enabled = it
             logSetting("camera360_enabled_v2", "启用 360 环影增强", from, it)
+            // 联动逻辑按 (总开关|挡位|雷达) 去重，改配置本身不会触发决策，
+            // 所以要显式刷一次，否则「刚打开开关、正在倒车」这一挂不会补动。
+            refreshCamera360Link()
             select(selectedKey)
         }
         if (!prefs.camera360Enabled) {
@@ -3327,6 +3344,7 @@ class SettingsOverlay(
             val to = CAMERA360_DELAY_MS[idx]
             prefs.camera360DelayMs = to
             logSetting("camera360_view_delay_ms", "视角延迟", from, to)
+            refreshCamera360Link()
         }
         chipRow("按键视角", CAMERA360_VIEW_LABELS, CAMERA360_VIEW_IDS.indexOf(prefs.camera360KeyView)) { idx ->
             val from = prefs.camera360KeyView
@@ -3334,14 +3352,65 @@ class SettingsOverlay(
             prefs.camera360KeyView = to
             logSetting("camera360_key_view_v2", "按键视角", from, to)
         }
-        // 第154轮：原来这一页下面还有「倒车视角 / R→D 视角 / D 档视角 / 转向灯视角 /
-        // N/P 关闭环影」五项，审计发现它们**写进偏好后没有任何代码读**：
-        // 实现侧只有一条通路 —— VehicleController.schedule360View(按键视角, 延迟)，
-        // 一次只切一个视角，其余五个存了没人用。
+        // 第三百一十轮：下面这些视角/联动项**真的有执行端**了 ——
+        // `vehicle/Camera360Link` 订阅挡位与雷达信号，按这里的配置决定「开环影 + 切哪个视角」。
+        // 以前它们只写偏好、无人读，所以整段被收起来过；现在补回并接到执行端。
         //
-        // 与其留五个假开关，不如把这一页收敛成「能用的两个」：
-        // 启用 + 视角延迟 + 按键视角。看板倒车时的视角切换留待实现侧真的支持了再加回来
-        // （落盘键 `camera360_reverse_view_v2` 等在 Prefs.kt 里保留着，随时可接）。
+        // 视角行统一用 `-1 = 关` 的选项条（与「按键视角」同一套 `CAMERA360_VIEW_IDS`）。
+        fun viewRow(label: String, key: String, value: Int, apply: (Int) -> Unit) {
+            chipRow(label, CAMERA360_VIEW_LABELS, CAMERA360_VIEW_IDS.indexOf(value)) { idx ->
+                val to = CAMERA360_VIEW_IDS[idx]
+                apply(to)
+                logSetting(key, label, value, to)
+                refreshCamera360Link()
+            }
+        }
+        viewRow("倒车视角", "camera360_reverse_view_v2", prefs.camera360ReverseView) {
+            prefs.camera360ReverseView = it
+        }
+        viewRow("R→D 视角", "camera360_rd_view_v2", prefs.camera360RdView) {
+            prefs.camera360RdView = it
+        }
+        viewRow("D 挡视角", "camera360_d_view_v2", prefs.camera360DView) {
+            prefs.camera360DView = it
+        }
+        // 「转向灯视角」这一行**不放出来**：车机侧目前没有可验证的转向灯信号通路
+        // （`camera360LampView` 这个偏好字段保留着，等有了信号再连）。
+        // 设置页的口径是「写进去必须有人读」，放一条没人读的项比没有更糟。
+        switchRow("N/P 挡关闭环影", prefs.camera360NpClose) {
+            val from = prefs.camera360NpClose
+            prefs.camera360NpClose = it
+            logSetting("camera360_np_close_v2", "N/P 挡关闭环影", from, it)
+            refreshCamera360Link()
+        }
+        // 雷达图形触发是**新增**的通用偏好键（不占 Prefs.kt 的字段位）：默认开，
+        // 车机在低速贴障碍物时给出雷达图形信号 → 自动开环影。
+        switchRow("雷达图形触发", prefs.flag("camera360_radar_open", true)) {
+            val from = prefs.flag("camera360_radar_open", true)
+            prefs.setFlag("camera360_radar_open", it)
+            logSetting("camera360_radar_open", "雷达图形触发", from, it)
+            refreshCamera360Link()
+        }
+        // 调试用：真车挡位来自属性/信号通道，模拟器上这些信号不存在。
+        // 这一行直接喂一次挡位事件给联动逻辑（只影响这一次判定，不改车辆状态），
+        // 方便在没有 IBS 数据的环境里验证「挂挡 → 开环影 + 切视角」整条链路。
+        chipRow(
+            "模拟挡位（调试）",
+            listOf("P", "R", "N", "D"),
+            prefs.stringValue("camera360_sim_gear", "P"),
+        ) { gear ->
+            prefs.setStringValue("camera360_sim_gear", gear)
+            Logx.event(LogTags.CAM360, "模拟挡位", "gear" to gear)
+            com.cardesk.launcher.vehicle.Camera360Link.simulateGear(gear)
+        }
+        // 雷达图形同理：模拟车辆通道只会回显自己写下去的值，没有「上游出现图形」，
+        // 所以给一个调试开关直接喂边沿，用来验证「低速贴障碍物 → 自动开环影」那条规则。
+        switchRow("模拟雷达（调试）", prefs.flag("camera360_sim_radar", false)) {
+            val from = prefs.flag("camera360_sim_radar", false)
+            prefs.setFlag("camera360_sim_radar", it)
+            Logx.event(LogTags.CAM360, "模拟雷达", "on" to it)
+            com.cardesk.launcher.vehicle.Camera360Link.simulateRadar(it)
+        }
     }
 
     /**
@@ -4198,6 +4267,37 @@ class SettingsOverlay(
             note("当前：车模资产不含${missingViews.joinToString("、")}图，选中会先按 3/4 侧视显示")
         }
         }  // showViewRow
+        // 第三百一十轮：车模图支持远端资源包。
+        //
+        // 默认仍然用内置资产（首次安装、断网都照常显示）；点一次「检查更新」就能把更新的
+        // 高清图拉到本地缓存，之后解码优先读缓存、缓存缺失再回退内置资产。
+        //
+        // 放在「写实车模」这一页，是因为它改的就是写实车模用的那套图；
+        // 把它塞进「在线更新」会让用户以为整个桌面在升级（那页是换 APK 的）。
+        section("车模资源包")
+        val installed = runCatching {
+            com.cardesk.launcher.core.car3d.CarModelRemote.installedVersions(context)
+        }.getOrDefault(emptyMap())
+        val currentDir = com.cardesk.launcher.core.CarModels.assetDir(prefs.carModel)
+        val currentVer = installed[currentDir] ?: 0
+        kvRow(
+            "本地资源包",
+            if (installed.isEmpty()) {
+                "内置资产"
+            } else {
+                "${installed.size} 个车型 · 当前 " + if (currentVer > 0) "v$currentVer" else "内置"
+            },
+            installed.isNotEmpty(),
+        )
+        actionButton("检查车模资源更新…", full = true) {
+            Logx.event(LogTags.CAR3D, "检查车模资源更新", "dir" to currentDir)
+            com.cardesk.launcher.core.car3d.CarModelRemote.refresh(context) { msg ->
+                Logx.i(LogTags.CAR3D, "车模资源包结果", "msg" to msg, "dir" to currentDir)
+                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                // 装完立刻重建本页（「本地资源包」那行要显示新版本号）。
+                refreshCarInfoPage()
+            }
+        }
         chipRow("车辆数据源", listOf("自动探测", "模拟车辆", "真车通道"), prefs.vehicleSource) { idx ->
             val from = prefs.vehicleSource
             prefs.vehicleSource = idx

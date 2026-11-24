@@ -6,6 +6,7 @@ import android.content.ServiceConnection
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import com.cardesk.launcher.core.Camera360Policy
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import java.lang.reflect.Proxy
@@ -66,6 +67,17 @@ object EcarxSignals {
     @Volatile
     var onSignalChanged: (() -> Unit)? = null
 
+    /**
+     * 挡位信号变化回调（`car_signal` 通道的 [SIG_GEAR]）。
+     *
+     * 只在这个信号**真的变了**的时候触发，参数是归一化后的挡位字符
+     * （`D` / `R` / `N` / `P`；读不出来或值不在已知口径内则不会回调）。
+     * 360 环影联动（`vehicle/Camera360Link.kt`）靠它拿到实车挡位，
+     * 具体怎么解释由 `core/Camera360Policy.gearFromSignal` 统一负责。
+     */
+    @Volatile
+    var onGearChanged: ((Char?) -> Unit)? = null
+
     /** 常量（内联的 id）。 */
     const val SIG_DOOR_DRVR = 29207
     const val SIG_DOOR_PASS = 29211
@@ -75,6 +87,28 @@ object EcarxSignals {
     const val SIG_TRUNK = 29268
     const val SIG_DST_TO_EMPTY = 29524
     const val SIG_SCR_DST_TO_EMPTY = 29720
+
+    /**
+     * 挡位信号 id = 29693（`car_signal` 通道）。
+     *
+     * 实车口径：`1` = D、`2` = R、`3` = N、`0` 或 `4` = P；
+     * 具体映射在 `Camera360Policy.gearFromSignal` 里（纯函数、有单测）。
+     * 这个 id 必须进 [SignalFilter] 白名单才会回调；同时 [gear] 也能直接读，
+     * 供轮询兜底（回调丢失时不至于完全读不到挡位）。
+     */
+    const val SIG_GEAR = 29693
+
+    /** 同一次信号回调里最多每 [GEAR_CALLBACK_PROBE_INTERVAL_MS] 读一次挡位，避免被高频信号拖慢。 */
+    private const val GEAR_CALLBACK_PROBE_INTERVAL_MS = 250L
+
+    /** 上一次通过回调识别出的挡位；null = 还没识别过一次。 */
+    private var lastGearSignal: Char? = null
+
+    /** 是否已经通过回调识别出过挡位（用来区分「第一次读到」和「一直为 null」）。 */
+    private var gearSignalSeen = false
+
+    /** 上次在回调里探测挡位的时间（毫秒，`System.currentTimeMillis` 口径）。 */
+    private var lastGearProbeAt = 0L
 
     /**
      * ——**6 项**：4 门 + 引擎盖 + 后备箱。
@@ -382,7 +416,7 @@ object EcarxSignals {
             val add = filterCls.getMethod("add", Integer.TYPE)
             for (id in intArrayOf(
                 SIG_DOOR_DRVR, SIG_DOOR_PASS, SIG_DOOR_DRVR_RE, SIG_DOOR_PASS_RE,
-                SIG_HOOD, SIG_TRUNK, SIG_DST_TO_EMPTY, SIG_SCR_DST_TO_EMPTY,
+                SIG_HOOD, SIG_TRUNK, SIG_DST_TO_EMPTY, SIG_SCR_DST_TO_EMPTY, SIG_GEAR,
             )) {
                 add.invoke(filter, id)
             }
@@ -393,6 +427,9 @@ object EcarxSignals {
                     // 收到变化就 publishBodyState()
                     // 我们桌面据此立刻刷新车况卡，不等下一秒的轮询。
                     onSignalChanged?.invoke()
+                    // 挡位也在同一个回调里识别：args 的形状随固件版本不一样，
+                    // 所以不解析参数、直接用捕获的 manager 读 [SIG_GEAR]，再和上次值比。
+                    notifyGearChangedFromCallback(sm)
                 }
                 null
             }
@@ -410,11 +447,71 @@ object EcarxSignals {
         }
     }
 
+    /**
+     * 收到任意 `car_signal` 变化回调时顺带识别挡位。
+     *
+     * 为什么不在回调参数里拿 id：`CarSignalEventCallback.onChangeEvent` 的参数形状
+     * 在不同固件上不一样（有的给 id，有的给 id 数组，有的什么都不给），
+     * 解析参数是给自己挖坑。这里统一改成「读一次 [SIG_GEAR] + 和上次值比较」，
+     * 对任何固件都成立；多读一次反射的成本用 [GEAR_CALLBACK_PROBE_INTERVAL_MS] 限住。
+     */
+    private fun notifyGearChangedFromCallback(sm: Any) {
+        val now = System.currentTimeMillis()
+        if (now - lastGearProbeAt < GEAR_CALLBACK_PROBE_INTERVAL_MS) return
+        lastGearProbeAt = now
+        val raw = readInt(sm, SIG_GEAR) ?: return
+        val gear = Camera360Policy.gearFromSignal(raw) ?: return
+        if (gearSignalSeen && gear == lastGearSignal) return
+        val prev = lastGearSignal
+        gearSignalSeen = true
+        lastGearSignal = gear
+        Logx.i(
+            LogTags.SIGNAL, "挡位信号变化",
+            "from" to (prev?.toString() ?: "未知"),
+            "to" to gear,
+            "raw" to raw,
+        )
+        onGearChanged?.invoke(gear)
+    }
+
+    /**
+     * 读当前挡位（`car_signal` 通道的 [SIG_GEAR]）。
+     *
+     * 返回 `D` / `R` / `N` / `P`；通道不可用、读不到、或值不在已知口径内都返回 null
+     * （调用方继续往下一级通道降级，见 `vehicle/GearSource.kt`）。
+     *
+     * 原始值按限频落日志：**实车校准时就看这一条** —— 不同固件对 29693 的编码
+     * 可能与已知口径不一致，日志里能直接看到读到的 raw 值。
+     */
+    fun gear(): Char? {
+        val sm = signalManager ?: return null
+        val raw = readInt(sm, SIG_GEAR) ?: return null
+        val gear = Camera360Policy.gearFromSignal(raw)
+        if (gear == null) {
+            Logx.dThrottled(
+                LogTags.SIGNAL, "gear-$SIG_GEAR-unmapped", 30_000L,
+                "挡位信号值无法解释（实车校准用）",
+                "signalId" to SIG_GEAR, "raw" to raw,
+            )
+        } else {
+            Logx.dThrottled(
+                LogTags.SIGNAL, "gear-$SIG_GEAR", 10_000L,
+                "挡位信号",
+                "signalId" to SIG_GEAR, "raw" to raw, "gear" to gear,
+            )
+        }
+        return gear
+    }
+
     fun disconnect() {
         connected = false
         signalManager = null
         phevManager = null
         car = null
+        // 通道断开后旧的挡位记忆就失效了：重连后第一次读到的值要能重新通知出去。
+        lastGearSignal = null
+        gearSignalSeen = false
+        lastGearProbeAt = 0L
     }
 
     /** 剩余续航（km）：SCR_DST_TO_EMPTY → DST_TO_EMPTY → PHEV DTE。 */

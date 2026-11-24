@@ -95,6 +95,14 @@ class VehiclePage(context: Context, private val pal: Palette) : FrameLayout(cont
 
     /** 「平均油耗」读数（画板 14.2 kWh/100km 那一行，单位换成 L/100km）。 */
     private val avgFuelValue: TextView
+
+    /**
+     * 「海拔」读数。
+     *
+     * 海拔来自定位通道，异步到达（见 [com.cardesk.launcher.core.AltitudeDesk]），
+     * 所以不在 [bind] 里刷，而是由宿主把 `AltitudeDesk.text()` 赋给 [altitudeText]。
+     */
+    private val altitudeValue: TextView
     private val tireValues = arrayOfNulls<TextView>(4)
     private val carView: TopCarView
     private val doorLabels = ArrayList<TextView>()
@@ -137,6 +145,20 @@ class VehiclePage(context: Context, private val pal: Palette) : FrameLayout(cont
         set(value) {
             field = value
             carView.carModel = value
+        }
+
+    /**
+     * 海拔展示文案（如 `42 m`；无值 `--`）。
+     *
+     * 海拔是定位通道的异步数据，不跟着 [bind] 的车辆信号走；宿主把
+     * `AltitudeDesk.text()` 赋进来即可。文案真的变化时才更新并「顶一下」，
+     * 避免定时注入时数字一直抖。
+     */
+    var altitudeText: String = "--"
+        set(value) {
+            field = value
+            setValue(altitudeValue, value)
+            invalidate()
         }
 
     var onOpenClimate: (() -> Unit)? = null
@@ -215,6 +237,12 @@ class VehiclePage(context: Context, private val pal: Palette) : FrameLayout(cont
         val avgFuelRow = kvRow("平均油耗", "--", 14f)
         avgFuelValue = avgFuelRow.getChildAt(1) as TextView
         range.addView(avgFuelRow, Ui.frame(440, 24, Gravity.TOP or Gravity.START, 25, 154))
+
+        // 第三行「海拔」：接在 154+24=178 之后，高 22 → 卡内 200，卡高 203，
+        // 留 3px 底距，不与卡底重叠；与上面两行同为「左标签 16 / 右值 14」。
+        val altitudeRow = kvRow("海拔", "--", 14f)
+        altitudeValue = altitudeRow.getChildAt(1) as TextView
+        range.addView(altitudeRow, Ui.frame(440, 22, Gravity.TOP or Gravity.START, 25, 178))
 
         /* ---------- 左列：胎压（画板 32,289 / 490×568） ---------- */
         val tires = card()
