@@ -86,29 +86,26 @@ object KeyActionResolver {
      * ⚠️ 风险：这些键码在别的场景可能另有含义（比如 `KEYCODE_SEARCH` 在导航里是搜索）。
      * 因此**只有「按键增强总开关」打开时**才接这些键，
      * 且接住之后**不再往下传**（不会触发系统默认行为）。
+     *
+     * 第三百一十五轮：候选表移到 [OemKeyProtocol.VOICE_KEY_CODES]（单一来源）——
+     * 方控广播里语音键是**私有码 `200231`**，卡在 KeyEvent 通路的那份老清单里认不出来。
      */
-    val VOICE_KEY_CODES: IntArray = intArrayOf(
-        108, // KEYCODE_VOICE_ASSIST（Android 13 及以下；本车 API 28 用它）
-        231, // KEYCODE_VOICE_ASSIST（Android 14 起的新值）
-        84,  // KEYCODE_SEARCH
-        204, // KEYCODE_ASSIST
-        112, // KEYCODE_VOICE_COMMAND
-    )
+    val VOICE_KEY_CODES: IntArray get() = OemKeyProtocol.VOICE_KEY_CODES
 
-    /** 媒体上一曲 keyCode（`KEYCODE_MEDIA_PREVIOUS`）。 */
+    /** 媒体上一曲 keyCode（`KEYCODE_MEDIA_PREVIOUS`，标准码）。 */
     const val KEYCODE_MEDIA_PREVIOUS = 88
 
-    /** 媒体下一曲 keyCode（`KEYCODE_MEDIA_NEXT`）。 */
+    /** 媒体下一曲 keyCode（`KEYCODE_MEDIA_NEXT`，标准码）。 */
     const val KEYCODE_MEDIA_NEXT = 87
 
     /** 是否是候选语音键。 */
-    fun isVoiceKey(keyCode: Int): Boolean = VOICE_KEY_CODES.contains(keyCode)
+    fun isVoiceKey(keyCode: Int): Boolean = OemKeyProtocol.isVoiceKey(keyCode)
 
-    /** 是媒体上一曲键。 */
-    fun isMediaPrev(keyCode: Int): Boolean = keyCode == KEYCODE_MEDIA_PREVIOUS
+    /** 是媒体上一曲键（含方控私有码 `200088`）。 */
+    fun isMediaPrev(keyCode: Int): Boolean = OemKeyProtocol.isMediaPrev(keyCode)
 
-    /** 是媒体下一曲键。 */
-    fun isMediaNext(keyCode: Int): Boolean = keyCode == KEYCODE_MEDIA_NEXT
+    /** 是媒体下一曲键（含方控私有码 `200087`）。 */
+    fun isMediaNext(keyCode: Int): Boolean = OemKeyProtocol.isMediaNext(keyCode)
 
     /** 是不是本模块关心的按键（语音键 / 媒体上一曲 / 下一曲）。 */
     fun isHandled(keyCode: Int): Boolean =

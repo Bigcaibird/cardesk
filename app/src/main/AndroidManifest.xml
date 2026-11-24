@@ -175,5 +175,31 @@
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+
+        <!--
+          第三百一十五轮：方控按键广播。
+
+          车机把方向盘按键做成有序广播（不是 KeyEvent），所以必须在清单里静态注册
+          才能「桌面不在前台也收得到」——这也是「按键增强」以前只在桌面里有反应的根因。
+
+          priority 拉满：系统语音助手同样监听这些广播，我们要排在它前面才能决定
+          「执行桌面绑定的动作」还是「放行给系统语音」。exported=true 是必须的
+          （广播来自系统进程），无 android:permission —— 车机固件发送时未声明权限，
+          声明了反而收不到。
+        -->
+        <receiver
+            android:name=".ui.OemKeyReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter android:priority="2147483647">
+                <category android:name="android.intent.category.DEFAULT" />
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+                <action android:name="ecarx.intent.action.ECARX_KEY_RVOICEASSIST_EVENT" />
+                <action android:name="ecarx.intent.action.ECARX_KEY_CUSTOM_EVENT" />
+                <action android:name="ecarx.intent.action.ECARX_KEY_RSRC_EVENT" />
+                <action android:name="ecarx.intent.action.ECARX_KEY_RCALL_EVENT" />
+                <action android:name="ecarx.intent.action.ECARX_KEY_RMULTIFUNCTION_EVENT" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

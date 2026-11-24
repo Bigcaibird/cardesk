@@ -6,11 +6,14 @@ import android.view.View
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import com.cardesk.launcher.core.OemKeyProtocol
 import com.cardesk.launcher.core.Palette
 import com.cardesk.launcher.core.Prefs
 import com.cardesk.launcher.core.Skin
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
+import com.cardesk.launcher.ui.KeyActionExecutor
+import com.cardesk.launcher.ui.OemKeyRuntime
 import com.cardesk.launcher.ui.Ui
 import com.cardesk.launcher.ui.anim.Motion
 
@@ -33,6 +36,13 @@ import com.cardesk.launcher.ui.anim.Motion
  * `voice_click_action` / `voice_click_mode` / `voice_double_action` / `voice_double_mode` /
  * `voice_long_action` / `voice_long_mode` / `media_prev_long_action` / `media_prev_long_mode` /
  * `media_next_long_action` / `media_next_long_mode`。
+ *
+ * ## 第三百一十五轮：补「按键通路」自检
+ *
+ * 车机方控走**广播**（不是 KeyEvent），桌面不在前台也收得到 —— 但真车上
+ * 「按键有没有到」没法靠 `am broadcast` 模拟（shell 无权限）。
+ * 所以这里放一张自检卡片：显示「最近一次按键」，并能直接往执行端灌一次
+ * 单击/长按，用来在车上确认「配置 → 手势 → 动作」这条链是通的。
  *
  * 第四十九轮按设计板 `s10-keys` 重绘：面板 1000×640 摆在 (460,180)，
  * 标题 38px bold (40,34)，行 900 宽圆角 20（surfaceSoft + 1px 描边），
@@ -266,6 +276,85 @@ class KeysDialog(
         return scroll
     }
 
+    /**
+     * 第三百一十五轮：**按键通路自检卡片**。
+     *
+     * 三行信息 + 两个自测按钮：
+     * - 车机广播「最近按键」：真车上按一下语音键，这里会显示键码（`200231` 一类）
+     *   与单击/长按 —— 用来确认广播真的到了；
+     * - 自测按钮：不经过系统广播，直接往执行端灌一次事件 ⇒
+     *   用来确认「配置 → 手势 → 动作」这一半是通的。
+     *   两者都通 ⇒ 链路完整；只有自测通 ⇒ 系统没把广播发给我们（查清单/权限）。
+     */
+    private fun channelCard(): View {
+        val card = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            background = Ui.round(Skin.surfaceSoft, 20f, 1f, Skin.NAV_STROKE)
+            setPadding(24, 14, 24, 14)
+        }
+        card.addView(
+            Ui.text(context, "方控广播", 26f, pal.text, bold = true),
+            Ui.linear(-1, -2),
+        )
+        val last = prefs.stringValue(KeyActionExecutor.KEY_DIAG_LAST, "")
+        card.addView(
+            Ui.text(
+                context,
+                if (last.isEmpty()) {
+                    "最近按键：还没收到（在车上按一下语音键，这里会显示键码）"
+                } else {
+                    "最近按键：$last"
+                },
+                19f,
+                pal.textFaint,
+            ),
+            Ui.linear(-1, -2).apply { topMargin = 6 },
+        )
+        val buttons = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        buttons.addView(
+            chip("自测：单击", sizePx = 19f, padH = 18, padV = 10) { selfTest(OemKeyProtocol.Press.CLICK) },
+            Ui.linear(-2, 44, 0f, 8),
+        )
+        buttons.addView(
+            chip("自测：长按", sizePx = 19f, padH = 18, padV = 10) { selfTest(OemKeyProtocol.Press.LONG) },
+            Ui.linear(-2, 44, 0f, 8),
+        )
+        buttons.addView(
+            chip("自测：媒体长按", sizePx = 19f, padH = 18, padV = 10) {
+                selfTest(OemKeyProtocol.Press.LONG, OemKeyProtocol.KEY_R_MEDIA_PREV)
+            },
+            Ui.linear(-2, 44, 0f, 8),
+        )
+        card.addView(buttons, Ui.linear(-1, -2).apply { topMargin = 8 })
+        rows.addView(card, Ui.linear(-1, -2, 0f, 0, 16))
+        return card
+    }
+
+    /**
+     * 往执行端直接灌一次语音键事件（不经过系统广播）。
+     *
+     * 用实车的语音键码 [OemKeyProtocol.KEY_R_VOICE_ASSIST]，
+     * 这样自测与真车日志里的键码一致，方便对照。
+     */
+    private fun selfTest(press: OemKeyProtocol.Press, keyCode: Int = OemKeyProtocol.KEY_R_VOICE_ASSIST) {
+        val event = OemKeyProtocol.OemKeyEvent(
+            keyCode = keyCode,
+            press = press,
+            sourceAction = "selftest",
+        )
+        Logx.event(LogTags.KEYS, "按键增强自测", "press" to press.name)
+        val handled = OemKeyRuntime.dispatch(
+            context = context.applicationContext ?: context,
+            event = event,
+            path = "selftest",
+        )
+        Logx.i(LogTags.KEYS, "按键增强自测结果", "press" to press.name, "handled" to handled)
+        render()
+    }
+
     private fun resetDefaults() {
         // 排障场景：恢复默认后想知道到底把哪些键位清空了 —— 先留旧值
         val before = listOf(
@@ -328,6 +417,11 @@ class KeysDialog(
         cards += keySlot("下一曲", prefs.mediaNextLongAction, { prefs.mediaNextLongAction = it }, prefs.mediaNextLongMode) {
             prefs.mediaNextLongMode = it
         }
+        rows.addView(
+            Ui.text(context, "按键通路（车机广播）", 20f, pal.textFaint),
+            Ui.linear(-1, 32, 0f, 8, 4),
+        )
+        cards += channelCard()
         // 错峰入场：**只有总开关切换时**才做（见 [staggerSlots]）。
         // 其余情况（点动作/模式胶囊）会重建整个列表，
         // 那时候再错峰就是每点一下全列卡片重新淡入一次。

@@ -25,7 +25,7 @@ package com.cardesk.launcher.core
  * 若抬起就立刻发单击，双击时就会**先触发 A 再触发 B**（A 被误触发）。
  *
  * ⇒ 单击必须**延迟**到双击窗口结束才发。
- * 代价：单击有 [DOUBLE_WINDOW_MS] 的延迟（默认 280ms，人手指可感知但不难受）。
+ * 代价：单击有 [DOUBLE_WINDOW_MS] 的延迟（默认 380ms，人手指可感知但不难受）。
  *
  * ## 线程
  *
@@ -49,8 +49,15 @@ object KeyGesture {
         LONG,
     }
 
-    /** 双击判定窗口（毫秒）。两次抬起间隔小于它 ⇒ 算双击。 */
-    const val DOUBLE_WINDOW_MS = 280L
+    /**
+     * 双击判定窗口（毫秒）。两次抬起间隔小于它 ⇒ 算双击。
+     *
+     * 第三百一十五轮：`280ms` → `380ms`，与方控广播那套手势机
+     * （`core/OemKeyGesture.DOUBLE_WINDOW_MS`）对齐 ——
+     * 同一个用户、同一颗语音键，两条通路的双击窗口不该不一样，
+     * 否则「按键在桌面里好点、在导航里不好点」。实车手感以 380ms 为准。
+     */
+    const val DOUBLE_WINDOW_MS = 380L
 
     /** 长按阈值（毫秒）。按住超过它 ⇒ 算长按。 */
     const val LONG_THRESHOLD_MS = 500L

@@ -2,6 +2,7 @@ package com.cardesk.launcher.ui
 
 import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -9,6 +10,8 @@ import android.view.KeyEvent
 import android.widget.Toast
 import com.cardesk.launcher.core.KeyActionResolver
 import com.cardesk.launcher.core.KeyGesture
+import com.cardesk.launcher.core.OemKeyGesture
+import com.cardesk.launcher.core.OemKeyProtocol
 import com.cardesk.launcher.core.Prefs
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
@@ -30,7 +33,9 @@ import com.cardesk.launcher.vehicle.VehicleController
  *
  * | 层 | 文件 | 职责 |
  * |---|---|---|
- * | 识别 | `core/KeyGesture.kt` | 纯状态机（单击/双击/长按），不碰 Android ⇒ 可 JVM 单测 |
+ * | 识别 | `core/KeyGesture.kt` | KeyEvent 通道的纯状态机（按下/抬起 → 单击/双击/长按） |
+ * | 识别 | `core/OemKeyGesture.kt` | 方控广播通道的纯状态机（单击/长按事件流 → 单击/双击/长按） |
+ * | 协议 | `core/OemKeyProtocol.kt` | 方控广播的 action / extra / 键码（含车机私有码） |
  * | 解析 | `core/KeyActionResolver.kt` | 「哪个键、哪种手势」→ 「做什么动作」 |
  * | **执行** | **本类** | 真的去切驾驶模式 / 开 360 / 唤起语音助手 |
  *
@@ -106,6 +111,44 @@ class KeyActionExecutor(
         else -> null
     }
 
+    // ------------------------------------------------------------ 方控广播通路
+    //
+    // 第三百一十五轮：车机把方向盘按键做成**有序广播**，而不是 KeyEvent
+    // （协议见 `core/OemKeyProtocol`）。车上用户在导航/音乐里按方控时，
+    // 桌面收不到 KeyEvent，只有这条广播通路能拿到键。
+    //
+    // 广播只给「单击 / 长按」两种事件（没有按下/抬起），所以双击要在这条
+    // 通路上自己合成 —— 由 [oemDetector] 负责。
+
+    /** 方控广播的手势机。 */
+    private val oemDetector = OemKeyGesture.Detector()
+
+    /** 方控广播上「挂起的单击」结算定时器。 */
+    private val oemSingleRunnable = Runnable {
+        val result = oemDetector.expire(SystemClock.uptimeMillis())
+        if (result.gesture == OemKeyGesture.Gesture.SINGLE) {
+            executeOrOemVoice(
+                KeyActionResolver.voice(prefs, KeyActionResolver.VoiceSlot.CLICK),
+                "方控语音键单击",
+            )
+        }
+    }
+
+    /** 媒体键按下时记下键码（KeyEvent 通道：短按要补发给系统）。 */
+    private var mediaPressKey = 0
+
+    /** 这次媒体键按下是否已经升级成长按（是 ⇒ 抬手时不再补发短按）。 */
+    private var mediaLongFired = false
+
+    /** 最近一次方控广播（设置页诊断行读它）。 */
+    @Volatile
+    var lastOemKey: String = ""
+        private set
+
+    /** 音频服务：媒体键短按要「补发」给系统，否则切歌会失灵。 */
+    private val audioManager: AudioManager?
+        get() = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+
     /**
      * 喂一个按键事件进来。
      *
@@ -128,6 +171,28 @@ class KeyActionExecutor(
             return false
         }
 
+        val voice = KeyActionResolver.isVoiceKey(code)
+
+        // 第三百一十五轮：**媒体键不再无条件吃掉**。
+        //
+        // 第218轮的实现里，媒体键只要进了 isHandled 就一律 `return true`：
+        // 哪怕长按动作配的是「无」，短按切歌也被吞掉了 ⇒ 方控切歌失灵。
+        // 现在：没配长按动作 ⇒ 整颗键放行，系统爱怎么处理怎么处理。
+        if (!voice && longActionOf(code).isNone) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                Logx.d(LogTags.KEYS, "按键增强：媒体键放行", "keyCode" to code, "reason" to "未配置长按动作")
+            }
+            return false
+        }
+
+        // 语音键：三个槽位都没配动作 ⇒ 放行，让系统自己的语音助手接管。
+        if (voice && !voiceConfigured()) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                Logx.d(LogTags.KEYS, "按键增强：语音键放行", "keyCode" to code, "reason" to "未配置动作")
+            }
+            return false
+        }
+
         when (event.action) {
             KeyEvent.ACTION_DOWN -> {
                 // 长按的自动重复事件：长按由我们自己的定时器判定，重复事件直接忽略。
@@ -135,6 +200,10 @@ class KeyActionExecutor(
                 val detector = detectorOf(code) ?: return false
                 detector.onDown(code, now)
                 pendingLongKey = code
+                if (!voice) {
+                    mediaPressKey = code
+                    mediaLongFired = false
+                }
                 handler.removeCallbacks(longRunnable)
                 handler.postDelayed(longRunnable, KeyGesture.LONG_THRESHOLD_MS)
                 Logx.d(LogTags.KEYS, "按键增强：按下", "keyCode" to code)
@@ -149,20 +218,210 @@ class KeyActionExecutor(
                 if (gesture == KeyGesture.Gesture.DOUBLE) {
                     // 双击成立 ⇒ 挂起的单击作废
                     handler.removeCallbacks(singleRunnable)
-                    execute(
-                        KeyActionResolver.voice(prefs, KeyActionResolver.VoiceSlot.DOUBLE),
-                        "语音键双击",
-                    )
-                } else if (KeyActionResolver.isVoiceKey(code)) {
+                    if (voice) {
+                        val double = KeyActionResolver.voice(prefs, KeyActionResolver.VoiceSlot.DOUBLE)
+                        if (double.isNone) {
+                            // 没配双击动作 ⇒ 退化成一次单击（用户预期是「点两下 = 点一下」）
+                            executeOrOemVoice(
+                                KeyActionResolver.voice(prefs, KeyActionResolver.VoiceSlot.CLICK),
+                                "语音键双击（按单击执行）",
+                            )
+                        } else {
+                            execute(double, "语音键双击")
+                        }
+                    }
+                } else if (voice) {
                     // 单击：等双击窗口结束再定夺
                     handler.removeCallbacks(singleRunnable)
                     handler.postDelayed(singleRunnable, KeyGesture.DOUBLE_WINDOW_MS)
+                } else if (mediaPressKey == code) {
+                    // 第三百一十五轮：短按不再吞 —— 长按没触发就把短按补发给系统
+                    if (!mediaLongFired) injectMediaKey(code)
+                    mediaPressKey = 0
                 }
                 Logx.d(LogTags.KEYS, "按键增强：抬起", "keyCode" to code, "gesture" to gesture.name)
                 return true
             }
         }
         return false
+    }
+
+    /**
+     * 喂一条**方控广播**按键进来（第三百一十五轮新增）。
+     *
+     * 与 [onKeyEvent] 的区别：广播只给「单击 / 长按」两种语义事件，
+     * 双击在这里合成（见 [oemDetector]）。
+     *
+     * @return true = 这条广播被吃掉了（接收端应 `abortBroadcast()`，
+     *         避免系统语音助手同时也被唤起）。
+     */
+    fun onOemKey(
+        event: OemKeyProtocol.OemKeyEvent,
+        now: Long = SystemClock.uptimeMillis(),
+    ): Boolean {
+        if (!prefs.keysEnhanced) return false
+        if (!KeyActionResolver.isHandled(event.keyCode)) {
+            logUnknownKey(event.keyCode, now)
+            return false
+        }
+        lastOemKey = OemKeyProtocol.describe(event)
+        prefs.setStringValue(KEY_DIAG_LAST, lastOemKey)
+        Logx.i(
+            LogTags.KEYS,
+            "按键增强：收到方控广播",
+            "keyCode" to event.keyCode,
+            "keyName" to OemKeyProtocol.keyName(event.keyCode),
+            "press" to event.press.name,
+            "action" to event.sourceAction,
+        )
+
+        if (KeyActionResolver.isVoiceKey(event.keyCode)) {
+            if (event.press == OemKeyProtocol.Press.LONG) {
+                handler.removeCallbacks(oemSingleRunnable)
+                oemDetector.onLong(event.keyCode)
+                executeOrOemVoice(
+                    KeyActionResolver.voice(prefs, KeyActionResolver.VoiceSlot.LONG),
+                    "方控语音键长按",
+                )
+                return true
+            }
+            val gesture = oemDetector.onClick(event.keyCode, now)
+            return when (gesture.gesture) {
+                OemKeyGesture.Gesture.DOUBLE -> {
+                    handler.removeCallbacks(oemSingleRunnable)
+                    val double = KeyActionResolver.voice(prefs, KeyActionResolver.VoiceSlot.DOUBLE)
+                    if (double.isNone) {
+                        executeOrOemVoice(
+                            KeyActionResolver.voice(prefs, KeyActionResolver.VoiceSlot.CLICK),
+                            "方控语音键双击（按单击执行）",
+                        )
+                    } else {
+                        execute(double, "方控语音键双击")
+                    }
+                    true
+                }
+
+                OemKeyGesture.Gesture.NONE -> {
+                    // 挂起，等双击窗口到期再发单击
+                    handler.removeCallbacks(oemSingleRunnable)
+                    handler.postDelayed(oemSingleRunnable, OemKeyGesture.DOUBLE_WINDOW_MS)
+                    true
+                }
+
+                else -> true
+            }
+        }
+
+        // 媒体键：广播已经区分了单击/长按 ⇒ 单击直接放行给系统（切歌/暂停），
+        // 只有配了长按动作时才由我们处理。
+        if (event.press != OemKeyProtocol.Press.LONG) return false
+        val action = longActionOf(event.keyCode)
+        if (action.isNone) return false
+        execute(action, "方控媒体键长按")
+        return true
+    }
+
+    /**
+     * 停止执行端（Activity 销毁时调用）。
+     *
+     * 不清配置、不清 prefs，只把定时器与手势状态收掉，
+     * 免得已经 set 的 Runnable 在控件销毁后还去碰 UI。
+     */
+    fun stop() {
+        handler.removeCallbacks(longRunnable)
+        handler.removeCallbacks(singleRunnable)
+        handler.removeCallbacks(oemSingleRunnable)
+        pendingLongKey = 0
+        mediaPressKey = 0
+        mediaLongFired = false
+        oemDetector.reset()
+    }
+
+    /** 语音键三个槽位里是否至少配了一个动作。 */
+    private fun voiceConfigured(): Boolean =
+        !KeyActionResolver.voice(prefs, KeyActionResolver.VoiceSlot.CLICK).isNone ||
+            !KeyActionResolver.voice(prefs, KeyActionResolver.VoiceSlot.DOUBLE).isNone ||
+            !KeyActionResolver.voice(prefs, KeyActionResolver.VoiceSlot.LONG).isNone
+
+    /** 某颗键的「长按动作」（媒体键没有双击/单击槽位）。 */
+    private fun longActionOf(code: Int): KeyActionResolver.Action = when {
+        KeyActionResolver.isVoiceKey(code) ->
+            KeyActionResolver.voice(prefs, KeyActionResolver.VoiceSlot.LONG)
+
+        KeyActionResolver.isMediaPrev(code) ->
+            KeyActionResolver.media(prefs, KeyActionResolver.MediaSlot.PREV)
+
+        KeyActionResolver.isMediaNext(code) ->
+            KeyActionResolver.media(prefs, KeyActionResolver.MediaSlot.NEXT)
+
+        else -> KeyActionResolver.Action(Prefs.ACTION_NONE, 0)
+    }
+
+    /**
+     * 执行动作；配置是「无」时**不吞按键**，改为唤起系统语音助手。
+     *
+     * 原因：总开关打开但某个手势配「无」，用户仍然期待语音键能唤语音 ——
+     * 第218轮的实现在这种情况下什么都不做，等于把语音键废掉了。
+     */
+    private fun executeOrOemVoice(action: KeyActionResolver.Action, source: String) {
+        if (action.isNone) {
+            launchOemVoice("$source（未配置动作）")
+            return
+        }
+        execute(action, source)
+    }
+
+    /**
+     * 唤起**车机自带**的语音助手（有序广播）。
+     *
+     * 车机语音不是普通 Activity，`startActivity` 唤不起来 ——
+     * 正确做法是发有序广播 `ecarx.intent.action.ECARX_KEY_EVENT_RVOICE_EVENT`，
+     * 接收方需要 `com.android.systemui.permission.PLUGIN` 权限。
+     *
+     * 广播发不出去（没权限/系统没有接收方）时退回 [launchVoiceAssist]。
+     */
+    private fun launchOemVoice(source: String) {
+        val intent = Intent(OemKeyProtocol.ACTION_VOICE_LAUNCH)
+        intent.addCategory(Intent.CATEGORY_DEFAULT)
+        val sent = runCatching {
+            context.sendOrderedBroadcast(intent, OemKeyProtocol.PERMISSION_VOICE_LAUNCH)
+            true
+        }.getOrElse { error ->
+            Logx.w(LogTags.KEYS, "按键增强：唤起车机语音广播失败", error, "source" to source)
+            false
+        }
+        if (sent) {
+            Logx.i(
+                LogTags.KEYS,
+                "按键增强：唤起车机语音",
+                "source" to source,
+                "action" to OemKeyProtocol.ACTION_VOICE_LAUNCH,
+            )
+            return
+        }
+        launchVoiceAssist(source)
+    }
+
+    /**
+     * 把媒体键短按**补发**给系统。
+     *
+     * 配了「媒体键长按 = 某动作」之后，短按必须先被我们截住（否则等不到长按），
+     * 抬手时再判断：没升级成长按 ⇒ 补发一次按下+抬起，系统照常切歌。
+     * 不做这一步的话，配了长按就等于把短按切歌弄丢了。
+     */
+    private fun injectMediaKey(code: Int) {
+        val am = audioManager ?: return
+        val now = SystemClock.uptimeMillis()
+        runCatching {
+            am.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, code, 0))
+            am.dispatchMediaKeyEvent(KeyEvent(now, now + 1, KeyEvent.ACTION_UP, code, 0))
+        }.onFailure { Logx.w(LogTags.KEYS, "按键增强：短按转交系统失败", it, "keyCode" to code) }
+        Logx.d(
+            LogTags.KEYS,
+            "按键增强：短按转交系统",
+            "keyCode" to code,
+            "keyName" to KeyEvent.keyCodeToString(code),
+        )
     }
 
     /**
@@ -201,6 +460,7 @@ class KeyActionExecutor(
                 KeyActionResolver.media(prefs, KeyActionResolver.MediaSlot.NEXT)
             else -> return
         }
+        if (!KeyActionResolver.isVoiceKey(code)) mediaLongFired = true
         execute(action, "长按 keyCode=$code")
     }
 
@@ -221,7 +481,7 @@ class KeyActionExecutor(
         when (action.action) {
             Prefs.ACTION_DRIVE_MODE -> switchDriveMode(action.driveMode, source)
             Prefs.ACTION_360_TOGGLE -> toggle360(source)
-            Prefs.ACTION_VOICE_ASSIST -> launchVoiceAssist(source)
+            Prefs.ACTION_VOICE_ASSIST -> launchOemVoice(source)
             Prefs.ACTION_DIM_NAVI_CAST_TOGGLE -> toggleNaviCast(source)
             else -> Logx.w(LogTags.KEYS, "按键增强：未知动作", "source" to source, "action" to action.action)
         }
@@ -320,5 +580,12 @@ class KeyActionExecutor(
     companion object {
         /** 同一个未知 keyCode 的记录间隔（毫秒）。 */
         private const val UNKNOWN_KEY_LOG_INTERVAL_MS = 3000L
+
+        /**
+         * 「最近一次方控按键」落在哪个 pref 里（设置页诊断行读它）。
+         *
+         * 用通用键而不是新增 Prefs 字段：这是纯诊断信息，不进备份、不做迁移。
+         */
+        const val KEY_DIAG_LAST = "key_diag_last"
     }
 }

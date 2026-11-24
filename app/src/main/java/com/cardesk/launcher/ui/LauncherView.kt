@@ -1029,6 +1029,15 @@ class LauncherView(context: Context) : FrameLayout(context) {
         }.onFailure { Logx.w(LogTags.CAR3D, "启动车模资源包自动补齐失败", it) }
         mark("svc:carmodel")
 
+        // 第三百一十五轮：方控广播动态注册。
+        //
+        // 车机把方向盘按键做成**隐式广播**，API 28 起隐式广播不再投递给后台应用的
+        // 清单接收器（系统直接打 `Background execution not allowed`）。桌面在导航/
+        // 音乐里通常是后台态 ⇒ 只靠清单收不到，必须进程还活着时再动态注册一份。
+        runCatching { com.cardesk.launcher.ui.OemKeyRegistry.start(context.applicationContext) }
+            .onFailure { Logx.w(LogTags.KEYS, "方控广播动态注册失败", it) }
+        mark("svc:oemkey")
+
         // 导航引导数据源：没有导航时不显示任何东西（`visibility="gone"`）。
         runCatching {
             navGuideSource = com.cardesk.launcher.core.nav.AmapDesktopGuide(
@@ -6151,6 +6160,10 @@ fun toggleCam360() {
         if (servicesStarted) {
             runCatching { com.cardesk.launcher.core.car3d.CarModelAutoSync.start(context.applicationContext) }
         }
+        // 方控广播同理（detach 时注销过；start 幂等）。
+        if (servicesStarted) {
+            runCatching { com.cardesk.launcher.ui.OemKeyRegistry.start(context.applicationContext) }
+        }
         // 第138轮：状态栏连接类图标（蜂窝 / WiFi / 热点 / 蓝牙）按**真实状态**显示。
         // 采样器跟窗口生命周期起停 —— 后台时不用采（车机本来就在省电）。
         startSystemStatusSampling()
@@ -6188,6 +6201,7 @@ fun toggleCam360() {
         com.cardesk.launcher.vehicle.Camera360Link.stop()
         com.cardesk.launcher.core.car3d.CarModelAutoSync.onUpdated = null
         com.cardesk.launcher.core.car3d.CarModelAutoSync.stop()
+        com.cardesk.launcher.ui.OemKeyRegistry.stop(context.applicationContext)
         // 第138轮：连接状态采样一起停（后台线程 + 定时器都收掉）。
         systemStatusSampler?.stop()
         systemStatusSampler = null

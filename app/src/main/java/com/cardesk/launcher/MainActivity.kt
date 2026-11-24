@@ -979,6 +979,8 @@ class MainActivity : Activity() {
         runCatching { com.cardesk.launcher.core.media.MusicController.get().stop() }
             .onFailure { Logx.w(LogTags.MEDIA, "媒体会话停止失败", it) }
         pendingReadyActions.clear()
+        keyActionExecutor?.let { com.cardesk.launcher.ui.OemKeyRuntime.detach(it) }
+        keyActionExecutor = null
         launcher = null
         if (instance === this) instance = null
         splash = null
@@ -1117,12 +1119,21 @@ class MainActivity : Activity() {
         if (keyActionExecutor != null) return
         val view = launcher ?: return
         val appPrefs = com.cardesk.launcher.core.Prefs(applicationContext)
-        keyActionExecutor = com.cardesk.launcher.ui.KeyActionExecutor(
+        val executor = com.cardesk.launcher.ui.KeyActionExecutor(
             context = this,
             prefs = appPrefs,
             onToggle360 = { view.toggleCam360() },
         )
-        Logx.i(LogTags.KEYS, "按键增强：执行端就绪", "enabled" to appPrefs.keysEnhanced)
+        keyActionExecutor = executor
+        // 第三百一十五轮：把执行端挂到全局总机上 —— 方控广播（OemKeyReceiver）
+        // 在导航/音乐里也会来，那时桌面可能已不可见，靠总机把事件转过来。
+        com.cardesk.launcher.ui.OemKeyRuntime.attach(applicationContext, appPrefs, executor)
+        Logx.i(
+            LogTags.KEYS,
+            "按键增强：执行端就绪",
+            "enabled" to appPrefs.keysEnhanced,
+            "oemReceiver" to true,
+        )
     }
 
     /**
