@@ -137,6 +137,25 @@ class SettingsOverlay(
     context: Context,
     private val prefs: Prefs,
     private val pal: Palette,
+    /**
+     * 屏幕底部被**别的窗口**吃掉的高度（设计 px）。
+     *
+     * ## 为什么需要它（第三百零七轮，用户 m02052）
+     *
+     * 实车/模拟器上 `GlobalDockService` 的全局 Dock 是一个**独立窗口**
+     * （type 2024 导航栏面板，`[0,968][1920,1080]`）——
+     * 它盖在应用窗口最下面 112px 上。设置页按 1080 的设计高度排版时，
+     * 两块面板的底边（画板 y=1056）与左栏滚动区的最后两行
+     * （「ADB 调试」「诊断日志」）正好落在这一条里：
+     * **看不见，也点不到**（触摸被那个窗口吞掉）。
+     *
+     * 所以宿主用 [com.cardesk.launcher.ui.LauncherView.settingsBottomReserve]
+     * 算出这条被占高度，这里把它从面板高度里减掉 —— 面板整体上移，
+     * 内容不再伸进被别的窗口盖住的那一条。
+     *
+     * 0 = 没有这个遮挡（手机档 / 没开全局 Dock / 窗口本来就不含这一条）。
+     */
+    private val bottomReserve: Float = 0f,
 ) : FrameLayout(context) {
 
     var onClose: (() -> Unit)? = null
@@ -531,7 +550,9 @@ class SettingsOverlay(
         val gap = if (compact) 16 else SHELL_GAP
         leftWidth = if (compact) 300 else NAV_W
         panelWidth = screenW - side * 2
-        panelHeight = screenH - top - bottom
+        // 第三百零七轮：把「被全局 Dock 窗口吃掉的那一条」从面板高度里减掉，
+        // 否则设置页最后两行（ADB 调试 / 诊断日志）落在盖住区里，看不见也点不到。
+        panelHeight = (screenH - top - bottom - bottomReserve.coerceIn(0f, screenH / 3f)).toInt()
         val contentX = side + leftWidth + gap
         val contentW = panelWidth - leftWidth - gap
 

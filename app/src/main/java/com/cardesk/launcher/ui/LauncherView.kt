@@ -3895,25 +3895,90 @@ fun toggleCam360() {
         return com.cardesk.launcher.core.media.LyricWindow.window(lines, index, layout.slots)
     }
 
+    /**
+     * 设置页底部要空出来的高度（**设计 px**）—— 第三百零七轮。
+     *
+     * ## 问题（用户 m02052）
+     *
+     * 实车设置页里「ADB 调试」点不动、往下滑「诊断日志」也看不到。
+     * 根因不是排版坏了，而是**屏幕最下面那一条是另一个窗口画的**：
+     * `GlobalDockService` 的全局 Dock（type 2024 导航栏面板）占
+     * `[0,968][1920,1080]`，盖在应用窗口之上 ——
+     * 落进这条里的控件既看不见（被它不透明的底图盖住），
+     * 也点不到（触摸事件被它吞掉）。
+     *
+     * 设置页原本按 1080 设计高度排版（面板 y=64..1056），
+     * 左栏滚动区最后两行（ADB 调试 / 诊断日志）正好在 968 以下。
+     *
+     * ## 算法
+     *
+     * 1. 拿全局 Dock 窗口的高度（[GlobalDockService.designBarHeight]，设计单位）
+     *    换算到实时屏幕像素（Dock 窗口按**屏宽的 1920 比例**算高）；
+     * 2. 得到这条带子在屏幕上的顶边，再换算成「相对本 View」的像素；
+     * 3. 用本 View 的设计缩放（[Design.scaleFor]，整层等比缩放 + 居中）
+     *    反算这条带子在**设计坐标**里占多少；
+     * 4. 夹在 `[0, 设计高/3]` 之间兜底（异常值不该把面板压扁）。
+     *
+     * 返回 0 的常见情况：窗口本来就比屏幕矮（预留区下应用窗口只有 968），
+     * 这条带子根本不在窗口里；或者没开全局 Dock / 没走预留区。
+     */
+    private fun settingsBottomReserve(): Float {
+        val globalDock = prefs.globalDockEnabled &&
+            com.cardesk.launcher.core.dock.NavInsets.applied(context)
+        if (!globalDock) return 0f
+        val vw = width.toFloat()
+        val vh = height.toFloat()
+        if (vw <= 0f || vh <= 0f) return 0f
+        val real = android.graphics.Point()
+        runCatching {
+            val wm = context.getSystemService(android.content.Context.WINDOW_SERVICE)
+                as android.view.WindowManager
+            @Suppress("DEPRECATION")
+            wm.defaultDisplay.getRealSize(real)
+        }.onFailure { return 0f }
+        if (real.x <= 0 || real.y <= 0) return 0f
+        val screenW = real.x.toFloat()
+        val screenH = real.y.toFloat()
+        // Dock 窗口高度：`applyGeometry()` 里就是按「屏宽 / 1920」的比例算的。
+        val bandPx = GlobalDockService.designBarHeight() * screenW / Design.W
+        if (bandPx <= 0f) return 0f
+        val loc = IntArray(2)
+        getLocationOnScreen(loc)
+        val bandTopInView = (screenH - bandPx) - loc[1]
+        val scale = Design.scaleFor(width, height)
+        if (scale <= 0f) return 0f
+        // 整层内容在设计坐标里被居中放置，所以窗口顶边不一定对应设计 y=0。
+        val contentTop = (vh - Design.H * scale) / 2f
+        val bandTopDesign = (bandTopInView - contentTop) / scale
+        return (Design.H - bandTopDesign).coerceIn(0f, Design.H / 3f)
+    }
+
     private fun showSettings() {
         if (settings != null) return
         Logx.event(LogTags.SETTING, "打开设置页")
         // 画板 `s01..s25` 全是「设置覆盖整屏」：底部**没有 Dock**（只有状态栏）。
         // 之前 Dock 一直露在设置面板下面，面板底边与 Dock 之间还压着一条桌面内容。
         dock.visibility = View.GONE
-        // 画板里设置页底部没有 Dock：桌面自己的 Dock 设 GONE 还不够，
-        // 屏幕上那条是**另一个窗口**（`GlobalDockService`）画出来的。
+        // 第三百零八轮（用户 m02164「设置页也需要显示我们的 dock 栏」）：
+        // 设置页底部**不再**做空白占位，而是继续显示我们自己的 Dock —— 全局 Dock
+        // 窗口（`GlobalDockService`）画的就是 `DockBarView`，让它照常显示即可。
         //
-        // 第三百零五轮：让它「让出内容但别让出窗口」—— 实车预留区路径下，
-        // 原车 CarNavigationBar 就画在我们面板下面，窗口一隐身底部 112px
-        // 立刻露出原车 Dock（用户 m01073 第 2 点）。
-        // 先铺单色兜底（不能让原车栏露出来哪怕一帧），设置页画上去之后再
-        // [captureSettingsBottomCover] 用真实像素替换，接缝彻底消失。
-        com.cardesk.launcher.core.dock.GlobalDockService.setSuppressed(
-            true,
-            coverColor = bottomCoverColor(),
+        // 历史上这里调过 `setSuppressed(true)` 让窗口隐身（第三百零五轮改成空白
+        // 占位 + PixelCopy 底图），当时是画板口径「设置页底部没有 Dock」且要压住
+        // 原车 `CarNavigationBar`；现在用户要求设置页也带 Dock，而「压住原车栏」
+        // 本来就靠**我们自己的不透明 Dock 窗口**完成，不需要让位。
+        //
+        // 设置页面板高度已让出这条带子（[settingsBottomReserve]，第三百零七轮），
+        // 所以两者不再互相遮挡：面板底边 ≈944，Dock 从 968 起。
+        // 这里防御性地清一次抑制状态：启动页可能刚把它置 true
+        // （`MainActivity.showSplash` → `setSuppressed(true, ...)`）。
+        com.cardesk.launcher.core.dock.GlobalDockService.setSuppressed(false)
+        val overlay = SettingsOverlay(
+            context,
+            prefs,
+            pal,
+            bottomReserve = settingsBottomReserve(),
         )
-        val overlay = SettingsOverlay(context, prefs, pal)
         overlay.onClose = { closeSettings() }
         overlay.onApply = { onSettingsApplied() }
         // 画板 s06「立即切换」：真的把当前明暗翻过来（不是重放当前 palette）。
@@ -4031,8 +4096,6 @@ fun toggleCam360() {
         applyDockVisibility()
         // 面板上滑 + 遮罩淡入（200ms / 180ms）。
         overlay.playOpen()
-        // 画完一帧后把接缝上方那条真实像素拷给全局 Dock 当底图（第三百零五轮）。
-        captureSettingsBottomCover()
     }
 
     private fun closeSettings() {
@@ -5158,97 +5221,6 @@ fun toggleCam360() {
         // 把当前状态推给高德，让地图跟桌面一致
         // （跟随高德模式下不推，见 [pushDayNightToAmap]）。
         pushDayNightToAmap(pal.night)
-    }
-
-    /**
-     * 第三百零五轮：给全局 Dock 的「空白占位」采一个底色。
-     *
-     * 设置页打开时，屏幕底部那 112px 由 `GlobalDockService` 的窗口画
-     * （它盖在原车 `CarNavigationBar` 上）。让位时内容藏掉、但窗口得留着盖住原车栏，
-     * 于是需要一层**和上面画面接得上的底**。
-     *
-     * ## 为什么不是直接取玻璃底图
-     *
-     * 第一版取的是 [com.cardesk.launcher.core.Glass.backdrop] 最底部 1/10 的平均色，
-     * 实机截图一量：底条 `(11,21,30)`、接缝上方壁纸 `(24,30,39)` —— **暗了 13/255**，
-     * 底部能看到一条横带。差别来自两处：玻璃底图是**压暗过**的，而且设置页在上面
-     * 又盖了一层 26% 暗罩。
-     *
-     * 现在的口径：
-     * 1. 取**壁纸最底部**的本色（[com.cardesk.launcher.ui.widget.BackgroundView.bottomWallpaperColor]，
-     *    不含任何蒙层）；
-     * 2. 按设置页那层暗罩（[SettingsOverlay.SHELL_SCRIM_ALPHA] / 主题 `scrim` 色）混合一遍 ——
-     *    得到的就是「壁纸被暗罩压过」的样子，正是接缝上方那块的颜色。
-     *
-     * @return 混合后的颜色；拿不到壁纸色（视频壁纸 / 图还没解好）时返回 0，
-     *   调用方会退回默认的不透明底栏色。
-     */
-    private fun bottomCoverColor(): Int {
-        val wall = runCatching { background.bottomWallpaperColor() }.getOrDefault(0)
-        if (wall == 0) return 0
-        return runCatching {
-            val a = SettingsOverlay.SHELL_SCRIM_ALPHA / 255f
-            val scrim = pal.scrim
-            fun mix(c: Int, s: Int): Int =
-                (c * (1f - a) + s * a).toInt().coerceIn(0, 255)
-            android.graphics.Color.rgb(
-                mix(android.graphics.Color.red(wall), android.graphics.Color.red(scrim)),
-                mix(android.graphics.Color.green(wall), android.graphics.Color.green(scrim)),
-                mix(android.graphics.Color.blue(wall), android.graphics.Color.blue(scrim)),
-            )
-        }.getOrDefault(0)
-    }
-
-    /**
-     * 第三百零五轮第三版：设置页画上去之后，把**接缝上方那条真实像素**拷下来，
-     * 交给全局 Dock 当空白占位的底图 —— 和上面的画面逐像素一致，接缝彻底消失。
-     *
-     * ## 为什么不再「裁背景视图」
-     *
-     * 前两版都失败在同一个点上：桌面背景在窗口里的实际尺寸 / 缩放口径和设计坐标
-     * 不是 1:1（窗口 1920×968、设计 1920×1080），裁出来的那条实测比真实像素
-     * **暗 10~20 级**，屏幕上仍是一道横带。`PixelCopy` 拿的是**合成后的窗口内容**
-     * （含设置页暗罩、含所有父层缩放），不依赖任何坐标换算。
-     *
-     * 拿不到（窗口没画好 / 被安全策略拒绝）就保持 [bottomCoverColor] 的单色兜底。
-     */
-    private fun captureSettingsBottomCover() {
-        val w = width
-        val h = height
-        if (w <= 0 || h <= 0) return
-        val designW = com.cardesk.launcher.core.dock.GlobalDockService.designBarWidth().coerceAtLeast(1)
-        val designH = com.cardesk.launcher.core.dock.GlobalDockService.designBarHeight().coerceAtLeast(1)
-        val band = (designH * (w.toFloat() / designW)).toInt().coerceIn(1, h)
-        // 等设置页真正画到屏幕上（playOpen 有 ~200ms 入场动画）
-        postDelayed({
-            if (settings == null) return@postDelayed
-            val win = (context as? android.app.Activity)?.window ?: return@postDelayed
-            val rect = android.graphics.Rect(0, h - band, w, h)
-            val bmp = runCatching {
-                Bitmap.createBitmap(rect.width(), rect.height(), Bitmap.Config.ARGB_8888)
-            }.getOrNull() ?: return@postDelayed
-            val ok = runCatching {
-                android.view.PixelCopy.request(
-                    win,
-                    rect,
-                    bmp,
-                    { result ->
-                        if (result == android.view.PixelCopy.SUCCESS && settings != null) {
-                            com.cardesk.launcher.core.dock.GlobalDockService.setSuppressed(
-                                true,
-                                coverColor = bottomCoverColor(),
-                                coverBitmap = bmp,
-                            )
-                        } else {
-                            bmp.recycle()
-                        }
-                    },
-                    android.os.Handler(android.os.Looper.getMainLooper()),
-                )
-                true
-            }.getOrDefault(false)
-            if (!ok) bmp.recycle()
-        }, 260L)
     }
 
     private fun applyDockVisibility() {
