@@ -169,6 +169,7 @@ trap 'rm -rf "$WORK"' EXIT
 echo "== 干净构建目录：$WORK"
 rsync -a --checksum \
     --exclude build --exclude .gradle --exclude dist --exclude dist-dev --exclude preview \
+    --exclude R2.txt --exclude '*.keystore' --exclude '.android-home' \
     "$REPO/" "$WORK/"
 
 # ---------------------------------------------------------------- 3) 构建

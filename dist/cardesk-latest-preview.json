@@ -1,16 +1,16 @@
 {
   "schema": 1,
   "channel": "preview",
-  "version": "1.0.1224-preview",
-  "versionCode": 4320,
-  "tag": "v1.0.1224-preview",
-  "name": "CarDesk 4320 / 1.0.1224-preview（开发版）",
-  "notes": "第三百零九轮：在线更新支持「正式版 / 开发版」两条通道。\n\n新增\n- 设置 → 在线更新：新增「更新渠道」下拉，可选 正式版 / 开发版；选完之后「检查更新」只查该通道的清单。\n- 开发版更新源：https://file.chuxi.bid/cardesk/preview/latest.json\n- 正式版更新源：https://file.chuxi.bid/cardesk/latest.json\n\n说明\n- 开发版版本号以 -preview 收尾（例如 1.0.1224-preview），更新更早、可能不稳。\n- 两条通道各自一份清单、各自一套安装包，互不干扰：选正式版不会被开发版弹窗打扰。\n- 本包即为 开发版（preview）通道的首个构建。",
-  "publishedAt": "2026-11-24T02:58:43Z",
+  "version": "1.0.1227-preview",
+  "versionCode": 4323,
+  "tag": "v1.0.1227-preview",
+  "name": "CarDesk 4323 / 1.0.1227-preview（开发版）",
+  "notes": "车模资源包改为启动自动校验补齐：本地齐全时不联网，缺失时一次下全全部车型，失败每 5 分钟静默重试；补齐或手动更新后解码缓存自动失效，换车模不用重启桌面；设置页手动检查改为强制问远端。",
+  "publishedAt": "2026-11-24T05:25:20Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4320-preview.apk",
-    "url": "cardesk/preview/CarDesk-platform-ecarx-cardesk-4320-preview.apk",
-    "size": 4109965,
-    "sha256": "f320e80a9885abb57ccfec232cf3696ad209eac1ab714c685c69d9976f84f7fe"
+    "name": "CarDesk-platform-ecarx-cardesk-4323-preview.apk",
+    "url": "cardesk/preview/CarDesk-platform-ecarx-cardesk-4323-preview.apk",
+    "size": 4168917,
+    "sha256": "c2d872940fef032706534ee61fd6ff18fa25e40d30b42208e663ca3908945941"
   }
 }

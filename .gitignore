@@ -9,6 +9,7 @@
 build/
 .gradle/
 .gradle-home/
+.android-home/
 app/build/
 .cxx/
 *.apk
