@@ -1015,6 +1015,20 @@ class LauncherView(context: Context) : FrameLayout(context) {
         }.onFailure { Logx.w(LogTags.CAM360, "启动 360 联动失败", it) }
         mark("svc:camera360")
 
+        // 车模资源包自动补齐：本地已齐 ⇒ 一个请求都不发；不齐（首次安装 / 数据被清）才去
+        // 远端一次性把全部车型拉下来，失败每 5 分钟静默重试，装好后让解码缓存失效。
+        runCatching {
+            com.cardesk.launcher.core.car3d.CarModelAutoSync.onUpdated = { dirs ->
+                Logx.i(LogTags.CAR3D, "车模资源包已补齐，解码缓存失效", "dirs" to dirs)
+                // `reset()` 会回收旧位图、清掉 model.json 与缺图记忆，桌面下一帧就用新图。
+                com.cardesk.launcher.core.car3d.Car3dAssets.reset()
+                refresh()
+            }
+            com.cardesk.launcher.core.car3d.CarModelAutoSync.start(context.applicationContext)
+            Logx.i(LogTags.CAR3D, "启动车模资源包自动补齐")
+        }.onFailure { Logx.w(LogTags.CAR3D, "启动车模资源包自动补齐失败", it) }
+        mark("svc:carmodel")
+
         // 导航引导数据源：没有导航时不显示任何东西（`visibility="gone"`）。
         runCatching {
             navGuideSource = com.cardesk.launcher.core.nav.AmapDesktopGuide(
@@ -6133,6 +6147,10 @@ fun toggleCam360() {
         if (servicesStarted) {
             runCatching { com.cardesk.launcher.vehicle.Camera360Link.start(context.applicationContext, prefs) }
         }
+        // 车模自动补齐同理（detach 时 stop 过；start 幂等、失败重试会重新挂上）。
+        if (servicesStarted) {
+            runCatching { com.cardesk.launcher.core.car3d.CarModelAutoSync.start(context.applicationContext) }
+        }
         // 第138轮：状态栏连接类图标（蜂窝 / WiFi / 热点 / 蓝牙）按**真实状态**显示。
         // 采样器跟窗口生命周期起停 —— 后台时不用采（车机本来就在省电）。
         startSystemStatusSampling()
@@ -6168,6 +6186,8 @@ fun toggleCam360() {
         com.cardesk.launcher.core.AltitudeDesk.onChanged = null
         com.cardesk.launcher.core.AltitudeDesk.stop()
         com.cardesk.launcher.vehicle.Camera360Link.stop()
+        com.cardesk.launcher.core.car3d.CarModelAutoSync.onUpdated = null
+        com.cardesk.launcher.core.car3d.CarModelAutoSync.stop()
         // 第138轮：连接状态采样一起停（后台线程 + 定时器都收掉）。
         systemStatusSampler?.stop()
         systemStatusSampler = null

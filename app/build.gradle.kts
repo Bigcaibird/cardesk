@@ -5,7 +5,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-// 包名/版本可用 -P 覆盖，便于产出与参考车机桌面同包名的「替换版」：
+// 包名/版本可用 -P 覆盖，便于产出与原车桌面同包名的「替换版」：
 //   gradle :app:assembleSystem -PcardeskPackage=com.ecarx.qq.tool -PcardeskVersionCode=4354
 // 注意：applicationId 只影响安装身份，Kotlin/Java 包名（namespace）保持 com.cardesk.launcher 不变。
 val pkgOverride = (project.findProperty("cardeskPackage") as String?)?.trim().orEmpty()
@@ -24,8 +24,8 @@ val versionNameOverride = (project.findProperty("cardeskVersionName") as String?
 
 android {
     namespace = "com.cardesk.launcher"
-    // compileSdk / targetSdk 与参考 App 完全一致
-    // （`aapt dump badging` 参考 APK → compileSdkVersion=29、targetSdkVersion=29）。
+    // compileSdk / targetSdk 与原车既有构建口径一致
+    // （车机侧既有构建即 compileSdkVersion=29、targetSdkVersion=29）。
     //
     // 这不只是「口径对齐」，还直接决定**车机 SDK 能不能反射得到**：
     // Android 的隐藏 API（hidden API）限制按 targetSdk 分级 ——
@@ -34,13 +34,13 @@ android {
     // `com.ecarx.sdk.weather.WeatherAPI`、`android.os.ServiceManager.getServiceNames`
     // 这些**车机/系统私有类**的成员属于新一档，targetSdk 34 会被拦掉
     // （`Method.invoke` 抛 NoSuchMethodException），
-    // 而参考版 targetSdk 29 拿得到 —— 参考的天气主通路（车机天气 SDK）就是这么走的。
+    // 而 targetSdk 29 拿得到 —— 车机天气主通路（车机天气 SDK）就是这么走的。
     compileSdk = 29
 
     defaultConfig {
         applicationId = pkgOverride.ifEmpty { "com.cardesk.launcher" }
         minSdk = 26
-        // targetSdk 与参考 App 一致（参考 APK `aapt dump badging` → targetSdkVersion=29）。
+        // targetSdk 与原车既有构建一致（targetSdkVersion=29）。
         //
         // 这不只是「口径对齐」，还直接决定**车机 SDK 能不能反射得到**：
         // Android 的隐藏 API（hidden API）限制按 targetSdk 分级 ——
@@ -49,7 +49,7 @@ android {
         // `com.ecarx.sdk.weather.WeatherAPI`、`android.os.ServiceManager.getServiceNames`
         // 这些**车机/系统私有类**的成员属于新一档，targetSdk 34 会被拦掉
         // （`Method.invoke` 抛 NoSuchMethodException），
-        // 而参考版 targetSdk 29 拿得到 —— 参考的天气主通路（车机天气 SDK）就是这么走的。
+        // 而 targetSdk 29 拿得到 —— 车机天气主通路（车机天气 SDK）就是这么走的。
         targetSdk = 29
         versionCode = versionCodeOverride
         versionName = versionNameOverride.ifEmpty { "0.1.0" }
@@ -58,7 +58,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    // 平台签名（AOSP platform 测试密钥，与参考 App 的 PLATFORM.RSA 同一指纹）
+    // 平台签名（AOSP platform 测试密钥，与车机平台签名同一指纹）
     //
     // **密钥文件不入库**（见 `.gitignore` 的 `platform-key/`）：
     // 别人 clone 之后这个文件不存在，所以这里做**条件判断** ——
@@ -127,11 +127,11 @@ android {
     }
 }
 
-// system 构建默认产出与参考车机桌面同包名的「替换版」：
+// system 构建默认产出与原车桌面同包名的「替换版」：
 //   assembleSystem                 → com.ecarx.qq.tool, versionCode 4354, 平台签名
 //   assembleDebug                  → com.cardesk.launcher, versionCode 1, debug 签名
 //
-// 「自有包名 + 亿咖通前缀」的 system 版（与参考 App **并存**、不覆盖它）：
+// 「自有包名 + 亿咖通前缀」的 system 版（与原车桌面**并存**、不覆盖它）：
 //   第四十二轮（4123）起包名从 com.ecarx.qq.cardesk 改成 **com.ecarx.cardesk**（去掉中间的 qq）。
 //   assembleSystem -PcardeskPackage=com.ecarx.cardesk \
 //                  -PcardeskVersionCode=4123 -PcardeskVersionName=1.0.1027-lynkco-tool-cardesk
@@ -139,11 +139,11 @@ android {
 // 指定 -PcardeskPackage 后不再走「替换版」逻辑（版本号不会被抬到 4354）。
 //
 // versionCode 的约定：versionName = "1.0.0" + (versionCode - 3096)
-//   参考包 4353 ↔ 1.0.01257；4385 ↔ 1.0.01289；… 所以 1.0.1027 → 4123。
+//   原车桌面 4353 ↔ 1.0.01257；4385 ↔ 1.0.01289；… 所以 1.0.1027 → 4123。
 androidComponents {
     onVariants(selector().withBuildType("system")) { variant ->
         // 只有「默认（未用 -PcardeskPackage 指定包名）」的 system 构建才是替换版，
-        // 才改成参考包名并把版本号抬到 4354 以上。
+        // 才改成原车包名并把版本号抬到 4354 以上。
         val replacement = pkgOverride.isEmpty()
         if (replacement) {
             variant.applicationId.set("com.ecarx.qq.tool")

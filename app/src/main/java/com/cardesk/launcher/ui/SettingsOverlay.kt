@@ -4172,6 +4172,9 @@ class SettingsOverlay(
             logSetting("tpms_car_model", "车模编号", from, modelId)
             // 换车型可能换掉整套资产（纯俯视 ↔ 多视角），本页的行可见性要立刻跟着变。
             refreshCarInfoPage()
+            // 桌面那边原本靠车辆数据每秒刷新顺带把 carModel 推下去，最慢要等一拍；
+            // 这里直接走「设置已应用」链路，关上设置页就是新车模，不用等。
+            onApply?.invoke()
         }
         // 写实车模（第163轮）：离线烘焙图 + 纯 Canvas 合成（`core/car3d`）。
         // 关掉立刻回到自绘俯视车模；资产缺失/解码失败时无论开关如何都会静默回退。
@@ -4291,12 +4294,36 @@ class SettingsOverlay(
         )
         actionButton("检查车模资源更新…", full = true) {
             Logx.event(LogTags.CAR3D, "检查车模资源更新", "dir" to currentDir)
-            com.cardesk.launcher.core.car3d.CarModelRemote.refresh(context) { msg ->
-                Logx.i(LogTags.CAR3D, "车模资源包结果", "msg" to msg, "dir" to currentDir)
-                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                // 装完立刻重建本页（「本地资源包」那行要显示新版本号）。
-                refreshCarInfoPage()
-            }
+            // 手动检查要「真的去问远端」：走 force=true 绕过 10 分钟索引缓存，
+            // 否则刚发布的资源包在缓存过期前点了也是「全部最新」。
+            val appCtx = context.applicationContext
+            Thread {
+                val r = com.cardesk.launcher.core.car3d.CarModelAutoSync.syncNow(appCtx)
+                val msg = when {
+                    r.error != null -> "车模资源包：" + r.error
+                    r.updated > 0 -> "已更新 " + r.updated + " 个车模"
+                    r.failedDirs.isNotEmpty() -> "部分车模更新失败"
+                    else -> "车模资源包已是最新"
+                }
+                post {
+                    Logx.i(
+                        LogTags.CAR3D, "车模资源包结果",
+                        "msg" to msg,
+                        "dir" to currentDir,
+                        "updated" to r.updatedDirs.keys.toList(),
+                        "failed" to r.failedDirs,
+                    )
+                    Toast.makeText(appCtx, msg, Toast.LENGTH_SHORT).show()
+                    // 真的换了图才清解码缓存：`Car3dAssets` 按车型目录缓存 `model.json` 与位图，
+                    // 不清就一直是旧图（以前要杀进程重启才换）。post 在主线程，reset 安全。
+                    if (r.updatedDirs.isNotEmpty()) {
+                        com.cardesk.launcher.core.car3d.Car3dAssets.reset()
+                        onApply?.invoke()
+                    }
+                    // 装完立刻重建本页（「本地资源包」那行要显示新版本号）。
+                    refreshCarInfoPage()
+                }
+            }.start()
         }
         chipRow("车辆数据源", listOf("自动探测", "模拟车辆", "真车通道"), prefs.vehicleSource) { idx ->
             val from = prefs.vehicleSource
