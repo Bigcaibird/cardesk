@@ -479,27 +479,27 @@ class DockBarView(context: Context) : View(context) {
                 )
             }
             fill.color = if (active) Skin.ACCENT else Skin.TEXT_SOFT
-            // 3×3 宫格：每格 8×8、间距 4 —— 总宽 32，落在 40 的图标框里。
+            // 3×3 宫格：每格 12×12、间距 6 —— 总宽 48，落在 72 的键面里。
             for (row in 0..2) for (col in 0..2) {
-                val left = cx - 16f + col * 12f
-                val top = cy - 16f + row * 12f
-                canvas.drawRoundRect(RectF(left, top, left + 8f, top + 8f), 2f, 2f, fill)
+                val left = cx - 24f + col * 18f
+                val top = cy - 24f + row * 18f
+                canvas.drawRoundRect(RectF(left, top, left + 12f, top + 12f), 3f, 3f, fill)
             }
         }
-        registerIconHit("apps", cx, cy)
+        registerIconHit("apps", cx, cy, NAV_TILE)
     }
 
     /** 分屏键（画板：两个并排的圆角矩形，无底板）。 */
     private fun drawSplit(canvas: Canvas, cx: Float, cy: Float) {
         withPress(canvas, "split", cx, cy) {
             stroke.color = Skin.TEXT_SOFT
-            stroke.strokeWidth = 2.4f
-            r.set(cx - 16f, cy - 13f, cx - 2f, cy + 13f)
-            canvas.drawRoundRect(r, 4f, 4f, stroke)
-            r.set(cx + 2f, cy - 13f, cx + 16f, cy + 13f)
-            canvas.drawRoundRect(r, 4f, 4f, stroke)
+            stroke.strokeWidth = 3.2f
+            r.set(cx - 24f, cy - 20f, cx - 2f, cy + 20f)
+            canvas.drawRoundRect(r, 6f, 6f, stroke)
+            r.set(cx + 2f, cy - 20f, cx + 24f, cy + 20f)
+            canvas.drawRoundRect(r, 6f, 6f, stroke)
         }
-        registerIconHit("split", cx, cy)
+        registerIconHit("split", cx, cy, NAV_TILE)
     }
 
     /** 360 键（画板：圆角框 + 「360」字，无底板）。 */
@@ -507,16 +507,16 @@ class DockBarView(context: Context) : View(context) {
         withPress(canvas, "360", cx, cy) {
             // 圆角 10、1.8px 描边：日间模式下这层浅蓝在白底上看不见，沿用主题弱文字色。
             stroke.color = if (Skin.isNight) Skin.TEXT else Skin.TEXT_SOFT
-            stroke.strokeWidth = 1.8f
-            r.set(cx - 19f, cy - 13f, cx + 19f, cy + 13f)
-            canvas.drawRoundRect(r, 10f, 10f, stroke)
+            stroke.strokeWidth = 2.6f
+            r.set(cx - 28f, cy - 20f, cx + 28f, cy + 20f)
+            canvas.drawRoundRect(r, 14f, 14f, stroke)
             text.color = stroke.color
-            text.textSize = 15f
+            text.textSize = 22f
             text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             text.textAlign = Paint.Align.CENTER
-            canvas.drawText("360", cx, cy + 5.5f, text)
+            canvas.drawText("360", cx, cy + 8f, text)
         }
-        registerIconHit("360", cx, cy)
+        registerIconHit("360", cx, cy, NAV_TILE)
     }
 
     /**
@@ -525,8 +525,9 @@ class DockBarView(context: Context) : View(context) {
      * 用户明确要求「画板视觉 40~56，点击区要放大到 56，用透明命中盒」——
      * 视觉不放大，命中盒放大，手不用瞄得那么准。
      */
-    private fun registerIconHit(key: String, cx: Float, cy: Float) {
-        hit[key] = RectF(cx - HIT_MIN / 2f, cy - HIT_MIN / 2f, cx + HIT_MIN / 2f, cy + HIT_MIN / 2f)
+    private fun registerIconHit(key: String, cx: Float, cy: Float, size: Float = HIT_MIN) {
+        val half = maxOf(size, HIT_MIN) / 2f
+        hit[key] = RectF(cx - half, cy - half, cx + half, cy + half)
     }
 
     // ================================================================
@@ -536,7 +537,7 @@ class DockBarView(context: Context) : View(context) {
     /**
      * 媒体胶囊（画板 x365..735 / 高 72 / 圆角 28 / 灰白玻璃）。
      *
-     * 内部从左到右：封面 56×56（圆角 14，青绿渐变 + 音符）→ 标题 15 粗 + 副标题 11 弱
+     * 内部从左到右：封面 56×56（圆角 14，青绿渐变 + 音符）→ 标题 19 粗 + 副标题 14 弱
      * → ⏮（中心 629）→ 播放（白色实心圆，直径 40，中心 666.5）→ ⏭（中心 705）。
      * 三个键的 x 由**右边缘**反推，和画板一致，也与旧版 `DockMediaLayout` 的
      * 「从右往左量」同一套思路。
@@ -586,28 +587,28 @@ class DockBarView(context: Context) : View(context) {
         text.isFakeBoldText = false
         canvas.save()
         canvas.translate(swipeOffset, 0f)
-        text.textSize = 15f
+        text.textSize = 19f
         text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         text.color = Skin.TEXT
-        canvas.drawText(clip(mediaTitle, text, textW), textLeft, cy - 3f, text)
+        canvas.drawText(clip(mediaTitle, text, textW), textLeft, cy - 5f, text)
         text.typeface = Typeface.DEFAULT
-        text.textSize = 11f
+        text.textSize = 14f
         text.color = Skin.TEXT_SOFT
-        canvas.drawText(clip(mediaArtist, text, textW), textLeft, cy + 14f, text)
+        canvas.drawText(clip(mediaArtist, text, textW), textLeft, cy + 19f, text)
         canvas.restore()
 
         if (swipeFraction > 0f) {
             text.textAlign = Paint.Align.LEFT
             text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            text.textSize = 15f
+            text.textSize = 19f
             text.color = Skin.TEXT
             canvas.save()
             canvas.translate(-swipeOffset, 0f)
-            canvas.drawText(clip(swipePreviewTitle, text, textW), textLeft, cy - 3f, text)
+            canvas.drawText(clip(swipePreviewTitle, text, textW), textLeft, cy - 5f, text)
             text.typeface = Typeface.DEFAULT
-            text.textSize = 11f
+            text.textSize = 14f
             text.color = Skin.TEXT_SOFT
-            canvas.drawText(clip(swipePreviewArtist, text, textW), textLeft, cy + 14f, text)
+            canvas.drawText(clip(swipePreviewArtist, text, textW), textLeft, cy + 19f, text)
             canvas.restore()
         }
 
@@ -663,13 +664,13 @@ class DockBarView(context: Context) : View(context) {
         val on = hvac?.power == true
         withPress(canvas, "power", cx, cy) {
             stroke.color = if (on) Skin.ACCENT else Skin.TEXT_SOFT
-            stroke.strokeWidth = 2.6f
-            r.set(cx - 13f, cy - 14f, cx + 13f, cy + 12f)
+            stroke.strokeWidth = 3.4f
+            r.set(cx - 20f, cy - 21f, cx + 20f, cy + 19f)
             canvas.drawArc(r, 300f, 300f, false, stroke)
-            canvas.drawLine(cx, cy - 20f, cx, cy - 3f, stroke)
+            canvas.drawLine(cx, cy - 28f, cx, cy - 4f, stroke)
         }
         // 命中区 56×56（视觉 28，点击区放大）。
-        hit["power"] = RectF(cx - HIT_MIN / 2f, cy - HIT_MIN / 2f, cx + HIT_MIN / 2f, cy + HIT_MIN / 2f)
+        hit["power"] = RectF(cx - NAV_TILE / 2f, cy - NAV_TILE / 2f, cx + NAV_TILE / 2f, cy + NAV_TILE / 2f)
     }
 
     // ================================================================
@@ -731,10 +732,10 @@ class DockBarView(context: Context) : View(context) {
 
         // —— 主驾 / 副驾（11px 弱字，居中在数字下方）——
         text.typeface = Typeface.DEFAULT
-        text.textSize = 11f
+        text.textSize = 14f
         text.color = Skin.TEXT_DIM
         text.textAlign = Paint.Align.CENTER
-        canvas.drawText(if (passenger) "副驾" else "主驾", cx, cy + 17f, text)
+        canvas.drawText(if (passenger) "副驾" else "主驾", cx, cy + 20f, text)
 
         // —— 加减键（画板：− 距左 14、+ 距右 17，统一取 16）——
         val minusCx = left + TEMP_ARROW_INSET
@@ -760,9 +761,9 @@ class DockBarView(context: Context) : View(context) {
      */
     private fun plusMinus(canvas: Canvas, cx: Float, cy: Float, plus: Boolean) {
         stroke.color = Skin.TEXT_SOFT
-        stroke.strokeWidth = 2.2f
+        stroke.strokeWidth = 2.8f
         stroke.strokeCap = Paint.Cap.ROUND
-        val half = 7f
+        val half = 9f
         canvas.drawLine(cx - half, cy, cx + half, cy, stroke)
         if (plus) canvas.drawLine(cx, cy - half, cx, cy + half, stroke)
     }
@@ -806,7 +807,7 @@ class DockBarView(context: Context) : View(context) {
             fanGlyph(canvas, cx, cy, glyphColor, level, auto)
             canvas.restore()
         }
-        hit["fan"] = RectF(cx - HIT_MIN / 2f, cy - HIT_MIN / 2f, cx + HIT_MIN / 2f, cy + HIT_MIN / 2f)
+        hit["fan"] = RectF(cx - FAN_SIZE / 2f, cy - FAN_SIZE / 2f, cx + FAN_SIZE / 2f, cy + FAN_SIZE / 2f)
     }
 
     /**
@@ -826,23 +827,23 @@ class DockBarView(context: Context) : View(context) {
         // 改回画板原样的「风」，档位单独用下面一排点表示 —— 图标负责「是什么」，
         // 点负责「几档风」，两者不抢。
         stroke.color = color
-        stroke.strokeWidth = 3f
+        stroke.strokeWidth = 3.6f
         stroke.strokeCap = Paint.Cap.ROUND
 
-        // 三条线整体上移 3px，把下半部分让给档位点。
-        val gy = cy - 3f
+        // 三条线整体上移 4px，把下半部分让给档位点。
+        val gy = cy - 4f
         val top = Path()
-        top.moveTo(cx - 12f, gy - 8f)
-        top.lineTo(cx + 3f, gy - 8f)
-        top.cubicTo(cx + 9f, gy - 8f, cx + 9f, gy - 16f, cx + 2.5f, gy - 16f)
+        top.moveTo(cx - 15f, gy - 10f)
+        top.lineTo(cx + 4f, gy - 10f)
+        top.cubicTo(cx + 11.5f, gy - 10f, cx + 11.5f, gy - 20f, cx + 3f, gy - 20f)
         canvas.drawPath(top, stroke)
 
-        canvas.drawLine(cx - 9.5f, gy, cx + 9.5f, gy, stroke)
+        canvas.drawLine(cx - 12f, gy, cx + 12f, gy, stroke)
 
         val bottom = Path()
-        bottom.moveTo(cx + 12f, gy + 8f)
-        bottom.lineTo(cx - 3f, gy + 8f)
-        bottom.cubicTo(cx - 9f, gy + 8f, cx - 9f, gy + 16f, cx - 2.5f, gy + 16f)
+        bottom.moveTo(cx + 15f, gy + 10f)
+        bottom.lineTo(cx - 4f, gy + 10f)
+        bottom.cubicTo(cx - 11.5f, gy + 10f, cx - 11.5f, gy + 20f, cx - 3f, gy + 20f)
         canvas.drawPath(bottom, stroke)
 
         // 档位点：7 档，亮到第 level 颗；风关着（0 档且非 AUTO）时整排不画 ——
@@ -851,11 +852,11 @@ class DockBarView(context: Context) : View(context) {
         if (shown <= 0) return
         val dotOn = if (auto) CardStyle.scaleAlpha(color, 0.75f) else color
         val dotOff = CardStyle.scaleAlpha(Skin.TEXT_SOFT, 0.55f)
-        val pitch = 5.4f
+        val pitch = 6.4f
         val startX = cx - pitch * 3f
         for (i in 0 until 7) {
             fill.color = if (i < shown) dotOn else dotOff
-            canvas.drawCircle(startX + i * pitch, cy + 21f, 1.9f, fill)
+            canvas.drawCircle(startX + i * pitch, cy + 27f, 2.3f, fill)
         }
     }
 
@@ -879,9 +880,9 @@ class DockBarView(context: Context) : View(context) {
             )
             text.textAlign = Paint.Align.CENTER
             text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            text.textSize = 15f
+            text.textSize = 17f
             text.color = if (active) Skin.ACCENT else Skin.TEXT_SOFT
-            canvas.drawText(label, rect.centerX(), cy + 5.5f, text)
+            canvas.drawText(label, rect.centerX(), cy + 6.5f, text)
         }
         // 命中区：横向用**胶囊自身的宽度**（A/C 56、AUTO 64，都 ≥56），纵向放大到 56。
         // 若在这里也套 56 宽的中心盒，A/C 与 AUTO 之间只隔 11，两个盒子会叠 17px，
@@ -923,28 +924,28 @@ class DockBarView(context: Context) : View(context) {
                 Glass.card(canvas, rect, RIGHT_RADIUS, Skin.surfaceStrong, shadow = false, sheen = true, stroke = Skin.GLASS_STROKE)
             }
             when {
-                hasIcon -> drawAppIcon(canvas, quick!!.icon!!, cx, cy, RIGHT_KEY - 12f)
+                hasIcon -> drawAppIcon(canvas, quick!!.icon!!, cx, cy, RIGHT_KEY - 16f)
                 quick != null && quick.pkg.isNotEmpty() -> {
                     // 有包名但取不到图标 → 首字占位
                     text.textAlign = Paint.Align.CENTER
-                    text.textSize = 18f
+                    text.textSize = 22f
                     text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
                     text.color = Skin.TEXT_SOFT
-                    canvas.drawText(quick.label.take(1), cx, cy + 6f, text)
+                    canvas.drawText(quick.label.take(1), cx, cy + 7f, text)
                 }
                 key.startsWith("quick") -> {
                     // 空槽：一个「+」
                     stroke.color = Skin.TEXT_SOFT
                     stroke.strokeWidth = 2.4f
-                    canvas.drawLine(cx - 9f, cy, cx + 9f, cy, stroke)
-                    canvas.drawLine(cx, cy - 9f, cx, cy + 9f, stroke)
+                    canvas.drawLine(cx - 12f, cy, cx + 12f, cy, stroke)
+                    canvas.drawLine(cx, cy - 12f, cx, cy + 12f, stroke)
                 }
                 key == "circ" -> circulationGlyph(canvas, cx, cy)
                 key == "defrostR" -> defrostGlyph(canvas, cx, cy, front = false)
                 key == "defrostF" -> defrostGlyph(canvas, cx, cy, front = true)
             }
         }
-        hit[key] = RectF(cx - HIT_MIN / 2f, cy - HIT_MIN / 2f, cx + HIT_MIN / 2f, cy + HIT_MIN / 2f)
+        hit[key] = RectF(cx - RIGHT_KEY / 2f, cy - RIGHT_KEY / 2f, cx + RIGHT_KEY / 2f, cy + RIGHT_KEY / 2f)
     }
 
     /**
@@ -955,21 +956,21 @@ class DockBarView(context: Context) : View(context) {
     private fun circulationGlyph(canvas: Canvas, cx: Float, cy: Float) {
         val inner = hvac?.circulation == 0
         stroke.color = if (inner) Skin.ACCENT else Skin.TEXT_SOFT
-        stroke.strokeWidth = 2f
-        r.set(cx - 12.5f, cy - 10f, cx + 12.5f, cy + 10f)
+        stroke.strokeWidth = 2.6f
+        r.set(cx - 17f, cy - 14f, cx + 17f, cy + 14f)
         canvas.drawArc(r, 30f, 140f, false, stroke)
         canvas.drawArc(r, 210f, 140f, false, stroke)
         // 箭头（向右上 / 向左下），与圆弧端头接上
         val p = Path().apply {
-            moveTo(cx + 11f, cy - 2f)
-            lineTo(cx + 11f, cy - 8f)
-            lineTo(cx + 5f, cy - 8f)
+            moveTo(cx + 15f, cy - 3f)
+            lineTo(cx + 15f, cy - 11f)
+            lineTo(cx + 7f, cy - 11f)
         }
         canvas.drawPath(p, stroke)
         val q = Path().apply {
-            moveTo(cx - 11f, cy + 2f)
-            lineTo(cx - 11f, cy + 8f)
-            lineTo(cx - 5f, cy + 8f)
+            moveTo(cx - 15f, cy + 3f)
+            lineTo(cx - 15f, cy + 11f)
+            lineTo(cx - 7f, cy + 11f)
         }
         canvas.drawPath(q, stroke)
     }
@@ -982,15 +983,15 @@ class DockBarView(context: Context) : View(context) {
     private fun defrostGlyph(canvas: Canvas, cx: Float, cy: Float, front: Boolean) {
         val on = if (front) hvac?.defrostFront == true else hvac?.defrostRear == true
         stroke.color = if (on) Skin.ACCENT else Skin.TEXT_SOFT
-        stroke.strokeWidth = 1.8f
-        r.set(cx - 14.5f, cy - 13.5f, cx + 14.5f, cy + 2.5f)
-        canvas.drawRoundRect(r, 5.5f, 5.5f, stroke)
+        stroke.strokeWidth = 2.4f
+        r.set(cx - 20f, cy - 19f, cx + 20f, cy + 4f)
+        canvas.drawRoundRect(r, 7f, 7f, stroke)
         for (i in 0..2) {
-            val x0 = cx - 9f + i * 9f
+            val x0 = cx - 12f + i * 12f
             if (front) {
-                canvas.drawLine(x0, cy + 6f, x0 - 2.5f, cy + 12f, stroke)
+                canvas.drawLine(x0, cy + 8f, x0 - 3.5f, cy + 16f, stroke)
             } else {
-                canvas.drawLine(x0, cy + 6f, x0, cy + 12f, stroke)
+                canvas.drawLine(x0, cy + 8f, x0, cy + 16f, stroke)
             }
         }
     }
@@ -1573,17 +1574,22 @@ class DockBarView(context: Context) : View(context) {
         const val HOME_SIZE = 72f
         const val HOME_RADIUS = 20f
 
-        /** 网格 / 分屏 / 360 三枚裸图标键的中心 x。 */
-        const val NAV_GRID_CX = 148f
-        const val NAV_SPLIT_CX = 220f
-        const val NAV_360_CX = 316f
+        /**
+         * 网格 / 分屏 / 360 三枚图标键的中心 x。
+         *
+         * 第三百二十轮：三枚键从「32 左右的裸字形」改成 72×72 的键面（与首页块同尺寸），
+         * 中心随之间距 84 排开（148 / 232 / 316）。
+         */
+        const val NAV_GRID_CX = 146f
+        const val NAV_SPLIT_CX = 228f
+        const val NAV_360_CX = 310f
 
-        /** 「应用」键打开抽屉时才出现的底板边长（和首页块同尺寸）。 */
-        const val NAV_TILE = 64f
+        /** 图标键的键面边长（与首页块同尺寸）。 */
+        const val NAV_TILE = 72f
 
         /** 媒体胶囊：x365、370×72、圆角 28（实测，不是全圆）。 */
-        const val MEDIA_LEFT = 365f
-        const val MEDIA_W = 370f
+        const val MEDIA_LEFT = 356f
+        const val MEDIA_W = 390f
         const val MEDIA_H = 72f
         const val MEDIA_RADIUS = 28f
 
@@ -1607,14 +1613,14 @@ class DockBarView(context: Context) : View(context) {
         const val PLAY_BTN = 40f
 
         /** 电源键中心 x（只有一个描边图标，无底板）。 */
-        const val POWER_CX = 805f
+        const val POWER_CX = 792f
 
         /** 主驾温区胶囊：x845、宽 205、高 72、圆角 28。 */
-        const val TEMP_DRIVER_LEFT = 845f
+        const val TEMP_DRIVER_LEFT = 838f
         const val TEMP_DRIVER_W = 205f
 
         /** 副驾温区胶囊：x1166、宽 207。 */
-        const val TEMP_PASS_LEFT = 1166f
+        const val TEMP_PASS_LEFT = 1135f
         const val TEMP_PASS_W = 207f
 
         /** 温区胶囊高度。 */
@@ -1625,16 +1631,16 @@ class DockBarView(context: Context) : View(context) {
         const val TEMP_ARROW_INSET = 16f
 
         /** 风量键：x1082、56×56、圆角 18。 */
-        const val FAN_LEFT = 1082f
-        const val FAN_SIZE = 56f
-        const val FAN_RADIUS = 18f
+        const val FAN_LEFT = 1053f
+        const val FAN_SIZE = 72f
+        const val FAN_RADIUS = 24f
 
         /** A/C：x1416、56 宽；AUTO：x1483、64 宽；都高 44、圆角 22。 */
-        const val AC_LEFT = 1416f
+        const val AC_LEFT = 1352f
         const val AC_W = 56f
-        const val AUTO_LEFT = 1483f
+        const val AUTO_LEFT = 1418f
         const val AUTO_W = 64f
-        const val CLIMATE_CHIP_H = 44f
+        const val CLIMATE_CHIP_H = 56f
         const val CLIMATE_CHIP_RADIUS = 22f
 
         /**
@@ -1644,10 +1650,10 @@ class DockBarView(context: Context) : View(context) {
          * 46×46 / 步距 57 → 56×56 / 步距 64，右缘仍落在 1892（= W - 28），
          * 与 A/C·AUTO 组（右到 1547）之间留 33。
          */
-        const val RIGHT_FIRST_CX = 1608f
-        const val RIGHT_PITCH = 64f
-        const val RIGHT_KEY = 56f
-        const val RIGHT_RADIUS = 18f
+        const val RIGHT_FIRST_CX = 1530f
+        const val RIGHT_PITCH = 82f
+        const val RIGHT_KEY = 72f
+        const val RIGHT_RADIUS = 24f
 
         /**
          * 最小命中区边长（用户要求：画板视觉 40~56，点击区放大到 56）。
