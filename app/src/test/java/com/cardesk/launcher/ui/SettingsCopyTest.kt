@@ -142,7 +142,7 @@ class SettingsCopyTest {
         "颜色跟着频谱缓慢换" to "选项",
         "所有参数都开放" to "选项",
         // —— 法律 ——
-        "本应用源代码完整公开" to "法律",
+        "本软件按 PolyForm Noncommercial License 1.0.0" to "法律",
         // 第163轮：写实车模的授权署名（CC-BY 要求署名，属法律声明）。
         "3D 模型：" to "法律",
     )

@@ -62,9 +62,9 @@ class SettingsLayoutTest {
     fun `导航项比合并前少了`() {
         val rows = navRows(overlay())
         // 合并前 28 项。这轮把「桌面自启 / 卡片风格 / 桌面歌词 / 仪表歌词 /
-        // Dock 快捷应用」五项并进了别的页（-5），又新开「歌词」「媒体源」两项（+2），
-        // 净剩 25 项。
-        assertEquals("导航项应该正好是 25 项（28 - 5 + 2）", 25, rows.size)
+        // Dock 快捷应用」五项并进了别的页（-5），又新开「歌词」「媒体源」「关于」三项（+3），
+        // 净剩 26 项。
+        assertEquals("导航项应该正好是 26 项（28 - 5 + 3）", 26, rows.size)
     }
 
     @Test

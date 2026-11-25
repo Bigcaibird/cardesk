@@ -391,6 +391,7 @@ class SettingsOverlay(
                 NavItem("restart", "重启车机"),
                 // 调试工具（没有这一页，是为真机排障加的）
                 NavItem("logs", "诊断日志"),
+                NavItem("about", "关于"),
             ),
         ),
     )
@@ -752,7 +753,7 @@ class SettingsOverlay(
         // 可能还在用它们），但它们已经不在导航树里了 —— 所以标题要单独给，
         // 否则深链进来会看到一片空白标题。
         val label = when (key) {
-            "about" -> "开源与声明"
+            "about" -> "关于"
             "autostart" -> "启动与开机"
             "cardstyle" -> "桌面卡片"
             "desktoplyric", "clusterlyric" -> "歌词"
@@ -6132,17 +6133,13 @@ class SettingsOverlay(
     }
 
     /**
-     * 「开源与声明」页。
-     *
-     * 第六十八轮：这一页原来只有「激活信息 / 车辆 VIN / 本版本不设激活码」，
-     * 现在按用户要求改成**开源信息 + 免责声明**。
+     * 「关于」页（开源信息 + 免责声明）。
      *
      * ## 许可口径
      *
-     * 仓库里**目前没有 LICENSE 文件**（第六十五轮决定：公开仓库暂不加 LICENSE，
-     * 留给作者后续法务处理）。所以这里**不能**写「MIT / GPL」之类具体许可证 ——
-     * 凭空声明一个许可证是在替作者做法律决定，而且一旦和仓库实际内容对不上就成了虚假声明。
-     * 因此页面上如实写「源码公开，暂未附带 LICENSE 文件」，并提示二次开发 / 分发前先与作者确认。
+     * 依据仓库根目录 `LICENSE`：采用 **PolyForm Noncommercial License 1.0.0**，
+     * 并附带「附加署名要求（Attribution Requirement）」：非商业用途免费使用、修改与分发，
+     * 商业用途需作者书面授权，分发须保留版权声明、`Required Notice` 与 `LICENSE` 文件。
      */
     private fun pageAbout() {
         section("开源信息")
@@ -6150,12 +6147,12 @@ class SettingsOverlay(
         kvRow("源码仓库", REPO_URL_TEXT, true)
         kvRow("当前版本", appVersionLabel(), true)
         kvRow("语言 / 依赖", "Kotlin · 纯 framework API · 无第三方运行时依赖", true)
-        kvRow("开源许可", "源码公开，暂未附带 LICENSE 文件", false, pal.warn)
+        kvRow("开源许可", "PolyForm Noncommercial 1.0.0（附加署名要求）", true)
         note(
-            "本应用源代码完整公开在上述仓库，可自行审阅、编译与二次开发；" +
-                "安装包通过 GitHub Release 分发，不随源码仓库提交。\n\n" +
-                "在作者补充许可条款之前，请勿将本项目视为已授予再分发或商用授权；" +
-                "二次开发或分发前请先与作者确认。",
+            "本软件按 PolyForm Noncommercial License 1.0.0 授权，并适用仓库 LICENSE 中的附加署名要求：\n" +
+                "• 非商业用途免费：个人使用、学习研究、改装车机及非商业开源项目可自由使用、修改与分发。\n" +
+                "• 商业用途需授权：用于商业产品或营利分发前须取得作者书面授权（GitHub Issue 或 328576666@qq.com）。\n" +
+                "• 署名与保留：任何形式分发须保留版权声明、Required Notice（CarDesk — https://github.com/Bigcaibird/cardesk）及 LICENSE 文件，并声明来源。",
         )
         actionButton("打开项目主页", primary = true, full = true) { openRepoPage() }
 
