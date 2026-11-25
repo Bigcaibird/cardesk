@@ -375,9 +375,20 @@ class ClimatePage(context: Context, private val pal: Palette) : FrameLayout(cont
         }
     }
 
-    /** 座舱出风示意（画板里的内嵌槽）。 */
+    /** 座舱出风示意（画板里的内嵌槽，可点按切换吹脸 / 吹脚 / 吹窗）。 */
     private fun buildCabin(card: FrameLayout) {
-        cabin = ClimateCabin(context).apply { palette = this@ClimatePage.pal }
+        cabin = ClimateCabin(context).apply {
+            palette = this@ClimatePage.pal
+            onZoneTap = { bit ->
+                val current = HvacCodec.blowingMask(VehicleController.state.blowing)
+                val next = current xor bit
+                if (next != 0) {
+                    Logx.event(LogTags.HVAC, "空调浮层：座舱出风方向", "bit" to bit, "from" to current, "to" to next)
+                    VehicleController.setBlowingMask(next)
+                    refresh()
+                }
+            }
+        }
         card.addView(cabin, lp(CABIN_X, CABIN_TOP, CABIN_W, CABIN_H))
     }
 
@@ -1008,9 +1019,12 @@ private class ClimateCabin(context: Context) : View(context) {
             invalidate()
         }
 
+    var onZoneTap: ((bit: Int) -> Unit)? = null
+
     private var face = false
     private var feet = false
     private var wind = false
+    private var downZone = -1
 
     fun setFlow(face: Boolean, feet: Boolean, wind: Boolean) {
         if (this.face == face && this.feet == feet && this.wind == wind) return
@@ -1048,7 +1062,7 @@ private class ClimateCabin(context: Context) : View(context) {
         textPaint.textAlign = Paint.Align.RIGHT
         textPaint.textSize = HINT_TEXT
         textPaint.color = palette.textFaint
-        canvas.drawText("随吹风模式变化", width - PAD, TITLE_BASELINE, textPaint)
+        canvas.drawText("点按切换出风方向", width - PAD, TITLE_BASELINE, textPaint)
         textPaint.textSize = LABEL_TEXT
 
         drawZone(canvas, ZONE_X[0], "吹脸", face, window = false)
@@ -1098,6 +1112,35 @@ private class ClimateCabin(context: Context) : View(context) {
         }
     }
 
+    private fun zoneAt(x: Float, y: Float): Int {
+        if (y < 36f || y > height.toFloat()) return -1
+        for (i in ZONE_X.indices) {
+            if (abs(x - ZONE_X[i]) <= ZONE_HIT_HALF_W) return i
+        }
+        return -1
+    }
+
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downZone = zoneAt(event.x, event.y)
+                return downZone != -1
+            }
+            MotionEvent.ACTION_UP -> {
+                val hit = downZone
+                downZone = -1
+                if (hit != -1 && zoneAt(event.x, event.y) == hit) {
+                    performClick()
+                    onZoneTap?.invoke(ZONE_BITS[hit])
+                    return true
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> downZone = -1
+        }
+        return super.onTouchEvent(event)
+    }
+
     companion object {
         /** 块内左右留白。 */
         const val PAD = 23f
@@ -1114,6 +1157,12 @@ private class ClimateCabin(context: Context) : View(context) {
 
         /** 三个座位图标的中心 x（画板 719 / 956 / 1192 − 块左 590）。 */
         val ZONE_X = floatArrayOf(129f, 366f, 602f)
+
+        /** 三个按钮对应的吹风掩码位：吹脸(1) / 吹脚(2) / 吹窗(4)。 */
+        val ZONE_BITS = intArrayOf(1, 2, 4)
+
+        /** 单个出风按钮的水平点击热区半宽。 */
+        const val ZONE_HIT_HALF_W = 110f
 
         /** 图标中心 y 与亮态圆底半径。 */
         const val ICON_CY = 84f
