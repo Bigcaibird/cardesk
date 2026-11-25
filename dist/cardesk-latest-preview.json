@@ -1,16 +1,16 @@
 {
   "schema": 1,
   "channel": "preview",
-  "version": "1.0.1245-preview",
-  "versionCode": 4341,
-  "tag": "v1.0.1245-preview",
-  "name": "CarDesk 4341 / 1.0.1245-preview（开发版）",
-  "notes": "1. 双画中画窗口2顶部三点按钮支持单击换位/长按选应用，分隔把手居中对齐两窗空隙；2. 修复最近任务关闭单个任务与清空按钮；3. 车况详情页支持点按页面外、下滑/左右滑关闭，Dock分页按钮支持关闭详情页并切换至导航页",
-  "publishedAt": "2026-11-25T08:21:37Z",
+  "version": "1.0.1246-preview",
+  "versionCode": 4342,
+  "tag": "v1.0.1246-preview",
+  "name": "CarDesk 4342 / 1.0.1246-preview（开发版）",
+  "notes": "设置页「系统」分组新增「关于」页面，更新 PolyForm Noncommercial 1.0.0 开源许可与免责声明",
+  "publishedAt": "2026-11-25T08:53:01Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4341-preview.apk",
-    "url": "cardesk/preview/CarDesk-platform-ecarx-cardesk-4341-preview.apk",
-    "size": 2882461,
-    "sha256": "22ab3b3feae950526bf98bff50e325f2966d86810f4cdf410741046bd19890d2"
+    "name": "CarDesk-platform-ecarx-cardesk-4342-preview.apk",
+    "url": "cardesk/preview/CarDesk-platform-ecarx-cardesk-4342-preview.apk",
+    "size": 2882609,
+    "sha256": "b9f7468073ffe4ed100ac1e1939dfde28d01e767725be344c675222e28743b9b"
   }
 }
