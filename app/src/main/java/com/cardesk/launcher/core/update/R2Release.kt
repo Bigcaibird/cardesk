@@ -122,8 +122,8 @@ data class R2Release(
             val rawUrl = JsonLite.str(map, "url").trim()
             if (rawUrl.isEmpty()) return null
             val url = resolveUrl(rawUrl, rootUrl) ?: return null
-            // 只允许 http/https —— 清单是外部数据，不能让它指到 file:// 之类的地方
-            if (!url.startsWith("http://") && !url.startsWith("https://")) return null
+            // 只允许 https —— 清单是外部数据，不能让它指到 http/file 等不安全地址
+            if (!url.startsWith("https://")) return null
             val name = JsonLite.str(map, "name").trim().ifEmpty { url.substringAfterLast('/') }
             val digest = JsonLite.str(map, "sha256").trim().lowercase()
             return R2Apk(

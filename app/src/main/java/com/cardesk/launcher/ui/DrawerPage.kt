@@ -470,14 +470,38 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
             topMargin = y
         }
 
-    /** 读取全部可启动应用（不再截断），并按用户排序持久化（`launcher_app_order`）。 */
-    fun reload() {
-        grid.removeAllViews()
+    private data class LoadedApp(
+        val info: ResolveInfo,
+        val display: String,
+        val enabled: Boolean,
+        val icon: Drawable?,
+        val mono: Bitmap?,
+    )
+
+    @Volatile
+    private var preloadedApps: List<LoadedApp>? = null
+
+    @Volatile
+    private var preloading = false
+
+    /** 后台线程预扫描应用并预解码单色图标，避免首次打开抽屉时在主线程阻塞。 */
+    fun preloadAsync() {
+        if (preloading || preloadedApps != null) return
+        preloading = true
+        Thread({
+            try {
+                preloadedApps = queryLoadedApps()
+            } catch (t: Throwable) {
+                Logx.w(LogTags.DRAWER, "抽屉应用后台预加载失败", t)
+            } finally {
+                preloading = false
+            }
+        }, "cardesk-drawer-preload").apply { isDaemon = true }.start()
+    }
+
+    private fun queryLoadedApps(): List<LoadedApp> {
         val pm = context.packageManager
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        // 排障场景：「抽屉里一个应用都没有」——加载耗时与数量要能查。
-        val startMs = System.currentTimeMillis()
-        // 第九十四轮：已禁用的应用也要留在抽屉里（置灰显示），否则禁用后就"消失"了。
         val apps = try {
             pm.queryIntentActivities(intent, PackageManager.MATCH_DISABLED_COMPONENTS)
                 .distinctBy { it.activityInfo.packageName }
@@ -486,10 +510,6 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
             Logx.w(LogTags.DRAWER, "抽屉应用列表查询失败", e, "reason" to e.message)
             emptyList()
         }
-        // 用户排序优先：排过序的按保存顺序在前，其余按名称排在后面。
-        //
-        // 第152轮去掉了拖放排序，**这里只读不写** ——
-        // 老用户之前排过的顺序不该因为功能下线就丢（写了就还在）。
         val order = prefs.appOrder
         val rank = order.withIndex().associate { (i, pkg) -> pkg to i }
         val ordered = apps.sortedWith(
@@ -498,31 +518,46 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
                 { displayLabel(it, pm) },
             )
         )
-        // **最终按包名去重**（上一轮验收 FAIL 项：出现了两个「CarDesk 车控桌面」）。
-        //
-        // `queryIntentActivities` 对同一个包可能返回多个 launcher activity
-        // （activity 名不同、label 相同），顶部的 `distinctBy` 是按包名做的，
-        // 但排序/改别名之后仍然可能混进来同一个包；画板每格是一个**应用**，
-        // 所以这里用 LinkedHashMap 再兜一次底，保留排序后的第一个。
         val unique = LinkedHashMap<String, ResolveInfo>()
         for (info in ordered) {
             val pkg = info.activityInfo.packageName
             if (!unique.containsKey(pkg)) unique[pkg] = info
         }
-        val sorted = unique.values.toList()
-        currentPackages = sorted.map { it.activityInfo.packageName }
-        hint.visibility = if (sorted.isEmpty()) View.VISIBLE else View.GONE
+        return unique.values.map { info ->
+            val display = displayLabel(info, pm)
+            val enabled = isEnabled(info)
+            val icon: Drawable? = try {
+                info.loadIcon(pm)
+            } catch (_: Exception) {
+                null
+            }
+            val mono = monochromeIcon(icon, pal.accent)
+            LoadedApp(info = info, display = display, enabled = enabled, icon = icon, mono = mono)
+        }
+    }
+
+    /** 读取全部可启动应用（不再截断），并按用户排序持久化（`launcher_app_order`）。 */
+    fun reload() {
+        grid.removeAllViews()
+        // 排障场景：「抽屉里一个应用都没有」——加载耗时与数量要能查。
+        val startMs = System.currentTimeMillis()
+        val cached = preloadedApps?.also { preloadedApps = null }
+        val loaded = cached ?: queryLoadedApps()
+        currentPackages = loaded.map { it.info.activityInfo.packageName }
+        hint.visibility = if (loaded.isEmpty()) View.VISIBLE else View.GONE
         // 排障场景：「抽屉打开很慢 / 应用数量不对」——数量 + 耗时落盘。
         Logx.i(
             LogTags.DRAWER,
             "抽屉应用列表加载",
-            "count" to sorted.size,
+            "count" to loaded.size,
             "costMs" to (System.currentTimeMillis() - startMs),
             "ordered" to prefs.appOrder.size,
+            "preloaded" to (cached != null),
         )
-        for ((index, info) in sorted.withIndex()) {
-            val display = displayLabel(info, pm)
-            val enabled = isEnabled(info)
+        for ((index, app) in loaded.withIndex()) {
+            val info = app.info
+            val display = app.display
+            val enabled = app.enabled
             // 格子 = 画板那张 278×156 的卡（圆角 24、比面板暗约 7%）。
             //
             // 点按/长按逻辑原样保留：格子整块是热区，tag 仍挂在 body 上
@@ -558,14 +593,8 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
                 }
             }
             val iv = ImageView(context)
-            val icon: Drawable? = try {
-                info.loadIcon(pm)
-            } catch (e: Exception) {
-                null
-            }
-            // 单色化（画板 03-apps：每格都是「浅青底 + accent 单色符号」）。
-            // 返回 null 表示这个图标不适合单色化（纯色块 / 会被洗掉），退回原图。
-            val mono = monochromeIcon(icon, pal.accent)
+            val icon = app.icon
+            val mono = app.mono
             if (mono != null) {
                 // 位图里已经烤进了 14px 内边距，所以 View 不再留 padding。
                 iv.setImageBitmap(mono)

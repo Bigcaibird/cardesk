@@ -680,6 +680,11 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
      */
     var onPipPickApp: (() -> Unit)? = null
 
+    /**
+     * 双画中画窗口 2 上方三个点：**长按** → 打开副画应用选择器。
+     */
+    var onPipSecondaryPickApp: (() -> Unit)? = null
+
     // ------------------------------------------------------------------ 画中画分屏
 
     /** 比例持久化（；我们用 SharedPreferences）。 */
@@ -945,6 +950,7 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
      *
      */
     val pipSecondary = PipSurface(context, pal)
+    private val secondaryDots by lazy { buildPipDots { this@NavPage.onPipSecondaryPickApp?.invoke() } }
 
     init {
         setBackgroundColor(0x00000000)
@@ -1089,6 +1095,7 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         // mapCard2 = **副画承载面**（第二个）
         rightSlot.addView(combinedCard, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         rightSlot.addView(pipSecondary, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        rightSlot.addView(secondaryDots, dotsParams())
 
         // 地图卡内容：画中画 + 顶部 3 个圆点
         mapCard.addView(pip, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
@@ -1134,7 +1141,9 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
      *
      * 版式：横向居中、padding 8dp、宽 60dp、marginTop 8dp、elevation 2dp。
      */
-    private fun buildPipDots(): LinearLayout =
+    private fun buildPipDots(
+        onLongPress: () -> Unit = { this@NavPage.onPipPickApp?.invoke() },
+    ): LinearLayout =
         LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -1151,7 +1160,7 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
             }
             setOnLongClickListener {
                 // lambda$setupDotGestures$4 —— 打开画中画应用选择器
-                this@NavPage.onPipPickApp?.invoke()
+                onLongPress()
                 true
             }
             // setupDotGestures 的触摸拦截：手势期间不让父层（翻页）抢走事件
@@ -2052,6 +2061,7 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         // 双画：组合卡隐藏、右侧换成**第二路画中画**（mapCard2）
         combinedCard.visibility = if (dualPip) View.GONE else View.VISIBLE
         pipSecondary.visibility = if (dualPip) View.VISIBLE else View.GONE
+        secondaryDots.visibility = if (dualPip) View.VISIBLE else View.GONE
     }
 
     /** 分隔条显隐与手势开关。 */
@@ -2096,7 +2106,11 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         // 日志「画中画分隔条按下 → 单击（切换全屏）」⇒ 控件一直在，只是画歪了 44px。
         val rowLeft = if (::navRow.isInitialized) navRow.left else 0
         val rowTop = if (::navRow.isInitialized) navRow.top else 0
-        val edge = rowLeft + PipSides.dividerEdge(mapCard.left, mapCard.right, sidesSwapped)
+        val edge = if (::navGap.isInitialized && navGap.width > 0) {
+            rowLeft + (navGap.left + navGap.right) / 2
+        } else {
+            rowLeft + PipSides.dividerEdge(mapCard.left, mapCard.right, sidesSwapped)
+        }
         pipDivider.x = (edge - pipDivider.width / 2).toFloat()
         pipDivider.y = (rowTop + mapCard.top + (mapCard.height - pipDivider.height) / 2).toFloat()
 

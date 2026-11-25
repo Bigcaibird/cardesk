@@ -1,6 +1,7 @@
 package com.cardesk.launcher.core
 
 import android.content.Context
+import android.content.SharedPreferences
 
 /**
  * 轻量持久化（MMKV 配置层）。
@@ -19,7 +20,7 @@ import android.content.Context
  */
 class Prefs(context: Context) {
 
-    private val sp = context.getSharedPreferences("cardesk", Context.MODE_PRIVATE)
+    private val sp: SharedPreferences = sharedPrefsFor(context)
 
     // ------------------------------------------------------------------ 日夜模式
 
@@ -223,6 +224,31 @@ class Prefs(context: Context) {
     var carStatusCardVisible: Boolean
         get() = sp.getBoolean("scene_car_status_card_visible", true)
         set(v) = sp.edit().putBoolean("scene_car_status_card_visible", v).apply()
+
+    /** 车况卡小尺寸样式（与底部卡片等高、车模头朝左、只显车门与胎压）。 */
+    var carStatusCardCompact: Boolean
+        get() = sp.getBoolean("scene_car_status_card_compact", false)
+        set(v) = sp.edit().putBoolean("scene_car_status_card_compact", v).apply()
+
+    /** 车况卡自定义横坐标（设计 px，<0 表示使用默认右对齐位置）。 */
+    var carStatusCardPosX: Float
+        get() = sp.getFloat("scene_car_status_x", -1f)
+        set(v) = sp.edit().putFloat("scene_car_status_x", v).apply()
+
+    /** 车况卡自定义纵坐标（设计 px，<0 表示使用默认位置）。 */
+    var carStatusCardPosY: Float
+        get() = sp.getFloat("scene_car_status_y", -1f)
+        set(v) = sp.edit().putFloat("scene_car_status_y", v).apply()
+
+    /** 车况卡是否已拖入底部卡片行。 */
+    var carStatusInBottomRow: Boolean
+        get() = sp.getBoolean("scene_car_status_in_bottom_row", false)
+        set(v) = sp.edit().putBoolean("scene_car_status_in_bottom_row", v).apply()
+
+    /** 车况卡在底部卡片行里的插入位置索引。 */
+    var carStatusBottomIndex: Int
+        get() = sp.getInt("scene_car_status_bottom_index", -1)
+        set(v) = sp.edit().putInt("scene_car_status_bottom_index", v).apply()
 
     /**
      * 第二页（导航页）音乐卡的「**歌曲图片当卡片背景**」开关。
@@ -1556,5 +1582,21 @@ class Prefs(context: Context) {
         }
 
         private fun normalizeCamera360View(view: Int): Int = if (view in -1..9) view else -1
+
+        @Volatile
+        private var cachedAppContext: Context? = null
+
+        @Volatile
+        private var cachedSp: SharedPreferences? = null
+
+        private fun sharedPrefsFor(context: Context): SharedPreferences {
+            val app = context.applicationContext ?: context
+            val existing = cachedSp
+            if (cachedAppContext === app && existing != null) return existing
+            return app.getSharedPreferences("cardesk", Context.MODE_PRIVATE).also {
+                cachedAppContext = app
+                cachedSp = it
+            }
+        }
     }
 }

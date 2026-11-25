@@ -311,18 +311,18 @@ class KeyActionExecutor(
                 }
 
                 OemKeyGesture.Gesture.NONE -> {
-                    if (clickAction.isNone) {
-                        // 单击槽位没配动作 ⇒ **立刻放行**给车机自己的语音助手。
+                    if (clickAction.isNone || clickAction.action == Prefs.ACTION_VOICE_ASSIST) {
+                        // 单击槽位没配动作或配了「唤起语音助手」 ⇒ **立刻放行**给车机自己的语音助手。
                         //
                         // 真车实测（2026-11-24）：以前这里先 `abortBroadcast()` 吞掉、等双击
                         // 窗口到期再用 `ECARX_KEY_EVENT_RVOICE_EVENT` 补发；车机不认这条
                         // 补发广播，于是语音键彻底哑掉（设置页「模拟测试」却正常，因为它
-                        // 不经广播）。现在「没配动作」= 用户就是要车机原生语音，直接放行，
-                        // 按压仍然喂给手势机，所以紧跟的第二下照样能判成双击。
+                        // 不经广播）。直接放行同时按压已喂给手势机，紧跟的第二下照样能判成双击。
                         Logx.i(
                             LogTags.KEYS,
                             "按键增强：语音键单击放行车机",
                             "keyCode" to event.keyCode,
+                            "action" to clickAction.action,
                         )
                         return false
                     }

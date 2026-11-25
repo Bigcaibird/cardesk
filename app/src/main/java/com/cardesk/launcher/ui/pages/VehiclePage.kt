@@ -8,6 +8,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Shader
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -28,6 +29,7 @@ import com.cardesk.launcher.core.car3d.Car3dPainter
 import com.cardesk.launcher.core.car3d.CarPose
 import com.cardesk.launcher.vehicle.TireOrder
 import com.cardesk.launcher.vehicle.VehicleInfo
+import kotlin.math.abs
 
 /*
  * 车模的「车漆 / 玻璃 / 轮胎」色。
@@ -127,6 +129,15 @@ class VehiclePage(context: Context, private val pal: Palette) : FrameLayout(cont
     private val doorColors = IntArray(4)
     private val sourceLabel: TextView
 
+    /** 关闭车辆详情页回调（点按页面外、下滑或左右滑动关闭）。 */
+    var onClose: (() -> Unit)? = null
+
+    private var downX = 0f
+    private var downY = 0f
+    private var swiping = false
+    private val swipeSlop = 24f
+    private val dismissDistance = 80f
+
     /**
      * 右列三个真实入口的回调。
      *
@@ -172,6 +183,8 @@ class VehiclePage(context: Context, private val pal: Palette) : FrameLayout(cont
         // 用 `Skin.surface`（62% 白）实机截图会把主页面的「386 / 车况卡 / 天气」透出来
         // （`/tmp/v-vehicle-page.png`）。读数区就是这样被干扰的。
         val panel = FrameLayout(context).apply {
+            isClickable = true
+            setOnClickListener { }
             background = GlassDrawable(
                 28f,
                 if (pal.night) PAGE_FILL_NIGHT else PAGE_FILL_DAY,
@@ -187,6 +200,7 @@ class VehiclePage(context: Context, private val pal: Palette) : FrameLayout(cont
             com.cardesk.launcher.ui.widget.BackgroundView(context).apply {
                 palette = this@VehiclePage.pal
                 isClickable = true
+                setOnClickListener { onClose?.invoke() }
             },
             LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
         )
@@ -745,6 +759,58 @@ class VehiclePage(context: Context, private val pal: Palette) : FrameLayout(cont
                 }
             }
         }
+    }
+
+    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = ev.x
+                downY = ev.y
+                swiping = false
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = ev.x - downX
+                val dy = ev.y - downY
+                if ((abs(dx) > swipeSlop && abs(dx) > abs(dy)) || (dy > swipeSlop && dy > abs(dx))) {
+                    swiping = true
+                    return true
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> swiping = false
+        }
+        return super.onInterceptTouchEvent(ev)
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    override fun onTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = ev.x
+                downY = ev.y
+                swiping = false
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = ev.x - downX
+                val dy = ev.y - downY
+                if ((abs(dx) > swipeSlop && abs(dx) > abs(dy)) || (dy > swipeSlop && dy > abs(dx))) {
+                    swiping = true
+                }
+                return true
+            }
+            MotionEvent.ACTION_UP -> {
+                val dx = ev.x - downX
+                val dy = ev.y - downY
+                val shouldClose = swiping && (abs(dx) >= dismissDistance || dy >= dismissDistance)
+                swiping = false
+                if (shouldClose) {
+                    onClose?.invoke()
+                    return true
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> swiping = false
+        }
+        return super.onTouchEvent(ev)
     }
 
 }

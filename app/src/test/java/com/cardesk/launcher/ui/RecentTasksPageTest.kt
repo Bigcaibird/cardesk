@@ -37,10 +37,11 @@ class RecentTasksPageTest {
     private val dir = File("../preview").apply { mkdirs() }
     private lateinit var context: Context
 
-    private class FakeSystem(private val tasks: List<RecentTasks.Raw>) : RecentTasks.System {
-        override fun list(max: Int) = tasks
+    private class FakeSystem(initialTasks: List<RecentTasks.Raw>) : RecentTasks.System {
+        val tasks = initialTasks.toMutableList()
+        override fun list(max: Int) = tasks.toList()
         override fun moveToFront(taskId: Int) = true
-        override fun remove(taskId: Int) = true
+        override fun remove(taskId: Int) = tasks.removeAll { it.taskId == taskId }
     }
 
     private fun <T> findAll(root: View, type: Class<T>): List<T> {
@@ -87,5 +88,31 @@ class RecentTasksPageTest {
         shadowOf(Looper.getMainLooper()).idle()
         assertTrue("锁定应持久化", Prefs(context).recentLocked.contains("com.ecarx.music"))
         assertNotNull("锁定后按钮应显示已锁定", findAll(view, TextView::class.java).firstOrNull { it.text == "已锁定" })
+    }
+
+    @Test
+    fun 关闭单个任务与清空按钮生效() {
+        val view = page()
+        findAll(view, TextView::class.java).first { it.text == "关闭任务" }.performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(
+            "关闭任务后第一条应从列表移除",
+            findAll(view, TextView::class.java).none { it.text.toString() == "com.ecarx.music" },
+        )
+        assertNotNull(
+            "其余任务仍应保留",
+            findAll(view, TextView::class.java).firstOrNull { it.text.toString() == "com.autonavi.amapautp.yh" },
+        )
+
+        findAll(view, TextView::class.java).first { it.text == "清空" }.performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(
+            "清空后剩余未锁定任务应全部移除",
+            findAll(view, TextView::class.java).none { it.text.toString() == "com.autonavi.amapautp.yh" },
+        )
+        assertNotNull(
+            "清空后应显示空态提示",
+            findAll(view, TextView::class.java).firstOrNull { it.text == "暂无最近任务" && it.visibility == View.VISIBLE },
+        )
     }
 }

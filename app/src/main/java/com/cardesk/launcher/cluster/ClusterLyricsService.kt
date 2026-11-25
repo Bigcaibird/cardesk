@@ -395,6 +395,7 @@ class ClusterLyricsService : Service() {
         // 系统会抛 `RemoteServiceException`（Android 8+）—— 那是「启动即崩」，
         // 比「静默退出」难排查得多。
         startForeground(NOTIFICATION_ID, buildNotification())
+        runCatching { MusicController.get().retain(applicationContext, "ClusterLyricsService") }
         displayManager = getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
         displayManager?.registerDisplayListener(displayListener, handler)
         reconcile("service-created")
@@ -417,6 +418,7 @@ class ClusterLyricsService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        runCatching { MusicController.get().release("ClusterLyricsService") }
         displayManager?.unregisterDisplayListener(displayListener)
         stopFeed()
         handler.removeCallbacksAndMessages(null)

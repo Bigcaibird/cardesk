@@ -18,6 +18,7 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.io.PushbackInputStream
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.NetworkInterface
@@ -27,6 +28,8 @@ import java.net.URLDecoder
 import java.net.URLEncoder
 import java.security.SecureRandom
 import java.util.Locale
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import kotlin.concurrent.thread
 
 /**
@@ -85,8 +88,15 @@ object LanTransferServer {
     /** 下载流式拷贝缓冲 64KB（L928）。 */
     private const val DOWNLOAD_BUFFER_BYTES = 65536
 
+    /** 并发客户端处理线程上限。 */
+    private const val MAX_WORKERS = 4
+
+    /** 传输锁单次最长持有时间（30 分钟），防止异常未停导致永久持锁。 */
+    private const val LOCK_TIMEOUT_MS = 30 * 60 * 1000L
+
     private var server: ServerSocket? = null
     private var worker: Thread? = null
+    private var clientPool: ExecutorService? = null
     private var errorCallback: ((String) -> Unit)? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
@@ -181,18 +191,22 @@ object LanTransferServer {
         server = socket
         running = true
         acquireTransferLocks(context)
+        clientPool?.shutdownNow()
+        clientPool = Executors.newFixedThreadPool(MAX_WORKERS) { r ->
+            Thread(r, "LanTransfer-worker").apply { isDaemon = true }
+        }
         worker = thread(isDaemon = true, name = "LanTransferHttp") {
             acceptLoop(socket, shareDir)
         }
-        // 排障场景：电脑连不上 —— 监听地址、端口、token、目录都要能对得上
+        // 排障场景：电脑连不上 —— 监听地址、端口、目录都要能对得上（token 脱敏后记录）
         Logx.i(
             LogTags.LAN,
             "局域网传输已启动",
             "bind" to "0.0.0.0",
             "port" to port,
-            "token" to token,
+            "token" to maskToken(token),
             "dir" to shareDir.absolutePath,
-            "url" to url(context),
+            "url" to maskedUrl(context),
         )
         postStatus(if (resolveLanIp(context).isEmpty()) "服务已开，等待热点 IP…" else "服务已开，等待手机扫码…")
         onStarted(url(context))
@@ -203,6 +217,8 @@ object LanTransferServer {
         running = false
         releaseTransferLocks()
         token = ""
+        clientPool?.shutdownNow()
+        clientPool = null
         try {
             server?.close()
         } catch (_: Exception) {
@@ -218,6 +234,18 @@ object LanTransferServer {
         val ip = resolveLanIp(context)
         val host = if (ip.isEmpty()) "127.0.0.1" else ip
         return "http://$host:$port/?t=$token"
+    }
+
+    private fun maskedUrl(context: Context): String {
+        val ip = resolveLanIp(context)
+        val host = if (ip.isEmpty()) "127.0.0.1" else ip
+        return "http://$host:$port/?t=${maskToken(token)}"
+    }
+
+    private fun maskToken(value: String?): String = when {
+        value.isNullOrEmpty() -> "<none>"
+        value.length <= 4 -> "***"
+        else -> value.take(4) + "***"
     }
 
     /** 已接收文件列表：排除 `.uploading` 临时文件，按修改时间倒序（L675-689）。 */
@@ -350,7 +378,7 @@ object LanTransferServer {
             val pm = context.applicationContext.getSystemService(Context.POWER_SERVICE) as? PowerManager
             if (pm != null) {
                 wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Lynkco:LanTransfer")
-                wakeLock?.acquire()
+                wakeLock?.acquire(LOCK_TIMEOUT_MS)
             }
             val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
             if (wm != null) {
@@ -388,8 +416,15 @@ object LanTransferServer {
                     "remote" to client.remoteSocketAddress?.toString(),
                     "port" to port,
                 )
-                thread(isDaemon = true, name = "LanTransfer-worker") {
-                    handleClient(client, shareDir)
+                val pool = clientPool
+                if (pool == null || pool.isShutdown) {
+                    runCatching { client.close() }
+                } else {
+                    try {
+                        pool.execute { handleClient(client, shareDir) }
+                    } catch (_: Throwable) {
+                        runCatching { client.close() }
+                    }
                 }
             } catch (e: Exception) {
                 if (running) {
@@ -489,7 +524,7 @@ object LanTransferServer {
                 "tokenInQuery" to tokenFromQuery,
                 "remote" to client.remoteSocketAddress?.toString(),
             )
-            if (token != t) {
+            if (!running || token.isEmpty() || token != t) {
                 // 排障场景：鉴权失败 —— 地址里的 token 与车机当前 token 不一致（多半是服务重启过）
                 code = 403
                 Logx.w(
@@ -497,8 +532,8 @@ object LanTransferServer {
                     "鉴权失败：token 不匹配",
                     "method" to method,
                     "path" to path,
-                    "sentToken" to (t ?: "<none>"),
-                    "expectedToken" to token,
+                    "sentToken" to maskToken(t),
+                    "expectedToken" to maskToken(token),
                     "tokenInQuery" to tokenFromQuery,
                 )
                 writeResponse(output, 403, "text/plain; charset=utf-8", "forbidden", reqDesc)
@@ -750,8 +785,11 @@ object LanTransferServer {
             output.flush()
         }
 
-        val body = LimitedInputStream(input, contentLength)
         val boundaryBytes = ("--" + boundary).toByteArray(Charsets.ISO_8859_1)
+        val body = PushbackInputStream(
+            LimitedInputStream(input, contentLength),
+            DOWNLOAD_BUFFER_BYTES + boundaryBytes.size + 16,
+        )
         if (!skipUntil(body, boundaryBytes)) {
             Logx.w(LogTags.LAN, "上传失败：multipart 内容格式错误", "req" to req)
             writeResponse(output, 400, "text/plain; charset=utf-8", "bad multipart", req)
@@ -879,42 +917,80 @@ object LanTransferServer {
     /**
      * 拷贝一个 multipart 分段体，返回写入字节数。
      * 返回 -1 表示超过上限（L167-204）。
+     *
+     * 使用 64KB 块缓冲 + 末尾 carry-over 窗口扫描 boundary，并在命中后将多余预读字节
+     * 通过 [PushbackInputStream.unread] 退回流中，兼顾吞吐量与流位置精确性。
      */
-    private fun copyPartBody(
-        input: InputStream,
+    internal fun copyPartBody(
+        input: PushbackInputStream,
         output: OutputStream?,
         boundary: ByteArray,
         max: Long
     ): Long {
-        val length = boundary.size + 2
-        val marker = ByteArray(length)
+        val m = boundary.size + 2
+        val marker = ByteArray(m)
         marker[0] = 13
         marker[1] = 10
         System.arraycopy(boundary, 0, marker, 2, boundary.size)
-        val window = ByteArray(length)
+        val buf = ByteArray(DOWNLOAD_BUFFER_BYTES + m)
         var count = 0L
-        var filled = 0
+        var carry = 0
         while (true) {
-            val b = input.read()
-            if (b < 0) throw EOFException("Missing multipart boundary")
-            if (filled < length) {
-                val next = filled + 1
-                window[filled] = b.toByte()
-                if (next == length && startsWith(window, marker, length)) return count
-                filled = next
-            } else {
-                output?.write(window[0].toInt())
-                count++
-                if (count > max) return -1L
-                System.arraycopy(window, 1, window, 0, length - 1)
-                window[length - 1] = b.toByte()
-                if (startsWith(window, marker, length)) return count
+            val n = input.read(buf, carry, buf.size - carry)
+            if (n < 0) throw EOFException("Missing multipart boundary")
+            val total = carry + n
+            if (total < m) {
+                carry = total
+                continue
             }
+            val limit = total - m
+            var foundAt = -1
+            val m0 = marker[0]
+            val m1 = marker[1]
+            var i = 0
+            while (i <= limit) {
+                if (buf[i] == m0 && buf[i + 1] == m1) {
+                    var match = true
+                    var j = 2
+                    while (j < m) {
+                        if (buf[i + j] != marker[j]) {
+                            match = false
+                            break
+                        }
+                        j++
+                    }
+                    if (match) {
+                        foundAt = i
+                        break
+                    }
+                }
+                i++
+            }
+            if (foundAt >= 0) {
+                if (foundAt > 0) {
+                    count += foundAt
+                    if (count > max) return -1L
+                    output?.write(buf, 0, foundAt)
+                }
+                val leftover = total - (foundAt + m)
+                if (leftover > 0) {
+                    input.unread(buf, foundAt + m, leftover)
+                }
+                return count
+            }
+            val safeWrite = total - (m - 1)
+            if (safeWrite > 0) {
+                count += safeWrite
+                if (count > max) return -1L
+                output?.write(buf, 0, safeWrite)
+            }
+            carry = m - 1
+            System.arraycopy(buf, safeWrite, buf, 0, carry)
         }
     }
 
     /** 跳过一个没有文件名的分段（L218-220、L569-580）。 */
-    private fun drainPart(input: InputStream, boundary: ByteArray): Boolean {
+    private fun drainPart(input: PushbackInputStream, boundary: ByteArray): Boolean {
         return copyPartBody(input, null, boundary, MAX_UPLOAD_BYTES) >= 0L
     }
 

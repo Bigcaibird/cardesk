@@ -600,6 +600,28 @@ class MusicController private constructor() {
         }
     }
 
+    private val retainedClients = linkedSetOf<String>()
+
+    /**
+     * 按客户端标识（如 MainActivity / GlobalDockService / ClusterLyricsService）引用计数启动媒体总控。
+     * 避免单个 Activity 销毁时误停同进程常驻服务的媒体监听。
+     */
+    fun retain(context: Context, clientTag: String) {
+        synchronized(retainedClients) {
+            retainedClients.add(clientTag)
+        }
+        start(context)
+    }
+
+    /** 释放客户端引用；仅当无任何活跃客户端时才停止媒体总控。 */
+    fun release(clientTag: String) {
+        val shouldStop = synchronized(retainedClients) {
+            retainedClients.remove(clientTag)
+            retainedClients.isEmpty()
+        }
+        if (shouldStop) stop()
+    }
+
     fun start(context: Context) {
         if (started) return
         val app = context.applicationContext
@@ -631,6 +653,7 @@ class MusicController private constructor() {
     }
 
     fun stop() {
+        synchronized(retainedClients) { retainedClients.clear() }
         // —— 退出前把当前状态落盘
         track?.let { persistTrack(it, force = true) }
         started = false

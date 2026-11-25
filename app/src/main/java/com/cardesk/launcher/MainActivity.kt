@@ -418,7 +418,7 @@ class MainActivity : Activity() {
             )
         }.onFailure { Logx.w(LogTags.TASK, "桌面内任务调度失败", it) }
 
-        runCatching { com.cardesk.launcher.core.media.MusicController.get().start(applicationContext) }
+        runCatching { com.cardesk.launcher.core.media.MusicController.get().retain(applicationContext, "MainActivity") }
             .onFailure { Logx.w(LogTags.MEDIA, "媒体会话启动失败", it) }
 
         // 仪表歌词投射（第一百三十三轮）：桌面起来了就把投射服务拉起来。
@@ -715,6 +715,7 @@ class MainActivity : Activity() {
             if (granted) return@Thread
             // 需要系统授权框 → 回主线程弹。
             mainHandler.post {
+                if (isFinishing || isDestroyed) return@post
                 runCatching {
                     com.cardesk.launcher.core.Permissions.requestLocationDialog(this@MainActivity)
                 }.onFailure { Logx.w(LogTags.WEATHER, "定位权限处理失败", it) }
@@ -1006,8 +1007,11 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
-        runCatching { com.cardesk.launcher.core.media.MusicController.get().stop() }
-            .onFailure { Logx.w(LogTags.MEDIA, "媒体会话停止失败", it) }
+        mainHandler.removeCallbacksAndMessages(null)
+        runCatching { com.cardesk.launcher.ui.LanTransferServer.stop() }
+        runCatching { com.cardesk.launcher.core.dock.GlobalDockService.setSuppressed(false) }
+        runCatching { com.cardesk.launcher.core.media.MusicController.get().release("MainActivity") }
+            .onFailure { Logx.w(LogTags.MEDIA, "媒体会话释放失败", it) }
         pendingReadyActions.clear()
         keyActionExecutor?.let { com.cardesk.launcher.ui.OemKeyRuntime.detach(it) }
         keyActionExecutor = null
@@ -1051,6 +1055,7 @@ class MainActivity : Activity() {
      * 「跳系统设置页」必须在主线程做（要起 Activity）。
      */
     private fun handleNotificationPermissionResult(granted: Boolean) {
+        if (isFinishing || isDestroyed) return
         if (granted) {
             if (notificationGuideShown) {
                 Logx.i(LogTags.APP, "通知使用权已授予", "state" to NotificationAccess.describeEnumeration(this))

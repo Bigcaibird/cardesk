@@ -73,6 +73,10 @@ object Glass {
     private val sheenPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
+    /** 缓存与当前 [backdrop] 绑定的 [BitmapShader]，避免每帧每卡重复创建上传纹理。 */
+    private var cachedShaderBmp: android.graphics.Bitmap? = null
+    private var cachedShader: android.graphics.BitmapShader? = null
+
     /**
      * 发布一张**已经模糊过**的背景缩略图。
      *
@@ -115,12 +119,19 @@ object Glass {
 
         val bmp = backdrop
         if (bmp != null && !bmp.isRecycled) {
+            if (bmp !== cachedShaderBmp || cachedShader == null) {
+                cachedShaderBmp = bmp
+                cachedShader = android.graphics.BitmapShader(
+                    bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP,
+                )
+            }
             shaderMatrix.setScale(bmp.width / Design.W, bmp.height / Design.H)
-            bitmapPaint.shader = android.graphics.BitmapShader(
-                bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP,
-            ).apply { setLocalMatrix(shaderMatrix) }
-            canvas.drawRoundRect(rect, radius, radius, bitmapPaint)
-            bitmapPaint.shader = null
+            cachedShader?.let { s ->
+                s.setLocalMatrix(shaderMatrix)
+                bitmapPaint.shader = s
+                canvas.drawRoundRect(rect, radius, radius, bitmapPaint)
+                bitmapPaint.shader = null
+            }
         }
 
         fillPaint.color = fill
@@ -173,6 +184,8 @@ object Glass {
     /** 清掉（退出桌面 / 视频壁纸接管时）。 */
     fun clear() {
         backdrop = null
+        cachedShaderBmp = null
+        cachedShader = null
         // 第三百零四轮：让**在飞**的模糊结果作废。否则视频壁纸刚接管时，
         // 上一张静态壁纸的模糊图会晚到并被发布出去（盖在视频上 ⇒ 卡片后面
         // 透出一块静态糊图），得等下一次刷新才会消失。

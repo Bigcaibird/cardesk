@@ -146,10 +146,15 @@ class ArtworkProvider : ContentProvider() {
         return path.removePrefix(PATH_PREFIX).trim('/')
     }
 
-    /** key → 文件（目录在 app 的 files 下）。 */
+    /** key → 文件（目录在 app 的 files 下，强制校验 canonicalPath 防止路径穿越）。 */
     private fun fileFor(ctx: Context, key: String): File? {
-        if (key.isEmpty()) return null
-        return File(File(ctx.filesDir, DIR_NAME), "$key.jpg")
+        if (key.isEmpty() || key.contains('/') || key.contains('\\') || key.contains("..")) return null
+        val baseDir = File(ctx.filesDir, DIR_NAME)
+        val canonicalBase = runCatching { baseDir.canonicalFile }.getOrNull() ?: return null
+        val candidate = File(baseDir, "$key.jpg")
+        val canonicalFile = runCatching { candidate.canonicalFile }.getOrNull() ?: return null
+        if (canonicalFile.parentFile != canonicalBase) return null
+        return canonicalFile
     }
 }
 
@@ -163,6 +168,9 @@ object ArtworkStore {
 
     /** 写入锁：同一首歌可能被两个线程同时写（会话刷新 + 广播刷新）。 */
     private val lock = Any()
+
+    private const val MAX_CACHE_FILES = 100
+    private const val MAX_CACHE_BYTES = 20L * 1024 * 1024
 
     /**
      * 把封面 Bitmap 存下来，返回给仪表用的 Uri 字符串。
@@ -182,15 +190,35 @@ object ArtworkStore {
                 val dir = File(ctx.filesDir, "bridge-artwork")
                 if (!dir.exists()) dir.mkdirs()
                 val file = File(dir, "$safe.jpg")
-                // 同一首歌不重复写（封面多半一样，白写一遍只是浪费 IO）
+                // 同一首歌不重复写（封面多半一样，白写一遍只是浪费 IO），刷新时间戳以维持 LRU
                 if (file.exists() && file.length() > 0) {
+                    file.setLastModified(System.currentTimeMillis())
                     return@synchronized uriFor(ctx, safe)
                 }
                 val bytes = compressJpeg(bitmap) ?: return@synchronized ""
                 if (bytes.isEmpty()) return@synchronized ""
                 FileOutputStream(file).use { it.write(bytes) }
+                pruneCache(dir, exclude = file)
                 uriFor(ctx, safe)
             }.getOrDefault("")
+        }
+    }
+
+    /** 按数量与总容量上限淘汰最旧的封面缓存。 */
+    internal fun pruneCache(dir: File, exclude: File? = null) {
+        val files = dir.listFiles { f -> f.isFile && f.name.endsWith(".jpg") } ?: return
+        var count = files.size
+        var totalBytes = files.sumOf { it.length() }
+        if (count <= MAX_CACHE_FILES && totalBytes <= MAX_CACHE_BYTES) return
+        val oldestFirst = files.sortedBy { it.lastModified() }
+        for (f in oldestFirst) {
+            if (count <= MAX_CACHE_FILES && totalBytes <= MAX_CACHE_BYTES) break
+            if (exclude != null && f == exclude) continue
+            val len = f.length()
+            if (f.delete()) {
+                count--
+                totalBytes -= len
+            }
         }
     }
 

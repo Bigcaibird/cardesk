@@ -445,6 +445,7 @@ object Motion {
                 .scaleY(1f)
                 .setDuration(MotionSpec.SHEET_ENTER_DURATION)
                 .setInterpolator(EMPHASIS)
+                .withLayer()
                 .start()
         }
         scrim?.let {
@@ -453,6 +454,7 @@ object Motion {
             it.animate()
                 .alpha(1f)
                 .setDuration(MotionSpec.SHEET_SCRIM_DURATION)
+                .withLayer()
                 .start()
         }
     }
@@ -490,9 +492,13 @@ object Motion {
             duration = MotionSpec.SHEET_SCRIM_DURATION
             interpolator = EMPHASIS
         }
-        scrim?.animate()?.alpha(0f)?.setDuration(MotionSpec.SHEET_SCRIM_DURATION)?.start()
+        scrim?.animate()?.alpha(0f)?.setDuration(MotionSpec.SHEET_SCRIM_DURATION)?.withLayer()?.start()
         // 同 [animateProgress]：监听器不能强引用 `sheet`，
         // 否则 WeakHashMap 的值会一直吊着键，这一项永远回收不掉。
+        val prevLayer = sheet.layerType
+        if (prevLayer == View.LAYER_TYPE_NONE) {
+            sheet.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        }
         val ref = WeakReference(sheet)
         val set = AnimatorSet().apply {
             playTogether(slide, fade)
@@ -501,10 +507,14 @@ object Motion {
 
                 override fun onAnimationCancel(animation: Animator) {
                     cancelled = true
+                    ref.get()?.let { if (prevLayer == View.LAYER_TYPE_NONE) it.setLayerType(View.LAYER_TYPE_NONE, null) }
                 }
 
                 override fun onAnimationEnd(animation: Animator) {
-                    ref.get()?.let { exits.remove(it) }
+                    ref.get()?.let {
+                        exits.remove(it)
+                        if (prevLayer == View.LAYER_TYPE_NONE) it.setLayerType(View.LAYER_TYPE_NONE, null)
+                    }
                     // 被取消（比如紧接着又打开）就不摘层、不复位。
                     if (cancelled) return
                     if (resetOnEnd) {

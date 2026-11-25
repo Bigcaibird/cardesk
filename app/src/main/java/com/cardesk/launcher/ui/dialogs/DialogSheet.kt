@@ -98,6 +98,9 @@ abstract class DialogSheet(
         addView(sheet, lp)
         body = FrameLayout(context)
         sheet.addView(body, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        // 先隐掉首帧透明度，待 attach 后布局就绪再启动进场动画，防止首帧未就绪闪现。
+        sheet.alpha = 0f
+        backdrop.alpha = 0f
     }
 
     /**
@@ -117,10 +120,12 @@ abstract class DialogSheet(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        // 进场：面板上滑 + 淡入 + 轻微放大，背景板淡入。
-        // 之前所有对话框都是「啪」一下弹出来的 —— 没有过程，
-        // 用户会以为界面卡了一下才出现。
-        Motion.enterSheet(sheet, backdrop)
+        // 进场：等首帧布局就绪再上滑 + 淡入 + 轻微放大，避免布局与动画同帧抢占导致闪烁。
+        post {
+            if (isAttachedToWindow && !dismissing) {
+                Motion.enterSheet(sheet, backdrop)
+            }
+        }
         val clearance = dockClearancePx()
         if (clearance <= 0) return
         val lp = layoutParams as? FrameLayout.LayoutParams ?: return

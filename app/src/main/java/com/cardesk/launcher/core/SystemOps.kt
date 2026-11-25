@@ -201,7 +201,7 @@ object SystemOps {
         runCatching {
             val intent = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(
-                    android.net.Uri.fromFile(apk),
+                    com.cardesk.launcher.core.update.ApkFileProvider.uriFor(context, apk),
                     "application/vnd.android.package-archive",
                 )
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)

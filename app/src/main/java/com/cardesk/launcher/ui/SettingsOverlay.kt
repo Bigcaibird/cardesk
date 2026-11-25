@@ -534,6 +534,7 @@ class SettingsOverlay(
         // 观感与画板一致，且不再依赖「把桌面压暗 26%」这种近似。
         val scrim = com.cardesk.launcher.ui.widget.BackgroundView(context).apply {
             palette = this@SettingsOverlay.pal
+            setLayerType(View.LAYER_TYPE_HARDWARE, null)
             isClickable = true
             setOnClickListener { onClose?.invoke() }
         }
@@ -3159,6 +3160,12 @@ class SettingsOverlay(
             prefs.carStatusCardVisible = on
             logSetting("scene_car_status_card_visible", "车况卡", from, on)
         }
+        switchRow("车况 · 小尺寸样式", prefs.carStatusCardCompact, height = CARD_SLOT_ROW_H) { on ->
+            val from = prefs.carStatusCardCompact
+            prefs.carStatusCardCompact = on
+            logSetting("scene_car_status_card_compact", "车况卡小尺寸", from, on)
+            onCardLayoutChanged?.invoke()
+        }
 
         // ② 音乐卡封面开关。它和「点封面图」是**同一个键**
         // （`prefs.navCoverBackdropEnabled`）—— 设置页是发现入口，状态只有一份。
@@ -3231,6 +3238,10 @@ class SettingsOverlay(
         }
         actionButton("恢复默认布局", full = true) {
             store.save(com.cardesk.launcher.core.CardLayout.DEFAULT)
+            prefs.carStatusCardPosX = -1f
+            prefs.carStatusCardPosY = -1f
+            prefs.carStatusInBottomRow = false
+            prefs.carStatusBottomIndex = -1
             onCardLayoutChanged?.invoke()
             select(selectedKey)
         }

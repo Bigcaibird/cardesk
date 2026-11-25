@@ -387,16 +387,19 @@ class UpdateDialog(
     private val detail = Ui.text(context, "", 19f, pal.textFaint).apply { setLineSpacing(8f, 1f) }
     private val bar = SeekBar(context).apply {
         isEnabled = false
-        // 没开始下载时不显示那条空进度条
-        visibility = View.GONE
+        // 固定占位（INVISIBLE 而非 GONE），避免检查/下载切换时触发整窗 requestLayout 闪屏
+        visibility = View.INVISIBLE
     }
     private val footer = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
     }
 
-    /** 有新版时才出现的「下载并更新」。 */
-    private var downloadBtn: TextView? = null
+    /** 有新版时才显示的「下载并更新」（预先占位避免动态 add/remove 触发重排版）。 */
+    private val downloadBtn: TextView = primaryButton("下载并更新") {
+        pendingRelease?.let { (rel, allowDowngrade) -> download(rel, allowDowngrade) }
+    }.apply { visibility = View.INVISIBLE }
+    private var pendingRelease: Pair<R2Release, Boolean>? = null
 
     init {
         val content = flowContent()
@@ -417,7 +420,8 @@ class UpdateDialog(
         content.addView(detailScroll, Ui.linear(-1, 0, 1f, 0, 8))
         content.addView(bar, Ui.linear(-1, 60, 0f, 0, 12))
         content.addView(footer, Ui.linear(-1, 66, 0f, 0, 18))
-        footer.addView(primaryButton("检查更新") { check() }, Ui.linear(-2, 62))
+        footer.addView(primaryButton("检查更新") { check() }, Ui.linear(-2, 62, 0f, 12))
+        footer.addView(downloadBtn, Ui.linear(-2, 62))
         // 启动检测弹窗点「立即更新」进来的：直接把版本信息摆好并开始下载
         autoDownload?.let { release ->
             handler.post {
@@ -448,9 +452,9 @@ class UpdateDialog(
         setStatus("状态：检查中…")
         detail.text = ""
         bar.progress = 0
-        bar.visibility = View.GONE
-        downloadBtn?.let { footer.removeView(it) }
-        downloadBtn = null
+        bar.visibility = View.INVISIBLE
+        pendingRelease = null
+        downloadBtn.visibility = View.INVISIBLE
         // 排障场景：用户点了检查更新 —— 记下这次是**手动**触发
         Logx.event(
             LogTags.SETTING, "检查更新（手动触发）",
@@ -497,11 +501,9 @@ class UpdateDialog(
                     if (notes.isNotEmpty()) append("\n\n$notes")
                     if (asset != null) append("\n\n下载地址：${asset.url}")
                 }
-                val btn = primaryButton(
-                    if (result.branchSwitch) "下载并切换" else "下载并更新",
-                ) { download(r, allowDowngrade = result.branchSwitch) }
-                downloadBtn = btn
-                footer.addView(btn, Ui.linear(-2, 62, 0f, 12))
+                pendingRelease = r to result.branchSwitch
+                downloadBtn.text = if (result.branchSwitch) "下载并切换" else "下载并更新"
+                downloadBtn.visibility = View.VISIBLE
             }
             is AppUpdate.CheckResult.Failed -> {
                 setStatus("状态：检查失败")
@@ -514,8 +516,8 @@ class UpdateDialog(
         setStatus("状态：下载中…")
         bar.visibility = View.VISIBLE
         bar.progress = 0
-        downloadBtn?.let { footer.removeView(it) }
-        downloadBtn = null
+        pendingRelease = null
+        downloadBtn.visibility = View.INVISIBLE
         Thread {
             val file = AppUpdate.download(context, release) { p ->
                 handler.post { bar.progress = p }
@@ -548,6 +550,10 @@ class UpdateDialog(
                 detail.text = result.reason
             }
         }
+    }
+    override fun onDetachedFromWindow() {
+        handler.removeCallbacksAndMessages(null)
+        super.onDetachedFromWindow()
     }
 }
 

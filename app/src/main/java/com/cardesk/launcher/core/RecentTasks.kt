@@ -189,13 +189,29 @@ class RecentTasks(
         }
 
         override fun remove(taskId: Int): Boolean {
+            // Android 8+/9+ 上 removeTask(int) 位于 IActivityManager（ActivityManager.getService()），
+            // 不在 ActivityManager 实例上；先走 IActivityManager，再兜底 ActivityManager.removeTask。
+            val svcResult = runCatching {
+                val svc = ActivityManager::class.java.getMethod("getService").invoke(null)
+                svc?.javaClass
+                    ?.getMethod("removeTask", Int::class.javaPrimitiveType)
+                    ?.invoke(svc, taskId) as? Boolean
+            }
+            if (svcResult.getOrNull() == true) return true
+
             val manager = am() ?: return false
-            // ActivityManager.removeTask 是 @SystemApi（公开 SDK 不可见），平台签名应用走反射。
-            return runCatching {
+            val amResult = runCatching {
                 ActivityManager::class.java
                     .getMethod("removeTask", Int::class.javaPrimitiveType)
                     .invoke(manager, taskId) as? Boolean ?: false
-            }.getOrDefault(false)
+            }
+            if (amResult.getOrDefault(false)) return true
+
+            val err = svcResult.exceptionOrNull() ?: amResult.exceptionOrNull()
+            if (err != null) {
+                Logx.w(LogTags.RECENT, "removeTask 反射失败", err)
+            }
+            return false
         }
     }
 

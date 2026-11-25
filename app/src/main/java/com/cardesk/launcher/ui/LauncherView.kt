@@ -880,6 +880,8 @@ class LauncherView(context: Context) : FrameLayout(context) {
     /** 图标加载完回主线程用。 */
     private val iconHandler = Handler(Looper.getMainLooper())
 
+    private val vehicleObserver: (com.cardesk.launcher.vehicle.HvacState) -> Unit = { refresh() }
+
     init {
         // 第208轮：视频壁纸的 Surface 就绪回调 ——
         // 冷启动恢复视频壁纸时 SurfaceTexture 可能还没建好，先挂起，等回调再起播。
@@ -913,7 +915,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
         runCatching {
             com.cardesk.launcher.vehicle.DriveModeAutoStart.apply(context, "桌面启动")
         }.onFailure { Logx.w(LogTags.VEHICLE, "桌面启动自动切换驾驶模式失败", it) }
-        VehicleController.addObserver { refresh() }
+        VehicleController.addObserver(vehicleObserver)
         // 360 状态回调：只做三件事 ——
         // 刷新导航栏 360 图标、标记「本桌面开启」、按设置切视角；
         // **不隐藏桌面、不缩放、不打开任何自有浮窗**
@@ -1536,6 +1538,19 @@ class LauncherView(context: Context) : FrameLayout(context) {
             // 场景页自己默认是 true（= 升级前的现状），这里按偏好覆盖，
             // 免得 build() 之后到 refresh() 之前闪一下。
             showCarStatusCard = prefs.carStatusCardVisible
+            carStatusCardCompact = prefs.carStatusCardCompact
+            carStatusCardPosX = prefs.carStatusCardPosX
+            carStatusCardPosY = prefs.carStatusCardPosY
+            carStatusInBottomRow = prefs.carStatusInBottomRow
+            carStatusBottomIndex = prefs.carStatusBottomIndex
+            onCarStatusCardMoved = { x, y ->
+                prefs.carStatusCardPosX = x
+                prefs.carStatusCardPosY = y
+            }
+            onCarStatusRowChanged = { inRow, idx ->
+                prefs.carStatusInBottomRow = inRow
+                prefs.carStatusBottomIndex = idx
+            }
             // 第166轮 C 版：车况卡整卡点击 → 车辆状态面板。
             onOpenVehicleStatus = { openVehiclePage() }
             onToggleWindow = { closed ->
@@ -1596,6 +1611,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
             // 单击 → 左右换位并保存；长按 → 打开画中画应用选择器。
             onPipSwapSides = { navPage.toggleSidesSwapped() }
             onPipPickApp = { showPipPicker(false) }
+            onPipSecondaryPickApp = { showPipPicker(true) }
         }
         // 第139轮：把换肤前**摘出来**的承载面交给新的承载面。
         //
@@ -1675,7 +1691,9 @@ class LauncherView(context: Context) : FrameLayout(context) {
             onApps = { toggleDrawer() }
             onAppsDrawer = { toggleDrawer() }
             // 单击切换页面（dockSplit「单击切换页面」= showPage((page + 1) % 3)）
-            onSplit = { showPage(nextPage(page)) }
+            onSplit = {
+                if (vehiclePage != null) showPage(PAGE_NAV) else showPage(nextPage(page))
+            }
             // 长按切换单画 / 双画（dockSplit「长按切换单画和双画」）
             onSplitLongPress = { toggleDualPip() }
             // 媒体卡左右滑动切歌
@@ -2054,7 +2072,9 @@ class LauncherView(context: Context) : FrameLayout(context) {
             }
             com.cardesk.launcher.MainActivity.ACTION_CLIMATE -> showClimate()
             com.cardesk.launcher.MainActivity.ACTION_MEDIA -> showPage(PAGE_NAV)
-            com.cardesk.launcher.MainActivity.ACTION_SPLIT -> showPage(nextPage(page))
+            com.cardesk.launcher.MainActivity.ACTION_SPLIT -> {
+                if (vehiclePage != null) showPage(PAGE_NAV) else showPage(nextPage(page))
+            }
             com.cardesk.launcher.MainActivity.ACTION_SPLIT_LONG -> toggleDualPip()
             com.cardesk.launcher.MainActivity.ACTION_CAMERA360 -> showCam()
             com.cardesk.launcher.MainActivity.ACTION_RECENTS -> showRecents()
@@ -2222,8 +2242,9 @@ class LauncherView(context: Context) : FrameLayout(context) {
     fun warmupDeferredUi() {
         if (!::drawerPage.isInitialized) {
             mark("warmup:begin")
-            runCatching { ensureDrawerPage() }
-                .onFailure { Logx.w(LogTags.DRAWER, "预热抽屉页失败", it) }
+            runCatching {
+                ensureDrawerPage().preloadAsync()
+            }.onFailure { Logx.w(LogTags.DRAWER, "预热抽屉页失败", it) }
         }
         mark("warmup:drawer")
     }
@@ -2887,6 +2908,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
             "fullscreen" to pipFullscreen,
         )
         closeClimate()
+        closeVehiclePage()
         if (sourceMenu.isOpen) sourceMenu.hide()
         val old = page
         page = target
@@ -3406,6 +3428,7 @@ fun toggleCam360() {
         val page = com.cardesk.launcher.ui.pages.VehiclePage(context, pal)
         // 车型和首页/车况卡保持一致（车辆页用同一套 cardtop 车模图）。
         page.carModel = prefs.carModel
+        page.onClose = { closeVehiclePage() }
         page.onOpenClimate = {
             closeVehiclePage()
             showClimate()
@@ -5477,6 +5500,11 @@ fun toggleCam360() {
     private fun invalidateGlassLayers() {
         if (::statusBar.isInitialized) statusBar.invalidate()
         if (::dock.isInitialized) dock.invalidate()
+        val settingsOpen = settings?.visibility == View.VISIBLE
+        if (settingsOpen) {
+            settings?.invalidate()
+            return
+        }
         if (::dots.isInitialized) dots.invalidate()
         if (::scenePage.isInitialized) scenePage.invalidate()
     }
@@ -6039,6 +6067,11 @@ fun toggleCam360() {
         // 第111轮：右侧固定「车况卡」的显隐跟着偏好走。
         // 设置页开关 → `prefs.carStatusCardVisible` → 这里 → 场景页。
         scenePage.showCarStatusCard = prefs.carStatusCardVisible
+        scenePage.carStatusCardCompact = prefs.carStatusCardCompact
+        scenePage.carStatusCardPosX = prefs.carStatusCardPosX
+        scenePage.carStatusCardPosY = prefs.carStatusCardPosY
+        scenePage.carStatusInBottomRow = prefs.carStatusInBottomRow
+        scenePage.carStatusBottomIndex = prefs.carStatusBottomIndex
         // 第148轮：「歌曲图片当卡片背景」的开关跟着偏好走。
         //
         // 设置页开关和「点封面图」操作的是**同一个键**（`prefs.navCoverBackdropEnabled`），
@@ -6742,7 +6775,11 @@ fun toggleCam360() {
         com.cardesk.launcher.vehicle.VehicleSignalSampler.stop()
         // 车机昼夜回调不再往已销毁的视图派发
         com.cardesk.launcher.vehicle.AdaptapiDayNight.detach()
-        VehicleController.removeObserver { }
+        VehicleController.removeObserver(vehicleObserver)
+        VehicleController.on360State = null
+        VehicleController.onBodyStateChanged = null
+        navPage.pip.release("detached")
+        navPage.pipSecondary.release("detached")
         super.onDetachedFromWindow()
     }
 }

@@ -311,6 +311,14 @@ object AppUpdate {
             Logx.w(LogTags.SETTING, "更新下载失败：清单里没有安装包", "version" to release.version)
             return null
         }
+        if (!apk.url.startsWith("https://")) {
+            Logx.w(LogTags.SETTING, "更新下载失败：仅允许 HTTPS 地址", "url" to apk.url)
+            return null
+        }
+        if (apk.sha256.length != 64) {
+            Logx.w(LogTags.SETTING, "更新下载失败：清单缺少有效的 SHA-256 摘要", "version" to release.version)
+            return null
+        }
         val file = File(context.cacheDir, "cardesk-update-${release.version}.apk")
         val result = FileDownload.download(
             url = apk.url,
@@ -348,6 +356,18 @@ object AppUpdate {
      *   系统默认会以 `INSTALL_FAILED_VERSION_DOWNGRADE` 拒装。
      */
     fun install(context: Context, apk: File, allowDowngrade: Boolean = false): InstallResult {
+        val archivePkg = runCatching {
+            context.packageManager.getPackageArchiveInfo(apk.absolutePath, 0)?.packageName
+        }.getOrNull()
+        if (archivePkg != context.packageName) {
+            Logx.w(
+                LogTags.SETTING,
+                "更新安装拦截：包名不匹配",
+                "expected" to context.packageName,
+                "actual" to (archivePkg ?: "<invalid>"),
+            )
+            return InstallResult.Fail("安装包签名或包名校验失败")
+        }
         if (SystemOps.installApk(context, apk, allowDowngrade)) return InstallResult.Silent
         // —— 回退：把 APK 放进公共目录，再叫系统安装器 ——
         val published = publishToPublic(context, apk)
@@ -414,7 +434,7 @@ object AppUpdate {
 
     /** 叫起系统安装器。 */
     private fun openInstaller(context: Context, published: Published): Boolean {
-        val uri = published.uri ?: android.net.Uri.fromFile(File(published.location))
+        val uri = published.uri ?: ApkFileProvider.uriFor(context, File(published.location))
         return runCatching {
             val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
                 setDataAndType(uri, "application/vnd.android.package-archive")

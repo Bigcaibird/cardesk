@@ -829,7 +829,9 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
     private val handler = Handler(Looper.getMainLooper())
 
     /** 连续几次没找到进程。 */
+    /** 看门狗连续判为「无主进程 / 虚拟屏无任务」的次数。 */
     private var watchdogMisses = 0
+    private var noTaskMisses = 0
 
     /** 「承载任务在哪个 display」诊断日志的限频计数（见 [logTaskDisplay]）。 */
     private var taskDisplayLogTick = 0
@@ -876,6 +878,20 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
         handler.removeCallbacks(watchdog)
         handler.removeCallbacks(surfaceRecheck)
         watchdogMisses = 0
+        noTaskMisses = 0
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        if (ready && content != null && packageName.isNotBlank()) {
+            startWatchdog()
+        }
+    }
+
+    override fun onDetachedFromWindow() {
+        stopWatchdog()
+        handler.removeCallbacks(relaunchRunnable)
+        super.onDetachedFromWindow()
     }
 
     /** 看门狗的一轮检查。 */
@@ -901,6 +917,21 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
         if (checkDisplaySurface("看门狗")) return
         // —— 黑屏自愈（第六十七轮）：进程活着但画面没了的情形
         checkBlackScreen()
+        // —— 虚拟屏无任何任务兜底：主界面崩溃但子进程（:push/:locationservice）仍存活时，
+        // 虚拟屏上已无 Activity，连续 2 轮（6s）仍无任务则重新拉起主界面。
+        val hostInfo = content?.let { ActivityEmbed.hostTaskInfo(it, pkg) }
+        if (hostInfo?.ourDisplayId != null && hostInfo.state == HostTaskDisplay.State.NOT_FOUND) {
+            noTaskMisses++
+            if (noTaskMisses >= WATCHDOG_MISS_LIMIT) {
+                noTaskMisses = 0
+                watchdogMisses = 0
+                Logx.w(LogTags.NAV_UI, "画中画看门狗：虚拟屏无承载任务，重新拉起", "pkg" to pkg, "role" to role)
+                relaunch("no-task")
+                return
+            }
+        } else {
+            noTaskMisses = 0
+        }
         when (isProcessAlive(pkg)) {
             null -> {
                 // 判据不可靠（看不到别的进程）→ 不动作
@@ -1283,17 +1314,11 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
         if (list.none { it.uid != Process.myUid() }) return null
         val ai = runCatching { context.packageManager.getApplicationInfo(pkg, 0) }.getOrNull() ?: return null
         val proc = ai.processName
-        // —— 第130轮：**多进程 App** 的判据 ——
-        //
-        // 高德这类 App 有多个进程（地图渲染跑在子进程里）。
-        // 以前只认**主进程名**：主进程刚好不在时就判「进程没了」→
-        // 看门狗误伤 → 反复重发启动去打断**正在正常工作**的承载应用
-        // （实测日志里就有「承载进程不在」而高德明明还在发导航状态）。
-        //
-        // 现在改成：该包名的**任意**进程在跑就算活着。
+        // 仅认主进程（与 applicationInfo.processName 精确一致）：
+        // 多进程 App（如高德的 :push / :locationservice）主界面崩溃后子进程仍会存活，
+        // 若用 startsWith("$proc:") 匹配子进程会导致看门狗永远误判存活而不拉起。
         return list.any {
-            it.uid == ai.uid &&
-                (it.processName == proc || it.processName.startsWith("$proc:"))
+            it.uid == ai.uid && it.processName == proc
         }
     }
 

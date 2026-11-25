@@ -101,6 +101,8 @@ class OverlayBackdrop(context: Context) : View(context) {
         }
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private var cachedShaderKey: String = ""
+    private var cachedGlowShader: RadialGradient? = null
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
@@ -112,20 +114,24 @@ class OverlayBackdrop(context: Context) : View(context) {
         // 透出桌面（第124轮）时底色改成半透明；
         // 两个端点用**同一个** alpha，渐变过程中 alpha 恒定，不会出现脏边。
         val bgAlpha = if (seeThrough) OverlaySpec.THROUGH_BG_ALPHA else 0xFF
-        paint.shader = RadialGradient(
-            0f, 0f, 1f,
-            intArrayOf(
-                palette.withAlpha(palette.bgGlow, bgAlpha),
-                palette.withAlpha(palette.bgTop, bgAlpha),
-            ),
-            floatArrayOf(0f, BackgroundView.GLOW_STOP),
-            Shader.TileMode.CLAMP,
-        ).apply {
-            val m = Matrix()
-            m.setScale(w * 1.2f, h * 0.9f)
-            m.postTranslate(w * 0.5f, 0f)
-            setLocalMatrix(m)
+        val glowColor = palette.withAlpha(palette.bgGlow, bgAlpha)
+        val topColor = palette.withAlpha(palette.bgTop, bgAlpha)
+        val key = "$w:$h:$glowColor:$topColor"
+        if (cachedGlowShader == null || cachedShaderKey != key) {
+            cachedShaderKey = key
+            cachedGlowShader = RadialGradient(
+                0f, 0f, 1f,
+                intArrayOf(glowColor, topColor),
+                floatArrayOf(0f, BackgroundView.GLOW_STOP),
+                Shader.TileMode.CLAMP,
+            ).apply {
+                val m = Matrix()
+                m.setScale(w * 1.2f, h * 0.9f)
+                m.postTranslate(w * 0.5f, 0f)
+                setLocalMatrix(m)
+            }
         }
+        paint.shader = cachedGlowShader
         canvas.drawRect(0f, 0f, w, h, paint)
         paint.shader = null
 

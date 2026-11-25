@@ -44,11 +44,12 @@ class GlassDrawable(
     private val mat = Matrix()
     private val values = FloatArray(9)
     private val rect = RectF()
-    private val shader = BitmapShader(
-        Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888),
-        Shader.TileMode.CLAMP,
-        Shader.TileMode.CLAMP,
-    )
+    private var backdropBmp: Bitmap? = null
+    private var backdropShader: BitmapShader? = null
+    private var cachedSheenTop = Float.NaN
+    private var cachedSheenH = Float.NaN
+    private var cachedSheenNight: Boolean? = null
+    private var cachedSheenShader: LinearGradient? = null
 
     fun setFill(color: Int) {
         if (fill == color) return
@@ -81,6 +82,10 @@ class GlassDrawable(
 
         val bmp = Glass.backdrop
         if (bmp != null && !bmp.isRecycled) {
+            if (bmp !== backdropBmp || backdropShader == null) {
+                backdropBmp = bmp
+                backdropShader = BitmapShader(bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+            }
             canvas.getMatrix(mat)
             mat.getValues(values)
             val sx = bmp.width / Design.W
@@ -88,22 +93,32 @@ class GlassDrawable(
             mat.reset()
             mat.setScale(sx, sy)
             mat.postTranslate(values[2] * sx, values[5] * sy)
-            shader.setLocalMatrix(mat)
-            bmpPaint.shader = shader
-            canvas.drawRoundRect(rect, radius, radius, bmpPaint)
-            bmpPaint.shader = null
+            backdropShader?.let { s ->
+                s.setLocalMatrix(mat)
+                bmpPaint.shader = s
+                canvas.drawRoundRect(rect, radius, radius, bmpPaint)
+                bmpPaint.shader = null
+            }
         }
 
         fillPaint.color = fill
         canvas.drawRoundRect(rect, radius, radius, fillPaint)
 
         if (sheen) {
-            sheenPaint.shader = LinearGradient(
-                rect.left, rect.top, rect.left, rect.top + rect.height() * 0.38f,
-                if (Skin.isNight) 0x14FFFFFF else 0x2EFFFFFF,
-                0x00FFFFFF,
-                Shader.TileMode.CLAMP,
-            )
+            val night = Skin.isNight
+            val h = rect.height()
+            if (cachedSheenShader == null || cachedSheenTop != rect.top || cachedSheenH != h || cachedSheenNight != night) {
+                cachedSheenTop = rect.top
+                cachedSheenH = h
+                cachedSheenNight = night
+                cachedSheenShader = LinearGradient(
+                    rect.left, rect.top, rect.left, rect.top + h * 0.38f,
+                    if (night) 0x14FFFFFF else 0x2EFFFFFF,
+                    0x00FFFFFF,
+                    Shader.TileMode.CLAMP,
+                )
+            }
+            sheenPaint.shader = cachedSheenShader
             canvas.drawRoundRect(rect, radius, radius, sheenPaint)
             sheenPaint.shader = null
         }

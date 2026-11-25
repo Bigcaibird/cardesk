@@ -868,6 +868,50 @@ class ScenePage(context: Context) : View(context) {
             invalidate()
         }
 
+    /** 车况卡小尺寸样式（与底部卡片等高、车模头朝左、仅显车门与胎压）。 */
+    var carStatusCardCompact: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
+
+    /** 车况卡自定义横/纵坐标（<0 表示使用默认右对齐位置）。 */
+    var carStatusCardPosX: Float = -1f
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
+
+    var carStatusCardPosY: Float = -1f
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
+
+    /** 车况卡被拖拽到新位置时回调持久化。 */
+    var onCarStatusCardMoved: ((Float, Float) -> Unit)? = null
+
+    /** 车况卡是否拖入底部卡片行及其位置索引。 */
+    var carStatusInBottomRow: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
+
+    var carStatusBottomIndex: Int = -1
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
+
+    /** 车况卡拖入/拖出底部行或行内换位时回调持久化。 */
+    var onCarStatusRowChanged: ((Boolean, Int) -> Unit)? = null
+
     // ---------------------------------------------------------------- 壁纸提示
 
     private val main = Handler(Looper.getMainLooper())
@@ -2044,15 +2088,30 @@ class ScenePage(context: Context) : View(context) {
     /** 底部卡片的布局（顺序/尺寸/显隐由 [cardLayout] 决定）。 */
     private fun layoutBottomCards(): LinkedHashMap<String, RectF> {
         val out = LinkedHashMap<String, RectF>()
-        val widths = com.cardesk.launcher.core.CardLayout.widths(
+        val rowW = rightEnd - left
+        val baseWidths = com.cardesk.launcher.core.CardLayout.widths(
             com.cardesk.launcher.core.CardLayout.active(cardLayout),
-            rightEnd - left,
+            rowW,
             CARD_GAP,
             naturalWidth = { id -> cardWidth(id) },
             minWidth = 160f,
-        )
+        ).toMutableList()
+        if (carStatusInBottomRow && showCarStatusCard) {
+            val idx = (if (carStatusBottomIndex < 0) baseWidths.size else carStatusBottomIndex)
+                .coerceIn(0, baseWidths.size)
+            baseWidths.add(idx, com.cardesk.launcher.core.CardLayout.CAR_STATUS to CAR_STATUS_CARD_W)
+            val totalGap = CARD_GAP * (baseWidths.size - 1).coerceAtLeast(0)
+            val sumW = baseWidths.sumOf { it.second.toDouble() }.toFloat()
+            val avail = (rowW - totalGap).coerceAtLeast(160f * baseWidths.size)
+            if (sumW > avail && sumW > 0f) {
+                val scale = avail / sumW
+                for (i in baseWidths.indices) {
+                    baseWidths[i] = baseWidths[i].first to (baseWidths[i].second * scale)
+                }
+            }
+        }
         var x = left
-        for ((id, w) in widths) {
+        for ((id, w) in baseWidths) {
             out[id] = RectF(x, cardTop, x + w, cardTop + cardH)
             x += w + CARD_GAP
         }
@@ -2068,6 +2127,7 @@ class ScenePage(context: Context) : View(context) {
         com.cardesk.launcher.core.CardLayout.LEGACY_TRIP -> TRIP_BOTTOM_CARD_W
         com.cardesk.launcher.core.CardLayout.TRIP_CARD -> TRIP_BOTTOM_CARD_W
         com.cardesk.launcher.core.CardLayout.STATUS -> STATUS_BOTTOM_CARD_W
+        com.cardesk.launcher.core.CardLayout.CAR_STATUS -> CAR_STATUS_CARD_W
         else -> 0f
     }
 
@@ -2097,6 +2157,20 @@ class ScenePage(context: Context) : View(context) {
                 com.cardesk.launcher.core.CardLayout.LEGACY_TRIP,
                 com.cardesk.launcher.core.CardLayout.TRIP_CARD -> drawTripCard(canvas, drawRect)
                 com.cardesk.launcher.core.CardLayout.STATUS -> drawStatusBottomCard(canvas, drawRect)
+                com.cardesk.launcher.core.CardLayout.CAR_STATUS -> {
+                    val i = info
+                    if (i != null) {
+                        val dp = com.cardesk.launcher.core.car3d.Car3dDebugPose.pose
+                        val effDoors = dp?.doors?.map { !it } ?: i.doorsClosed
+                        val effTrunk = dp?.trunk?.let { !it } ?: i.trunkClosed
+                        card(canvas, drawRect)
+                        hits[CAR_STATUS_CARD_HIT_KEY] = RectF(drawRect)
+                        drawCarStatusCardCompact(canvas, drawRect, effDoors, i.hoodClosed, effTrunk, i)
+                    }
+                }
+            }
+            if (id == dragId) {
+                drawDragOutline(canvas, drawRect)
             }
             if (lifting) canvas.restore()
         }
@@ -3014,6 +3088,7 @@ class ScenePage(context: Context) : View(context) {
      */
     private fun drawCarStatusCard(canvas: Canvas) {
         if (!showCarStatusCard) return
+        if (carStatusInBottomRow) return
         val i = info ?: return
         val doors = i.doorsClosed
         val windows = resolveWindowOpenFlags()
@@ -3034,17 +3109,33 @@ class ScenePage(context: Context) : View(context) {
             carStatusEmptyLogged = false
         }
 
-        val r = RectF(
-            rightEnd - CAR_STATUS_CARD_RIGHT_INSET - CAR_STATUS_CARD_W,
-            CAR_STATUS_CARD_TOP,
-            rightEnd - CAR_STATUS_CARD_RIGHT_INSET,
-            CAR_STATUS_CARD_TOP + CAR_STATUS_CARD_H,
-        )
+        val targetW = CAR_STATUS_CARD_W
+        val targetH = if (carStatusCardCompact) cardH else CAR_STATUS_CARD_H
+        val defaultLeft = rightEnd - CAR_STATUS_CARD_RIGHT_INSET - targetW
+        val defaultTop = if (carStatusCardCompact) (cardTop - 8f - targetH) else CAR_STATUS_CARD_TOP
+        val rawLeft = if (dragCarStatus) dragCarStatusX else if (carStatusCardPosX >= 0f) carStatusCardPosX else defaultLeft
+        val rawTop = if (dragCarStatus) dragCarStatusY else if (carStatusCardPosY >= 0f) carStatusCardPosY else defaultTop
+        val clampedLeft = rawLeft.coerceIn(left, (rightEnd - targetW).coerceAtLeast(left))
+        val clampedTop = rawTop.coerceIn(84f, (cardTop - 8f - targetH).coerceAtLeast(84f))
+        val r = RectF(clampedLeft, clampedTop, clampedLeft + targetW, clampedTop + targetH)
         // 整卡可点：点开「车辆状态」面板。
-        // 整卡按下时轻微缩小（场景页是自绘的，没有子 View 能挂按压反馈）。
-        val cardPressed = beginPress(canvas, CAR_STATUS_CARD_HIT_KEY, r)
+        val cardPressed = if (dragCarStatus) false else beginPress(canvas, CAR_STATUS_CARD_HIT_KEY, r)
+        val liftingCarStatus = dragCarStatus && dragLift > 0f
+        if (liftingCarStatus) {
+            canvas.save()
+            val s = 1f + (MotionSpec.STATE_BUMP - 1f) * dragLift
+            canvas.scale(s, s, r.centerX(), r.centerY())
+        }
         card(canvas, r)
         hits[CAR_STATUS_CARD_HIT_KEY] = RectF(r)
+
+        if (carStatusCardCompact) {
+            drawCarStatusCardCompact(canvas, r, effDoors, hood, effTrunk, i)
+            if (dragCarStatus) drawDragOutline(canvas, r)
+            if (liftingCarStatus) canvas.restore()
+            if (cardPressed) canvas.restore()
+            return
+        }
 
         // —— 标题 + 详情入口（整卡可点，详情只是可发现性）——
         //
@@ -3119,7 +3210,132 @@ class ScenePage(context: Context) : View(context) {
 
         lastCarImageRect = RectF(imageRect)
         drawTireBesideWheels(canvas, r, imageRect, i)
+        if (dragCarStatus) drawDragOutline(canvas, r)
+        if (liftingCarStatus) canvas.restore()
         if (cardPressed) canvas.restore()
+    }
+
+    /**
+     * 车况卡小尺寸样式（与底部卡片等高 388×150）：
+     * - 车模旋转 -90° 朝向左侧，仅展示车门/盖开关状态，不显示车窗开关；
+     * - 四轮胎压分别显示在对应车轮位置旁（头朝左：右上=右后、右下=左后、左上=右前、左下=左前）。
+     */
+    private fun drawCarStatusCardCompact(
+        canvas: Canvas,
+        r: RectF,
+        effDoors: List<Boolean?>?,
+        hood: Boolean?,
+        effTrunk: Boolean?,
+        i: VehicleInfo,
+    ) {
+        text.textAlign = Paint.Align.LEFT
+        text.typeface = Typeface.DEFAULT
+        text.textSize = 14f
+        text.color = Skin.TEXT_DIM
+        canvas.drawText("车况", r.left + 16f, r.top + 24f, text)
+        text.textAlign = Paint.Align.RIGHT
+        text.color = Skin.ACCENT
+        canvas.drawText("详情 ›", r.right - 16f, r.top + 24f, text)
+        text.textAlign = Paint.Align.LEFT
+
+        val assetDir = CarModels.assetDir(carModel)
+        val dir = if (Car3dSettings.enabled) assetDir else null
+        val topDown = Car3dAssets.topDownOnly(context, assetDir)
+        val cardView = if (topDown) Car3dAssets.VIEW_CARDTOP else Car3dSettings.cardView
+        val compactPose = com.cardesk.launcher.core.car3d.Car3dDebugPose.pose?.let { p ->
+            p.copy(windows = BooleanArray(4) { false })
+        } ?: CarPose.of(effDoors, BooleanArray(4) { false }, hood, effTrunk)
+        car3d.setPose(context, dir, compactPose, rich = true, view = cardView)
+
+        val carCx = r.centerX()
+        val carCy = r.centerY() + 8f
+        val maxBoxW = 104f
+        val maxBoxH = (r.width() - 164f).coerceIn(130f, 196f)
+        val baseArea = RectF(carCx - maxBoxW / 2f, carCy - maxBoxH / 2f, carCx + maxBoxW / 2f, carCy + maxBoxH / 2f)
+        val usedView = Car3dAssets.usedView(context, dir, cardView)
+        val slot = Car3dAssets.slotOf(context, dir, usedView)
+        val unrotRect = if (slot != null && slot.second > 0) {
+            fitIn(baseArea, slot.first.toFloat() / slot.second)
+        } else {
+            baseArea
+        }
+        val save = canvas.save()
+        canvas.rotate(-90f, carCx, carCy)
+        val clipSave = canvas.save()
+        canvas.clipRect(
+            unrotRect.left,
+            unrotRect.top,
+            unrotRect.left + unrotRect.width() * CAR3D_CLIP_RIGHT,
+            unrotRect.bottom,
+        )
+        val painted = car3d.paint(canvas, context, cardView, unrotRect, fit = false)
+        canvas.restoreToCount(clipSave)
+        if (!painted) {
+            val frame = CarTopPainter.frame(carCx, carCy, 64f, 152f)
+            CarTopPainter.draw(canvas, frame, CarTopGeometryFactory.of(carModel), carColors)
+        }
+        canvas.restoreToCount(save)
+
+        val visualW = unrotRect.height()
+        val visualH = unrotRect.width()
+        val carVisualRect = RectF(carCx - visualW / 2f, carCy - visualH / 2f, carCx + visualW / 2f, carCy + visualH / 2f)
+        lastCarImageRect = RectF(carVisualRect)
+
+        // 车头朝左时四轮方位：左前(0)=左下，右前(1)=左上，左后(2)=右下，右后(3)=右上。
+        val topRowY = r.top + 58f
+        val botRowY = r.bottom - 30f
+        val wheelSlots = arrayOf(
+            Triple(carVisualRect.left - 8f, botRowY, -1),  // 0 左前
+            Triple(carVisualRect.left - 8f, topRowY, -1),  // 1 右前
+            Triple(carVisualRect.right + 8f, botRowY, +1), // 2 左后
+            Triple(carVisualRect.right + 8f, topRowY, +1), // 3 右后
+        )
+        val padX = 16f
+        val minLeft = r.left + padX
+        val maxRight = r.right - padX
+        for (k in 0 until 4) {
+            val raw = i.tires.getOrNull(k)?.takeIf { !it.isNaN() && it > 0f }
+            val bar = raw?.let { it / 100f }
+            val abnormal = bar != null && (bar < 2.0f || bar > 2.8f)
+            val value = if (bar == null) "--" else String.format(java.util.Locale.US, "%.1f", bar)
+            val (edge, cy, dirSide) = wheelSlots[k]
+
+            text.textAlign = Paint.Align.LEFT
+            text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            text.textSize = 26f
+            val vw = text.measureText(value)
+            text.typeface = Typeface.DEFAULT
+            text.textSize = 14f
+            val uw = text.measureText("bar")
+            val gap = 4f
+            val totalW = vw + gap + uw
+            val rawLeft = if (dirSide < 0) edge - totalW else edge
+            val startX = rawLeft.coerceIn(minLeft, (maxRight - totalW).coerceAtLeast(minLeft))
+
+            text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            text.textSize = 26f
+            text.color = if (abnormal) Skin.WARN else Skin.TEXT
+            canvas.drawText(value, startX, cy, text)
+
+            text.typeface = Typeface.DEFAULT
+            text.textSize = 14f
+            text.color = Skin.TEXT_SOFT
+            canvas.drawText("bar", startX + vw + gap, cy, text)
+        }
+    }
+
+    /** 拖拽高亮描边。 */
+    private fun drawDragOutline(canvas: Canvas, r: RectF) {
+        val prevStyle = text.style
+        val prevStroke = text.strokeWidth
+        val prevColor = text.color
+        text.style = Paint.Style.STROKE
+        text.strokeWidth = 2.5f
+        text.color = Skin.ACCENT
+        canvas.drawRoundRect(r, GLASS_RADIUS, GLASS_RADIUS, text)
+        text.style = prevStyle
+        text.strokeWidth = prevStroke
+        text.color = prevColor
     }
 
     /**
@@ -3453,9 +3669,14 @@ class ScenePage(context: Context) : View(context) {
             text.typeface = Typeface.DEFAULT
             text.textSize = 21f
             val uw = text.measureText("bar")
-            // 两行一组：数字在上、单位在下，整组按「数字宽」对齐到贴车侧。
-            val anchorX = if (dir < 0) edge - gapX else edge + gapX
-            val startX = if (dir < 0) anchorX - vw else anchorX
+            // 两行一组：数字在上、单位在下，整组按「数字宽」对齐到贴车侧，并钳制在卡片内边距内防止越界。
+            val cardPadX = 16f
+            val minLeft = r.left + cardPadX
+            val maxRight = r.right - cardPadX
+            val groupW = maxOf(vw, uw)
+            val rawLeft = if (dir < 0) edge - groupW else edge
+            val groupLeft = rawLeft.coerceIn(minLeft, (maxRight - groupW).coerceAtLeast(minLeft))
+            val startX = if (dir < 0) groupLeft + (groupW - vw) else groupLeft
 
             text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             text.textSize = 39f
@@ -3465,7 +3686,7 @@ class ScenePage(context: Context) : View(context) {
             text.typeface = Typeface.DEFAULT
             text.textSize = 21f
             text.color = Skin.TEXT_SOFT
-            val unitLeft = if (dir < 0) anchorX - uw else anchorX
+            val unitLeft = if (dir < 0) groupLeft + (groupW - uw) else groupLeft
             canvas.drawText("bar", unitLeft, cy + 24f, text)
         }
         text.textAlign = Paint.Align.LEFT
@@ -3813,9 +4034,16 @@ class ScenePage(context: Context) : View(context) {
         }.also { it.start() }
     }
     private var dragGrabX = 0f
+    private var dragGrabY = 0f
     private var downX = 0f
     private var downY = 0f
     private var downCardId: String? = null
+    private var downCarStatusCard = false
+    private var dragCarStatus = false
+    private var dragCarStatusStartX = 0f
+    private var dragCarStatusStartY = 0f
+    private var dragCarStatusX = 0f
+    private var dragCarStatusY = 0f
     private var longPressFired = false
 
     // ---------------------------------------------------------------- 壁纸横拖（已去掉）
@@ -3864,6 +4092,23 @@ class ScenePage(context: Context) : View(context) {
     }
 
     private val longPressRunnable = Runnable {
+        if (downCarStatusCard) {
+            val r = hits[CAR_STATUS_CARD_HIT_KEY] ?: return@Runnable
+            longPressFired = true
+            dragCarStatus = true
+            dragGrabX = downX
+            dragGrabY = downY
+            dragCarStatusStartX = r.left
+            dragCarStatusStartY = r.top
+            dragCarStatusX = r.left
+            dragCarStatusY = r.top
+            animateDragLift(true)
+            endPress()
+            parent?.requestDisallowInterceptTouchEvent(true)
+            Logx.event(LogTags.SCENE, "车况卡长按开始拖拽", "x" to downX, "y" to downY)
+            invalidate()
+            return@Runnable
+        }
         val id = downCardId ?: return@Runnable
         longPressFired = true
         dragId = id
@@ -3903,18 +4148,56 @@ class ScenePage(context: Context) : View(context) {
                 downY = y
                 longPressFired = false
                 dragId = null
+                dragCarStatus = false
                 dragDx = 0f
                 // 按下反馈：记住按着的是哪一块，画的时候把它缩小。
                 startPress(pressKeyAt(x, y))
                 downCardId = cardRects.entries.firstOrNull { it.value.contains(x, y) }?.key
-                if (downCardId != null) {
+                downCarStatusCard = downCardId == null && (hits[CAR_STATUS_CARD_HIT_KEY]?.contains(x, y) == true)
+                if (downCardId != null || downCarStatusCard) {
                     main.postDelayed(longPressRunnable, LONG_PRESS_MS)
                 }
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
+                if (dragCarStatus) {
+                    dragCarStatusX = dragCarStatusStartX + (x - dragGrabX)
+                    dragCarStatusY = dragCarStatusStartY + (y - dragGrabY)
+                    // 拖入底部卡片行区域：实时并入底部行排布
+                    if (y >= cardTop - 40f) {
+                        val bounds = cardRects.entries.map { it.value.left to it.value.right }
+                        val hover = cardIndexAt(x, bounds).coerceIn(0, bounds.size)
+                        carStatusInBottomRow = true
+                        carStatusBottomIndex = hover
+                        dragCarStatus = false
+                        dragId = com.cardesk.launcher.core.CardLayout.CAR_STATUS
+                        dragGrabX = x
+                        dragDx = 0f
+                        dragMoved = true
+                    }
+                    invalidate()
+                    return true
+                }
                 val id = dragId
                 if (id != null) {
+                    // 车况卡从底部行拖出回到上方区域
+                    if (id == com.cardesk.launcher.core.CardLayout.CAR_STATUS && y < cardTop - 60f) {
+                        val prevRect = cardRects[id]
+                        carStatusInBottomRow = false
+                        carStatusBottomIndex = -1
+                        onCarStatusRowChanged?.invoke(false, -1)
+                        dragId = null
+                        dragCarStatus = true
+                        dragGrabX = x
+                        dragGrabY = y
+                        dragCarStatusStartX = prevRect?.left ?: (x - CAR_STATUS_CARD_W / 2f)
+                        dragCarStatusStartY = prevRect?.top ?: (y - cardH / 2f)
+                        dragCarStatusX = dragCarStatusStartX
+                        dragCarStatusY = dragCarStatusStartY
+                        dragMoved = false
+                        invalidate()
+                        return true
+                    }
                     dragDx = x - dragGrabX
                     val bounds = cardRects.entries.map { it.value.left to it.value.right }
                     val hover = cardIndexAt(x, bounds)
@@ -3922,11 +4205,21 @@ class ScenePage(context: Context) : View(context) {
                         val visibleIds = cardRects.keys.toList()
                         val current = visibleIds.indexOf(id)
                         if (current >= 0 && hover != current) {
-                            val reordered = visibleIds.toMutableList()
-                            reordered.add(hover.coerceIn(0, reordered.size - 1), reordered.removeAt(current))
-                            cardLayout = reorderVisible(cardLayout, reordered)
-                            dragMoved = true
-                            // 排障场景：「拖到某个位置没插进去」——记录每次经过的位置。
+                            if (id == com.cardesk.launcher.core.CardLayout.CAR_STATUS) {
+                                carStatusBottomIndex = hover.coerceIn(0, visibleIds.size - 1)
+                                dragMoved = true
+                            } else {
+                                val reordered = visibleIds
+                                    .filterNot { it == com.cardesk.launcher.core.CardLayout.CAR_STATUS }
+                                    .toMutableList()
+                                val targetIdx = hover.coerceIn(0, reordered.size - 1)
+                                val curIdx = reordered.indexOf(id)
+                                if (curIdx >= 0 && targetIdx != curIdx) {
+                                    reordered.add(targetIdx, reordered.removeAt(curIdx))
+                                    cardLayout = reorderVisible(cardLayout, reordered)
+                                    dragMoved = true
+                                }
+                            }
                             Logx.d(
                                 LogTags.SCENE,
                                 "底部卡片拖拽经过位置",
@@ -3940,12 +4233,35 @@ class ScenePage(context: Context) : View(context) {
                     invalidate()
                     return true
                 }
+                if ((downCardId != null || downCarStatusCard) &&
+                    (kotlin.math.abs(x - downX) > 20f || kotlin.math.abs(y - downY) > 20f)
+                ) {
+                    main.removeCallbacks(longPressRunnable)
+                    downCardId = null
+                    downCarStatusCard = false
+                }
                 return true
             }
             MotionEvent.ACTION_UP -> {
                 main.removeCallbacks(longPressRunnable)
                 // 松手：按压缩放弹回去。
                 endPress()
+                if (dragCarStatus) {
+                    dragCarStatus = false
+                    val targetW = CAR_STATUS_CARD_W
+                    val targetH = if (carStatusCardCompact) cardH else CAR_STATUS_CARD_H
+                    val finalX = dragCarStatusX.coerceIn(left, (rightEnd - targetW).coerceAtLeast(left))
+                    val finalY = dragCarStatusY.coerceIn(84f, (cardTop - 8f - targetH).coerceAtLeast(84f))
+                    carStatusCardPosX = finalX
+                    carStatusCardPosY = finalY
+                    onCarStatusCardMoved?.invoke(finalX, finalY)
+                    animateDragLift(false)
+                    parent?.requestDisallowInterceptTouchEvent(false)
+                    Logx.event(LogTags.SCENE, "车况卡拖拽结束", "x" to finalX, "y" to finalY)
+                    invalidate()
+                    performClick()
+                    return true
+                }
                 val id = dragId
                 if (id != null) {
                     dragId = null
@@ -3954,8 +4270,12 @@ class ScenePage(context: Context) : View(context) {
                     parent?.requestDisallowInterceptTouchEvent(false)
                     // 只有真的挪动了才落盘
                     if (dragMoved) {
-                        layoutStore?.save(cardLayout)
-                        onCardLayoutChanged?.invoke(cardLayout)
+                        if (id == com.cardesk.launcher.core.CardLayout.CAR_STATUS) {
+                            onCarStatusRowChanged?.invoke(carStatusInBottomRow, carStatusBottomIndex)
+                        } else {
+                            layoutStore?.save(cardLayout)
+                            onCardLayoutChanged?.invoke(cardLayout)
+                        }
                     }
                     // 排障场景：「排序没保存」——松手时记录最终顺序与是否真的挪动过。
                     Logx.event(
@@ -3981,6 +4301,9 @@ class ScenePage(context: Context) : View(context) {
                 main.removeCallbacks(longPressRunnable)
                 endPress()
                 dragId = null
+                dragCarStatus = false
+                downCardId = null
+                downCarStatusCard = false
                 animateDragLift(false)
                 parent?.requestDisallowInterceptTouchEvent(false)
                 invalidate()
@@ -4913,7 +5236,7 @@ class ScenePage(context: Context) : View(context) {
         const val HINT_AUTO_HIDE_MS = 1600L
 
         /** 长按拖拽排序的触发时长（系统长按默认 500ms）。 */
-        const val LONG_PRESS_MS = 500L
+        const val LONG_PRESS_MS = 300L
 
         /** 快捷入口内容组的顶部偏移（第五十轮对齐设计板：标题 27 之后，图标底板从 42 开始）。 */
         const val QUICK_CONTENT_TOP = 42f

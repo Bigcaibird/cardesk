@@ -105,6 +105,7 @@ class BackgroundView(context: Context) : View(context) {
 
     var palette: Palette = Palettes.night
         set(value) {
+            if (field == value) return
             field = value
             invalidate()
             // 日夜换了 → 静态壁纸的配色也换了（day / night 两套色调）→ 亮度要重算。
@@ -351,9 +352,14 @@ class BackgroundView(context: Context) : View(context) {
      * | **首帧**（还没有玻璃底图） | 就地**同步** 3 遍盒式 | 异步的话首帧卡片会先以纯半透明出现、随后"跳"成模糊玻璃 = 一眼可见的闪；且 RS 上下文初始化 86ms 不能放主线程，这里只走盒式 |
      * | 之后（壁纸/日夜变化） | [Glass.blurAsync] 后台线程（RS 真高斯 → 回退盒式），算完回调 [onGlassChanged] | 不占主线程；RS 实测 1ms/张 |
      */
+    private var lastGlassKey: String = ""
+
     private fun refreshGlass() {
-        val glassStartMs = android.os.SystemClock.uptimeMillis()
+        val glass = com.cardesk.launcher.core.Glass
         val night = palette.night
+        val key = "$night:$wallpaper:$custom:${customBitmap?.let { System.identityHashCode(it) } ?: 0}:${palette.bgTop}"
+        if (glass.backdrop != null && key == lastGlassKey) return
+        val glassStartMs = android.os.SystemClock.uptimeMillis()
         val bw = (com.cardesk.launcher.core.Design.W * com.cardesk.launcher.core.Glass.SCALE).toInt()
         val bh = (com.cardesk.launcher.core.Design.H * com.cardesk.launcher.core.Glass.SCALE).toInt()
         if (bw <= 0 || bh <= 0) return
@@ -380,7 +386,6 @@ class BackgroundView(context: Context) : View(context) {
             return
         }
 
-        val glass = com.cardesk.launcher.core.Glass
         // 首帧：同步盒式（保证第一帧就是模糊玻璃，见上面 kDoc 的表）。
         if (glass.backdrop == null) {
             val blurStartMs = android.os.SystemClock.uptimeMillis()
@@ -388,6 +393,7 @@ class BackgroundView(context: Context) : View(context) {
             val blurMs = android.os.SystemClock.uptimeMillis() - blurStartMs
             if (blurred !== raw) raw.recycle()
             glass.publish(blurred)
+            lastGlassKey = key
             com.cardesk.launcher.core.log.Logx.i(
                 com.cardesk.launcher.core.log.LogTags.SCENE,
                 "玻璃底图耗时",
@@ -402,6 +408,7 @@ class BackgroundView(context: Context) : View(context) {
 
         // 之后：后台线程（raw 的所有权交给 Glass.blurAsync）。
         val queued = glass.blurAsync(context, raw, radius) {
+            lastGlassKey = key
             onGlassChanged?.invoke()
         }
         if (!queued) {
@@ -409,6 +416,7 @@ class BackgroundView(context: Context) : View(context) {
             val blurred = glass.boxBlur(raw, radius)
             if (blurred !== raw) raw.recycle()
             glass.publish(blurred)
+            lastGlassKey = key
             onGlassChanged?.invoke()
             com.cardesk.launcher.core.log.Logx.w(
                 com.cardesk.launcher.core.log.LogTags.SCENE, "玻璃模糊线程未启动，同步兜底",

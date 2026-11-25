@@ -144,6 +144,7 @@ class GlobalDockService : Service() {
      * 就产出一张 1920×112 的图（约 860KB），不回收会一直涨。
      */
     private var appliedCoverBitmap: Bitmap? = null
+    private var lookReceiver: android.content.BroadcastReceiver? = null
 
     /** 这次窗口用的是不是 2024（导航栏面板）。 */
     private var nativeInsets = false
@@ -237,6 +238,7 @@ class GlobalDockService : Service() {
      * 只剩 Dock 外观调试通道（圆角）。
      */
     private fun installDebugHooks() {
+        if (lookReceiver != null) return
         val debuggable = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
         if (!debuggable) return
 
@@ -253,6 +255,7 @@ class GlobalDockService : Service() {
         }
         runCatching {
             registerReceiver(look, android.content.IntentFilter("com.cardesk.launcher.DEBUG_DOCK_LOOK"))
+            lookReceiver = look
         }
     }
 
@@ -1023,8 +1026,10 @@ class GlobalDockService : Service() {
      * （`DockBarView` 自己不会去拉数据）。
      */
     private fun attachRefresh() {
-        runCatching { MusicController.get().addListener(mediaListener) }
-            .onFailure { Logx.w(LogTags.DOCK, "全局 Dock 订阅媒体状态失败", it) }
+        runCatching {
+            MusicController.get().retain(applicationContext, "GlobalDockService")
+            MusicController.get().addListener(mediaListener)
+        }.onFailure { Logx.w(LogTags.DOCK, "全局 Dock 订阅媒体状态失败", it) }
         runCatching { VehicleController.addObserver(hvacObserver) }
             .onFailure { Logx.w(LogTags.DOCK, "全局 Dock 订阅空调状态失败", it) }
         main.postDelayed(refreshTicker, TICK_MS)
@@ -1091,8 +1096,18 @@ class GlobalDockService : Service() {
         // 这里**无条件**恢复（不读开关）：窗口都没了，先把原车导航栏还回去；
         // 若开关还开着，START_STICKY 重建服务时 onCreate 会再写回全局 Dock 状态。
         restorePolicyAsync("服务销毁")
-        runCatching { MusicController.get().removeListener(mediaListener) }
-            .onFailure { Logx.w(LogTags.DOCK, "全局 Dock 取消媒体订阅失败", it) }
+        lookReceiver?.let { r ->
+            runCatching { unregisterReceiver(r) }
+            lookReceiver = null
+        }
+        appliedCoverBitmap?.let { bmp ->
+            if (!bmp.isRecycled) bmp.recycle()
+            appliedCoverBitmap = null
+        }
+        runCatching {
+            MusicController.get().removeListener(mediaListener)
+            MusicController.get().release("GlobalDockService")
+        }.onFailure { Logx.w(LogTags.DOCK, "全局 Dock 取消媒体订阅失败", it) }
         runCatching { VehicleController.removeObserver(hvacObserver) }
             .onFailure { Logx.w(LogTags.DOCK, "全局 Dock 取消空调订阅失败", it) }
         if (::windowManager.isInitialized) {
