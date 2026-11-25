@@ -1,16 +1,16 @@
 {
   "schema": 1,
   "channel": "preview",
-  "version": "1.0.1246-preview",
-  "versionCode": 4342,
-  "tag": "v1.0.1246-preview",
-  "name": "CarDesk 4342 / 1.0.1246-preview（开发版）",
-  "notes": "设置页「系统」分组新增「关于」页面，更新 PolyForm Noncommercial 1.0.0 开源许可与免责声明",
-  "publishedAt": "2026-11-25T08:53:01Z",
+  "version": "1.0.1247-preview",
+  "versionCode": 4343,
+  "tag": "v1.0.1247-preview",
+  "name": "CarDesk 4343 / 1.0.1247-preview（开发版）",
+  "notes": "空调弹窗「座舱出风示意」三个按钮（吹脸/吹脚/吹窗）支持点按切换对应出风方向",
+  "publishedAt": "2026-11-25T10:00:41Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4342-preview.apk",
-    "url": "cardesk/preview/CarDesk-platform-ecarx-cardesk-4342-preview.apk",
-    "size": 2882609,
-    "sha256": "b9f7468073ffe4ed100ac1e1939dfde28d01e767725be344c675222e28743b9b"
+    "name": "CarDesk-platform-ecarx-cardesk-4343-preview.apk",
+    "url": "cardesk/preview/CarDesk-platform-ecarx-cardesk-4343-preview.apk",
+    "size": 2883525,
+    "sha256": "64374d4ef2f4d04bc518bb8690f1d81f56657610786c78330bf4d3291ba95035"
   }
 }
