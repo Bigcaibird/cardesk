@@ -179,6 +179,7 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
      */
     var sourceLabel: String = "通用音乐"
         set(v) {
+            if (field == v) return
             field = v
             if (::sourceText.isInitialized) sourceText.text = v
             // 第138轮：文案还决定自绘符号的**品牌色**，图标要跟着换色。
@@ -214,15 +215,27 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
 
     /** 播放状态文案（缺省「已暂停」）。 */
     var musicState: String = "已暂停"
-        set(v) { field = v; if (::musicStateText.isInitialized) musicStateText.text = v }
+        set(v) {
+            if (field == v) return
+            field = v
+            if (::musicStateText.isInitialized) musicStateText.text = v
+        }
 
     /** 歌名。 */
     var trackTitle: String = ""
-        set(v) { field = v; if (::titleText.isInitialized) titleText.text = v }
+        set(v) {
+            if (field == v) return
+            field = v
+            if (::titleText.isInitialized) titleText.text = v
+        }
 
     /** 歌手。 */
     var trackArtist: String = ""
-        set(v) { field = v; if (::artistText.isInitialized) artistText.text = v }
+        set(v) {
+            if (field == v) return
+            field = v
+            if (::artistText.isInitialized) artistText.text = v
+        }
 
     /**
      * 专辑图（140×140 / 圆角 28 / centerCrop；画板实测见 [COMBINED_ART_TOP]）。
@@ -233,6 +246,7 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
      */
     var artwork: android.graphics.Bitmap? = null
         set(v) {
+            if (field === v) return
             field = v
             if (::albumArtView.isInitialized) albumArtView.bitmap = v
             // 画板只在**没有封面**时画占位块里的音符 —— 有图了就撤掉，
@@ -496,28 +510,38 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
     /** 播放进度 0..1（max=1000）。 */
     var progress: Float = 0f
         set(v) {
-            field = v.coerceIn(0f, 1f)
+            val clamped = v.coerceIn(0f, 1f)
+            if (kotlin.math.abs(field - clamped) < 0.0005f) return
+            field = clamped
             post { refreshProgress() }
         }
 
     /** 已播时长文案。 */
     var positionText: String = "0:00"
-        set(v) { field = v; if (::currentTimeText.isInitialized) currentTimeText.text = v }
+        set(v) {
+            if (field == v) return
+            field = v
+            if (::currentTimeText.isInitialized) currentTimeText.text = v
+        }
 
     /** 总时长文案。 */
     var durationText: String = "0:00"
-        set(v) { field = v; if (::totalTimeText.isInitialized) totalTimeText.text = v }
+        set(v) {
+            if (field == v) return
+            field = v
+            if (::totalTimeText.isInitialized) totalTimeText.text = v
+        }
 
     /** 播放键图标。 */
     var playing: Boolean = false
         set(v) {
-            val changed = field != v
+            if (field == v) return
             field = v
             if (::playGlyph.isInitialized) {
                 // ▶ / ❚❚ 换脸是「开始 / 暂停」**唯一**的信号 ——
                 // 补一个鼓一下，确认这一下真的生效了。
                 playGlyph.setPlaying(v)
-                if (changed) Motion.bump(playGlyph)
+                Motion.bump(playGlyph)
             }
         }
 
@@ -532,6 +556,7 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
      */
     var musicPackage: String? = null
         set(value) {
+            if (field == value) return
             field = value
             applyActionVisibility()
         }
@@ -546,11 +571,8 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
      */
     var actionProbe: MediaActions.Probe? = null
         set(value) {
+            if (field == value) return
             field = value
-            // 这里**不做**「值没变就跳过」的短路 ——
-            // 换了播放器但探测结果恰好相同时（两个 App 都发心形评分），
-            // 短路会让按钮显隐跟着上一个播放器走。
-            // `applyActionVisibility()` 只是设两个 visibility，代价可以忽略。
             applyActionVisibility()
         }
 
@@ -876,7 +898,7 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
     /** 第207轮：给单测开的观察口（见 [favoriteBtnForTest]）。 */
     fun playModeBtnForTest(): ImageView? = playModeBtn
 
-    private lateinit var progressFill: View
+    private lateinit var progressFill: NavProgressFillView
     private lateinit var progressHost: FrameLayout
     private lateinit var pipDivider: PipDividerView
     private lateinit var navSplit: View
@@ -1414,12 +1436,10 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
             View(context).apply { background = Skin.solid(cardPal.surfaceStrong, COMBINED_PROGRESS_H / 2f) },
             LayoutParams(LayoutParams.MATCH_PARENT, COMBINED_PROGRESS_H, Gravity.CENTER_VERTICAL),
         )
-        progressFill = View(context).apply {
-            background = Skin.solid(cardAccent, COMBINED_PROGRESS_H / 2f)
-        }
+        progressFill = NavProgressFillView(context, cardAccent, COMBINED_PROGRESS_H / 2f)
         progressHost.addView(
             progressFill,
-            LayoutParams(0, COMBINED_PROGRESS_H, Gravity.CENTER_VERTICAL),
+            LayoutParams(LayoutParams.MATCH_PARENT, COMBINED_PROGRESS_H, Gravity.CENTER_VERTICAL),
         )
         combinedCard.addView(
             progressHost,
@@ -1806,8 +1826,10 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         val caps = MediaActions.capsOf(pkg, actionProbe)
         // 第229轮：卡片窄的时候这两个按钮会和居中的控制键叠在一起，先让位。
         val roomy = combinedTier <= 0
-        favoriteBtn?.visibility = if (roomy && caps.favorite) View.VISIBLE else View.GONE
-        playModeBtn?.visibility = if (roomy && caps.playMode) View.VISIBLE else View.GONE
+        val favVis = if (roomy && caps.favorite) View.VISIBLE else View.GONE
+        val modeVis = if (roomy && caps.playMode) View.VISIBLE else View.GONE
+        favoriteBtn?.let { if (it.visibility != favVis) it.visibility = favVis }
+        playModeBtn?.let { if (it.visibility != modeVis) it.visibility = modeVis }
     }
 
     /**
@@ -2087,7 +2109,10 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         // 每次布局都重起一段动画 —— 永远停不下来。
         //
         // 所以：**布局里只定宽**，动画交给 [refreshProgress]（不在布局里调用）。
-        applyProgressWidth()
+        if (::progressHost.isInitialized && progressHost.width > 0) {
+            progressWidth = (progressHost.width * progress).coerceIn(0f, progressHost.width.toFloat())
+            applyProgressWidth(progressWidth)
+        }
     }
 
     /** 分隔条压在地图卡与右槽之间（:2277-2332）。 */
@@ -2147,47 +2172,25 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
      */
     private var progressWidth = 0f
 
-    /** 刷新进度条填充宽度（0..1）。 */
+    /** 刷新进度条填充宽度（0..1）。仅重绘 10px 进度条自身，不触发整页 requestLayout。 */
     fun refreshProgress() {
         if (!::progressFill.isInitialized) return
         val host = progressHost
         val usable = host.width
         if (usable <= 0) return
-        val target = (usable * progress).toInt().coerceAtLeast(0).toFloat()
+        val target = (usable * progress).coerceIn(0f, usable.toFloat())
         val from = progressWidth
-        if (from == target) return
-        // 用 `animateProgress`（按视图记）—— 同一个进度条上再起一段动画时，
-        // 上一个会被取消，两个动画抢同一个宽度会抖。
+        if (kotlin.math.abs(from - target) < 0.5f) return
         Motion.animateProgress(host, MotionSpec.VALUE_DURATION) { t ->
             progressWidth = from + (target - from) * t
-            applyProgressWidth(progressWidth, request = true)
+            applyProgressWidth(progressWidth)
         }
     }
 
-    /**
-     * 把进度条填充宽度设成 [px]。
-     *
-     * @param request true = 主动请求一次布局，让新的宽度**立刻**生效。
-     *
-     * ## 为什么这里要显式 `requestLayout()`
-     *
-     * 宽度是写在 `layoutParams` 上的，**布局时**才被读走。
-     * 而 `View.setLayoutParams` 传的是**同一个对象**时会直接返回
-     * （`if (params == mLayoutParams) return;`），不会触发重新布局。
-     *
-     * 所以只改 `lp.width` 是不够的 —— 得再叫一次 `requestLayout()`，
-     * 让下一轮布局把新宽度读走。
-     *
-     * 但**不能在布局过程中调**（见 [onLayout] 的说明），
-     * 所以布局里那次是 `request = false`：那一轮布局本来就会读走宽度。
-     */
-    private fun applyProgressWidth(px: Float = progressWidth, request: Boolean = false) {
-        val lp = progressFill.layoutParams ?: return
-        val w = px.toInt()
-        if (lp.width == w) return
-        lp.width = w
-        progressFill.layoutParams = lp
-        if (request) progressFill.requestLayout()
+    /** 直接更新自绘进度条宽度（仅 invalidate 进度条，零 requestLayout，消除 60fps 整页重排闪屏）。 */
+    private fun applyProgressWidth(px: Float = progressWidth) {
+        if (!::progressFill.isInitialized) return
+        progressFill.fillWidthPx = px
     }
 
 
@@ -2785,5 +2788,36 @@ private class NavPlayButtonView(context: Context, private val pal: Palette) : Vi
             glyph.close()
             canvas.drawPath(glyph, paint)
         }
+    }
+}
+
+/**
+ * 导航页音乐卡进度条填充视图（零 `requestLayout`）。
+ *
+ * 宽度保持 `MATCH_PARENT`，进度变化时只更新 [fillWidthPx] 并 `invalidate()` 这一条 10px 细带，
+ * 避免每帧修改 `LayoutParams.width` 触发 `NavPage.onLayout()` 导致组合卡背景重排与相邻画中画闪屏。
+ */
+private class NavProgressFillView(
+    context: Context,
+    fillColor: Int,
+    private val cornerRadius: Float,
+) : View(context) {
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = fillColor
+    }
+    var fillWidthPx: Float = 0f
+        set(value) {
+            val clamped = value.coerceAtLeast(0f)
+            if (kotlin.math.abs(field - clamped) < 0.25f) return
+            field = clamped
+            invalidate()
+        }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val w = fillWidthPx.coerceAtMost(width.toFloat())
+        if (w <= 0f || height <= 0) return
+        canvas.drawRoundRect(0f, 0f, w, height.toFloat(), cornerRadius, cornerRadius, paint)
     }
 }

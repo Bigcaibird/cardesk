@@ -45,7 +45,7 @@ object DriveMode {
     /** 读不到模式时的短标签（`currentShortLabel` 的兜底）。 */
     const val UNKNOWN_LABEL = "待命"
 
-    // ——`DriveModeController.SELECTION_*` ——
+    // —— `IDriveMode.DRIVE_MODE_SELECTION_*` 全量官方常量 ——
     const val SELECTION_NONE = 0
     const val SELECTION_ECO = 570491137
     const val SELECTION_COMFORT = 570491138
@@ -56,7 +56,16 @@ object DriveMode {
     const val SELECTION_HYBRID = 570491143
     const val SELECTION_POWER = 570491144
     const val SELECTION_SNOW = 570491145
+    const val SELECTION_MUD = 570491146
+    const val SELECTION_ROCK = 570491147
+    const val SELECTION_PHEV = 570491148
+    const val SELECTION_SAND = 570491149
+    const val SELECTION_AWD = 570491150
+    const val SELECTION_SAVE = 570491151
     const val SELECTION_ECO_PHEV = 570491152
+    const val SELECTION_EAWD = 570491154
+    const val SELECTION_OFFROAD = 570491155
+    const val SELECTION_ECO_PLUS = 570491156
     const val SELECTION_TRACK = 570491157
     const val SELECTION_CUSTOM = 570491200
 
@@ -109,26 +118,88 @@ object DriveMode {
     const val READ_UNKNOWN = 255
 
     /**
-     * 本车（753 / 领克 05）**实际支持**的驾驶模式。
+     * 默认兜底的驾驶模式清单（未连上车机或固件 `getSupportedFunctionValue`
+     * 返回为空时使用）。
      *
-     * 文档里 `IDriveMode` 有 22 个取值常量，但 jimu 文档站 `api-drive-mode`
-     * 与本地 `16-hud-dim-adas.md` §4.3 都注明：get 侧可用集合是 12 路
-     * `PaDm*` 信号过滤后的结果，不是无条件全部返回；实车只出现
-     * 经济 / 舒适 / 运动 三项（`570491137 / 570491138 / 570491139`）。
-     *
-     * 面板与设置页都只列这三项——不再把文档里存在、但本车没有的模式
-     * 摆出来让用户点了失败。
+     * 实车运行时优先动态读取 `ICarFunction.getSupportedFunctionValue(DM_FUNC_DRIVE_MODE_SELECT)`，
+     * 经 [resolveSupportedModes] 过滤、去重并按固定顺序排序后展示。
      */
     val SUPPORTED_LABELS = arrayOf("经济模式", "舒适模式", "运动模式")
 
     /** [SUPPORTED_LABELS] 对应的模式取值（`DRIVE_MODE_SELECTION_*`）。 */
     val SUPPORTED_VALUES = intArrayOf(SELECTION_ECO, SELECTION_COMFORT, SELECTION_SPORT)
 
-    /** 设置页里「目标驾驶模式」的完整名称（= 本车实际支持的三个）。 */
+    /** 默认兜底的 UI 完整名称（动态读取不到时回落）。 */
     val UI_MODE_LABELS = SUPPORTED_LABELS
 
-    /** 设置页里「目标驾驶模式」对应的功能号。 */
+    /** 默认兜底的 UI 模式功能号（动态读取不到时回落）。 */
     val UI_MODE_VALUES = SUPPORTED_VALUES
+
+    /**
+     * 规范展示顺序。
+     *
+     * 820A 固件的 `CarFunctionSupported.getSupportedFunctionValue(DM_FUNC_DRIVE_MODE_SELECT)`
+     * 内部用 `HashMap` 收集 12 路 `PaDm*` 信号再转数组，返回顺序不固定；
+     * 这里按驾驶习惯固定排序，避免每次重启或刷新后卡片/胶囊顺序跳动。
+     */
+    private val CANONICAL_ORDER = intArrayOf(
+        SELECTION_ECO,
+        SELECTION_ECO_PHEV,
+        SELECTION_ECO_PLUS,
+        SELECTION_COMFORT,
+        SELECTION_COMFORT_HEV,
+        SELECTION_SPORT,
+        SELECTION_TRACK,
+        SELECTION_CUSTOM,
+        SELECTION_PURE,
+        SELECTION_HYBRID,
+        SELECTION_PHEV,
+        SELECTION_POWER,
+        SELECTION_SAVE,
+        SELECTION_XC,
+        SELECTION_OFFROAD,
+        SELECTION_SNOW,
+        SELECTION_MUD,
+        SELECTION_SAND,
+        SELECTION_ROCK,
+        SELECTION_AWD,
+        SELECTION_EAWD,
+        SELECTION_HDC,
+    )
+
+    /**
+     * 将车机动态返回的模式清单规范化为稳定的 UI 展示列表。
+     *
+     * - 过滤无效值与读失败哨兵（253 / 254 / 255），并去重；
+     * - 若 [currentRaw] 是有效模式但不在 [raw] 中（例如当前处于低速/特殊模式），自动补入；
+     * - 按 [CANONICAL_ORDER] 排序（未列在表中的未知合法值维持原顺序排在末尾）；
+     * - 若动态列表为空（未连接 / 车机未就绪 / 固件未实现），回落到 [SUPPORTED_VALUES]（经济 / 舒适 / 运动）。
+     */
+    fun resolveSupportedModes(raw: IntArray?, currentRaw: Int? = null): IntArray {
+        val seen = LinkedHashSet<Int>()
+        if (raw != null) {
+            for (v in raw) {
+                val n = normalizeModeId(v)
+                if (n != SELECTION_NONE) seen.add(n)
+            }
+        }
+        if (seen.isEmpty()) {
+            SUPPORTED_VALUES.forEach { seen.add(it) }
+        }
+        if (currentRaw != null) {
+            val cur = normalizeModeId(currentRaw)
+            if (cur != SELECTION_NONE) seen.add(cur)
+        }
+        val orderMap = HashMap<Int, Int>(CANONICAL_ORDER.size * 2)
+        CANONICAL_ORDER.forEachIndexed { idx, id -> orderMap[id] = idx }
+        return seen.sortedWith(
+            compareBy<Int> { orderMap[it] ?: Int.MAX_VALUE },
+        ).toIntArray()
+    }
+
+    /** 设置页胶囊用的简短文案（不含「模式」后缀）。 */
+    fun chipLabel(value: Int): String =
+        shortLabelForValue(value) ?: fullLabel(value).removeSuffix("模式")
 
     /**
      * 把功能号归一到标准模式号。
@@ -142,8 +213,10 @@ object DriveMode {
         SELECTION_NONE -> SELECTION_NONE
         SELECTION_ECO, SELECTION_COMFORT, SELECTION_SPORT, SELECTION_XC, SELECTION_HDC,
         SELECTION_PURE, SELECTION_HYBRID, SELECTION_POWER, SELECTION_SNOW,
-        SELECTION_ECO_PHEV, SELECTION_TRACK, SELECTION_CUSTOM,
-        SELECTION_COMFORT_HEV -> value
+        SELECTION_MUD, SELECTION_ROCK, SELECTION_PHEV, SELECTION_SAND,
+        SELECTION_AWD, SELECTION_SAVE, SELECTION_ECO_PHEV, SELECTION_COMFORT_HEV,
+        SELECTION_EAWD, SELECTION_OFFROAD, SELECTION_ECO_PLUS,
+        SELECTION_TRACK, SELECTION_CUSTOM -> value
         else -> SELECTION_NONE
     }
 
@@ -192,7 +265,16 @@ object DriveMode {
             SELECTION_HYBRID -> "混动"
             SELECTION_POWER -> "动力"
             SELECTION_SNOW -> "雪地"
+            SELECTION_MUD -> "泥地"
+            SELECTION_ROCK -> "岩石"
+            SELECTION_PHEV -> "PHEV"
+            SELECTION_SAND -> "沙地"
+            SELECTION_AWD -> "四驱"
+            SELECTION_SAVE -> "保电"
             SELECTION_ECO_PHEV -> "经济PHEV"
+            SELECTION_EAWD -> "电四驱"
+            SELECTION_OFFROAD -> "越野"
+            SELECTION_ECO_PLUS -> "经济+"
             SELECTION_TRACK -> "赛道"
             SELECTION_CUSTOM -> "个性"
             // 570491153：厂商同一个值有两个名字（COMFORT_HEV / NORMAL）。
@@ -208,7 +290,7 @@ object DriveMode {
      */
     fun currentShortLabel(value: Int): String = shortLabelForValue(value) ?: UNKNOWN_LABEL
 
-    /** 设置页下拉里的完整名称。 */
+    /** 设置页下拉 / 驾驶模式面板里的完整名称。 */
     fun fullLabel(value: Int): String {
         val normalized = normalizeModeId(value)
         val idx = LABEL_CATALOG_VALUES.indexOf(normalized)
@@ -221,18 +303,20 @@ object DriveMode {
     }
 
     /**
-     * 全量显示名目录（文档 `IDriveMode` 的取值常量，含本车没有的档位）。
-     *
-     * 用途有两个：状态栏把**车端真的报回来**的值翻成中文（哪怕是本车没列出的档位），
-     * 以及设置页/面板以外的地方显示「当前模式」；面板可选项只取 [SUPPORTED_LABELS]。
+     * 全量显示名目录（覆盖 `IDriveMode` 全部 22 种官方模式常量）。
      */
     private val LABEL_CATALOG = arrayOf(
         "经济模式", "舒适模式", "运动模式", "赛道模式", "个性化模式", "电动模式",
         "混动模式", "动力模式", "越野模式", "陡坡缓降模式", "经济模式PHEV",
+        "标准模式", "雪地模式", "泥地模式", "岩石模式", "PHEV模式",
+        "沙地模式", "四驱模式", "保电模式", "电四驱模式", "越野模式", "经济+模式",
     )
     private val LABEL_CATALOG_VALUES = intArrayOf(
         SELECTION_ECO, SELECTION_COMFORT, SELECTION_SPORT, SELECTION_TRACK, SELECTION_CUSTOM,
         SELECTION_PURE, SELECTION_HYBRID, SELECTION_POWER, SELECTION_XC, SELECTION_HDC,
         SELECTION_ECO_PHEV,
+        SELECTION_COMFORT_HEV, SELECTION_SNOW, SELECTION_MUD, SELECTION_ROCK, SELECTION_PHEV,
+        SELECTION_SAND, SELECTION_AWD, SELECTION_SAVE, SELECTION_EAWD, SELECTION_OFFROAD,
+        SELECTION_ECO_PLUS,
     )
 }

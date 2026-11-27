@@ -46,6 +46,8 @@ class MockVehicleGateway(
     var simRangeKm: Int = 386
     var speedKmh: Int = 0
     var gear: String = "P"
+    var simAqiIndoor: Int = 45
+    var simPm25Indoor: Int = 18
     /**
      * 模拟胎压（**kPa**）。
      *
@@ -211,6 +213,14 @@ class MockVehicleGateway(
      */
     override fun isFunctionSupported(func: Int, zone: Int): Boolean? = when (func) {
         IssControl.FUNCTION_ENGINE_STOP_START -> true
+        else -> null
+    }
+
+    /** 模拟车辆支持的驾驶模式列表（默认经济 / 舒适 / 运动，测试可按需覆盖）。 */
+    var simSupportedDriveModes: IntArray = DriveMode.SUPPORTED_VALUES.copyOf()
+
+    override fun supportedFunctionValues(func: Int): IntArray? = when (func) {
+        DriveMode.FUNCTION_DRIVE_MODE_SELECT -> simSupportedDriveModes.copyOf()
         else -> null
     }
 

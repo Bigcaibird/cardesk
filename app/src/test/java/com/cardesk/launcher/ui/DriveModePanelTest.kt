@@ -103,4 +103,36 @@ class DriveModePanelTest {
         dialog.showResult(false, "切换失败：这台车机不允许桌面直接写驾驶模式")
         assertTrue(texts(dialog).any { it.contains("切换失败") })
     }
+
+    @Test
+    fun 动态传入六种模式时全部渲染且可点击切换() {
+        val context = RuntimeEnvironment.getApplication()
+        var picked = -1
+        val dynamicModes = intArrayOf(
+            DriveMode.SELECTION_CUSTOM,
+            DriveMode.SELECTION_XC,
+            DriveMode.SELECTION_SPORT,
+            DriveMode.SELECTION_ECO,
+            DriveMode.SELECTION_COMFORT,
+            DriveMode.SELECTION_TRACK,
+        )
+        val dialog = DriveModeDialog(
+            context,
+            Palettes.night,
+            DriveMode.SELECTION_XC,
+            onSwitch = { picked = it },
+            onMoreSettings = {},
+            supportedModes = dynamicModes,
+        )
+        layout(dialog)
+        val all = texts(dialog)
+        listOf("经济模式", "舒适模式", "运动模式", "赛道模式", "个性化模式", "越野模式").forEach { label ->
+            assertTrue("动态列表应渲染：$label", all.any { it == label })
+        }
+        assertTrue("应显示当前越野模式", all.any { it.startsWith("当前模式") && it.contains("越野模式") })
+        val customLabel = find(dialog, "个性化模式")
+        assertTrue("面板里应找到「个性化模式」卡片", customLabel != null)
+        (customLabel!!.parent as View).performClick()
+        assertEquals(DriveMode.SELECTION_CUSTOM, picked)
+    }
 }

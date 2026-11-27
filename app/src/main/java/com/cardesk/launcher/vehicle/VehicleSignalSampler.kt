@@ -5,6 +5,8 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.Process
 import android.os.SystemClock
+import com.cardesk.launcher.core.AutomationEngine
+import com.cardesk.launcher.core.Prefs
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 
@@ -89,6 +91,10 @@ object VehicleSignalSampler {
     private var thread: HandlerThread? = null
     private var handler: Handler? = null
 
+    /** 应用上下文（供后台线程评估熄火/锁车等自动任务，即使桌面不在前台也能触发）。 */
+    @Volatile
+    private var appContext: Context? = null
+
     /** 采样任务（后台线程上跑）。 */
     private var task: Runnable? = null
 
@@ -99,6 +105,7 @@ object VehicleSignalSampler {
      */
     @Synchronized
     fun start(context: Context) {
+        appContext = context.applicationContext
         if (handler != null) return
         val t = HandlerThread(THREAD_NAME, Process.THREAD_PRIORITY_BACKGROUND)
         t.start()
@@ -112,6 +119,22 @@ object VehicleSignalSampler {
             }
         }
         task = r
+        // 订阅电源/点火事件回调：熄火/离车锁车瞬间立刻触发自动任务评估，不等 1 秒轮询
+        AdaptapiSensors.onIgnitionChanged = { ignEvent ->
+            h.post {
+                appContext?.let { ctx ->
+                    runCatching {
+                        AutomationEngine.tick(
+                            ctx,
+                            Prefs(ctx),
+                            AutomationEngine.Snapshot(ignitionState = ignEvent),
+                        )
+                    }.onFailure { e ->
+                        Logx.w(LogTags.TASK, "电源状态回调自动任务评估异常", e)
+                    }
+                }
+            }
+        }
         // 立刻采一轮（不等 1 秒）—— 冷启动时桌面马上就有真实信号
         h.post(r)
         Logx.i(LogTags.SIGNAL, "车控信号采样已启动（后台线程）", "periodMs" to PERIOD_MS)
@@ -120,6 +143,7 @@ object VehicleSignalSampler {
     /** 停采样（幂等）。 */
     @Synchronized
     fun stop() {
+        AdaptapiSensors.onIgnitionChanged = null
         val h = handler
         val r = task
         if (h != null && r != null) h.removeCallbacks(r)
@@ -149,6 +173,32 @@ object VehicleSignalSampler {
         readCount++
         lastCostMs = cost
         if (cost > maxCostMs) maxCostMs = cost
+        // 后台持续评估自动任务（留空 isNight，由桌面 UI 刷新继续负责日夜模式条件），
+        // 确保高德导航等应用在前台时，熄火 / 离车锁车等状态切换依然能够及时触发。
+        appContext?.let { ctx ->
+            val prefs = Prefs(ctx)
+            // 仅在开启日夜切换时于后台线程刷新车机光感与日间模式缓存，
+            // 主线程 1Hz refresh() 只读快照，不再触发同步 Binder IPC 或固件异常堆栈刷屏。
+            if (prefs.dayNightEnabled) {
+                runCatching { com.cardesk.launcher.core.NightResolver.refreshBackgroundSignals() }
+            }
+            runCatching {
+                AutomationEngine.tick(
+                    ctx,
+                    prefs,
+                    AutomationEngine.Snapshot(
+                        tempC = info.ambientTemp.takeIf { !it.isNaN() },
+                        aqiIndoor = info.aqiIndoor,
+                        pm25Indoor = info.pm25Indoor,
+                        speedKmh = info.speedKmh,
+                        batteryVoltage = info.batteryVoltage,
+                        ignitionState = info.ignitionState,
+                    ),
+                )
+            }.onFailure { e ->
+                Logx.w(LogTags.TASK, "后台自动任务评估异常", e)
+            }
+        }
     }
 
     /** 最近一份快照（可能为 null = 还没采到）。 */

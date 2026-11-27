@@ -107,6 +107,15 @@ object AdaptapiSensors {
 
     // ------------------------------------------------------------常量
 
+    /** 车速（`ISensor.SENSOR_TYPE_CAR_SPEED`）；SDK 里有实现（km/h）。 */
+    const val SENSOR_CAR_SPEED = 1048832
+
+    /** 车内 PM2.5（`ISensor.SENSOR_TYPE_PM25_INDOOR`）；SDK 里有实现（0~1023）。 */
+    const val SENSOR_PM25_INDOOR = 1049344
+
+    /** 车内空气质量指数（`ISensor.SENSOR_TYPE_AQI_INDOOR`）；SDK 里有实现（0~1023）。 */
+    const val SENSOR_AQI_INDOOR = 1049856
+
     /** 油量（`ISensor.SENSOR_TYPE_FUEL_LEVEL`）；SDK 里有实现。 */
     const val SENSOR_FUEL_LEVEL = 1050112
 
@@ -128,6 +137,43 @@ object AdaptapiSensors {
 
     /** 续航（`ISensor.SENSOR_TYPE_ENDURANCE_MILEAGE`）；SDK 里有实现。 */
     const val SENSOR_ENDURANCE_KM = 1050624
+
+    /** 保养剩余里程（`PaDiDstToSrv` = 4206592，单位 km，值域 0..32000）；SDK 里有实现。 */
+    const val SENSOR_MAINTENANCE_KM = 4206592
+
+    /** 电源/点火状态（`ISensor.SENSOR_TYPE_IGNITION_STATE` = 2097408，事件型）；SDK 里有实现。 */
+    const val SENSOR_IGNITION_STATE = 2097408
+
+    /** 机油液位状态（`ISensor.SENSOR_TYPE_ENGINE_OIL_LEVEL` = 2098176，事件型）；SDK 里有实现。 */
+    const val SENSOR_OIL_LEVEL = 2098176
+
+    /** 制动液位状态（`ISensor.SENSOR_TYPE_BRAKE_FLUID_LEVEL` = 2098688，事件型）；SDK 里有实现。 */
+    const val SENSOR_BRAKE_FLUID = 2098688
+
+    /** 冷却液高温/液位告警（`ISensor.SENSOR_TYPE_WARN_ENGINE_COOLANT_TEMP_HIGH` = 3146752，事件型）；SDK 里有实现。 */
+    const val SENSOR_COOLANT_WARN = 3146752
+
+    /** 低油量告警（`ISensor.SENSOR_TYPE_WARN_FUEL_RED` = 3145984，事件型）；SDK 里有实现。 */
+    const val SENSOR_FUEL_LOW_WARN = 3145984
+
+    // ---- 820A SensorPaUtil 事件枚举值常量 ----
+    const val IGNITION_UNKNOWN = 2097409
+    const val IGNITION_ABANDON = 2097410
+    const val IGNITION_INACTIVE = 2097411
+    const val IGNITION_CONVENIENCE = 2097413
+    const val IGNITION_ACTIVE = 2097414
+    const val IGNITION_DRIVING = 2097415
+
+    const val OIL_LEVEL_OK = 2098177
+    const val OIL_LEVEL_LOW1 = 2098178
+    const val OIL_LEVEL_LOW2 = 2098179
+    const val OIL_LEVEL_HIGH = 2098180
+
+    const val BRAKE_FLUID_OK = 2098689
+    const val BRAKE_FLUID_LOW = 2098690
+
+    const val WARN_NORMAL = 3145728
+    const val WARN_ACTIVE = 3145729
 
     /**
      * 潜在续航（`IVirtualSensor.TYPE_POTENTIAL_ENDURANCE_MILEAGE`）。
@@ -237,7 +283,23 @@ object AdaptapiSensors {
      * 环温（1051392）和三个虚拟续航**不在这里** ——
      * SDK 里只有常量、没有取值实现，注册只会多一条失败日志。
      */
-    val LISTENED_SENSORS: IntArray = intArrayOf(SENSOR_FUEL_LEVEL, SENSOR_ODOMETER_KM) + RANGE_SENSORS
+    /** 事件型传感器 id 列表（走 `getSensorEvent(id)` 与 `onSensorEventChanged`）。 */
+    val EVENT_SENSORS: IntArray = intArrayOf(
+        SENSOR_IGNITION_STATE,
+        SENSOR_OIL_LEVEL,
+        SENSOR_BRAKE_FLUID,
+        SENSOR_COOLANT_WARN,
+        SENSOR_FUEL_LOW_WARN,
+    )
+
+    val LISTENED_SENSORS: IntArray = intArrayOf(
+        SENSOR_FUEL_LEVEL,
+        SENSOR_ODOMETER_KM,
+        SENSOR_CAR_SPEED,
+        SENSOR_PM25_INDOOR,
+        SENSOR_AQI_INDOOR,
+        SENSOR_MAINTENANCE_KM,
+    ) + RANGE_SENSORS + EVENT_SENSORS
 
     /** 反射用：`int` 的原始类型。 */
     private val INT_CLASS: Class<*> = Int::class.javaPrimitiveType ?: Int::class.java
@@ -264,6 +326,37 @@ object AdaptapiSensors {
 
     /** 油量百分比；-1 = 不可读。 */
     private val fuelPct = AtomicInteger(-1)
+
+    /** 车速（km/h）；-1 = 不可读。 */
+    private val speedKmh = AtomicInteger(-1)
+
+    /** 车内 PM2.5（0..1023）；-1 = 不可读。 */
+    private val pm25Indoor = AtomicInteger(-1)
+
+    /** 车内空气质量指数 AQI（0..1023）；-1 = 不可读。 */
+    private val aqiIndoor = AtomicInteger(-1)
+
+    /** 保养剩余里程（km）；-1 = 不可读。 */
+    private val maintenanceKm = AtomicInteger(-1)
+
+    /** 电源/点火状态事件值；-1 = 不可读。 */
+    private val ignitionEvent = AtomicInteger(-1)
+
+    /** 电源/点火状态实时变化回调（用于在熄火/锁车瞬间立刻触发自动任务，不等 1 秒轮询）。 */
+    @Volatile
+    var onIgnitionChanged: ((Int) -> Unit)? = null
+
+    /** 机油液位事件值；-1 = 不可读。 */
+    private val oilLevelEvent = AtomicInteger(-1)
+
+    /** 制动液位事件值；-1 = 不可读。 */
+    private val brakeFluidEvent = AtomicInteger(-1)
+
+    /** 冷却液告警事件值；-1 = 不可读。 */
+    private val coolantWarnEvent = AtomicInteger(-1)
+
+    /** 低油量告警事件值；-1 = 不可读。 */
+    private val fuelLowWarnEvent = AtomicInteger(-1)
 
     /**
      * 环温（℃）；[Int.MIN_VALUE] = 不可读。
@@ -358,6 +451,15 @@ object AdaptapiSensors {
         rangeKm.set(-1)
         odometerKm.set(-1)
         fuelPct.set(-1)
+        speedKmh.set(-1)
+        pm25Indoor.set(-1)
+        aqiIndoor.set(-1)
+        maintenanceKm.set(-1)
+        ignitionEvent.set(-1)
+        oilLevelEvent.set(-1)
+        brakeFluidEvent.set(-1)
+        coolantWarnEvent.set(-1)
+        fuelLowWarnEvent.set(-1)
         ambientC.set(Int.MIN_VALUE)
         lastFuelRaw = Float.NaN
         fuelCapacityCache = 0f
@@ -396,8 +498,17 @@ object AdaptapiSensors {
                     val v = args?.getOrNull(1) as? Float ?: Float.NaN
                     dispatch(id, v)
                 }
-                "onSensorEventChanged", "onSensorSupportChanged" -> {
-                    // 支持状态变了 / 事件变了 → 重新拉一次最新值
+                "onSensorEventChanged" -> {
+                    val id = args?.getOrNull(0) as? Int ?: return@newProxyInstance null
+                    val ev = args.getOrNull(1) as? Int
+                    if (ev != null) {
+                        dispatchEvent(id, ev)
+                    } else {
+                        probeOne(id)
+                    }
+                }
+                "onSensorSupportChanged" -> {
+                    // 支持状态变了 → 重新拉一次最新值/事件
                     val id = args?.getOrNull(0) as? Int ?: return@newProxyInstance null
                     probeOne(id)
                 }
@@ -499,6 +610,7 @@ object AdaptapiSensors {
         // 开机那一刻很可能还没有里程值（读到的是厂商的 0.0 占位）。
         // 只探一次就永远停在「读不到」。
         probeOdometer(reason)
+        probeExtraSensors()
         if (got || rangeKm.get() > 0) {
             // 已经有续航了 → 停掉快速重试，转成慢速复查
             main.removeCallbacks(rangeRetry)
@@ -526,6 +638,24 @@ object AdaptapiSensors {
         }?.invoke(s, id) as? Float
     }.getOrNull()
 
+    /** 读一个事件型传感器的当前事件值（读不到返回 null）。 */
+    private fun readEvent(s: Any, id: Int): Int? = runCatching {
+        s.javaClass.methods.firstOrNull {
+            it.name == "getSensorEvent" && it.parameterCount == 1
+        }?.invoke(s, id) as? Int
+    }.getOrNull()
+
+    /** 随慢速探针同步刷新保养里程与事件型传感器（防止开机漏推送）。 */
+    private fun probeExtraSensors() {
+        val s = sensor ?: return
+        readLatest(s, SENSOR_MAINTENANCE_KM)?.let { dispatch(SENSOR_MAINTENANCE_KM, it) }
+        readLatest(s, SENSOR_PM25_INDOOR)?.let { dispatch(SENSOR_PM25_INDOOR, it) }
+        readLatest(s, SENSOR_AQI_INDOOR)?.let { dispatch(SENSOR_AQI_INDOOR, it) }
+        for (id in EVENT_SENSORS) {
+            readEvent(s, id)?.let { dispatchEvent(id, it) }
+        }
+    }
+
     /**
      * 传感器支持状态。
      *
@@ -541,12 +671,42 @@ object AdaptapiSensors {
 
     private fun probeOne(id: Int) {
         val s = sensor ?: return
+        if (EVENT_SENSORS.contains(id)) {
+            val ev = readEvent(s, id) ?: return
+            Logx.d(LogTags.SIGNAL, "读取传感器事件", "id" to id, "name" to sensorName(id), "event" to ev)
+            dispatchEvent(id, ev)
+            return
+        }
         val v = readLatest(s, id) ?: return
         Logx.d(LogTags.SIGNAL, "读取传感器最新值", "id" to id, "name" to sensorName(id), "raw" to v)
         dispatch(id, v)
     }
 
     // ------------------------------------------------------------ 取值分发
+
+    private fun dispatchEvent(id: Int, event: Int) {
+        if (event < 0) return
+        when (id) {
+            SENSOR_IGNITION_STATE -> if (event != IGNITION_UNKNOWN) {
+                val prev = ignitionEvent.getAndSet(event)
+                if (prev != event) {
+                    Logx.i(
+                        LogTags.SIGNAL,
+                        "电源状态变化",
+                        "from" to ignitionLabel(prev.takeIf { it > 0 }),
+                        "to" to ignitionLabel(event),
+                        "prevRaw" to prev,
+                        "raw" to event,
+                    )
+                    runCatching { onIgnitionChanged?.invoke(event) }
+                }
+            }
+            SENSOR_OIL_LEVEL -> oilLevelEvent.set(event)
+            SENSOR_BRAKE_FLUID -> brakeFluidEvent.set(event)
+            SENSOR_COOLANT_WARN -> coolantWarnEvent.set(event)
+            SENSOR_FUEL_LOW_WARN -> fuelLowWarnEvent.set(event)
+        }
+    }
 
     private fun dispatch(id: Int, raw: Float) {
         if (raw.isNaN() || raw == Float.MIN_VALUE) return
@@ -568,6 +728,10 @@ object AdaptapiSensors {
             // 留着分支只会把「没实现」当成「环温变了」发出去 —— 见 [SENSOR_TEMP_AMBIENT]。
             SENSOR_ENDURANCE_KM -> publishRangeKm("sensor.$id", raw)
             SENSOR_ODOMETER_KM -> publishOdometerKm("sensor.$id", raw)
+            SENSOR_CAR_SPEED -> if (raw >= 0f) speedKmh.set(Math.round(raw))
+            SENSOR_PM25_INDOOR -> if (raw >= 0f) pm25Indoor.set(Math.round(raw))
+            SENSOR_AQI_INDOOR -> if (raw >= 0f) aqiIndoor.set(Math.round(raw))
+            SENSOR_MAINTENANCE_KM -> if (raw > 0f && raw <= 32000f) maintenanceKm.set(Math.round(raw))
         }
     }
 
@@ -813,6 +977,68 @@ object AdaptapiSensors {
     /** 油量百分比；-1 = 不可读。 */
     fun fuelPercent(): Int = fuelPct.get()
 
+    /** 车速（km/h）；-1 = 不可读。 */
+    fun carSpeedKmh(): Int = speedKmh.get()
+
+    /** 车内 PM2.5（0..1023）；-1 = 不可读。 */
+    fun pm25Indoor(): Int = pm25Indoor.get()
+
+    /** 车内空气质量指数（0..1023）；-1 = 不可读。 */
+    fun aqiIndoor(): Int = aqiIndoor.get()
+
+    /** 保养剩余里程（km）；-1 = 不可读。 */
+    fun maintenanceKm(): Int = maintenanceKm.get()
+
+    /** 电源/点火状态事件值；-1 = 不可读。 */
+    fun ignitionEvent(): Int = ignitionEvent.get()
+
+    /** 机油液位事件值；-1 = 不可读。 */
+    fun oilLevelEvent(): Int = oilLevelEvent.get()
+
+    /** 制动液位事件值；-1 = 不可读。 */
+    fun brakeFluidEvent(): Int = brakeFluidEvent.get()
+
+    /** 冷却液告警事件值；-1 = 不可读。 */
+    fun coolantWarnEvent(): Int = coolantWarnEvent.get()
+
+    /** 低油量告警事件值；-1 = 不可读。 */
+    fun fuelLowWarnEvent(): Int = fuelLowWarnEvent.get()
+
+    fun ignitionLabel(event: Int?): String = when (event) {
+        IGNITION_DRIVING -> "行驶中"
+        IGNITION_ACTIVE -> "已通电"
+        IGNITION_CONVENIENCE -> "便捷模式"
+        IGNITION_INACTIVE -> "已熄火"
+        IGNITION_ABANDON -> "离车"
+        else -> "--"
+    }
+
+    fun oilLevelLabel(event: Int?): String = when (event) {
+        OIL_LEVEL_OK -> "正常"
+        OIL_LEVEL_LOW1 -> "偏低"
+        OIL_LEVEL_LOW2 -> "过低"
+        OIL_LEVEL_HIGH -> "偏高"
+        else -> "--"
+    }
+
+    fun brakeFluidLabel(event: Int?): String = when (event) {
+        BRAKE_FLUID_OK -> "正常"
+        BRAKE_FLUID_LOW -> "液位偏低"
+        else -> "--"
+    }
+
+    fun coolantWarnLabel(event: Int?): String = when (event) {
+        WARN_NORMAL -> "正常"
+        WARN_ACTIVE -> "温度/液位告警"
+        else -> "--"
+    }
+
+    fun fuelLowWarnLabel(event: Int?): String = when (event) {
+        WARN_NORMAL -> "正常"
+        WARN_ACTIVE -> "油量偏低"
+        else -> "--"
+    }
+
     /**
      * 油箱容量**原始值**（第136轮新增）；`0` = 读不到。
      *
@@ -852,9 +1078,18 @@ object AdaptapiSensors {
 
     /** 传感器 id → 名字（日志用）。 */
     private fun sensorName(id: Int): String = when (id) {
+        SENSOR_CAR_SPEED -> "车速km/h"
+        SENSOR_PM25_INDOOR -> "车内PM2.5"
+        SENSOR_AQI_INDOOR -> "车内AQI"
         SENSOR_FUEL_LEVEL -> "油量"
         SENSOR_ODOMETER_KM -> "总里程km"
         SENSOR_ENDURANCE_KM -> "续航km"
+        SENSOR_MAINTENANCE_KM -> "保养里程km"
+        SENSOR_IGNITION_STATE -> "电源状态"
+        SENSOR_OIL_LEVEL -> "机油液位"
+        SENSOR_BRAKE_FLUID -> "制动液位"
+        SENSOR_COOLANT_WARN -> "冷却液告警"
+        SENSOR_FUEL_LOW_WARN -> "低油量告警"
         SENSOR_POTENTIAL_ENDURANCE -> "潜在续航"
         SENSOR_DISCHARGE_ENDURANCE -> "放电续航"
         SENSOR_CHARGE_ENDURANCE -> "充电续航"

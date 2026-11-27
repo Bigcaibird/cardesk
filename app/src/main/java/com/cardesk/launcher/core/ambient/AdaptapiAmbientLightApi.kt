@@ -305,10 +305,14 @@ class AdaptapiAmbientLightApi(
             maxDeltaE,
         )
         deltaELimitedCount++
-        Logx.d(
-            LogTags.AMBIENT, "氛围灯颜色被 ΔE00 限速",
+        Logx.dThrottled(
+            LogTags.AMBIENT,
+            "ambient-deltae-limit",
+            5000L,
+            "氛围灯颜色被 ΔE00 限速",
             "rawDeltaE" to de, "max" to maxDeltaE,
             "from" to color.toHex(), "to" to prev.toHex(),
+            "count" to deltaELimitedCount,
         )
         return AmbientColor(rgb.first, rgb.second, rgb.third, color.brightness)
     }

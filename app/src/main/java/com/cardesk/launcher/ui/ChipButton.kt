@@ -40,10 +40,19 @@ class ChipButton(context: Context, private val palette: Palette, textPx: Float =
      * 不画就不会多出三根无意义的点。
      */
     var showLevel: Boolean = false
-        set(value) { field = value; invalidate() }
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
 
     var level: Int = 0
-        set(value) { field = value.coerceIn(0, LEVEL_MAX); invalidate() }
+        set(value) {
+            val clamped = value.coerceIn(0, LEVEL_MAX)
+            if (field == clamped) return
+            field = clamped
+            invalidate()
+        }
 
     private val levelPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
 

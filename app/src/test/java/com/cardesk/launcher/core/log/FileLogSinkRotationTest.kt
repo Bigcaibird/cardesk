@@ -89,11 +89,14 @@ class FileLogSinkRotationTest {
 
         repeat(600) { sink.write(LogLevel.DEBUG, "CarDesk/Test", "y".repeat(1000), null) }
         waitForDrain(sink)
-        val before = dir.listFiles()?.maxByOrNull { it.lastModified() }?.length() ?: 0L
+        // JDK File.lastModified() 在秒级精度下同一秒轮换出的 -1/-2 两个文件 mtime 相同，
+        // 仅按 lastModified 取最大值会随机命中已写满的旧文件；加按文件名次级排序锁定最新序号文件。
+        val latest = { dir.listFiles()?.maxWithOrNull(compareBy<File> { it.lastModified() }.thenBy { it.name }) }
+        val before = latest()?.length() ?: 0L
 
         repeat(5) { sink.write(LogLevel.DEBUG, "CarDesk/Test", "z".repeat(1000), null) }
         waitForDrain(sink)
-        val after = dir.listFiles()?.maxByOrNull { it.lastModified() }?.length() ?: 0L
+        val after = latest()?.length() ?: 0L
 
         assertTrue(
             "轮换后最新文件应该继续增长（之前 $before，之后 $after）",

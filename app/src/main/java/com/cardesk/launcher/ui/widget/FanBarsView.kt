@@ -24,6 +24,7 @@ class FanBarsView(context: Context) : View(context) {
         true, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     )
         set(value) {
+            if (field == value) return
             field = value
             invalidate()
         }
@@ -38,7 +39,11 @@ class FanBarsView(context: Context) : View(context) {
         }
 
     var auto: Boolean = false
-        set(value) { field = value; invalidate() }
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
 
     var onLevel: ((Int) -> Unit)? = null
 

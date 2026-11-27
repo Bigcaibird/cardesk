@@ -249,4 +249,38 @@ class WallpaperContrastTest {
             WallpaperContrast.luma(ink.text) <= WallpaperContrast.luma(WallpaperContrast.ON_LIGHT.text),
         )
     }
+
+    @Test
+    fun 暗色视频带高光时次级歌词绝不反黑且跨帧稳定() {
+        // 实车诊断包实测循环两帧：center=31/bright=163 与 center=36/bright=181
+        val frameA = WallpaperSampler.Tone(
+            average = 0xFF1F1F1F.toInt(), // luma 31
+            dark = 0xFF101010.toInt(),
+            bright = 0xFFA3A3A3.toInt(), // luma 163
+        )
+        val frameB = WallpaperSampler.Tone(
+            average = 0xFF242424.toInt(), // luma 36
+            dark = 0xFF121212.toInt(),
+            bright = 0xFFB5B5B5.toInt(), // luma 181
+        )
+        val inkA = WallpaperContrast.inkForTone(frameA, themeNight = true, prevUseDarkInk = true)
+        val inkB = WallpaperContrast.inkForTone(frameB, themeNight = true, prevUseDarkInk = true)
+
+        // 次级歌词（soft）不能被亮端 163/181 反向混成黑灰，应保持浅色且两帧完全一致
+        assertTrue("soft 不应反黑：luma=${WallpaperContrast.luma(inkA.soft)}", WallpaperContrast.luma(inkA.soft) >= 140)
+        assertEquals("相邻循环帧的浮层墨色应完全稳定不闪烁", inkA, inkB)
+    }
+
+    @Test
+    fun 视频壁纸亮度在迟滞带内不反复切换极性() {
+        val midTone = WallpaperSampler.Tone(
+            average = 0xFF848484.toInt(), // luma 132，处于 [110, 145] 迟滞带内
+            dark = 0xFF505050.toInt(),
+            bright = 0xFFB0B0B0.toInt(),
+        )
+        val stayedDark = WallpaperContrast.inkForTone(midTone, themeNight = true, prevUseDarkInk = true)
+        val stayedLight = WallpaperContrast.inkForTone(midTone, themeNight = false, prevUseDarkInk = false)
+        assertEquals(WallpaperContrast.ON_DARK.surface, stayedDark.surface)
+        assertEquals(WallpaperContrast.ON_LIGHT.surface, stayedLight.surface)
+    }
 }

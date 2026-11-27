@@ -57,28 +57,80 @@ object NightResolver {
         return DayNight.minuteOfDay(cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE))
     }
 
+    /** 后台采样缓存的车机日间模式原始功能值（避免主线程 1Hz 同步 Binder 读）。 */
+    @Volatile
+    private var cachedCarDayModeRaw: Int? = null
+
+    /** 后台采样器是否已采过至少一轮日夜信号。 */
+    @Volatile
+    private var backgroundSampled: Boolean = false
+
+    /**
+     * 在后台线程刷新车机光感与日间模式功能值缓存（由 [com.cardesk.launcher.vehicle.VehicleSignalSampler] 调用）。
+     *
+     * 主线程 [resolve] 只读 `@Volatile` 缓存，彻底避免 1Hz 刷新循环里发生同步 Binder IPC
+     * 或固件异常堆栈打印导致的 `slow_ui_thread`。
+     */
+    fun refreshBackgroundSignals() {
+        com.cardesk.launcher.vehicle.AdaptapiDayNight.pollNightUiIfNeeded()
+        cachedCarDayModeRaw = try {
+            com.cardesk.launcher.vehicle.VehicleController.gateway.readValue(
+                DayNightSource.FUNCTION_DAYMODE_SETTING,
+                com.cardesk.launcher.vehicle.HvacIds.ZONE_GLOBAL,
+            )
+        } catch (_: Throwable) {
+            null
+        }
+        backgroundSampled = true
+    }
+
+    /** 清空后台缓存（仅供单测）。 */
+    fun resetCacheForTest() {
+        cachedCarDayModeRaw = null
+        backgroundSampled = false
+    }
+
     /**
      * 当前是夜间吗 —— 桌面与投射服务共用的那一份判定。
      *
      * @param prefs 用户的日夜模式设置（总开关 / 模式 / 时段表）。
      * @param context 读系统 UI 夜间态要 Context；传 `null` 就跳过这一路。
      */
-    fun resolve(prefs: Prefs, context: Context?): Boolean =
-        resolve(prefs, context, minuteOfDay())
+    fun resolve(prefs: Prefs, context: Context?): Boolean {
+        if (!prefs.dayNightEnabled) return prefs.lastAppliedNight() ?: true
+        val mode = DayNight.normalizeMode(prefs.dayNightMode)
+        if (mode == DayNight.MODE_FOLLOW_AMAP) {
+            amapNightUi?.let { return it }
+        }
+        return resolve(prefs, context, minuteOfDay())
+    }
 
     /** [resolve] 的重载：分钟数由调用方给（便于测试）。 */
     fun resolve(prefs: Prefs, context: Context?, minuteOfDay: Int): Boolean {
-        val lightNight = com.cardesk.launcher.vehicle.AdaptapiDayNight.nightUi()
+        // 快路径 1：未开启日夜自动切换，直接返回上次应用值，零 Binder / 零 SDK 调用
+        if (!prefs.dayNightEnabled) return prefs.lastAppliedNight() ?: true
+        val mode = DayNight.normalizeMode(prefs.dayNightMode)
+        // 快路径 2：跟随本地时间，纯内存分钟段计算，零 Binder / 零 SDK 调用
+        if (mode == DayNight.MODE_FOLLOW_TIME) {
+            return DayNight.isNight(minuteOfDay, prefs.dayStartMin, prefs.nightStartMin)
+        }
+        // 快路径 3：跟随高德且已有高德广播信号，直接命中
+        if (mode == DayNight.MODE_FOLLOW_AMAP) {
+            amapNightUi?.let { return it }
+        }
+        // 需要光感/车端/系统信号回落：优先读取后台缓存，不在主线程同步打 Binder
+        val lightNight = com.cardesk.launcher.vehicle.AdaptapiDayNight.cachedNightUi()
+        if (lightNight != null) return lightNight
         val sysNight = systemNightMode(context)
-        val carNight = carDayModeNight(sysNight)
+        val carNight = cachedCarDayModeNight(sysNight)
         return DayNight.resolveNightUi(
-            enabled = prefs.dayNightEnabled,
-            mode = prefs.dayNightMode,
+            enabled = true,
+            mode = mode,
             minuteOfDay = minuteOfDay,
             dayStartMin = prefs.dayStartMin,
             nightStartMin = prefs.nightStartMin,
             amapNightUi = amapNightUi,
-            sensorNightUi = lightNight,
+            sensorNightUi = null,
             carNightUi = carNight,
             systemNightUi = sysNight,
             lastAppliedNightUi = prefs.lastAppliedNight(),
@@ -88,23 +140,12 @@ object NightResolver {
     /**
      * 六个信号源 + 解析结果的**全量快照**（实车闪屏诊断，第三百零三轮）。
      *
-     * 用户反馈：装了 UI 重设计版后实车屏幕闪烁 —— 六源判据里只要有两个源
-     * 在临界值上反复交替（最典型的是**光感通道**在阈值附近抖、或高德信号
-     * 与车端 dayMode 打架），桌面就会每秒整桌重建（[resolveNight] →
-     * `applyTheme` → `build`），看起来就是闪屏。
-     *
-     * 快照把**每个源的原始值**都带出来，上车导出诊断包后一眼看出：
-     * - 哪个源是 null（读不到，走了回落）；
-     * - 哪个源在两次快照之间变了但解析结果没变（源抖动被优先级吸收）；
-     * - 解析结果本身在翻转（= 闪屏根因实锤）。
-     *
-     * 注意：会再读一遍车控通道（一次 binder 往返），**只给低频心跳用**
-     * （30 秒一条），不要放进每秒循环。
+     * 优先读后台缓存，不在主线程同步打车控 Binder。
      */
     fun snapshotSignals(prefs: Prefs, context: Context?): List<Pair<String, Any?>> {
-        val lightNight = com.cardesk.launcher.vehicle.AdaptapiDayNight.nightUi()
+        val lightNight = com.cardesk.launcher.vehicle.AdaptapiDayNight.cachedNightUi()
         val sysNight = systemNightMode(context)
-        val carNight = carDayModeNight(sysNight)
+        val carNight = cachedCarDayModeNight(sysNight)
         val minute = minuteOfDay()
         val result = DayNight.resolveNightUi(
             enabled = prefs.dayNightEnabled,
@@ -128,6 +169,13 @@ object NightResolver {
             "enabled" to prefs.dayNightEnabled,
             "mode" to prefs.dayNightMode,
         )
+    }
+
+    private fun cachedCarDayModeNight(systemNightUi: Boolean?): Boolean? {
+        if (backgroundSampled) {
+            return cachedCarDayModeRaw?.let { DayNightSource.nightFromCarValue(it, systemNightUi) }
+        }
+        return carDayModeNight(systemNightUi)
     }
 
     /**

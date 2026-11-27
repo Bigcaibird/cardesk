@@ -39,6 +39,7 @@ class MediaFloatCard(context: Context) : View(context) {
 
     var palette: Palette = Palettes.night
         set(value) {
+            if (field == value) return
             field = value
             invalidate()
         }
@@ -46,6 +47,7 @@ class MediaFloatCard(context: Context) : View(context) {
     /** 卡片顶上的小标题（默认「CarDesk 浮窗」）。 */
     var windowTitle: String = "CarDesk 浮窗"
         set(value) {
+            if (field == value) return
             field = value
             invalidate()
         }
@@ -53,6 +55,7 @@ class MediaFloatCard(context: Context) : View(context) {
     /** 曲名。 */
     var trackTitle: String = "暂无播放"
         set(value) {
+            if (field == value) return
             field = value
             invalidate()
         }
@@ -60,6 +63,7 @@ class MediaFloatCard(context: Context) : View(context) {
     /** 歌手（可为空）。 */
     var artist: String = ""
         set(value) {
+            if (field == value) return
             field = value
             invalidate()
         }
@@ -67,6 +71,7 @@ class MediaFloatCard(context: Context) : View(context) {
     /** 播放位置（毫秒）。 */
     var positionMs: Long = 0L
         set(value) {
+            if (field == value) return
             field = value
             invalidate()
         }
@@ -74,6 +79,7 @@ class MediaFloatCard(context: Context) : View(context) {
     /** 总时长（毫秒）；0 = 不知道总时长（进度条画成 0）。 */
     var durationMs: Long = 0L
         set(value) {
+            if (field == value) return
             field = value
             invalidate()
         }

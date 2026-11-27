@@ -83,6 +83,16 @@ class Prefs(context: Context) {
         set(v) = sp.edit().putInt("design_wallpaper_index", v).apply()
 
     /**
+     * 是否使用**默认日夜壁纸**（跟随日夜模式自动切换的流光渐层底）。
+     *
+     * 默认为 true：首次安装或未显式选择风景预设/自定义/视频壁纸时，呈现默认日夜壁纸；
+     * 在设置页「壁纸」中可直接预览并随时切回。
+     */
+    var wallpaperDefaultDayNight: Boolean
+        get() = sp.getBoolean("design_wallpaper_default_daynight", true)
+        set(v) = sp.edit().putBoolean("design_wallpaper_default_daynight", v).apply()
+
+    /**
      * 是否使用**自定义壁纸**（第 105 轮：用户导入的照片）。
      *
      * 持久化键 `design_wallpaper_custom`。为 true 时 [wallpaper] 仍保留，
@@ -250,6 +260,29 @@ class Prefs(context: Context) {
         get() = sp.getInt("scene_car_status_bottom_index", -1)
         set(v) = sp.edit().putInt("scene_car_status_bottom_index", v).apply()
 
+    /** 首页底排卡片的自由摆放坐标（id -> (x, y)）。 */
+    var cardFreePositions: Map<String, Pair<Float, Float>>
+        get() {
+            val raw = stringValue("scene_card_free_pos", "")
+            if (raw.isBlank()) return emptyMap()
+            val out = LinkedHashMap<String, Pair<Float, Float>>()
+            for (entry in raw.split(';')) {
+                val sep = entry.indexOf(':')
+                if (sep <= 0) continue
+                val id = entry.substring(0, sep)
+                val coords = entry.substring(sep + 1).split(',')
+                if (coords.size != 2) continue
+                val x = coords[0].toFloatOrNull() ?: continue
+                val y = coords[1].toFloatOrNull() ?: continue
+                out[id] = x to y
+            }
+            return out
+        }
+        set(v) {
+            val encoded = v.entries.joinToString(";") { (id, pos) -> "$id:${pos.first},${pos.second}" }
+            setStringValue("scene_card_free_pos", encoded)
+        }
+
     /**
      * 第二页（导航页）音乐卡的「**歌曲图片当卡片背景**」开关。
      *
@@ -286,6 +319,11 @@ class Prefs(context: Context) {
     var ambientEnabled: Boolean
         get() = sp.getBoolean("ambient_enabled", false)
         set(value) { sp.edit().putBoolean("ambient_enabled", value).apply() }
+
+    /** 仅夜间模式启用氛围灯（开关开启时，日间自动关闭氛围灯、夜间自动恢复）。 */
+    var ambientNightOnly: Boolean
+        get() = sp.getBoolean("ambient_night_only", false)
+        set(value) { sp.edit().putBoolean("ambient_night_only", value).apply() }
 
     /** 颜色模式（0=跟随低频 / 1=跟随频谱 / 2=固定色）。 */
     var ambientMode: Int
@@ -624,6 +662,11 @@ class Prefs(context: Context) {
     var dockQuickApps: List<String>
         get() = DockQuickApps.parse(stringValue(DockQuickApps.KEY, ""))
         set(value) = setStringValue(DockQuickApps.KEY, DockQuickApps.toCsv(value))
+
+    /** Dock 栏按钮与控件的自定义顺序（16 项 ID 逗号分隔）。 */
+    var dockOrder: List<String>
+        get() = DockOrder.parse(stringValue(DockOrder.KEY, ""))
+        set(value) = setStringValue(DockOrder.KEY, DockOrder.toCsv(value))
 
     /**
      * 应用重命名别名（第九十五轮 C5，`launcher_app_alias`）。
@@ -1110,26 +1153,6 @@ class Prefs(context: Context) {
     var voiceLongMode: Int
         get() = intValue("voice_long_mode", 0)
         set(v) = setIntValue("voice_long_mode", v)
-
-    /** 上一曲长按动作（`media_prev_long_action`）。 */
-    var mediaPrevLongAction: Int
-        get() = intValue("media_prev_long_action", ACTION_NONE)
-        set(v) = setIntValue("media_prev_long_action", v)
-
-    /** 上一曲长按模式（`media_prev_long_mode`）。 */
-    var mediaPrevLongMode: Int
-        get() = intValue("media_prev_long_mode", 0)
-        set(v) = setIntValue("media_prev_long_mode", v)
-
-    /** 下一曲长按动作（`media_next_long_action`）。 */
-    var mediaNextLongAction: Int
-        get() = intValue("media_next_long_action", ACTION_NONE)
-        set(v) = setIntValue("media_next_long_action", v)
-
-    /** 下一曲长按模式（`media_next_long_mode`）。 */
-    var mediaNextLongMode: Int
-        get() = intValue("media_next_long_mode", 0)
-        set(v) = setIntValue("media_next_long_mode", v)
 
     /** 启停控制（`start_switch_enabled`）。 */
     var startSwitchEnabled: Boolean

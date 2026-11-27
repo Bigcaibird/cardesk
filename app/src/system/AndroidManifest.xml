@@ -13,6 +13,10 @@
     <uses-permission android:name="android.permission.DELETE_PACKAGES" />
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+    <!-- 自动热点 / 热点开关：startSoftAp / startTethering 所需系统级权限 -->
+    <uses-permission android:name="android.permission.TETHER_PRIVILEGED" />
+    <uses-permission android:name="android.permission.NETWORK_SETTINGS" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
 
     <!--
       第五十五轮：无线 ADB 链路需要的两条权限（「领克 05 调试工具」用的也是这两条）。

@@ -2,8 +2,11 @@ package com.cardesk.launcher.ui.shell
 
 import android.animation.ValueAnimator
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.LinearGradient
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
@@ -14,6 +17,7 @@ import android.os.Looper
 import android.view.MotionEvent
 import android.view.View
 import com.cardesk.launcher.core.CardStyle
+import com.cardesk.launcher.core.DockOrder
 import com.cardesk.launcher.core.DockQuickApps
 import com.cardesk.launcher.core.Glass
 import com.cardesk.launcher.core.Prefs
@@ -111,6 +115,7 @@ class DockBarView(context: Context) : View(context) {
         set(v) { field = v; invalidate() }
 
     // —— 回调 ——
+    var onBack: (() -> Unit)? = null
     var onHome: (() -> Unit)? = null
     var onApps: (() -> Unit)? = null
     var onSplit: (() -> Unit)? = null
@@ -166,6 +171,7 @@ class DockBarView(context: Context) : View(context) {
 
     fun bind(state: HvacState?) {
         val prev = hvac
+        if (prev == state) return
         hvac = state
         // 数值变化的脉冲：只在**真的变了**的时候给信号。
         //
@@ -201,11 +207,24 @@ class DockBarView(context: Context) : View(context) {
         progress: Float = 0f,
         artwork: android.graphics.Bitmap? = null,
     ) {
+        val clamped = progress.coerceIn(0f, 1f)
+        if (mediaTitle == title &&
+            mediaArtist == artist &&
+            mediaPlaying == playing &&
+            kotlin.math.abs(mediaProgress - clamped) < 0.0005f &&
+            mediaArtwork === artwork
+        ) {
+            return
+        }
         mediaTitle = title
         mediaArtist = artist
         mediaPlaying = playing
-        mediaProgress = progress.coerceIn(0f, 1f)
-        mediaArtwork = artwork
+        mediaProgress = clamped
+        if (mediaArtwork !== artwork) {
+            mediaArtwork = artwork
+            coverArtShaderBmp = null
+            coverArtShader = null
+        }
         invalidate()
     }
 
@@ -257,6 +276,10 @@ class DockBarView(context: Context) : View(context) {
     }
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val text = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val coverBitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val coverBitmapMatrix = Matrix()
+    private var coverArtShaderBmp: Bitmap? = null
+    private var coverArtShader: BitmapShader? = null
 
     /**
      * 没有专辑图时的封面底色。
@@ -294,6 +317,36 @@ class DockBarView(context: Context) : View(context) {
      * 仍然是 36px 的圆角，跟用户设置里的默认值对不上。
      */
     private var cornerRadius: Float = 0f
+
+    /** 当前 Dock 按钮与控件的显示顺序（16 项，从 Prefs.dockOrder 加载）。 */
+    private var itemOrder: List<String> = runCatching { Prefs(context).dockOrder }.getOrDefault(DockOrder.DEFAULT)
+    private var lastSlots: List<DockOrder.Slot> = emptyList()
+
+    // —— 自定义拖动排序状态 ——
+    private var draggingId: String? = null
+    private var dragTouchOffsetX = 0f
+    private var dragPointerX = 0f
+    private var dragSlotWidth = 0f
+    private var dragChanged = false
+
+    private val reorderStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+        pathEffect = android.graphics.DashPathEffect(floatArrayOf(8f, 6f), 0f)
+    }
+    private val dragHighlightStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 3f
+    }
+
+    /** 当前按钮顺序（供单测与日志核对）。 */
+    fun currentOrder(): List<String> = itemOrder
+
+    /** 仅用于单测或外部同步设置顺序。 */
+    fun applyOrder(order: List<String>) {
+        itemOrder = DockOrder.normalize(order)
+        invalidate()
+    }
 
     private val bgPath = Path()
 
@@ -345,12 +398,14 @@ class DockBarView(context: Context) : View(context) {
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         cornerRadius = runCatching { Prefs(context).dockCornerRadius.toFloat() }.getOrDefault(0f)
+        itemOrder = runCatching { Prefs(context).dockOrder }.getOrDefault(DockOrder.DEFAULT)
         live.add(java.lang.ref.WeakReference(this))
         invalidate()
     }
 
     override fun onDetachedFromWindow() {
         live.removeAll { it.get() == null || it.get() === this }
+        draggingId = null
         // 视图离开窗口了，脉冲动画就别再空转着重绘。
         fanPulse.cancel()
         tempDriverPulse.cancel()
@@ -369,30 +424,63 @@ class DockBarView(context: Context) : View(context) {
         drawBackdrop(canvas, w, h)
         hit.clear()
 
-        // ——— 左段：首页（唯一带底板的导航键）+ 三枚裸图标键 ———
-        //
-        // 画板实测：首页块 72×72 @ (28,988..1060)，圆角 20；
-        // 网格 / 分屏 / 360 的中心 x = 148 / 220 / 316，图标 40，**无底板**。
-        drawHome(canvas, dx(HOME_LEFT), cy)
-        drawApps(canvas, dx(NAV_GRID_CX), cy)
-        drawSplit(canvas, dx(NAV_SPLIT_CX), cy)
-        draw360(canvas, dx(NAV_360_CX), cy)
+        val slots = DockOrder.layout(itemOrder, w)
+        lastSlots = slots
+        val activeDrag = if (reorderMode) draggingId else null
 
-        // ——— 媒体胶囊：x365..735、高 72（实测圆角 ≈28，不是全圆）———
-        drawMedia(canvas, dx(MEDIA_LEFT), cy - MEDIA_H / 2f, MEDIA_W, MEDIA_H)
+        // 先画其余控件（若正在拖动某个控件，先在其目标位画半透明占位框）
+        for (slot in slots) {
+            if (slot.id == activeDrag) {
+                fill.color = CardStyle.scaleAlpha(Skin.ACCENT, 0.14f)
+                val placeholder = RectF(slot.left, cy - 40f, slot.right, cy + 40f)
+                canvas.drawRoundRect(placeholder, 20f, 20f, fill)
+                reorderStroke.color = CardStyle.scaleAlpha(Skin.ACCENT, 0.7f)
+                canvas.drawRoundRect(placeholder, 20f, 20f, reorderStroke)
+                continue
+            }
+            drawDockItem(canvas, slot.id, slot.left, slot.width, cy)
+            if (reorderMode) {
+                reorderStroke.color = CardStyle.scaleAlpha(Skin.ACCENT, 0.55f)
+                canvas.drawRoundRect(RectF(slot.left - 2f, cy - 40f, slot.right + 2f, cy + 40f), 20f, 20f, reorderStroke)
+            }
+        }
 
-        // ——— 电源键：x≈805，只有一个描边图标，无底板 ———
-        drawPower(canvas, dx(POWER_CX), cy)
+        // 最后把正在拖动的控件浮在最上层，放大并描亮边框
+        if (activeDrag != null) {
+            val dragW = dragSlotWidth.takeIf { it > 0f } ?: DockOrder.widthOf(activeDrag)
+            val dragLeft = (dragPointerX - dragTouchOffsetX).coerceIn(8f, (w - dragW - 8f).coerceAtLeast(8f))
+            val dragCx = dragLeft + dragW / 2f
+            canvas.save()
+            canvas.scale(1.06f, 1.06f, dragCx, cy)
+            drawDockItem(canvas, activeDrag, dragLeft, dragW, cy)
+            dragHighlightStroke.color = Skin.ACCENT
+            canvas.drawRoundRect(RectF(dragLeft - 2f, cy - 40f, dragLeft + dragW + 2f, cy + 40f), 22f, 22f, dragHighlightStroke)
+            canvas.restore()
+        }
+    }
 
-        // ——— 主驾温区 → 风量 → 副驾温区 → A/C → AUTO ———
-        drawTempPill(canvas, dx(TEMP_DRIVER_LEFT), cy, TEMP_DRIVER_W, passenger = false)
-        drawFan(canvas, dx(FAN_LEFT), cy - FAN_SIZE / 2f, FAN_SIZE)
-        drawTempPill(canvas, dx(TEMP_PASS_LEFT), cy, TEMP_PASS_W, passenger = true)
-        drawClimateChip(canvas, dx(AC_LEFT), cy, AC_W, "A/C", active = hvac?.ac == true)
-        drawClimateChip(canvas, dx(AUTO_LEFT), cy, AUTO_W, "AUTO", active = hvac?.auto == true)
-
-        // ——— 右侧 5 枚功能键（严格按配置渲染：循环 / 后除霜 / 前除霜 / 快捷 1 / 快捷 2）———
-        drawRightKeys(canvas, cy)
+    /** 按控件 ID 在指定水平区域绘制对应按钮或控件。 */
+    private fun drawDockItem(canvas: Canvas, id: String, left: Float, w: Float, cy: Float) {
+        val cx = left + w / 2f
+        when (id) {
+            DockOrder.ITEM_BACK -> drawBack(canvas, cx, cy)
+            DockOrder.ITEM_HOME -> drawHome(canvas, left, cy)
+            DockOrder.ITEM_APPS -> drawApps(canvas, cx, cy)
+            DockOrder.ITEM_SPLIT -> drawSplit(canvas, cx, cy)
+            DockOrder.ITEM_360 -> draw360(canvas, cx, cy)
+            DockOrder.ITEM_MEDIA -> drawMedia(canvas, left, cy - MEDIA_H / 2f, w, MEDIA_H)
+            DockOrder.ITEM_POWER -> drawPower(canvas, cx, cy)
+            DockOrder.ITEM_TEMP_DRIVER -> drawTempPill(canvas, left, cy, w, passenger = false)
+            DockOrder.ITEM_FAN -> drawFan(canvas, left, cy - FAN_SIZE / 2f, w)
+            DockOrder.ITEM_TEMP_PASS -> drawTempPill(canvas, left, cy, w, passenger = true)
+            DockOrder.ITEM_AC -> drawClimateChip(canvas, left, cy, w, "A/C", active = hvac?.ac == true)
+            DockOrder.ITEM_AUTO -> drawClimateChip(canvas, left, cy, w, "AUTO", active = hvac?.auto == true)
+            DockOrder.ITEM_CIRC -> drawRightKey(canvas, cx, cy, "circ")
+            DockOrder.ITEM_DEFROST_R -> drawRightKey(canvas, cx, cy, "defrostR")
+            DockOrder.ITEM_DEFROST_F -> drawRightKey(canvas, cx, cy, "defrostF")
+            DockOrder.ITEM_QUICK0 -> drawRightKey(canvas, cx, cy, "quick0")
+            DockOrder.ITEM_QUICK1 -> drawRightKey(canvas, cx, cy, "quick1")
+        }
     }
 
     // ================================================================
@@ -434,8 +522,23 @@ class DockBarView(context: Context) : View(context) {
     }
 
     // ================================================================
-    // 左段：首页 / 网格 / 分屏 / 360
+    // 左段：返回 / 首页 / 网格 / 分屏 / 360
     // ================================================================
+
+    /** 返回键（最左侧：简洁向左折线箭头，与网格 / 分屏 / 360 同 72×72 命中区）。 */
+    private fun drawBack(canvas: Canvas, cx: Float, cy: Float) {
+        withPress(canvas, "back", cx, cy) {
+            stroke.color = Skin.TEXT_SOFT
+            stroke.strokeWidth = 3.6f
+            val p = Path().apply {
+                moveTo(cx + 8f, cy - 17f)
+                lineTo(cx - 9f, cy)
+                lineTo(cx + 8f, cy + 17f)
+            }
+            canvas.drawPath(p, stroke)
+        }
+        registerIconHit("back", cx, cy, NAV_TILE)
+    }
 
     /**
      * 首页键（画板：72×72 圆角 20，accent-soft 底 + accent 房子）
@@ -558,13 +661,22 @@ class DockBarView(context: Context) : View(context) {
         val coverTop = cy - COVER_SIZE / 2f
         val cover = RectF(left + COVER_PAD, coverTop, left + COVER_PAD + COVER_SIZE, coverTop + COVER_SIZE)
         val art = mediaArtwork
-        if (art != null) {
-            // 有专辑图 → 按裁剪成圆角矩形贴上去
-            val clipPath = Path().apply { addRoundRect(cover, COVER_RADIUS, COVER_RADIUS, Path.Direction.CW) }
-            canvas.save()
-            canvas.clipPath(clipPath)
-            canvas.drawBitmap(art, null, cover, Paint(Paint.FILTER_BITMAP_FLAG))
-            canvas.restore()
+        if (art != null && art.width > 0 && art.height > 0) {
+            // 有专辑图 → BitmapShader 单遍圆角绘制，避免 clipPath 模板裁剪闪屏
+            val shader = if (coverArtShaderBmp === art && coverArtShader != null) {
+                coverArtShader!!
+            } else {
+                BitmapShader(art, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).also {
+                    coverArtShaderBmp = art
+                    coverArtShader = it
+                }
+            }
+            coverBitmapMatrix.reset()
+            coverBitmapMatrix.setScale(cover.width() / art.width.toFloat(), cover.height() / art.height.toFloat())
+            coverBitmapMatrix.postTranslate(cover.left, cover.top)
+            shader.setLocalMatrix(coverBitmapMatrix)
+            coverBitmapPaint.shader = shader
+            canvas.drawRoundRect(cover, COVER_RADIUS, COVER_RADIUS, coverBitmapPaint)
         } else {
             // 设计稿：青绿渐变底 + 白色音符（渐变端点取自 ACCENT / ACCENT_LIGHT）
             fill.shader = coverShader()
@@ -1138,6 +1250,7 @@ class DockBarView(context: Context) : View(context) {
      * Dock 按键的可读名（真机 grep 时直接看中文，不用对照代码里的 key）。
      */
     private fun keyLabel(key: String): String = when (key) {
+        "back" -> "返回"
         "home" -> "首页"
         "apps" -> "应用"
         "split" -> "分屏"
@@ -1248,7 +1361,66 @@ class DockBarView(context: Context) : View(context) {
         invalidate()
     }
 
+    /** 编辑排序模式下的触摸处理：按住任意控件左右拖动实时换位，抬手持久化并同步全部 Dock 实例。 */
+    private fun handleReorderTouch(event: MotionEvent): Boolean {
+        val x = event.x
+        val w = width.toFloat().takeIf { it > 0f } ?: DESIGN_W
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                parent?.requestDisallowInterceptTouchEvent(true)
+                val slots = lastSlots.ifEmpty { DockOrder.layout(itemOrder, w) }
+                val target = slots.firstOrNull { x in (it.left - 6f)..(it.right + 6f) } ?: return true
+                draggingId = target.id
+                dragTouchOffsetX = x - target.left
+                dragPointerX = x
+                dragSlotWidth = target.width
+                dragChanged = false
+                Logx.event(LogTags.DOCK, "开始拖动 Dock 控件", "id" to target.id, "from" to itemOrder.indexOf(target.id))
+                invalidate()
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val id = draggingId ?: return true
+                dragPointerX = x
+                val dragW = dragSlotWidth.takeIf { it > 0f } ?: DockOrder.widthOf(id)
+                val dragLeft = (dragPointerX - dragTouchOffsetX).coerceIn(8f, (w - dragW - 8f).coerceAtLeast(8f))
+                val dragCenterX = dragLeft + dragW / 2f
+                val from = itemOrder.indexOf(id)
+                val to = DockOrder.targetIndexForCenter(itemOrder, id, dragCenterX, w)
+                if (from >= 0 && to >= 0 && to != from) {
+                    itemOrder = DockOrder.move(itemOrder, from, to)
+                    dragChanged = true
+                    Logx.d(LogTags.DOCK, "Dock 控件拖动换位", "id" to id, "from" to from, "to" to to)
+                }
+                invalidate()
+                return true
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                parent?.requestDisallowInterceptTouchEvent(false)
+                val id = draggingId
+                val changed = dragChanged
+                draggingId = null
+                dragChanged = false
+                if (changed) {
+                    runCatching { Prefs(context.applicationContext).dockOrder = itemOrder }
+                    Logx.event(
+                        LogTags.DOCK,
+                        "保存 Dock 自定义顺序",
+                        "id" to (id ?: ""),
+                        "order" to itemOrder.joinToString(","),
+                    )
+                    refreshOrderAll(context)
+                } else {
+                    invalidate()
+                }
+                return true
+            }
+        }
+        return true
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (reorderMode) return handleReorderTouch(event)
         val x = event.x
         val y = event.y
         when (event.actionMasked) {
@@ -1416,6 +1588,7 @@ class DockBarView(context: Context) : View(context) {
                         "appsOpen" to appsOpen,
                     )
                     when (key) {
+                        "back" -> onBack?.invoke()
                         "home" -> onHome?.invoke()
                         "apps" -> (onAppsDrawer ?: onApps)?.invoke()
                         "split" -> onSplit?.invoke()
@@ -1719,7 +1892,42 @@ class DockBarView(context: Context) : View(context) {
         private val live =
             java.util.concurrent.CopyOnWriteArrayList<java.lang.ref.WeakReference<DockBarView>>()
 
-        /** 设置页改完圆角后调用：重新读偏好 + 重绘所有实例。 */
+        /** 是否处于 Dock 拖动排序编辑态（桌面 Dock 与全局 Dock 共享）。 */
+        @Volatile
+        var reorderMode: Boolean = false
+            private set
+
+        /** 切换 Dock 拖动排序编辑态，并通知所有活着实例重绘。 */
+        fun setReorderMode(context: Context, enabled: Boolean) {
+            reorderMode = enabled
+            val order = runCatching { Prefs(context.applicationContext).dockOrder }.getOrDefault(DockOrder.DEFAULT)
+            for (ref in live) {
+                val v = ref.get() ?: continue
+                v.itemOrder = order
+                if (!enabled) v.draggingId = null
+                v.invalidate()
+            }
+            Logx.event(LogTags.DOCK, "Dock 排序编辑态切换", "enabled" to enabled)
+        }
+
+        /** 顺序变更后刷新全部活着的 DockBarView 实例（桌面 Dock + 全局 Dock）。 */
+        fun refreshOrderAll(context: Context) {
+            val order = runCatching { Prefs(context.applicationContext).dockOrder }.getOrDefault(DockOrder.DEFAULT)
+            for (ref in live) {
+                val v = ref.get() ?: continue
+                v.itemOrder = order
+                v.invalidate()
+            }
+        }
+
+        /** 恢复默认 Dock 顺序并落盘，同时刷新所有实例。 */
+        fun resetOrder(context: Context) {
+            runCatching { Prefs(context.applicationContext).dockOrder = DockOrder.DEFAULT }
+            Logx.event(LogTags.DOCK, "恢复默认 Dock 按钮顺序")
+            refreshOrderAll(context)
+        }
+
+        /** 设置页改完圆角后调用：重新读偏好 + 重绘所有实例（同时刷新槽位条与全局 Dock 宿主圆角）。 */
         fun refreshAll(context: Context) {
             val radius = runCatching {
                 Prefs(context.applicationContext).dockCornerRadius.toFloat()
@@ -1729,6 +1937,8 @@ class DockBarView(context: Context) : View(context) {
                 v.cornerRadius = radius
                 v.invalidate()
             }
+            NavSlotBarView.refreshAll(context)
+            com.cardesk.launcher.core.dock.GlobalDockService.refreshCornerRadius()
         }
 
     }

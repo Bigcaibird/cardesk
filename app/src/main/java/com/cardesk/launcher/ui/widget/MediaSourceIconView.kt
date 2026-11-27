@@ -2,10 +2,12 @@ package com.cardesk.launcher.ui.widget
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.graphics.Canvas
+import android.graphics.Matrix
 import android.graphics.Paint
-import android.graphics.Path
 import android.graphics.RectF
+import android.graphics.Shader
 import android.view.View
 import com.cardesk.launcher.core.media.MediaSourceIconKind
 import com.cardesk.launcher.core.media.MediaSources
@@ -69,13 +71,15 @@ class MediaSourceIconView(context: Context) : View(context) {
         set(v) {
             if (field === v) return
             field = v
+            shaderBitmap = null
+            bitmapShader = null
             invalidate()
         }
 
-    private val bitmapPaint = Paint(Paint.FILTER_BITMAP_FLAG)
-
-    private val clipPath = Path()
-
+    private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val shaderMatrix = Matrix()
+    private var shaderBitmap: Bitmap? = null
+    private var bitmapShader: BitmapShader? = null
     private val box = RectF()
 
     /** 图标种类（由 [sourceId] 决定，缓存一下省得每帧都去查表）。 */
@@ -98,16 +102,22 @@ class MediaSourceIconView(context: Context) : View(context) {
         val cx = w / 2f
         val cy = h / 2f
         val appIcon = icon
-        if (appIcon != null) {
-            // 圆角矩形裁剪（与首页音乐卡里的来源图标一个风格）。
+        if (appIcon != null && appIcon.width > 0 && appIcon.height > 0) {
             val r = minOf(w, h) * 0.22f
             box.set(0f, 0f, w, h)
-            clipPath.reset()
-            clipPath.addRoundRect(box, r, r, Path.Direction.CW)
-            canvas.save()
-            canvas.clipPath(clipPath)
-            canvas.drawBitmap(appIcon, null, box, bitmapPaint)
-            canvas.restore()
+            val shader = if (shaderBitmap === appIcon && bitmapShader != null) {
+                bitmapShader!!
+            } else {
+                BitmapShader(appIcon, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).also {
+                    shaderBitmap = appIcon
+                    bitmapShader = it
+                }
+            }
+            shaderMatrix.reset()
+            shaderMatrix.setScale(w / appIcon.width.toFloat(), h / appIcon.height.toFloat())
+            shader.setLocalMatrix(shaderMatrix)
+            bitmapPaint.shader = shader
+            canvas.drawRoundRect(box, r, r, bitmapPaint)
             return
         }
         // 没有真图标 → 自绘符号（蓝牙 / USB / 音符）。

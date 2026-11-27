@@ -79,4 +79,49 @@ class CustomWallpaperTest {
         CustomWallpaper.reset(ctx)
         assertTrue("删除后文件应消失", !CustomWallpaper.has(ctx))
     }
+
+    @Test
+    fun 日夜双槽静态壁纸按日夜模式自动切换并支持回退() {
+        val ctx = RuntimeEnvironment.getApplication()
+        CustomWallpaper.reset(ctx)
+
+        fun pngBytes(color: Int): ByteArray {
+            val bmp = Bitmap.createBitmap(400, 300, Bitmap.Config.ARGB_8888)
+            Canvas(bmp).drawColor(color)
+            return ByteArrayOutputStream().also {
+                bmp.compress(Bitmap.CompressFormat.PNG, 100, it)
+                bmp.recycle()
+            }.toByteArray()
+        }
+
+        val dayUri = Uri.parse("content://test/day.png")
+        val nightUri = Uri.parse("content://test/night.png")
+        shadowOf(ctx.contentResolver).registerInputStream(dayUri, ByteArrayInputStream(pngBytes(Color.rgb(240, 220, 180))))
+        shadowOf(ctx.contentResolver).registerInputStream(nightUri, ByteArrayInputStream(pngBytes(Color.rgb(20, 30, 60))))
+
+        assertTrue(CustomWallpaper.importFromUri(ctx, dayUri, night = false))
+        assertTrue(CustomWallpaper.importFromUri(ctx, nightUri, night = true))
+        assertTrue(CustomWallpaper.hasDay(ctx))
+        assertTrue(CustomWallpaper.hasNight(ctx))
+        assertTrue(CustomWallpaper.usesDedicatedNight(ctx, night = true))
+        assertTrue(!CustomWallpaper.usesDedicatedNight(ctx, night = false))
+
+        val dayBmp = CustomWallpaper.loadForMode(ctx, night = false)
+        val nightBmp = CustomWallpaper.loadForMode(ctx, night = true)
+        assertNotNull(dayBmp)
+        assertNotNull(nightBmp)
+        val dayPx = dayBmp!!.getPixel(960, 540)
+        val nightPx = nightBmp!!.getPixel(960, 540)
+        assertTrue("日间图应明显更亮", Color.red(dayPx) > Color.red(nightPx) + 100)
+
+        // 删除夜间图后，夜间应自动回退到日间图
+        CustomWallpaper.resetNight(ctx)
+        assertTrue(!CustomWallpaper.hasNight(ctx))
+        assertTrue(!CustomWallpaper.usesDedicatedNight(ctx, night = true))
+        val fallbackBmp = CustomWallpaper.loadForMode(ctx, night = true)
+        assertNotNull(fallbackBmp)
+        assertTrue("删夜间后应回退日间图", fallbackBmp === dayBmp)
+
+        CustomWallpaper.reset(ctx)
+    }
 }

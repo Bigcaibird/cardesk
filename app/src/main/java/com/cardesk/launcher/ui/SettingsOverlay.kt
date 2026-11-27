@@ -56,6 +56,7 @@ import com.cardesk.launcher.ui.widget.QrCodeView
 import com.cardesk.launcher.ui.widget.SpectrumView
 import com.cardesk.launcher.ui.widget.WallpaperThumbView
 import com.cardesk.launcher.vehicle.DriveMode
+import com.cardesk.launcher.vehicle.VehicleController
 import com.cardesk.launcher.vehicle.VinReader
 
 /**
@@ -89,7 +90,7 @@ import com.cardesk.launcher.vehicle.VinReader
  * | 画板 | 改了什么 |
  * |---|---|
  * | s01 启动与开机 | 删掉重复的「启动后」小标题（`bootCaption` 整块移除）与左栏底部的 VIN /「开源与声明」（画板没有；合规入口仍在「关于」页 `select("about")`）；「目标驾驶模式」三个 chips 改成**右对齐**并去掉「模式」后缀（`DriveMode.UI_MODE_LABELS.map { removeSuffix("模式") }`，落盘仍用 `UI_MODE_VALUES`，语义不变）；补回画板底部的说明「关闭「桌面开机启动」后…」 |
- * | s02 按键增强 | 行高按画板收紧（开关行 [KEY_SWITCH_ROW_H] 96 / 按键行 [KEY_ROW_H] 104 / 驾驶模式块 [KEY_MODE_ROW_H] 110）；第三百一十五轮起底部改为「按键通路」自检区（最近按键 + 单击/长按/媒体长按自测），不再有第二个编辑器入口 |
+ * | s02 按键增强 | 行高按画板收紧（开关行 [KEY_SWITCH_ROW_H] 96 / 按键行 [KEY_ROW_H] 104 / 驾驶模式块 [KEY_MODE_ROW_H] 110）；底部为「按键通路」自检区（最近按键 + 单击/长按自测），已移除媒体键增强与重复编辑器入口 |
  * | s05 媒体源 | 单列 9 行 → **两列**（左 5 右 4，按列填充，[MEDIA_COL_W] 685）；右侧状态改成**胶囊**（绿「已安装」/ 灰「未安装」/ 蓝「兜底来源」，[pillTag]），**不再显示包名** |
  * | s06 日夜模式 | 补「同步方式」分区标签；三张模式卡 96 → [CARD_CHOICE_H] 90 高、间距 12 → [CARD_CHOICE_GAP] 20，对齐画板 y316..406；「切换时间」分区标签保留（仅在「跟随时间」时出现） |
  * | s07 壁纸 | 整页改**两栏**（[WALLPAPER_COL_W] 598）：左栏 当前壁纸 / 自定义壁纸 / 导入照片…，右栏 3×3 预设 / 壁纸轮播 / 视频壁纸；空态框改**虚线**边框、高度按画板 300 |
@@ -178,6 +179,7 @@ class SettingsOverlay(
     var onVehicleSource: (() -> Unit)? = null
     var onEditNavSlots: (() -> Unit)? = null
     var onShowTasks: (() -> Unit)? = null
+    var onEditTask: ((com.cardesk.launcher.core.ScheduledTask?) -> Unit)? = null
 
     /** 桌面卡片布局（顺序/尺寸/显隐）变了：让场景页立刻重排。 */
     var onCardLayoutChanged: (() -> Unit)? = null
@@ -231,6 +233,9 @@ class SettingsOverlay(
      */
     var onShowDockQuickApps: (() -> Unit)? = null
 
+    /** 进入 Dock 栏按钮与控件拖动排序模式。 */
+    var onReorderDock: (() -> Unit)? = null
+
     /**
      * 打开画中画应用选择器。
      *
@@ -246,14 +251,29 @@ class SettingsOverlay(
      */
     var onWallpaperChange: ((Int) -> Unit)? = null
 
-    /** 打开系统相册选图（第 105 轮：自定义壁纸）。 */
+    /** 切换为「默认日夜壁纸」（L0 日夜流光渐层，随日夜模式自动切换）。 */
+    var onUseDefaultDayNightWallpaper: (() -> Unit)? = null
+
+    /** 打开系统相册选图（日间静态壁纸）。 */
     var onImportWallpaper: (() -> Unit)? = null
+
+    /** 打开系统相册选图（夜间静态壁纸）。 */
+    var onImportNightWallpaper: (() -> Unit)? = null
+
+    /** 打开应用内图片库选图（日间静态壁纸）。 */
+    var onPickWallpaper: (() -> Unit)? = null
+
+    /** 打开应用内图片库选图（夜间静态壁纸）。 */
+    var onPickNightWallpaper: (() -> Unit)? = null
 
     /** 使用已经导入的自定义壁纸。 */
     var onUseCustomWallpaper: (() -> Unit)? = null
 
-    /** 删除自定义壁纸。 */
+    /** 删除日间自定义壁纸。 */
     var onDeleteCustomWallpaper: (() -> Unit)? = null
+
+    /** 删除夜间自定义壁纸。 */
+    var onDeleteCustomNightWallpaper: (() -> Unit)? = null
 
     /** 壁纸轮播开关变了（第207轮）。 */
     var onWallpaperCarouselChange: ((Boolean) -> Unit)? = null
@@ -282,6 +302,9 @@ class SettingsOverlay(
     var onImportNightVideoWallpaper: (() -> Unit)? = null
     /** 点「删除夜间视频」。 */
     var onDeleteNightVideoWallpaper: (() -> Unit)? = null
+
+    /** 在线壁纸下载并应用完成回调：(kind, night)。 */
+    var onOnlineWallpaperApplied: ((com.cardesk.launcher.core.wallpaperstore.WallpaperKind, Boolean) -> Unit)? = null
 
     /**
      * 卡片风格改了（第五十八轮）：透明度 / 颜色 / 圆角。
@@ -348,7 +371,7 @@ class SettingsOverlay(
                 NavItem("boot", "启动与开机"),
                 NavItem("keys", "按键增强"),
                 NavItem("cluster", "方控仪表"),
-                NavItem("tasks", "计划任务"),
+                NavItem("tasks", "自动任务"),
                 NavItem("media", "媒体源"),
             ),
         ),
@@ -481,26 +504,35 @@ class SettingsOverlay(
     private var panelHeight = 992
     private var leftWidth = NAV_W
 
-    /** 玻璃面板（动画用：打开时上滑、关闭时下滑）。 */
+    /** 右侧内容玻璃面板（`SettingsSeeThroughTest` 等直接查这块面板的玻璃背景）。 */
     private var panelView: View? = null
+
+    /**
+     * 左右两块玻璃面板（左导航栏 + 右内容区）的统一动画容器。
+     *
+     * 之前 `playOpen` / `playClose` 只对右侧 `contentPanel` 做动画，
+     * 导致关闭时右侧设置页先滑出淡出、左侧导航栏原地定住 240ms 再突然消失，体感割裂卡顿。
+     * 统一包进透明容器后，两块面板走同一套硬件层动画同步进退。
+     */
+    private var panesContainer: View? = null
 
     /** 遮罩（动画用：打开淡入、关闭淡出）。 */
     private var scrimView: View? = null
 
     /**
-     * 播放**打开**动画（滑入 + 淡入）。
+     * 播放**打开**动画（左右两块面板同步上滑 + 淡入）。
      */
     fun playOpen() {
-        OverlayAnim.open(panelView, scrimView)
+        OverlayAnim.open(panesContainer ?: panelView, scrimView)
     }
 
     /**
-     * 播放**关闭**动画（下滑 + 淡出）。
+     * 播放**关闭**动画（左右两块面板同步下滑 + 淡出）。
      *
      * @param onEnd 动画结束后回调（一般是把这层从窗口摘掉）
      */
     fun playClose(onEnd: () -> Unit) {
-        OverlayAnim.close(panelView, scrimView, onEnd)
+        OverlayAnim.close(panesContainer ?: panelView, scrimView, resetOnEnd = false, onEnd = onEnd)
     }
 
     init {
@@ -533,9 +565,8 @@ class SettingsOverlay(
         // （底色渐变 + 右上青 / 左下蓝两处柔光）。所以这里直接铺一层 [BackgroundView]：
         // 它画的就是 L0（壁纸 + 设计底色 + 柔光），面板玻璃也从同一张模糊底上取样，
         // 观感与画板一致，且不再依赖「把桌面压暗 26%」这种近似。
-        val scrim = com.cardesk.launcher.ui.widget.BackgroundView(context).apply {
-            palette = this@SettingsOverlay.pal
-            setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        val scrim = View(context).apply {
+            setBackgroundColor((pal.scrim and 0x00FFFFFF) or (SHELL_SCRIM_ALPHA shl 24))
             isClickable = true
             setOnClickListener { onClose?.invoke() }
         }
@@ -586,12 +617,18 @@ class SettingsOverlay(
         val navPanel = pane()
         val contentPanel = pane()
         panelView = contentPanel
-        addView(navPanel, LayoutParams(leftWidth, panelHeight).also {
+        val panes = FrameLayout(context).apply {
+            // 保留两块面板边界外的柔阴影不被裁切；自身不设点击，让间隙与留白点击穿透到 scrimView 关闭。
+            clipChildren = false
+        }
+        panesContainer = panes
+        panes.addView(navPanel, LayoutParams(leftWidth, panelHeight).also {
             it.leftMargin = side; it.topMargin = top
         })
-        addView(contentPanel, LayoutParams(contentW, panelHeight).also {
+        panes.addView(contentPanel, LayoutParams(contentW, panelHeight).also {
             it.leftMargin = contentX; it.topMargin = top
         })
+        addView(panes, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
         // ---- 左栏：分组导航 ------------------------------------------------
         //
@@ -974,8 +1011,19 @@ class SettingsOverlay(
      *   28px 的行标题在 128px 的行里太满，和画板的 18/14 差了一档；
      * - 右侧控件从「顶 +14」改成垂直居中，跟文字基线对齐。
      */
-    private fun row(control: View, label: String, subtitle: String? = null, height: Int = ROW_H) {
+    private fun row(
+        control: View,
+        label: String,
+        subtitle: String? = null,
+        height: Int = ROW_H,
+        onRowClick: (() -> Unit)? = null,
+    ) {
         val holder = FrameLayout(context)
+        if (onRowClick != null) {
+            holder.isClickable = true
+            Motion.press(holder, MotionSpec.PRESS_SCALE_ROW)
+            holder.setOnClickListener { onRowClick() }
+        }
         val textBox = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
@@ -2120,20 +2168,13 @@ class SettingsOverlay(
             prefs.startSwitchEnabled = it
             logSetting("start_switch_enabled", "自动切换驾驶模式", from, it)
         }
-        // 「目标驾驶模式」在画板上是**一行**（y440..568）：
-        // 左侧 18px 粗体标签、右侧三颗胶囊**贴在正文右内边**（chip 1663..1864）。
-        // 老实现是「24px 标签一行 + 分段一行」并把 chips 从左边排，
-        // 既多占了一行，又和画板差了一整行宽度。
-        //
-        // 文案去掉「模式」后缀（画板就是「经济 / 舒适 / 运动」），
-        // 但**落盘值不变**（仍是 DriveMode.UI_MODE_VALUES 的 0/1/2），
-        // 所以这里只改显示用的一张标签表，不动任何存值语义。
-        val modeLabels = DriveMode.UI_MODE_LABELS.map { it.removeSuffix("模式") }
-        // 画板 s01 的目标驾驶模式是三枚**小胶囊**（约 52×34、右端 1838），
-        // 不是整行高的 84 胶囊 —— 第 2 轮验收实测左移 60、上移 84。
-        chipRow("目标驾驶模式", modeLabels, driveModeIndex(prefs.startSwitchMode), chipH = 34) { idx ->
+        // 动态读取本车支持的驾驶模式（无主线程 binder 开销，读不到时回落经济 / 舒适 / 运动）。
+        val bootModes = VehicleController.supportedDriveModes()
+        val modeLabels = bootModes.map { DriveMode.chipLabel(it) }
+        // 画板 s01 的目标驾驶模式是小胶囊（约 52×34、右端 1838）。
+        chipRow("目标驾驶模式", modeLabels, driveModeIndex(bootModes, prefs.startSwitchMode), chipH = 34) { idx ->
             val from = prefs.startSwitchMode
-            val to = DriveMode.UI_MODE_VALUES[idx]
+            val to = bootModes[idx]
             prefs.startSwitchMode = to
             logSetting("start_switch_mode", "目标驾驶模式", from, to)
         }
@@ -2172,131 +2213,139 @@ class SettingsOverlay(
      * 已经把全页的胶囊都推到右边了。
      */
     private fun pageKeys() {
+        val keysContent = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+
+        fun renderKeysContent() {
+            keysContent.removeAllViews()
+            if (!prefs.keysEnhanced) {
+                keysContent.visibility = View.GONE
+                return
+            }
+            keysContent.visibility = View.VISIBLE
+            val prevHost = columnHost
+            columnHost = keysContent
+            try {
+                section("语音助手 / * 键")
+                keySlot("单击", prefs.voiceClickAction, { prefs.voiceClickAction = it }, prefs.voiceClickMode) {
+                    prefs.voiceClickMode = it
+                }
+                keySlot("双击", prefs.voiceDoubleAction, { prefs.voiceDoubleAction = it }, prefs.voiceDoubleMode) {
+                    prefs.voiceDoubleMode = it
+                }
+                keySlot("长按", prefs.voiceLongAction, { prefs.voiceLongAction = it }, prefs.voiceLongMode) {
+                    prefs.voiceLongMode = it
+                }
+                // 第三百一十五轮：车机方控走**广播**（不是 KeyEvent），真车上又没法用 adb
+                // 模拟按键（shell 没权限）。所以这一页自己带一块「按键通路」自检：
+                // 显示最近一次收到的按键，并能往执行端灌一次单击 / 长按，
+                // 用来在车上确认「配置 → 手势 → 动作」这条链是通的。
+                section("按键通路（车机广播）")
+                val lastKey = prefs.stringValue(KeyActionExecutor.KEY_DIAG_LAST, "")
+                kvRow(
+                    "最近按键",
+                    if (lastKey.isEmpty()) "还没收到（在车上按一下语音键）" else lastKey,
+                    ok = lastKey.isNotEmpty(),
+                )
+                chipRow("自测", listOf("单击", "长按"), -1, height = KEY_ROW_H) { idx ->
+                    val press = if (idx == 0) OemKeyProtocol.Press.CLICK else OemKeyProtocol.Press.LONG
+                    Logx.event(LogTags.KEYS, "按键增强自测", "press" to press.name)
+                    val handled = OemKeyRuntime.dispatch(
+                        context = context.applicationContext ?: context,
+                        event = OemKeyProtocol.OemKeyEvent(
+                            keyCode = OemKeyProtocol.KEY_R_VOICE_ASSIST,
+                            press = press,
+                            sourceAction = "selftest",
+                        ),
+                        path = "selftest",
+                    )
+                    Logx.i(LogTags.KEYS, "按键增强自测结果", "press" to press.name, "handled" to handled)
+                    renderKeysContent()
+                }
+
+                // 第三百一十七轮：Home 键双击。
+                //
+                // 车机上 Home 键短按回桌面是系统行为，双击默认开**车机自己的**最近任务。
+                // 这里把双击改成打开本项目的最近任务页；接管状态与最近一次 Home 事件都
+                // 显示出来，方便在车上判断「拦截通道有没有生效、走的是哪条路」。
+                section("Home 键")
+                switchRow(
+                    "双击 Home 打开最近任务",
+                    prefs.flag(com.cardesk.launcher.core.HomeKeyRuntime.KEY_DOUBLE_RECENTS, true),
+                    height = KEY_SWITCH_ROW_H,
+                ) {
+                    val from = prefs.flag(com.cardesk.launcher.core.HomeKeyRuntime.KEY_DOUBLE_RECENTS, true)
+                    prefs.setFlag(com.cardesk.launcher.core.HomeKeyRuntime.KEY_DOUBLE_RECENTS, it)
+                    Logx.event(LogTags.HOME, "双击 Home 开关变更", "from" to from, "to" to it)
+                    com.cardesk.launcher.core.HomeKeyRuntime.reset()
+                    // 关掉双击映射就把车机的最近任务放回去；打开则按当前接管状态重新压制。
+                    val ctx = context.applicationContext ?: context
+                    runCatching {
+                        com.cardesk.launcher.core.OemRecentsSuppressor.sync(ctx, prefs)
+                    }.onFailure { Logx.w(LogTags.HOME, "原车最近任务同步失败", it) }
+                }
+                kvRow(
+                    "Home 键接管",
+                    com.cardesk.launcher.core.HomeKeyRuntime.interceptorStatus,
+                    ok = com.cardesk.launcher.core.HomeKeyRuntime.interceptorActive,
+                )
+                val recentsStatus = com.cardesk.launcher.core.OemRecentsSuppressor.statusText
+                kvRow(
+                    "原车最近任务",
+                    recentsStatus,
+                    ok = recentsStatus.startsWith("已压制") || recentsStatus.contains("未安装"),
+                )
+                val lastHome = prefs.stringValue(com.cardesk.launcher.core.HomeKeyRuntime.KEY_DIAG_LAST, "")
+                kvRow(
+                    "最近 Home",
+                    if (lastHome.isEmpty()) "还没收到（在车上按一下 Home 键）" else lastHome,
+                    ok = lastHome.isNotEmpty(),
+                )
+                chipRow("自测", listOf("单击", "双击"), -1, height = KEY_ROW_H) { idx ->
+                    Logx.event(LogTags.HOME, "Home 键自测", "index" to idx)
+                    val ctx = context.applicationContext ?: context
+                    // 双击 = 连续两次按压：第一下只做判定（dispatch=false），否则第一下就把
+                    // 设置页关掉、第二下没地方点；第二下才是真正执行的那个。
+                    val presses = if (idx == 0) 1 else 2
+                    repeat(presses) { i ->
+                        val dispatch = i == presses - 1
+                        val action = runCatching {
+                            com.cardesk.launcher.core.HomeKeyRuntime.simulate(ctx, prefs, dispatch)
+                        }.getOrElse {
+                            Logx.w(LogTags.HOME, "Home 键自测失败", it)
+                            com.cardesk.launcher.core.HomeKeyPolicy.Action.NONE
+                        }
+                        Logx.i(
+                            LogTags.HOME,
+                            "Home 键自测结果",
+                            "index" to idx,
+                            "press" to (i + 1),
+                            "dispatch" to dispatch,
+                            "action" to action.name,
+                        )
+                    }
+                    renderKeysContent()
+                }
+            } finally {
+                columnHost = prevHost
+            }
+        }
+
+        // 拨开「启用按键增强」后立即原地展开下方配置区，无需切页再切回，
+        // 且不重建顶行开关本身，避免开关动画被打断或跳动。
         switchRow("启用按键增强", prefs.keysEnhanced, height = KEY_SWITCH_ROW_H) {
             val from = prefs.keysEnhanced
             prefs.keysEnhanced = it
             logSetting("custom_keys_enabled", "启用按键增强", from, it, LogTags.KEYS)
+            renderKeysContent()
         }
-        if (!prefs.keysEnhanced) {
-            return
-        }
-        section("语音助手 / * 键")
-        keySlot("单击", prefs.voiceClickAction, { prefs.voiceClickAction = it }, prefs.voiceClickMode) {
-            prefs.voiceClickMode = it
-        }
-        keySlot("双击", prefs.voiceDoubleAction, { prefs.voiceDoubleAction = it }, prefs.voiceDoubleMode) {
-            prefs.voiceDoubleMode = it
-        }
-        keySlot("长按", prefs.voiceLongAction, { prefs.voiceLongAction = it }, prefs.voiceLongMode) {
-            prefs.voiceLongMode = it
-        }
-        section("媒体按键（长按）")
-        keySlot("上一曲", prefs.mediaPrevLongAction, { prefs.mediaPrevLongAction = it }, prefs.mediaPrevLongMode) {
-            prefs.mediaPrevLongMode = it
-        }
-        keySlot("下一曲", prefs.mediaNextLongAction, { prefs.mediaNextLongAction = it }, prefs.mediaNextLongMode) {
-            prefs.mediaNextLongMode = it
-        }
-        // 第三百一十五轮：车机方控走**广播**（不是 KeyEvent），真车上又没法用 adb
-        // 模拟按键（shell 没权限）。所以这一页自己带一块「按键通路」自检：
-        // 显示最近一次收到的按键，并能往执行端灌一次单击 / 长按，
-        // 用来在车上确认「配置 → 手势 → 动作」这条链是通的。
-        //
-        // 原来这里是一枚「打开按键增强面板…」按钮，点开的是一个**同样的编辑器**
-        // （相同五项、同一组 prefs），属重复入口，已合并到本页。
-        section("按键通路（车机广播）")
-        val lastKey = prefs.stringValue(KeyActionExecutor.KEY_DIAG_LAST, "")
-        kvRow(
-            "最近按键",
-            if (lastKey.isEmpty()) "还没收到（在车上按一下语音键）" else lastKey,
-            ok = lastKey.isNotEmpty(),
-        )
-        chipRow("自测", listOf("单击", "长按", "媒体长按"), -1, height = KEY_ROW_H) { idx ->
-            val press = if (idx == 0) OemKeyProtocol.Press.CLICK else OemKeyProtocol.Press.LONG
-            val code = if (idx == 2) OemKeyProtocol.KEY_R_MEDIA_PREV else OemKeyProtocol.KEY_R_VOICE_ASSIST
-            Logx.event(LogTags.KEYS, "按键增强自测", "press" to press.name)
-            val handled = OemKeyRuntime.dispatch(
-                context = context.applicationContext ?: context,
-                event = OemKeyProtocol.OemKeyEvent(
-                    keyCode = code,
-                    press = press,
-                    sourceAction = "selftest",
-                ),
-                path = "selftest",
-            )
-            Logx.i(LogTags.KEYS, "按键增强自测结果", "press" to press.name, "handled" to handled)
-            // 诊断行要跟着更新：整页重建一次（值没变的地方重建代价可以接受）
-            select(selectedKey)
-        }
-
-        // 第三百一十七轮：Home 键双击。
-        //
-        // 车机上 Home 键短按回桌面是系统行为，双击默认开**车机自己的**最近任务。
-        // 这里把双击改成打开本项目的最近任务页；接管状态与最近一次 Home 事件都
-        // 显示出来，方便在车上判断「拦截通道有没有生效、走的是哪条路」。
-        section("Home 键")
-        switchRow(
-            "双击 Home 打开最近任务",
-            prefs.flag(com.cardesk.launcher.core.HomeKeyRuntime.KEY_DOUBLE_RECENTS, true),
-            height = KEY_SWITCH_ROW_H,
-        ) {
-            val from = prefs.flag(com.cardesk.launcher.core.HomeKeyRuntime.KEY_DOUBLE_RECENTS, true)
-            prefs.setFlag(com.cardesk.launcher.core.HomeKeyRuntime.KEY_DOUBLE_RECENTS, it)
-            Logx.event(LogTags.HOME, "双击 Home 开关变更", "from" to from, "to" to it)
-            com.cardesk.launcher.core.HomeKeyRuntime.reset()
-            // 关掉双击映射就把车机的最近任务放回去；打开则按当前接管状态重新压制。
-            val ctx = context.applicationContext ?: context
-            runCatching {
-                com.cardesk.launcher.core.OemRecentsSuppressor.sync(ctx, prefs)
-            }.onFailure { Logx.w(LogTags.HOME, "原车最近任务同步失败", it) }
-        }
-        kvRow(
-            "Home 键接管",
-            com.cardesk.launcher.core.HomeKeyRuntime.interceptorStatus,
-            ok = com.cardesk.launcher.core.HomeKeyRuntime.interceptorActive,
-        )
-        val recentsStatus = com.cardesk.launcher.core.OemRecentsSuppressor.statusText
-        kvRow(
-            "原车最近任务",
-            recentsStatus,
-            ok = recentsStatus.startsWith("已压制") || recentsStatus.contains("未安装"),
-        )
-        val lastHome = prefs.stringValue(com.cardesk.launcher.core.HomeKeyRuntime.KEY_DIAG_LAST, "")
-        kvRow(
-            "最近 Home",
-            if (lastHome.isEmpty()) "还没收到（在车上按一下 Home 键）" else lastHome,
-            ok = lastHome.isNotEmpty(),
-        )
-        chipRow("自测", listOf("单击", "双击"), -1, height = KEY_ROW_H) { idx ->
-            Logx.event(LogTags.HOME, "Home 键自测", "index" to idx)
-            val ctx = context.applicationContext ?: context
-            // 双击 = 连续两次按压：第一下只做判定（dispatch=false），否则第一下就把
-            // 设置页关掉、第二下没地方点；第二下才是真正执行的那个。
-            val presses = if (idx == 0) 1 else 2
-            repeat(presses) { i ->
-                val dispatch = i == presses - 1
-                val action = runCatching {
-                    com.cardesk.launcher.core.HomeKeyRuntime.simulate(ctx, prefs, dispatch)
-                }.getOrElse {
-                    Logx.w(LogTags.HOME, "Home 键自测失败", it)
-                    com.cardesk.launcher.core.HomeKeyPolicy.Action.NONE
-                }
-                Logx.i(
-                    LogTags.HOME,
-                    "Home 键自测结果",
-                    "index" to idx,
-                    "press" to (i + 1),
-                    "dispatch" to dispatch,
-                    "action" to action.name,
-                )
-            }
-            select(selectedKey)
-        }
+        hostCol.addView(keysContent, LinearLayout.LayoutParams(-1, -2))
+        renderKeysContent()
     }
 
     /**
      * 一个键位
-     * 一行 = 键位名 + 动作选择；**只有动作是「切换驾驶模式」时**才追加「　目标驾驶模式」一行。
+     * 一行 = 键位名 + 动作选择；**只有动作是「切换驾驶模式」时**才追加「目标驾驶模式」一行。
+     * 切换动作时就地显隐「目标驾驶模式」，不重建整页。
      */
     private fun keySlot(
         label: String,
@@ -2305,14 +2354,61 @@ class SettingsOverlay(
         mode: Int,
         onMode: (Int) -> Unit,
     ) {
+        var currentAction = action
+        var currentMode = mode
+        val modeBox = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+
+        fun renderModeBox() {
+            modeBox.removeAllViews()
+            if (currentAction != Prefs.ACTION_DRIVE_MODE) {
+                modeBox.visibility = View.GONE
+                return
+            }
+            modeBox.visibility = View.VISIBLE
+            val prevHost = columnHost
+            columnHost = modeBox
+            try {
+                // 画板 s02：这一行紧跟在键位行下面，标题「目标驾驶模式」+ 副标题
+                // 「动作为「切换驾驶模式」时使用」，动态列出本车支持的模式。
+                val keyModes = VehicleController.supportedDriveModes()
+                chipRow(
+                    "目标驾驶模式",
+                    keyModes.map { DriveMode.chipLabel(it) },
+                    driveModeIndex(keyModes, currentMode),
+                    height = KEY_MODE_ROW_H,
+                    subtitle = "动作为「切换驾驶模式」时使用",
+                    // 画板新加的副标题，白名单里没有 → 不打标记（否则 SettingsCopyTest 误报）。
+                    subtitleMarked = false,
+                ) { idx ->
+                    val from = currentMode
+                    val to = keyModes[idx]
+                    currentMode = to
+                    onMode(to)
+                    // 排障场景：切换驾驶模式没切过去 —— 记下目标驾驶模式
+                    logSetting(
+                        keyModeKey(label),
+                        "$label·目标驾驶模式",
+                        keyModeName(from),
+                        keyModeName(to),
+                        LogTags.KEYS,
+                        "fromValue" to from,
+                        "toValue" to to,
+                    )
+                }
+            } finally {
+                columnHost = prevHost
+            }
+        }
+
         chipRow(
             label,
             KEY_ACTION_LABELS,
-            KEY_ACTION_VALUES.indexOf(action).takeIf { it >= 0 } ?: 0,
+            KEY_ACTION_VALUES.indexOf(currentAction).takeIf { it >= 0 } ?: 0,
             height = KEY_ROW_H,
         ) { idx ->
-            val from = action
+            val from = currentAction
             val to = KEY_ACTION_VALUES[idx]
+            currentAction = to
             onAction(to)
             // 排障场景：方向盘按键改绑后没反应 —— 记下键名与改绑前后的动作
             logSetting(
@@ -2324,34 +2420,10 @@ class SettingsOverlay(
                 "fromValue" to from,
                 "toValue" to to,
             )
+            renderModeBox()
         }
-        if (action == Prefs.ACTION_DRIVE_MODE) {
-            // 画板 s02：这一行紧跟在键位行下面，标题「目标驾驶模式」+ 副标题
-            // 「动作为「切换驾驶模式」时使用」，胶囊同样是 经济 / 舒适 / 运动。
-            chipRow(
-                "目标驾驶模式",
-                DriveMode.UI_MODE_LABELS.map { it.removeSuffix("模式") },
-                driveModeIndex(mode),
-                height = KEY_MODE_ROW_H,
-                subtitle = "动作为「切换驾驶模式」时使用",
-                // 画板新加的副标题，白名单里没有 → 不打标记（否则 SettingsCopyTest 误报）。
-                subtitleMarked = false,
-            ) { idx ->
-                val from = mode
-                val to = DriveMode.UI_MODE_VALUES[idx]
-                onMode(to)
-                // 排障场景：切换驾驶模式没切过去 —— 记下目标驾驶模式
-                logSetting(
-                    keyModeKey(label),
-                    "$label·目标驾驶模式",
-                    keyModeName(from),
-                    keyModeName(to),
-                    LogTags.KEYS,
-                    "fromValue" to from,
-                    "toValue" to to,
-                )
-            }
-        }
+        hostCol.addView(modeBox, LinearLayout.LayoutParams(-1, -2))
+        renderModeBox()
     }
 
     /** 按键动作值 → 中文名（日志用，认不出来就回显原值）。 */
@@ -2361,18 +2433,14 @@ class SettingsOverlay(
     }
 
     /** 驾驶模式值 → 中文名（日志用，认不出来就回显原值）。 */
-    private fun keyModeName(value: Int): String {
-        val index = DriveMode.UI_MODE_VALUES.indexOf(value)
-        return if (index >= 0) DriveMode.UI_MODE_LABELS[index] else value.toString()
-    }
+    private fun keyModeName(value: Int): String =
+        if (DriveMode.normalizeModeId(value) != DriveMode.SELECTION_NONE) DriveMode.fullLabel(value) else value.toString()
 
     /** 键位名 → 持久化键名（按键动作），日志用。 */
     private fun keyActionKey(label: String): String = when (label) {
         "单击" -> "voice_click_action"
         "双击" -> "voice_double_action"
         "长按" -> "voice_long_action"
-        "上一曲" -> "media_prev_long_action"
-        "下一曲" -> "media_next_long_action"
         else -> "key_action_$label"
     }
 
@@ -2381,25 +2449,52 @@ class SettingsOverlay(
         "单击" -> "voice_click_mode"
         "双击" -> "voice_double_mode"
         "长按" -> "voice_long_mode"
-        "上一曲" -> "media_prev_long_mode"
-        "下一曲" -> "media_next_long_mode"
         else -> "key_mode_$label"
     }
 
-    /** 取值 → 驾驶模式清单下标（认不出来一律落到「经济模式」）。 */
-    private fun driveModeIndex(value: Int): Int {
-        val index = DriveMode.UI_MODE_VALUES.indexOf(value)
+    /** 取值 → 动态驾驶模式清单下标（未配置/不在清单内时回落第 0 项）。 */
+    private fun driveModeIndex(modes: IntArray, value: Int): Int {
+        val norm = DriveMode.normalizeModeId(value)
+        val index = modes.indexOf(norm)
         return if (index >= 0) index else 0
     }
 
-    /** 计划任务。 */
+    /** 外部增删改自动任务后刷新设置页列表。 */
+    fun refreshTasks() {
+        if (selectedKey == "tasks") select("tasks")
+    }
+
+    /** 外部修改槽位 / 状态栏生效应用 / Dock 快捷应用后刷新「Dock 与导航栏」页。 */
+    fun refreshDockPage() {
+        if (selectedKey == "dock" || selectedKey == "quickapps") select(selectedKey)
+    }
+
+    /** 自动任务。 */
     private fun pageTasks() {
-        // —— 标题行右侧是「+ 添加」
+        // —— 标题行右侧是「导入示例」「+ 添加」
         val header = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        header.addView(Ui.text(context, "计划任务", 18f, pal.textDim), Ui.linear(0, -2, 1f))
+        header.addView(Ui.text(context, "自动任务", 18f, pal.textDim), Ui.linear(0, -2, 1f))
+        header.addView(
+            Ui.text(context, "导入示例", 18f, pal.textDim).apply {
+                gravity = Gravity.CENTER
+                setPadding(16, 10, 16, 10)
+                Motion.press(this, MotionSpec.PRESS_SCALE_ICON)
+                setOnClickListener {
+                    val list = ScheduledTasks.load(prefs)
+                    val existingIds = list.map { it.id }.toSet()
+                    val added = ScheduledTasks.examplePresets().filter { it.id !in existingIds }
+                    if (added.isNotEmpty()) {
+                        list.addAll(added)
+                        ScheduledTasks.save(prefs, list)
+                    }
+                    select(selectedKey)
+                }
+            },
+            Ui.linear(-2, -2),
+        )
         header.addView(
             Ui.text(context, "+ 添加", 18f, pal.accent).apply {
                 gravity = Gravity.CENTER
@@ -2407,9 +2502,9 @@ class SettingsOverlay(
                 // 按压反馈：这是个纯文字的小入口，最需要提示「点到了」。
                 Motion.press(this, MotionSpec.PRESS_SCALE_ICON)
                 setOnClickListener {
-                    // 排障场景：计划任务面板没打开 —— 记下这次点击
-                    Logx.event(LogTags.TASK, "从设置页打开计划任务面板")
-                    onShowTasks?.invoke()
+                    // 排障场景：点击添加直接进入新建任务编辑器
+                    Logx.event(LogTags.TASK, "从设置页直接打开新建任务")
+                    onEditTask?.invoke(null)
                 }
             },
             Ui.linear(-2, -2),
@@ -2418,37 +2513,50 @@ class SettingsOverlay(
 
         val tasks = ScheduledTasks.load(prefs)
         // 排障场景：设置页里的任务列表为空 / 数量不对
-        Logx.i(LogTags.TASK, "计划任务页加载", "count" to tasks.size)
+        Logx.i(LogTags.TASK, "自动任务页加载", "count" to tasks.size)
         if (tasks.isEmpty()) {
+            hostCol.addView(
+                Ui.text(context, "暂无自动任务，可点击「导入示例」或「+ 添加」创建规则", 16f, pal.textFaint),
+                Ui.linear(-1, -2, 0f, 0, 12),
+            )
         }
         for (task in tasks) {
-            row(
-                Ui.text(context, "删除", 18f, pal.danger).apply {
-                    gravity = Gravity.CENTER
-                    setPadding(16, 10, 16, 10)
-                    background = Ui.round(Skin.CHIP_FILL, 12f)
-                    // 按压反馈：「删除」是破坏性操作，
-                    // 按下去必须先有回应，别让用户以为没点着。
-                    Motion.press(this, MotionSpec.PRESS_SCALE_ICON)
-                    setOnClickListener {
-                        val list = ScheduledTasks.load(prefs)
-                        list.removeAll { it.id == task.id }
+            val toggle = BoardSwitch(context).apply {
+                tint = pal.accent
+                checked = task.enabled
+                setOnClickListener {
+                    val from = checked
+                    toggle()
+                    Motion.bump(this)
+                    val enabled = checked
+                    val list = ScheduledTasks.load(prefs)
+                    val idx = list.indexOfFirst { it.id == task.id }
+                    if (idx >= 0) {
+                        list[idx] = list[idx].copy(enabled = enabled)
                         ScheduledTasks.save(prefs, list)
-                        cancelTask(task.id)
-                        // 排障场景：任务删了还在跑 —— 记下删除与取消调度
-                        Logx.event(
-                            LogTags.TASK,
-                            "从设置页删除计划任务",
-                            "id" to task.id,
-                            "condition" to task.condition,
-                            "target" to task.target,
-                            "remaining" to list.size,
-                        )
-                        select(selectedKey)
+                        if (enabled) {
+                            com.cardesk.launcher.core.TaskScheduler.schedule(context, list[idx])
+                        } else {
+                            cancelTask(task.id)
+                        }
                     }
-                },
+                    Logx.event(
+                        LogTags.TASK,
+                        if (enabled) "从设置页启用自动任务" else "从设置页停用自动任务",
+                        "id" to task.id,
+                        "from" to from,
+                        "to" to enabled,
+                    )
+                }
+            }
+            row(
+                toggle,
                 appLabelOf(task.target) ?: ScheduledTasks.actionLabel(task),
                 ScheduledTasks.conditionLabel(task),
+                onRowClick = {
+                    Logx.event(LogTags.TASK, "从设置页编辑自动任务", "id" to task.id)
+                    onEditTask?.invoke(task)
+                },
             )
         }
     }
@@ -2805,26 +2913,120 @@ class SettingsOverlay(
     private fun pageWallpaper() {
         val current = com.cardesk.launcher.core.Wallpapers.normalize(prefs.wallpaper)
         val core = com.cardesk.launcher.core.CustomWallpaper
-        val hasCustom = core.has(context)
-        val usingCustom = prefs.wallpaperCustom && hasCustom
-        // 已导入的照片只是一张 1920×1080 的小图：设置页打开时同步解一次（缓存命中则更便宜）。
-        val customBmp = if (hasCustom) (core.cachedBitmap() ?: core.loadScaled(context)) else null
+        val hasDayCustom = core.hasDay(context)
+        val hasNightCustom = core.hasNight(context)
+        val hasCustom = hasDayCustom || hasNightCustom
         val hasVideo = com.cardesk.launcher.core.VideoWallpaper.has(context)
+        val hasNightVideo = com.cardesk.launcher.core.VideoWallpaper.hasNight(context)
+        val usingVideo = prefs.videoWallpaperEnabled && hasVideo
+        val usingCustom = !usingVideo && prefs.wallpaperCustom && hasCustom
+        val usingDefaultDayNight = !usingVideo && !usingCustom && prefs.wallpaperDefaultDayNight
 
-        // 左右两栏都要用到这几个（左栏建预览、右栏建网格，刷新时两边一起动），
-        // 所以先声明在栏外，由两个栏块分别填。
+        val dayCustomBmp = if (hasDayCustom) (core.cachedBitmap(night = false) ?: core.loadScaled(context, night = false)) else null
+        val nightCustomBmp = if (hasNightCustom) (core.cachedBitmap(night = true) ?: core.loadScaled(context, night = true)) else null
+        val activeCustomIsNight = hasCustom && core.activeSlotIsNight(context, pal.night)
+        val activeCustomBmp = if (activeCustomIsNight) (nightCustomBmp ?: dayCustomBmp) else (dayCustomBmp ?: nightCustomBmp)
+
         var previewThumb: WallpaperThumbView? = null
         var captionView: TextView? = null
+        var defaultCard: com.cardesk.launcher.ui.widget.DayNightWallpaperCardView? = null
+        var defaultLabel: TextView? = null
         val thumbs = ArrayList<WallpaperThumbView>()
         val labels = ArrayList<TextView>()
 
-        /** 刷新「当前壁纸」预览 + 选中态（跨两栏，所以放在栏外）。 */
-        fun refresh(index: Int) {
+        fun modeBadge(label: String, active: Boolean): TextView =
+            Ui.text(
+                context,
+                label,
+                12f,
+                if (active) pal.accentInk else 0xFFF4F8FC.toInt(),
+                bold = true,
+            ).apply {
+                gravity = Gravity.CENTER
+                background = Ui.round(
+                    if (active) pal.accent else 0xB8121826.toInt(),
+                    com.cardesk.launcher.core.Shape.PILL,
+                )
+                setPadding(12, 3, 12, 3)
+            }
+
+        /** 渲染自定义静态壁纸的单个日/夜预览槽（左日间 / 右夜间）。 */
+        fun buildStaticSlot(
+            badgeLabel: String,
+            bmp: android.graphics.Bitmap?,
+            isActiveSlot: Boolean,
+            emptyHint: String,
+            onTap: () -> Unit,
+        ): FrameLayout {
+            val slot = FrameLayout(context).apply {
+                Motion.press(this, MotionSpec.PRESS_SCALE_ICON)
+                setOnClickListener { onTap() }
+            }
+            if (bmp != null) {
+                val iv = android.widget.ImageView(context).apply {
+                    scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                    background = Ui.round(Skin.surfaceSoft, com.cardesk.launcher.core.Shape.INNER, 1f, Skin.GLASS_STROKE)
+                    clipToOutline = true
+                    setImageBitmap(bmp)
+                }
+                slot.addView(iv, FrameLayout.LayoutParams(-1, -1))
+                val border = View(context).apply {
+                    background = Ui.round(
+                        0x00000000,
+                        com.cardesk.launcher.core.Shape.INNER,
+                        if (isActiveSlot) 2.5f else 1f,
+                        if (isActiveSlot) pal.accent else Skin.GLASS_STROKE,
+                    )
+                }
+                slot.addView(border, FrameLayout.LayoutParams(-1, -1))
+            } else {
+                val dashed = Ui.round(TRANSPARENT, com.cardesk.launcher.core.Shape.INNER, 1f, Skin.GLASS_STROKE)
+                dashed.setStroke(1, Skin.GLASS_STROKE, 10f, 7f)
+                slot.background = dashed
+                slot.addView(
+                    Ui.text(context, emptyHint, 13f, pal.textDim).apply {
+                        gravity = Gravity.CENTER
+                        setPadding(12, 24, 12, 8)
+                    },
+                    FrameLayout.LayoutParams(-1, -1),
+                )
+            }
+            slot.addView(
+                modeBadge(badgeLabel, isActiveSlot),
+                FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).also {
+                    it.leftMargin = 10
+                    it.topMargin = 10
+                },
+            )
+            return slot
+        }
+
+        /** 刷新「当前壁纸」预览 + 选中态（跨两栏）。 */
+        fun refresh(index: Int, defaultMode: Boolean = usingDefaultDayNight) {
             val spec = com.cardesk.launcher.core.Wallpapers.spec(index)
-            previewThumb?.spec = spec
-            if (!usingCustom) captionView?.text = "当前：${spec.name} · ${spec.desc}"
+            previewThumb?.let { p ->
+                p.defaultDayNight = defaultMode
+                p.palette = pal
+                p.spec = spec
+            }
+            val customDesc = when {
+                hasDayCustom && hasNightCustom -> "日夜双图 · 随日夜自动切换"
+                hasNightCustom -> "夜间静态图"
+                else -> "导入的照片"
+            }
+            captionView?.text = when {
+                usingVideo -> if (hasNightVideo) "当前：动态视频壁纸（日夜双片 · 自动切换）" else "当前：动态视频壁纸"
+                usingCustom -> "当前：自定义壁纸（$customDesc）"
+                defaultMode -> "当前：默认日夜壁纸 · 随日夜模式自动切换"
+                else -> "当前：${spec.name} · ${spec.desc}"
+            }
+            defaultCard?.chosen = defaultMode
+            defaultLabel?.let { lbl ->
+                lbl.setTextColor(if (defaultMode) pal.accent else pal.textDim)
+                lbl.typeface = Typeface.create(Typeface.DEFAULT, if (defaultMode) Typeface.BOLD else Typeface.NORMAL)
+            }
             thumbs.forEachIndexed { i, t ->
-                val on = i == index
+                val on = !defaultMode && !usingCustom && !usingVideo && i == index
                 t.chosen = on
                 labels[i].setTextColor(if (on) pal.accent else pal.textDim)
                 labels[i].typeface = Typeface.create(Typeface.DEFAULT, if (on) Typeface.BOLD else Typeface.NORMAL)
@@ -2832,17 +3034,16 @@ class SettingsOverlay(
         }
 
         twoColumns(WALLPAPER_COL_W) { left, right ->
-            // ------------------------------------------------------ 左栏：当前 / 自定义
+            // ------------------------------------------------------ 左栏：当前壁纸 / 自定义静态（日夜双模）/ 在线壁纸
             inColumn(left) {
                 section("当前壁纸")
                 val previewHolder = FrameLayout(context)
-                if (usingCustom && customBmp != null) {
-                    // 当前用的是照片：大预览直接显示照片。
+                if (usingCustom && activeCustomBmp != null) {
                     val iv = android.widget.ImageView(context).apply {
                         scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
                         background = Ui.round(Skin.surfaceSoft, CARD_RADIUS, 1f, Skin.GLASS_STROKE)
                         clipToOutline = true
-                        setImageBitmap(customBmp)
+                        setImageBitmap(activeCustomBmp)
                     }
                     previewHolder.addView(iv, FrameLayout.LayoutParams(-1, -1))
                     val border = View(context).apply {
@@ -2855,84 +3056,115 @@ class SettingsOverlay(
                         com.cardesk.launcher.core.Wallpapers.spec(current),
                         pal.night,
                         pal.accent,
-                    ).apply { chosen = true }
+                    ).apply {
+                        defaultDayNight = usingDefaultDayNight
+                        palette = pal
+                        chosen = true
+                    }
                     previewThumb = p
                     previewHolder.addView(p, FrameLayout.LayoutParams(-1, -1))
                 }
-                hostCol.addView(previewHolder, LinearLayout.LayoutParams(-1, WALLPAPER_PREVIEW_H).also {
-                    it.topMargin = 10
+                previewHolder.addView(
+                    modeBadge(if (pal.night) "当前 · 夜间模式" else "当前 · 日间模式", active = true),
+                    FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).also {
+                        it.leftMargin = 14
+                        it.topMargin = 14
+                    },
+                )
+                hostCol.addView(previewHolder, LinearLayout.LayoutParams(-1, 224).also {
+                    it.topMargin = 8
                 })
 
-                // 当前壁纸名称：画板里它是组标题下面那行 14px 弱字（不是卡片里的一行）。
                 val caption = Ui.text(
                     context,
-                    if (usingCustom) "当前：自定义壁纸（导入的照片）" else "",
+                    "",
                     ROW_SUB,
-                    if (usingCustom) pal.accent else pal.textDim,
+                    if (usingCustom || usingVideo || usingDefaultDayNight) pal.accent else pal.textDim,
                 )
                 captionView = caption
-                hostCol.addView(caption, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
+                hostCol.addView(caption, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 8 })
 
-                section("自定义壁纸")
-                if (!hasCustom) {
-                    // 空态：画板是**一块描边空框 + 一句居中说明**（没有缩略图、没有删除/使用按钮）。
-                    // 描边用**虚线**（画板就是虚线框），1px `GLASS_STROKE`、**不填底** ——
-                    // 空的意思要用「透」来表达，填一块 surfaceSoft 会被看成
-                    // 「已经有一张壁纸，只是没显示出来」。
-                    val dashed = Ui.round(TRANSPARENT, CARD_RADIUS, 1f, Skin.GLASS_STROKE)
-                    dashed.setStroke(1, Skin.GLASS_STROKE, 12f, 8f)
-                    val empty = FrameLayout(context).apply { background = dashed }
-                    empty.addView(
-                        Ui.text(context, "还没有导入壁纸", ROW_SUB, pal.textDim).apply {
-                            gravity = Gravity.CENTER
-                        },
-                        FrameLayout.LayoutParams(-1, -1),
-                    )
-                    hostCol.addView(empty, LinearLayout.LayoutParams(-1, WALLPAPER_CUSTOM_BOX_H).also {
-                        it.topMargin = 10
-                    })
-                } else {
-                    val customHolder = FrameLayout(context)
-                    val customPreview = android.widget.ImageView(context).apply {
-                        scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
-                        background = Ui.round(Skin.surfaceSoft, CARD_RADIUS, 1f, Skin.GLASS_STROKE)
-                        clipToOutline = true
-                        if (customBmp != null) setImageBitmap(customBmp)
-                    }
-                    customHolder.addView(customPreview, FrameLayout.LayoutParams(-1, -1))
-                    val customBorder = View(context).apply {
-                        background = Ui.round(
-                            0x00000000,
-                            CARD_RADIUS,
-                            2f,
-                            if (usingCustom) pal.accent else 0x00000000,
-                        )
-                    }
-                    customHolder.addView(customBorder, FrameLayout.LayoutParams(-1, -1))
-                    hostCol.addView(customHolder, LinearLayout.LayoutParams(-1, WALLPAPER_CUSTOM_BOX_H).also {
-                        it.topMargin = 10
-                    })
-                    val customCaption = Ui.text(
-                        context,
-                        if (usingCustom) "当前：自定义壁纸（导入的照片）" else "已有自定义壁纸，点「使用自定义壁纸」切换",
-                        ROW_SUB,
-                        if (usingCustom) pal.accent else pal.textDim,
-                    )
-                    hostCol.addView(customCaption, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
-                }
-                // 画板：这一条是**整行白底、文字左对齐**的「导入照片…」。
-                actionButton("导入照片…", full = true) { onImportWallpaper?.invoke() }
+                // 自定义静态壁纸：日间 + 夜间双槽并排预览，随日夜模式自动切换
+                section("自定义静态壁纸（随日夜切换）")
+                val slotsRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+                val daySlot = buildStaticSlot(
+                    badgeLabel = if (usingCustom && !activeCustomIsNight) "日间 · 生效" else "日间静态",
+                    bmp = dayCustomBmp,
+                    isActiveSlot = usingCustom && !activeCustomIsNight,
+                    emptyHint = if (!hasCustom) "还没有导入壁纸" else "未导入日间照片",
+                    onTap = { (onPickWallpaper ?: onImportWallpaper)?.invoke() },
+                )
+                val nightSlot = buildStaticSlot(
+                    badgeLabel = if (usingCustom && activeCustomIsNight) "夜间 · 生效" else "夜间静态",
+                    bmp = nightCustomBmp,
+                    isActiveSlot = usingCustom && activeCustomIsNight,
+                    emptyHint = "未导入 · 夜间沿用日间",
+                    onTap = { (onPickNightWallpaper ?: onImportNightWallpaper)?.invoke() },
+                )
+                slotsRow.addView(daySlot, LinearLayout.LayoutParams(0, 146, 1f))
+                slotsRow.addView(
+                    nightSlot,
+                    LinearLayout.LayoutParams(0, 146, 1f).also { it.leftMargin = 14 },
+                )
+                hostCol.addView(slotsRow, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
+
+                actionPair(
+                    "导入照片…",
+                    if (hasNightCustom) "更换夜间照片…" else "导入夜间照片…",
+                    onLeft = { onImportWallpaper?.invoke() },
+                    onRight = { onImportNightWallpaper?.invoke() },
+                )
                 if (hasCustom && !usingCustom) {
                     actionButton("使用自定义壁纸", full = true) { onUseCustomWallpaper?.invoke() }
                 }
-                if (hasCustom) {
+                if (hasDayCustom) {
                     actionButton("删除自定义壁纸", danger = true, full = true) { onDeleteCustomWallpaper?.invoke() }
                 }
+                if (hasNightCustom) {
+                    actionButton("删除夜间壁纸", danger = true, full = true) { onDeleteCustomNightWallpaper?.invoke() }
+                }
+
+                // 在线壁纸资源（Cloudflare R2：静态 + 动态，均支持日夜区分）
+                section("在线壁纸资源")
+                kvRow("资源源", "Cloudflare R2 · 支持日夜静态/动态壁纸", true)
+                actionButton("浏览在线壁纸…", full = true) { openOnlineWallpaperDialog() }
             }
 
-            // ------------------------------------------------------ 右栏：预设 / 轮播 / 视频
+            // ------------------------------------------------------ 右栏：默认日夜 / 预设风景 / 轮播 / 动态视频
             inColumn(right) {
-                section("预设壁纸")
+                section("默认壁纸（随日夜切换）")
+                val dnCard = com.cardesk.launcher.ui.widget.DayNightWallpaperCardView(
+                    context,
+                    pal.accent,
+                ).apply {
+                    chosen = usingDefaultDayNight
+                    Motion.press(this, MotionSpec.PRESS_SCALE_ICON)
+                    setOnClickListener {
+                        if (usingDefaultDayNight) return@setOnClickListener
+                        prefs.wallpaperDefaultDayNight = true
+                        prefs.wallpaperCustom = false
+                        prefs.videoWallpaperEnabled = false
+                        prefs.videoWallpaper = false
+                        logSetting(
+                            "design_wallpaper_default_daynight", "壁纸", "preset/custom", "default_daynight",
+                            LogTags.SETTING,
+                        )
+                        refresh(current, defaultMode = true)
+                        onUseDefaultDayNightWallpaper?.invoke()
+                        select("wallpaper")
+                    }
+                }
+                val dnLbl = Ui.text(context, "默认日夜壁纸 · 自动跟随日间 / 夜间模式", 12f, pal.textDim).apply {
+                    gravity = Gravity.CENTER
+                }
+                defaultCard = dnCard
+                defaultLabel = dnLbl
+                hostCol.addView(dnCard, LinearLayout.LayoutParams(-1, 92).also {
+                    it.topMargin = 8
+                })
+                hostCol.addView(dnLbl, LinearLayout.LayoutParams(-1, WALLPAPER_THUMB_LABEL_H))
+
+                section("预设风景壁纸")
                 for (r in 0 until 3) {
                     val line = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
                     for (c in 0 until 3) {
@@ -2940,23 +3172,21 @@ class SettingsOverlay(
                         val spec = com.cardesk.launcher.core.Wallpapers.spec(index)
                         val cell = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
                         val thumb = WallpaperThumbView(context, spec, pal.night, pal.accent).apply {
-                            // 按压反馈：缩略图是这一页唯一能点的入口，
-                            // 按下去要缩一下才看得出点的是哪一张。
                             Motion.press(this, MotionSpec.PRESS_SCALE_ICON)
                         }
                         val label = Ui.text(context, spec.name, 12f, pal.textDim).apply {
                             gravity = Gravity.CENTER
                         }
-                        cell.addView(thumb, LinearLayout.LayoutParams(-1, WALLPAPER_THUMB_H))
+                        cell.addView(thumb, LinearLayout.LayoutParams(-1, 90))
                         cell.addView(label, LinearLayout.LayoutParams(-1, WALLPAPER_THUMB_LABEL_H))
                         line.addView(cell, LinearLayout.LayoutParams(0, -2, 1f).also {
-                            if (c > 0) it.leftMargin = 16
+                            if (c > 0) it.leftMargin = 14
                         })
                         thumbs.add(thumb)
                         labels.add(label)
                     }
                     hostCol.addView(line, LinearLayout.LayoutParams(-1, -2).also {
-                        it.topMargin = if (r == 0) 10 else 16
+                        it.topMargin = if (r == 0) 8 else 12
                     })
                 }
 
@@ -2964,24 +3194,20 @@ class SettingsOverlay(
                     thumb.setOnClickListener {
                         val from = prefs.wallpaper
                         val next = com.cardesk.launcher.core.Wallpapers.normalize(index)
-                        if (next == from) return@setOnClickListener
+                        if (next == from && !usingDefaultDayNight && !usingCustom && !usingVideo) return@setOnClickListener
+                        prefs.wallpaperDefaultDayNight = false
                         prefs.wallpaper = next
                         logSetting(
                             "design_wallpaper_index", "壁纸", from, next, LogTags.SETTING,
                             "name" to com.cardesk.launcher.core.Wallpapers.name(next),
                         )
-                        refresh(next)
-                        // 立刻让桌面换上 —— 用户在设置页里就能看到效果。
+                        refresh(next, defaultMode = false)
                         onWallpaperChange?.invoke(next)
-                        // 选预设 = 关掉自定义壁纸：重建本页，让自定义预览/按钮状态跟上。
                         select("wallpaper")
                     }
                 }
 
-                // ---------------------------------------------------------- 轮播（第207轮）
-                //
-                // 静态壁纸轮播：每隔一段时间自动切下一张。
-                // 间隔用 chip 选（15 / 30 / 60 / 300 秒）。
+                // ---------------------------------------------------------- 轮播
                 section("壁纸轮播")
                 switchRow(
                     "自动轮播",
@@ -3016,15 +3242,12 @@ class SettingsOverlay(
                     )
                 }
 
-                // ---------------------------------------------------------- 视频壁纸（第207轮）
-                section("视频壁纸")
+                // ---------------------------------------------------------- 动态视频壁纸（日夜双模）
+                section("动态视频壁纸（随日夜切换）")
                 val videoOn = prefs.videoWallpaperEnabled && hasVideo
                 switchRow(
                     "启用视频壁纸",
                     videoOn,
-                    // 第207轮：**不带副标题** ——
-                    // 开关副标题只留给「互斥 / 语义」那几条（见 [SettingsCopyTest]），
-                    // 「还没导入视频」是**状态**，写成下面的说明行。
                     null,
                     height = ROW_H_TIGHT,
                 ) { on ->
@@ -3037,9 +3260,6 @@ class SettingsOverlay(
                     logSetting("design_video_wallpaper_enabled", "视频壁纸", !on, on, LogTags.SETTING)
                     onVideoWallpaperChange?.invoke(on)
                 }
-                // 第三百一十八轮：日夜各一段视频（夜间是**可选**的，没有就用日间那段）。
-                // 状态用 kvRow（原始数据），不占用「说明文字」白名单。
-                val hasNightVideo = com.cardesk.launcher.core.VideoWallpaper.hasNight(context)
                 kvRow(
                     "日间视频",
                     if (hasVideo) {
@@ -3058,35 +3278,48 @@ class SettingsOverlay(
                     },
                     hasNightVideo,
                 )
-                // 画板 s07「视频壁纸」是并排两枚白按钮。
-                // 左「导入视频…」走**应用内**选择器（第219轮：实车上系统选择器秒退且不带 uri，
-                // 所以主路径换成自己列视频）；右「用系统选择器导入…」保留为**备选**。
                 actionPair(
                     "导入视频…",
-                    "用系统选择器导入…",
+                    if (hasNightVideo) "更换夜间视频…" else "导入夜间视频…",
                     onLeft = { onPickVideoWallpaper?.invoke() },
-                    onRight = { onImportVideoWallpaper?.invoke() },
+                    onRight = { onPickNightVideoWallpaper?.invoke() },
+                )
+                actionPair(
+                    "用系统选择器导入…",
+                    "用系统选择器导入夜间…",
+                    onLeft = { onImportVideoWallpaper?.invoke() },
+                    onRight = { onImportNightVideoWallpaper?.invoke() },
                 )
                 if (hasVideo) {
                     actionButton("删除视频壁纸", danger = true, full = true) {
                         onDeleteVideoWallpaper?.invoke()
                     }
                 }
-                // 第三百一十八轮：夜间版单列两个按钮（导入 / 删除），
-                // 白天那两枚按钮的行为**不变**（导入日间版）。
-                actionPair(
-                    if (hasNightVideo) "更换夜间视频…" else "导入夜间视频…",
-                    if (hasNightVideo) "删除夜间视频" else "用系统选择器导入夜间…",
-                    onLeft = { onPickNightVideoWallpaper?.invoke() },
-                    onRight = {
-                        if (hasNightVideo) onDeleteNightVideoWallpaper?.invoke() else onImportNightVideoWallpaper?.invoke()
-                    },
-                )
+                if (hasNightVideo) {
+                    actionButton("删除夜间视频", danger = true, full = true) {
+                        onDeleteNightVideoWallpaper?.invoke()
+                    }
+                }
             }
         }
 
         // 两栏都建完再落一次选中态（网格是右栏建的，必须先有 thumb 才能刷）。
         refresh(current)
+    }
+
+    /** 打开在线壁纸浏览弹窗（静态与动态壁纸均可在弹窗内直接从 R2 下载应用）。 */
+    private fun openOnlineWallpaperDialog() {
+        val dlg = com.cardesk.launcher.ui.dialogs.OnlineWallpaperDialog(
+            context = context,
+            pal = pal,
+            onApplied = { kind, night ->
+                onOnlineWallpaperApplied?.invoke(kind, night)
+            },
+        )
+        dlg.onClose = {
+            dlg.dismissAnimated { removeView(dlg) }
+        }
+        addView(dlg, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
     /**
@@ -3243,6 +3476,7 @@ class SettingsOverlay(
             prefs.carStatusCardPosY = -1f
             prefs.carStatusInBottomRow = false
             prefs.carStatusBottomIndex = -1
+            prefs.cardFreePositions = emptyMap()
             onCardLayoutChanged?.invoke()
             select(selectedKey)
         }
@@ -3668,10 +3902,47 @@ class SettingsOverlay(
 
     /** 自动热点（case "hotspot"）。 */
     private fun pageHotspot() {
+        val statusBox = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+
+        fun renderStatus() {
+            statusBox.removeAllViews()
+            val prevHost = columnHost
+            columnHost = statusBox
+            try {
+                val apState = com.cardesk.launcher.core.HotspotController.getApState(context)
+                val active = com.cardesk.launcher.core.HotspotController.isActiveState(apState)
+                val ssid = com.cardesk.launcher.core.HotspotController.readSsid(context)
+                val stateText = buildString {
+                    append(com.cardesk.launcher.core.HotspotController.stateLabel(apState))
+                    if (!ssid.isNullOrEmpty()) append(" · ").append(ssid)
+                }
+                kvRow("当前热点状态", stateText, ok = active)
+                val lastResult = prefs.stringValue(com.cardesk.launcher.core.HotspotController.KEY_AUTO_LAST_RESULT, "")
+                kvRow(
+                    "最近自动执行",
+                    if (lastResult.isEmpty()) "尚未执行" else lastResult,
+                    ok = lastResult.contains("已开启"),
+                )
+            } finally {
+                columnHost = prevHost
+            }
+        }
+
         switchRow("自动热点", ScheduledTasks.isHotspotAutoEnabled(prefs)) {
             val from = ScheduledTasks.isHotspotAutoEnabled(prefs)
             ScheduledTasks.setHotspotAutoEnabled(prefs, it)
             logSetting(ScheduledTasks.KEY_HOTSPOT_AUTO, "自动热点", from, it)
+        }
+        section("当前状态")
+        hostCol.addView(statusBox, LinearLayout.LayoutParams(-1, -2))
+        renderStatus()
+        section("手动控制")
+        chipRow("立即操作", listOf("开启热点", "关闭热点"), -1) { idx ->
+            val enable = idx == 0
+            com.cardesk.launcher.core.HotspotController.setEnabledAsync(context, enable, "设置页手动操作") { res ->
+                Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                renderStatus()
+            }
         }
     }
 
@@ -4508,39 +4779,18 @@ class SettingsOverlay(
      * 现在拆成三个互不相干的开关。
      */
     private fun dockLeftColumn() {
-        // 第五十六轮：这里原来只有一个「隐藏原车 Dock」开关，
-        // 而我们把它**同时**用在了「隐藏原车 Dock」和「隐藏桌面自己的 Dock」上 ——
-        // 于是勾上它，消失的是**桌面自己的** Dock（用户反馈「隐藏系统 Dock 栏功能实现错误」）。
-        // 现在拆成三个互不相干的开关。
-        switchRow("沉浸系统导航栏", prefs.oemNavImmersive) {
-            val from = prefs.oemNavImmersive
-            prefs.oemNavImmersive = it
-            logSetting("oem_nav_immersive", "沉浸系统导航栏", from, it)
-        }
+        section("显示与隐藏")
         switchRow("隐藏桌面 Dock", prefs.hideHomeDock) {
             val from = prefs.hideHomeDock
             prefs.hideHomeDock = it
             logSetting("home_dock_hidden", "隐藏桌面 Dock", from, it)
+            com.cardesk.launcher.core.dock.GlobalDockService.refreshVisibility()
         }
         switchRow("隐藏原车 Dock", prefs.hideDock, "对所有应用生效") {
             val from = prefs.hideDock
             prefs.hideDock = it
             logSetting("dockbar_hide_dock", "隐藏原车 Dock", from, it)
         }
-        // 第183轮：Dock 圆角可调（0..52 设计 px）。
-        // 第190轮：默认值 36 → 0（用户：「dock栏圆角默认改成0px吧」）——
-        // 滑杆本身保留，用户想找回圆角随时能拖回去。
-        // Dock 现在紧贴屏幕底部，圆角只作用在上面两个角；拖动时桌面/全局 Dock 实时重绘。
-        sliderRow("Dock 圆角", prefs.dockCornerRadius, 0, 52, " px") {
-            val from = prefs.dockCornerRadius
-            prefs.dockCornerRadius = it
-            com.cardesk.launcher.ui.shell.DockBarView.refreshAll(context)
-            logSettingDebug("dock_corner_radius", "Dock 圆角", from, it)
-        }
-        // 第189轮：原来的「Dock 生效应用」名单**整行删掉** ——
-        // 「隐藏原车 Dock」改成全局生效（`immersive.navigation=*`），不再按名单挑应用；
-        // 留着这一行会让人以为还能挑，而且老名单的含义会悄悄反转
-        // （以前是「只对这些生效」，现在全局了）。
         switchRow("隐藏原车状态栏", prefs.hideStatus) {
             val from = prefs.hideStatus
             prefs.hideStatus = it
@@ -4554,18 +4804,15 @@ class SettingsOverlay(
             )
             onShowStatusApps?.invoke()
         }
-        // 第149轮：同上，删掉与 `pickerRow("状态栏生效应用")` 重复的那一行。
     }
 
     /**
-     * s11 右栏：全局 Dock / 增强导航栏 / 下移 Dock / 导航栏样式 / 槽位 / 快捷应用。
+     * s11 右栏：全局 Dock / Dock 快捷应用 / Dock 外观（圆角）。
+     *
+     * 已移除导航栏样式、槽位编辑/重置，以及与全局 Dock 重复或互斥的历史项
+     * （沉浸系统导航栏、增强导航栏、下移 Dock），整页只保留相互独立、真正在生效的设置。
      */
     private fun dockRightColumn() {
-        // ---------------- 全局 Dock（第八十七轮） ----------------
-        // 模型：Dock 不再只活在桌面窗口里，而是起一个前台服务，
-        // 在**其它应用**底部常驻一个 Dock 窗口，把原车导航栏 / 原车 Dock 遮住。
-        // 桌面自己（HOME 前台）不用全局窗口 —— 桌面里本来就有同一套 Dock，
-        // 重复画既没价值还会闪（详见 work/r87-design.md「二、全局 Dock 工作流」）。
         section("全局 Dock")
         switchRow("全局 Dock 栏（其他应用也显示）", prefs.globalDockEnabled) {
             val from = prefs.globalDockEnabled
@@ -4584,81 +4831,21 @@ class SettingsOverlay(
         ) {
             note("预留区未启用：其它应用底部可能被 Dock 遮挡（平台签名版会自动启用）。")
         }
-        section("增强导航栏")
-        switchRow("增强导航栏（贴底 pill）", prefs.enhancedNav, "与隐藏 Dock / 下移 Dock 互斥") {
-            val from = prefs.enhancedNav
-            prefs.enhancedNav = it
-            logSetting("navbar_enhanced_enabled", "增强导航栏", from, it)
-            // 第八十七轮：增强导航栏与全局 Dock 互斥（prefs 的 setter 会关掉全局 Dock），
-            // 这里同步把前台服务停掉，否则别处应用底部还会留着那个窗口。
-            com.cardesk.launcher.core.dock.GlobalDockService.ensureStarted(context.applicationContext)
-        }
-        switchRow("下移 Dock", prefs.lowerDock, "与增强导航栏互斥") {
-            val from = prefs.lowerDock
-            prefs.lowerDock = it
-            logSetting("dockbar_lower_dock", "下移 Dock", from, it)
-            // 同上：下移 Dock 也会关掉全局 Dock（setter 互斥）。
-            com.cardesk.launcher.core.dock.GlobalDockService.ensureStarted(context.applicationContext)
-        }
-        // 导航栏样式（两种形态）
-        // - 「设计 Dock」：pill 里装设计版 Dock；
-        // - 「槽位条」：pill 里装**可配置槽位**（一族）
-        //   槽位里可以放媒体槽 / **歌词槽**。
-        //
-        // 原来这个键没人写（`navbar_style` 恒为 0），槽位条形态根本进不去 ——
-        // 歌词槽的擦除高亮也就无从验证。本轮补上入口。
-        chipRow("导航栏样式", listOf("设计 Dock", "槽位条"), prefs.navStyle, height = ROW_H) { idx ->
-            val from = prefs.navStyle
-            prefs.navStyle = idx
-            logSetting("navbar_style", "导航栏样式", from, idx)
-        }
-        // 画板 s11：槽位数量是**一行文字**，右边紧挨着「编辑槽位」按钮（同一行）。
-        // 以前是一个整行宽按钮「编辑槽位（N 项）」，数量只在按钮文字里，
-        // 和画板的「槽位（15 项） + 编辑」两段式不一致。
-        val slotRow = FrameLayout(context)
-        val slotCount = NavSlots.load(prefs).size
-        slotRow.addView(
-            Ui.text(context, "槽位（$slotCount 项）", ROW_TITLE, pal.text, bold = true),
-            FrameLayout.LayoutParams(-2, -1, Gravity.START or Gravity.CENTER_VERTICAL),
-        )
-        val editSlots = makeButton("编辑槽位", primary = true, danger = false, full = false)
-        editSlots.setOnClickListener {
-            // 排障场景：槽位编辑面板没打开 —— 记下这次点击
-            Logx.event(LogTags.SETTING, "打开槽位编辑面板")
-            onEditNavSlots?.invoke()
-        }
-        slotRow.addView(
-            editSlots,
-            FrameLayout.LayoutParams(-2, DOCK_SLOT_BTN_H, Gravity.END or Gravity.CENTER_VERTICAL).also {
-                // 同上：按钮的 bottomMargin 要 > 0（按钮间距测试是递归扫描的）。
-                it.bottomMargin = 12
-            },
-        )
-        hostCol.addView(slotRow, LinearLayout.LayoutParams(-1, DOCK_SLOT_ROW_H))
-        hairline()
-        actionButton("恢复默认 15 槽位", full = true) {
-            NavSlots.save(prefs, NavSlots.defaults())
-            // 排障场景：槽位被一键重置 —— 记下重置动作（落盘明细见 NavSlots.save）
-            Logx.event(LogTags.SETTING, "恢复默认 15 槽位")
-            // 第154轮审计：**光存盘不够**。
-            // `onApply` 走的是 LauncherView.onSettingsApplied()，它只在
-            // 「增强导航栏开关」或「导航栏样式」变了的时候才 build() 重建 ——
-            // 本按钮两个都不改 ⇒ 不重建，导航栏纹丝不动，
-            // 而且本页也不重画（按钮上方「编辑槽位（N 项）」的 N 都不变）。
-            // 落盘要到下次重启才生效，用户当下的预期完全落空。
-            //
-            // 修法：显式通知宿主把槽位重新读回来并刷到槽位条上，
-            // 和「编辑槽位…」面板 onChange 里的做法对齐（见 LauncherView.showNavSlots）。
-            onNavSlotsChanged?.invoke()
-            onApply?.invoke()
-            // 本页自己也要重画 —— 「槽位（N 项）」的 N 得跟着变。
-            select(selectedKey)
-        }
 
-        // 画板 s11：右栏最后是「DOCK 快捷应用」—— 已配置数量 + 配置按钮。
-        // 以前这一块在页面**最上面**（`pageDock` 先调 `quickAppsBody()`），
-        // 而画板把它放在 Dock 这一栏的末尾（配置完 Dock 再配快捷应用）。
         quickAppsBody()
+
+        section("外观")
+        // Dock 紧贴屏幕底部，圆角只作用在上面两个角；拖动时桌面/全局 Dock 实时重绘。
+        sliderRow("Dock 圆角", prefs.dockCornerRadius, 0, 52, " px") {
+            val from = prefs.dockCornerRadius
+            prefs.dockCornerRadius = it
+            com.cardesk.launcher.ui.shell.DockBarView.refreshAll(context)
+            logSettingDebug("dock_corner_radius", "Dock 圆角", from, it)
+        }
+        actionButton("调整 Dock 按钮顺序…", full = true) {
+            Logx.event(LogTags.SETTING, "进入 Dock 拖动排序模式")
+            onReorderDock?.invoke()
+        }
     }
 
     /**
@@ -5707,6 +5894,14 @@ class SettingsOverlay(
             // 开灯是要采频谱的 → 没权限就在这里要（用户正要开这个功能）
             if (enabled) ensureAmbientAudioPermission()
             // 状态文字会变（启用 → 采集 / 关闭 → 未启动）→ 重建这一页
+            select(selectedKey)
+        }
+        switchRow("仅夜间模式启用", prefs.ambientNightOnly) { nightOnly ->
+            val from = prefs.ambientNightOnly
+            prefs.ambientNightOnly = nightOnly
+            logSetting("ambient_night_only", "仅夜间模式启用氛围灯", from, nightOnly)
+            com.cardesk.launcher.core.ambient.AmbientLightController.syncPolicy(context)
+            onApply?.invoke()
             select(selectedKey)
         }
         val statusReadout = kvRow(

@@ -263,17 +263,14 @@ class SettingsCopyTest {
             shadowOf(android.os.Looper.getMainLooper()).idle()
             subtitles += markedTexts(bodyOf(overlay), SettingsOverlay.SUBTITLE_MARK)
         }
-        // 第242轮设计改版后的实际清单（6 条）：
-        //   互斥 2（增强导航栏 / 下移 Dock）
-        // + ISS 语义 1
+        // 实际清单（4 条，已移除「增强导航栏」「下移 Dock」两条互斥副标题）：
+        //   ISS 语义 1
         // + 自定义参数语义 1（「关：只看预设…」）
         // + 隐藏原车 Dock 全局 1（「对所有应用生效」）
         // + 壁纸轮播语义 1（「每隔一段时间自动换一张静态壁纸」）
-        // 原来的「续航卡自适应…」那条在改版里随卡片设置区重排删掉了，
-        // 所以从 7 变 6 —— 白名单（ALLOWED）照旧兜住「不许多出来」。
         assertEquals(
-            "开关副标题应该只剩互斥 / 语义那几条，实际：$subtitles",
-            6,
+            "开关副标题应该只剩语义那几条，实际：$subtitles",
+            4,
             subtitles.size,
         )
     }

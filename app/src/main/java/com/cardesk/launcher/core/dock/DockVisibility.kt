@@ -24,10 +24,15 @@ object DockVisibility {
      * @param nativeInsets 预留区（112px 覆盖包）是否生效
      * @param homeForeground 桌面是否在前台
      * @param immersiveAppForeground 前台的 App 是否属于「我们让位」的沉浸名单
+     * @param hideHomeDock 用户是否勾选了「隐藏桌面 Dock」
      */
     fun want(
         nativeInsets: Boolean,
         homeForeground: Boolean,
         immersiveAppForeground: Boolean,
-    ): Boolean = (nativeInsets || !homeForeground) && !immersiveAppForeground
+        hideHomeDock: Boolean = false,
+    ): Boolean {
+        if (homeForeground && hideHomeDock) return false
+        return (nativeInsets || !homeForeground) && !immersiveAppForeground
+    }
 }

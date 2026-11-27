@@ -97,6 +97,75 @@ class BackgroundView(context: Context) : View(context) {
 
         /** 亮度采样代理图的高度（第222轮）。 */
         const val PROXY_H = 108
+
+        /**
+         * 绘制**默认日夜模式壁纸**（L0 流光渐层：浅青白/深夜蓝底 + 右上青/左下蓝/左上微白三处柔光）。
+         *
+         * 桌面主背景、玻璃模糊底图、设置页「默认日夜壁纸」缩略图与大图预览共用这一套实现，
+         * 保证所见即所得。
+         */
+        fun drawDefaultDayNight(
+            canvas: Canvas,
+            palette: Palette,
+            w: Float,
+            h: Float,
+            washPaint: Paint = Paint(Paint.DITHER_FLAG),
+            glowPaint: Paint = Paint(Paint.DITHER_FLAG),
+            opaqueBase: Boolean = true,
+        ) {
+            if (w <= 0f || h <= 0f) return
+            val night = palette.night
+            val baseAlpha = if (opaqueBase) 0xFF else if (night) WASH_NIGHT else WASH_DAY
+            washPaint.shader = LinearGradient(
+                0f, 0f, 0f, h,
+                palette.withAlpha(palette.bgTop, baseAlpha),
+                palette.withAlpha(palette.bgBottom, baseAlpha),
+                Shader.TileMode.CLAMP,
+            )
+            canvas.drawRect(0f, 0f, w, h, washPaint)
+
+            // 左上近白柔光
+            glowPaint.shader = RadialGradient(
+                w * 0.00f, h * 0.06f, w * 0.52f,
+                intArrayOf(
+                    palette.withAlpha(GLOW_WHITE, if (night) GLOW_WHITE_NIGHT else 0x33),
+                    palette.withAlpha(GLOW_WHITE, 0),
+                ),
+                floatArrayOf(0f, 0.72f),
+                Shader.TileMode.CLAMP,
+            )
+            canvas.drawRect(0f, 0f, w, h, glowPaint)
+
+            // 右上青绿柔光
+            val teal = if (night) GLOW_TEAL_NIGHT else 0x8C
+            glowPaint.shader = RadialGradient(
+                w * 0.89f, h * 0.01f, w * 0.42f,
+                intArrayOf(
+                    palette.withAlpha(GLOW_TEAL, teal),
+                    palette.withAlpha(GLOW_TEAL, (teal * 0.55f).toInt()),
+                    palette.withAlpha(GLOW_TEAL, 0),
+                ),
+                floatArrayOf(0f, 0.45f, 1f),
+                Shader.TileMode.CLAMP,
+            )
+            canvas.drawRect(0f, 0f, w, h, glowPaint)
+
+            // 左下蓝柔光
+            val blue = if (night) GLOW_BLUE_NIGHT else 0x3D
+            glowPaint.shader = RadialGradient(
+                w * 0.10f, h * 0.98f, w * 0.55f,
+                intArrayOf(
+                    palette.withAlpha(GLOW_BLUE, blue),
+                    palette.withAlpha(GLOW_BLUE, (blue * 0.5f).toInt()),
+                    palette.withAlpha(GLOW_BLUE, 0),
+                ),
+                floatArrayOf(0f, 0.5f, 1f),
+                Shader.TileMode.CLAMP,
+            )
+            canvas.drawRect(0f, 0f, w, h, glowPaint)
+            glowPaint.shader = null
+            washPaint.shader = null
+        }
     }
 
     /** L0 的两支画笔（[drawDesignWash] 用；每帧复用，避免在 onDraw 里 new）。 */
@@ -151,6 +220,20 @@ class BackgroundView(context: Context) : View(context) {
         }
 
     /**
+     * 是否使用**默认日夜壁纸**（L0 流光渐层，随日夜模式自动切换）。
+     *
+     * 为 true 且未使用自定义照片时，整屏绘制默认日夜流光底；
+     * 选了 9 张风景预设或自定义照片时置 false，让所选壁纸清晰呈现。
+     */
+    var defaultDayNight: Boolean = true
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+            refreshBackdrop()
+        }
+
+    /**
      * 是否显示**自定义壁纸**（第 105 轮：用户导入的照片）。
      *
      * 为 true 时 [wallpaper] 只是回退值：删掉自定义壁纸 / 下次打开预设就用它。
@@ -161,6 +244,15 @@ class BackgroundView(context: Context) : View(context) {
             field = value
             invalidate()
             // 换壁纸类型 → 亮度要重算（第222轮）。
+            refreshBackdrop()
+        }
+
+    /** 自定义壁纸在夜间是否使用独立夜间照片（为 true 时不再叠加人工夜间压暗 scrim）。 */
+    var customUsesNightAsset: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
             refreshBackdrop()
         }
 
@@ -270,9 +362,13 @@ class BackgroundView(context: Context) : View(context) {
                 }
                 try {
                     val canvas = android.graphics.Canvas(proxy)
-                    WallpaperRenderer.drawDirect(
-                        canvas, Wallpapers.spec(wallpaper), proxy.width.toFloat(), proxy.height.toFloat(), night,
-                    )
+                    if (defaultDayNight) {
+                        drawDefaultDayNight(canvas, palette, proxy.width.toFloat(), proxy.height.toFloat(), washPaint, glowPaint, opaqueBase = true)
+                    } else {
+                        WallpaperRenderer.drawDirect(
+                            canvas, Wallpapers.spec(wallpaper), proxy.width.toFloat(), proxy.height.toFloat(), night,
+                        )
+                    }
                     publishBackdrop(
                         com.cardesk.launcher.core.WallpaperSampler.averageColor(
                             proxy, com.cardesk.launcher.core.WallpaperSampler.TOP_REGION, false,
@@ -323,9 +419,13 @@ class BackgroundView(context: Context) : View(context) {
         val proxy = proxyBitmap() ?: return 0
         return try {
             val canvas = Canvas(proxy)
-            WallpaperRenderer.drawDirect(
-                canvas, Wallpapers.spec(wallpaper), proxy.width.toFloat(), proxy.height.toFloat(), night,
-            )
+            if (defaultDayNight) {
+                drawDefaultDayNight(canvas, palette, proxy.width.toFloat(), proxy.height.toFloat(), washPaint, glowPaint, opaqueBase = true)
+            } else {
+                WallpaperRenderer.drawDirect(
+                    canvas, Wallpapers.spec(wallpaper), proxy.width.toFloat(), proxy.height.toFloat(), night,
+                )
+            }
             com.cardesk.launcher.core.WallpaperSampler.averageColor(proxy, region, false) ?: 0
         } catch (t: Throwable) {
             0
@@ -357,7 +457,7 @@ class BackgroundView(context: Context) : View(context) {
     private fun refreshGlass() {
         val glass = com.cardesk.launcher.core.Glass
         val night = palette.night
-        val key = "$night:$wallpaper:$custom:${customBitmap?.let { System.identityHashCode(it) } ?: 0}:${palette.bgTop}"
+        val key = "$night:$defaultDayNight:$wallpaper:$custom:$customUsesNightAsset:${customBitmap?.let { System.identityHashCode(it) } ?: 0}:${palette.bgTop}"
         if (glass.backdrop != null && key == lastGlassKey) return
         val glassStartMs = android.os.SystemClock.uptimeMillis()
         val bw = (com.cardesk.launcher.core.Design.W * com.cardesk.launcher.core.Glass.SCALE).toInt()
@@ -371,13 +471,11 @@ class BackgroundView(context: Context) : View(context) {
         try {
             val canvas = android.graphics.Canvas(raw)
             canvas.drawColor(palette.bgTop)
-            if (custom) {
-                WallpaperRenderer.drawCustom(canvas, customBitmap, bw.toFloat(), bh.toFloat(), night)
-            } else {
-                WallpaperRenderer.drawDirect(canvas, Wallpapers.spec(wallpaper), bw.toFloat(), bh.toFloat(), night)
+            when {
+                custom -> WallpaperRenderer.drawCustom(canvas, customBitmap, bw.toFloat(), bh.toFloat(), night && !customUsesNightAsset)
+                defaultDayNight -> drawDefaultDayNight(canvas, palette, bw.toFloat(), bh.toFloat(), washPaint, glowPaint, opaqueBase = true)
+                else -> WallpaperRenderer.drawDirect(canvas, Wallpapers.spec(wallpaper), bw.toFloat(), bh.toFloat(), night)
             }
-            // 卡片取样必须与屏幕上看到的一致：L0 的渐变与柔光也要画进去。
-            drawDesignWash(canvas, bw.toFloat(), bh.toFloat(), night)
         } catch (t: Throwable) {
             com.cardesk.launcher.core.log.Logx.w(
                 com.cardesk.launcher.core.log.LogTags.SCENE, "玻璃底图绘制失败", "err" to t.toString(),
@@ -557,74 +655,18 @@ class BackgroundView(context: Context) : View(context) {
     private fun drawWallpaper(canvas: Canvas, index: Int, w: Float, h: Float) {
         // 底色兜底：拖拽时两张壁纸之间会露出缝隙，先铺一层桌面底色。
         canvas.drawColor(palette.bgTop)
-        if (custom) {
-            WallpaperRenderer.drawCustom(canvas, customBitmap, w, h, palette.night)
-        } else {
-            WallpaperRenderer.draw(canvas, Wallpapers.spec(index), w, h, palette.night)
+        when {
+            custom -> WallpaperRenderer.drawCustom(canvas, customBitmap, w, h, palette.night && !customUsesNightAsset)
+            defaultDayNight -> drawDesignWash(canvas, w, h, palette.night)
+            else -> WallpaperRenderer.draw(canvas, Wallpapers.spec(index), w, h, palette.night)
         }
-        drawDesignWash(canvas, w, h, palette.night)
     }
 
     /**
-     * 设计稿 L0：底色渐变 + 两处柔光（压在壁纸上，见 [WASH_DAY] 的注释）。
-     *
-     * 画板里的两处光：右上偏中的**青**（`#00C2B2`，半径 ≈ 屏宽 42%）、
-     * 左下偏中的**蓝**（`#0E8FD8`，半径 ≈ 屏宽 45%）。都是柔和径向，
-     * 中心 alpha 15%/11%，到 [GLOW_STOP] 收敛为 0。
+     * 设计稿 L0：默认日夜壁纸（底色渐变 + 三处柔光）。
      */
     private fun drawDesignWash(canvas: Canvas, w: Float, h: Float, night: Boolean) {
-        val base = if (night) WASH_NIGHT else WASH_DAY
-        washPaint.shader = LinearGradient(
-            0f, 0f, 0f, h,
-            palette.withAlpha(palette.bgTop, base),
-            palette.withAlpha(palette.bgBottom, base),
-            Shader.TileMode.CLAMP,
-        )
-        canvas.drawRect(0f, 0f, w, h, washPaint)
-
-        // 左上近白柔光：画板 (100,60) ≈ #E6EFF4 —— 很淡，只是让左上不显得脏。
-        glowPaint.shader = RadialGradient(
-            w * 0.00f, h * 0.06f, w * 0.52f,
-            intArrayOf(
-                palette.withAlpha(GLOW_WHITE, if (night) GLOW_WHITE_NIGHT else 0x33),
-                palette.withAlpha(GLOW_WHITE, 0),
-            ),
-            floatArrayOf(0f, 0.72f),
-            Shader.TileMode.CLAMP,
-        )
-        canvas.drawRect(0f, 0f, w, h, glowPaint)
-
-        // 右上青绿：画板峰值在**右上角**（(1600,60) = #7FD9D0），向下向右衰减。
-        // 上一版圆心在 h*0.30、半径 0.42w，峰值整个掉到 y≈300（Δ46~64），
-        // 这里把圆心抬到顶部、半径收到 0.42w，并加一档 45% 衰减停靠。
-        val teal = if (night) GLOW_TEAL_NIGHT else 0x8C
-        glowPaint.shader = RadialGradient(
-            w * 0.89f, h * 0.01f, w * 0.42f,
-            intArrayOf(
-                palette.withAlpha(GLOW_TEAL, teal),
-                palette.withAlpha(GLOW_TEAL, (teal * 0.55f).toInt()),
-                palette.withAlpha(GLOW_TEAL, 0),
-            ),
-            floatArrayOf(0f, 0.45f, 1f),
-            Shader.TileMode.CLAMP,
-        )
-        canvas.drawRect(0f, 0f, w, h, glowPaint)
-
-        // 左下蓝：画板 (100,900) ≈ #DEECF7。
-        val blue = if (night) GLOW_BLUE_NIGHT else 0x3D
-        glowPaint.shader = RadialGradient(
-            w * 0.10f, h * 0.98f, w * 0.55f,
-            intArrayOf(
-                palette.withAlpha(GLOW_BLUE, blue),
-                palette.withAlpha(GLOW_BLUE, (blue * 0.5f).toInt()),
-                palette.withAlpha(GLOW_BLUE, 0),
-            ),
-            floatArrayOf(0f, 0.5f, 1f),
-            Shader.TileMode.CLAMP,
-        )
-        canvas.drawRect(0f, 0f, w, h, glowPaint)
-        glowPaint.shader = null
-        washPaint.shader = null
+        drawDefaultDayNight(canvas, palette, w, h, washPaint, glowPaint, opaqueBase = true)
     }
 
     /**
@@ -675,6 +717,7 @@ class BackgroundView(context: Context) : View(context) {
                 settleAnim = null
                 dragOffset = 0f
                 if (step != 0) {
+                    defaultDayNight = false
                     wallpaper = Wallpapers.next(wallpaper)
                     // 排障场景：「壁纸切了但界面没变」——最终落定的壁纸落盘。
                     Logx.event(

@@ -21,6 +21,7 @@ class SeatLevelView(context: Context) : View(context) {
 
     var palette: Palette = Palettes.night
         set(value) {
+            if (field == value) return
             field = value
             invalidate()
         }
@@ -36,12 +37,14 @@ class SeatLevelView(context: Context) : View(context) {
 
     var heat: Boolean = true
         set(value) {
+            if (field == value) return
             field = value
             invalidate()
         }
 
     var caption: String = "加热"
         set(value) {
+            if (field == value) return
             field = value
             invalidate()
         }

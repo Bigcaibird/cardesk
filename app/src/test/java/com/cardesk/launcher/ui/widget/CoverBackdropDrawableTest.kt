@@ -366,4 +366,30 @@ class CoverBackdropDrawableTest {
             colorDistance(center, surface) <= 2,
         )
     }
+
+    @Test
+    fun 半透明卡片绘制后切第二张封面不会被旧alpha或shader污染() {
+        val translucentSurface = (0x80 shl 24) or (surface and 0x00FFFFFF)
+        val d = CoverBackdropDrawable(
+            surfaceColor = translucentSurface,
+            strokeColor = stroke,
+            cornerRadius = 28f,
+            textColor = weakText,
+        )
+        d.setBounds(0, 0, cardW, cardH)
+        d.bitmap = solidCover(0xFFFF2D2D.toInt())
+        ShadowLooper.shadowMainLooper().idle()
+        // 先画一次，触发 bitmapPaint 的 alpha 与 shader 赋值
+        render(d)
+
+        // 再换第二张纯蓝封面，切回不透明卡面检查像素是否仍完整偏蓝
+        d.setStyle(surface, stroke, 28f, weakText)
+        d.bitmap = solidCover(0xFF1E90FF.toInt())
+        ShadowLooper.shadowMainLooper().idle()
+        val after = render(d).getPixel(cardW / 2, cardH / 2)
+        assertTrue(
+            "半透明绘制后切第二张封面颜色失真（实际 r=${Color.red(after)} b=${Color.blue(after)}）",
+            Color.blue(after) > Color.red(after) + 8,
+        )
+    }
 }

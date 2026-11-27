@@ -213,6 +213,9 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
     /** 嵌入是否已就绪。 */
     private var ready: Boolean = false
 
+    /** 承载层当前是否处于可见页（导航页在前台）；离屏预热停放时为 false，避免看门狗误检。 */
+    private var contentVisible: Boolean = false
+
     /**
      * 占位层。
      *
@@ -702,6 +705,7 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
      * 切回来时原画面还在（不重启应用）。
      */
     fun setContentVisible(visible: Boolean) {
+        contentVisible = visible
         val v = content ?: return
         // —— 第三百零六轮：回到可见态就体检一次「承载面输出面」 ——
         //
@@ -717,6 +721,12 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
             checkDisplaySurface("可见")
             handler.removeCallbacks(surfaceRecheck)
             handler.postDelayed(surfaceRecheck, SURFACE_REATTACH_RETRY_MS)
+            // 镜像路线离屏停放时触摸排除区在屏外；切页动画落位后刷新成屏内坐标。
+            handler.removeCallbacks(tapExcludeRefresh)
+            handler.postDelayed(tapExcludeRefresh, TAP_EXCLUDE_SETTLE_MS)
+        } else {
+            handler.removeCallbacks(surfaceRecheck)
+            handler.removeCallbacks(tapExcludeRefresh)
         }
         // **不要改 visibility**：实测 `INVISIBLE` 会让 `ActivityView` 把
         // VirtualDisplay 的 surface 拆掉，切回来画面**再也回不来**（一直黑）。
@@ -864,9 +874,14 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
      * 回到可见态那一刻可能还没绑好；500ms 后再看一次才能确认。
      */
     private val surfaceRecheck = Runnable {
-        if (!isShown) return@Runnable
+        if (!isShown || !contentVisible) return@Runnable
         runCatching { checkDisplaySurface("可见-延迟") }
             .onFailure { Logx.w(LogTags.NAV_UI, "画中画输出面体检异常", it, "role" to role) }
+    }
+
+    private val tapExcludeRefresh = Runnable {
+        if (!isShown || !contentVisible) return@Runnable
+        mirrorHost?.refreshTapExcludeRegion()
     }
 
     private fun startWatchdog() {
@@ -877,6 +892,7 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
     private fun stopWatchdog() {
         handler.removeCallbacks(watchdog)
         handler.removeCallbacks(surfaceRecheck)
+        handler.removeCallbacks(tapExcludeRefresh)
         watchdogMisses = 0
         noTaskMisses = 0
     }
@@ -898,9 +914,9 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
     private fun checkProcess() {
         val pkg = packageName
         if (pkg.isBlank() || !ready || content == null) return
-        // 承载面不可见（导航页不在前台）时不查 —— 这时 surface 都没了，
-        // 进程可能在后台被系统回收，等回到这一页 surface 重建会自己拉起。
-        if (!isShown) return
+        // 承载面不可见（导航页不在前台或处于离屏预热停放态）时不查，
+        // 避免在首页误触发像素采样/黑屏自愈。
+        if (!isShown || !contentVisible) return
         // —— 第130轮：桌面不在前台 → 不做黑屏自愈 ——
         //
         // 用户点「全屏打开」把应用拉到全屏时，它的 task 确实从我们的
@@ -1723,6 +1739,9 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
          * 留出「SurfaceView 的 surface 重建 → ActivityView 绑给 VirtualDisplay」的时序差。
          */
         const val SURFACE_REATTACH_RETRY_MS = 500L
+
+        /** 切页动画落位后再刷新镜像路线的触摸排除区（动画时长 260ms，留 60ms 余量）。 */
+        const val TAP_EXCLUDE_SETTLE_MS = 320L
 
         /** 连续几次没找到进程才动手（是 miss 1 软恢复、miss 2 重建；这里更保守）。 */
         const val WATCHDOG_MISS_LIMIT = 3

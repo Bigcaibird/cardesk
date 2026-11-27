@@ -416,10 +416,12 @@ class ClimatePage(context: Context, private val pal: Palette) : FrameLayout(cont
             s.fanLevel <= 0 -> 1
             else -> s.fanLevel
         }
-        fanLabel.text = "风量 $shownFan 档"
+        val fanText = "风量 $shownFan 档"
+        if (fanLabel.text?.toString() != fanText) fanLabel.text = fanText
         fanBars.level = if (s.power) s.fanLevel else 0
         fanBars.auto = s.fanAuto
-        powerStateText.text = if (s.power) "运行中" else "已关机"
+        val powerText = if (s.power) "运行中" else "已关机"
+        if (powerStateText.text?.toString() != powerText) powerStateText.text = powerText
 
         chips["power"]?.let { applyChip(it, "电源", s.power) }
         chips["ac"]?.let { applyChip(it, "A/C", s.ac) }
@@ -457,7 +459,9 @@ class ClimatePage(context: Context, private val pal: Palette) : FrameLayout(cont
      * 内部渐变改的就不是真正显示的那个 drawable，动画等于白做。
      */
     private fun bindChip(chip: ChipButton, text: String, active: Boolean) {
-        (chip.background as? GradientDrawable)?.cornerRadius = Shape.PILL
+        (chip.background as? GradientDrawable)?.let { gd ->
+            if (gd.cornerRadius != Shape.PILL) gd.cornerRadius = Shape.PILL
+        }
         applyChip(chip, text, active)
     }
 

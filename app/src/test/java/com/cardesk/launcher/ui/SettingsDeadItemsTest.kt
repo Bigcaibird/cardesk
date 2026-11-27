@@ -233,30 +233,34 @@ class SettingsDeadItemsTest {
         assertTrue("总开关本身要真的打开", prefs.camera360Enabled)
     }
 
-    // ---------------------------------------------------------------- ④ 恢复默认槽位当场生效
+    // ---------------------------------------------------------------- ④ Dock 页已精简掉导航栏样式、槽位及重复开关
 
     @Test
-    fun `恢复默认 15 槽位会通知宿主刷新槽位`() {
+    fun `Dock 页不再包含已下线的导航栏样式、槽位设置与重复项`() {
         val overlay = overlay()
-        val prefs = Prefs(RuntimeEnvironment.getApplication())
-        var notified = 0
-        overlay.onNavSlotsChanged = { notified++ }
-
         openPage(overlay, "dock")
-        val btn = findButton(bodyOf(overlay), "恢复默认 15 槽位")
-        assertNotNull("找不到「恢复默认 15 槽位」按钮", btn)
-
-        // 先写一份非默认的槽位，确认按钮真的把它重置了
-        NavSlots.save(prefs, NavSlots.defaults().take(3))
-        btn!!.performClick()
-        shadowOf(android.os.Looper.getMainLooper()).idle()
-
-        assertEquals("必须通知宿主刷新槽位条（否则要重启才生效）", 1, notified)
-        assertEquals(
-            "槽位要真的恢复成默认",
-            NavSlots.defaults().size,
-            NavSlots.load(prefs).size,
-        )
+        val ts = texts(bodyOf(overlay))
+        for (gone in listOf(
+            "导航栏样式",
+            "编辑槽位",
+            "恢复默认 15 槽位",
+            "沉浸系统导航栏",
+            "增强导航栏（贴底 pill）",
+            "下移 Dock",
+        )) {
+            assertTrue("「$gone」已下线，不应再出现在 Dock 与导航栏页", ts.none { it == gone })
+        }
+        for (kept in listOf(
+            "隐藏桌面 Dock",
+            "隐藏原车 Dock",
+            "隐藏原车状态栏",
+            "状态栏生效应用",
+            "全局 Dock 栏（其他应用也显示）",
+            "Dock 圆角",
+            "配置 Dock 快捷应用…",
+        )) {
+            assertTrue("「$kept」是有独立功能的有效项，必须保留", ts.any { it == kept })
+        }
     }
 
     /** 按文字找 actionButton（带 ACTION_BUTTON_MARK 标记的 TextView）。 */

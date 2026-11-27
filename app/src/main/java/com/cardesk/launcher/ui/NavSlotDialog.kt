@@ -49,10 +49,13 @@ class NavSlotDialog(
     var onChange: ((List<NavSlot>) -> Unit)? = null
     var onClose: (() -> Unit)? = null
 
+    private enum class PickMode { NONE, CATALOG, APPS }
+
     private val slots = initial.toMutableList()
+    private lateinit var scroll: ScrollView
     private lateinit var list: LinearLayout
     private lateinit var counter: TextView
-    private var picking = false
+    private var pickMode = PickMode.NONE
 
     /**
      * 遮罩与面板。
@@ -154,7 +157,7 @@ class NavSlotDialog(
         )
 
         // 槽位列表：设计板把第一行放在 30（会盖住标题与分割线），这里下移到分割线下方
-        val scroll = ScrollView(context).apply { isVerticalScrollBarEnabled = false }
+        scroll = ScrollView(context).apply { isVerticalScrollBarEnabled = false }
         list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         scroll.addView(list, LayoutParams(-1, -2))
         sheet.addView(
@@ -167,7 +170,7 @@ class NavSlotDialog(
 
         val hint = Ui.text(
             context,
-            "长按条目拖动排序；有效槽位最多 24 个，空槽位不限",
+            "点击 ↑ ↓ 调整顺序；有效槽位最多 24 个，空槽位不限",
             15f,
             pal.textFaint,
         )
@@ -239,13 +242,27 @@ class NavSlotDialog(
             setOnClickListener { onClick() }
         }
 
-    private fun refresh() {
+    private fun refresh(scrollToBottom: Boolean = false) {
         list.removeAllViews()
         counter.text = "有效槽位 ${NavSlots.countedCount(slots)} / ${NavSlots.MAX_COUNTED}"
-        for ((index, slot) in slots.withIndex()) {
-            list.addView(slotRow(index, slot), LinearLayout.LayoutParams(-1, ROW_H).also { it.bottomMargin = 16 })
+        when (pickMode) {
+            PickMode.CATALOG -> {
+                list.addView(catalogPickerView(), LinearLayout.LayoutParams(-1, -2))
+                scroll.post { scroll.scrollTo(0, 0) }
+            }
+            PickMode.APPS -> {
+                list.addView(appPickerView(), LinearLayout.LayoutParams(-1, -2))
+                scroll.post { scroll.scrollTo(0, 0) }
+            }
+            PickMode.NONE -> {
+                for ((index, slot) in slots.withIndex()) {
+                    list.addView(slotRow(index, slot), LinearLayout.LayoutParams(-1, ROW_H).also { it.bottomMargin = 16 })
+                }
+                if (scrollToBottom) {
+                    scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+                }
+            }
         }
-        if (picking) list.addView(pickerView(), LinearLayout.LayoutParams(-1, -2))
     }
 
     private fun slotRow(index: Int, slot: NavSlot): View {
@@ -404,7 +421,7 @@ class NavSlotDialog(
             return
         }
         slots.add(slot)
-        picking = false
+        pickMode = PickMode.NONE
         // 排障场景：槽位加没加上 —— 记下类型、动作与包名
         Logx.event(
             LogTags.SETTING,
@@ -416,20 +433,20 @@ class NavSlotDialog(
             "launchMode" to slot.launchMode,
             "count" to slots.size,
         )
-        commit()
+        commit(scrollToBottom = true)
     }
 
     private fun restoreDefaults() {
         slots.clear()
         slots.addAll(NavSlots.defaults())
-        picking = false
+        pickMode = PickMode.NONE
         // 排障场景：槽位被一键重置 —— 记下重置后的数量
         Logx.event(LogTags.SETTING, "槽位恢复默认", "count" to slots.size)
         commit()
     }
 
-    private fun commit() {
-        refresh()
+    private fun commit(scrollToBottom: Boolean = false) {
+        refresh(scrollToBottom = scrollToBottom)
         // 排障场景：槽位保存前最后一次确认（真正落盘在 NavSlots.save 里）
         Logx.d(LogTags.SETTING, "槽位面板提交", "count" to slots.size, "counted" to NavSlots.countedCount(slots))
         onChange?.invoke(slots.toList())
@@ -438,47 +455,68 @@ class NavSlotDialog(
     // --------------------------------------------------------- 添加面板
 
     private fun showCatalog() {
-        picking = true
+        pickMode = if (pickMode == PickMode.CATALOG) PickMode.NONE else PickMode.CATALOG
         refresh()
     }
 
     private fun showApps() {
-        picking = true
+        pickMode = if (pickMode == PickMode.APPS) PickMode.NONE else PickMode.APPS
         refresh()
     }
 
-    /** 添加时的选择面板：系统动作 22 项 + 已安装应用（最多 12 个）。 */
-    private fun pickerView(): View {
+    private fun pickerHeader(title: String): View {
+        val bar = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val back = Ui.text(context, "← 返回槽位列表", 17f, pal.accent, bold = true).apply {
+            gravity = Gravity.CENTER
+            background = Ui.round(pal.accentSoft, 12f)
+            setPadding(16, 0, 16, 0)
+            pressFeedback()
+            setOnClickListener {
+                pickMode = PickMode.NONE
+                refresh()
+            }
+        }
+        bar.addView(back, LinearLayout.LayoutParams(-2, 44).also { it.rightMargin = 16 })
+        bar.addView(
+            Ui.text(context, title, 18f, pal.text, bold = true),
+            LinearLayout.LayoutParams(0, -2, 1f),
+        )
+        return bar
+    }
+
+    /** 系统动作选择面板：22 项系统动作 + 媒体 / 歌词 / 日期时间。 */
+    private fun catalogPickerView(): View {
         val panel = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, 14, 0, 8)
+            setPadding(0, 4, 0, 8)
         }
-        panel.addView(
-            Ui.text(context, "选择要添加的槽位", 16f, pal.accent, bold = true),
-            LinearLayout.LayoutParams(-1, 36),
-        )
+        panel.addView(pickerHeader("选择要添加的系统动作"), LinearLayout.LayoutParams(-1, 52).also { it.bottomMargin = 10 })
         val grid = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         for (chunk in NavSlots.CATALOG.chunked(3)) {
             val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
             for ((id, label) in chunk) {
                 row.addView(
-                    Ui.text(context, label, 15f, pal.text).apply {
+                    Ui.text(context, label, 16f, pal.text).apply {
                         gravity = Gravity.CENTER
-                        background = Ui.round(Skin.surfaceSoft, 12f)
+                        background = Ui.round(Skin.surfaceSoft, 12f, 1f, Skin.NAV_STROKE)
                         maxLines = 1
                         ellipsize = android.text.TextUtils.TruncateAt.END
-                        setPadding(8, 0, 8, 0)
-                        // 按压反馈：选择面板里的每一格都可能被连点，
-                        // 有了按压反馈才知道自己点到了哪一格。
+                        setPadding(10, 0, 10, 0)
                         pressFeedback()
                         setOnClickListener { addSlot(NavSlots.createSlotForAction(id, label)) }
                     },
-                    LinearLayout.LayoutParams(0, 52, 1f).also { it.rightMargin = 8; it.topMargin = 6 },
+                    LinearLayout.LayoutParams(0, 56, 1f).also { it.rightMargin = 8; it.topMargin = 8 },
                 )
+            }
+            for (i in chunk.size until 3) {
+                row.addView(View(context), LinearLayout.LayoutParams(0, 56, 1f).also { it.rightMargin = 8; it.topMargin = 8 })
             }
             grid.addView(row, LinearLayout.LayoutParams(-1, -2))
         }
-        // 日期/媒体/歌词类型槽
+        // 日期/媒体/歌词快捷入口
         val typeRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
         val extra = listOf(
             "媒体" to NavSlot.createMedia(),
@@ -487,52 +525,84 @@ class NavSlotDialog(
         )
         for ((label, slot) in extra) {
             typeRow.addView(
-                Ui.text(context, label, 15f, pal.text).apply {
+                Ui.text(context, label, 16f, pal.accent, bold = true).apply {
                     gravity = Gravity.CENTER
                     background = Ui.round(pal.accentSoft, 12f)
                     pressFeedback()
                     setOnClickListener { addSlot(slot) }
                 },
-                LinearLayout.LayoutParams(0, 52, 1f).also { it.rightMargin = 8; it.topMargin = 6 },
+                LinearLayout.LayoutParams(0, 56, 1f).also { it.rightMargin = 8; it.topMargin = 10 },
             )
         }
         grid.addView(typeRow, LinearLayout.LayoutParams(-1, -2))
+        panel.addView(grid, LinearLayout.LayoutParams(-1, -2))
+        return panel
+    }
 
-        // 已安装应用
+    /** 已安装应用选择面板（列出全部可启动应用，带图标，不再截断前 12 个）。 */
+    private fun appPickerView(): View {
+        val panel = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 4, 0, 8)
+        }
+        panel.addView(pickerHeader("选择要添加的应用"), LinearLayout.LayoutParams(-1, 52).also { it.bottomMargin = 10 })
         val pm = context.packageManager
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        val apps = runCatching { pm.queryIntentActivities(intent, 0) }.getOrElse { emptyList() }
-            .map { it.activityInfo.packageName to it.loadLabel(pm).toString() }
+        val apps = runCatching { pm.queryIntentActivities(intent, android.content.pm.PackageManager.MATCH_ALL) }
+            .getOrElse { emptyList() }
+            .mapNotNull { info ->
+                val pkg = info.activityInfo?.packageName ?: return@mapNotNull null
+                val label = runCatching { info.loadLabel(pm).toString() }.getOrDefault(pkg)
+                pkg to label
+            }
             .distinctBy { it.first }
-            .take(12)
-        if (apps.isNotEmpty()) {
-            grid.addView(
-                Ui.text(context, "应用", 15f, pal.textFaint),
-                LinearLayout.LayoutParams(-1, 34).also { it.topMargin = 8 },
+            .sortedBy { it.second.lowercase() }
+        if (apps.isEmpty()) {
+            panel.addView(
+                Ui.text(context, "未读到可添加的应用", 16f, pal.textFaint),
+                LinearLayout.LayoutParams(-1, 44),
             )
-            for (chunk in apps.chunked(3)) {
-                val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
-                for ((pkg, label) in chunk) {
-                    row.addView(
-                        Ui.text(context, label, 15f, pal.textDim).apply {
-                            gravity = Gravity.CENTER
-                            background = Ui.round(Skin.surfaceSoft, 12f)
-                            maxLines = 1
-                            ellipsize = android.text.TextUtils.TruncateAt.END
-                            setPadding(8, 0, 8, 0)
-                            pressFeedback()
-                            setOnClickListener { addSlot(NavSlot.createApp(pkg, label)) }
+            return panel
+        }
+        val grid = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        for (chunk in apps.chunked(3)) {
+            val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+            for ((pkg, label) in chunk) {
+                val cell = LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    background = Ui.round(Skin.surfaceSoft, 12f, 1f, Skin.NAV_STROKE)
+                    setPadding(12, 0, 12, 0)
+                    isClickable = true
+                    pressFeedback()
+                    setOnClickListener { addSlot(NavSlot.createApp(pkg, label)) }
+                }
+                val iconDrawable = runCatching { pm.getApplicationIcon(pkg) }.getOrNull()
+                if (iconDrawable != null) {
+                    cell.addView(
+                        android.widget.ImageView(context).apply {
+                            scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+                            setImageDrawable(iconDrawable)
                         },
-                        LinearLayout.LayoutParams(0, 52, 1f).also { it.rightMargin = 8; it.topMargin = 6 },
+                        LinearLayout.LayoutParams(36, 36).also { it.rightMargin = 10 },
                     )
                 }
-                grid.addView(row, LinearLayout.LayoutParams(-1, -2))
+                cell.addView(
+                    Ui.text(context, label, 16f, pal.text).apply {
+                        maxLines = 1
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                    },
+                    LinearLayout.LayoutParams(0, -2, 1f),
+                )
+                row.addView(
+                    cell,
+                    LinearLayout.LayoutParams(0, 60, 1f).also { it.rightMargin = 8; it.topMargin = 8 },
+                )
             }
-        } else {
-            panel.addView(
-                Ui.text(context, "未读到可添加的应用（需要 QUERY_ALL_PACKAGES 或已安装三方应用）", 14f, pal.textFaint),
-                LinearLayout.LayoutParams(-1, 34),
-            )
+            for (i in chunk.size until 3) {
+                row.addView(View(context), LinearLayout.LayoutParams(0, 60, 1f).also { it.rightMargin = 8; it.topMargin = 8 })
+            }
+            grid.addView(row, LinearLayout.LayoutParams(-1, -2))
         }
         panel.addView(grid, LinearLayout.LayoutParams(-1, -2))
         return panel
@@ -541,13 +611,9 @@ class NavSlotDialog(
     private fun close() {
         if (closing) return
         closing = true
-        picking = false
-        // 排障场景：面板关闭时还剩几个槽位（没点「完成」保存的话会丢弃）
+        pickMode = PickMode.NONE
+        // 排障场景：面板关闭时还剩几个槽位
         Logx.event(LogTags.SETTING, "关闭槽位管理面板", "count" to slots.size)
-        // 退场：面板下滑 + 淡出，**动画结束后**才通知宿主摘层。
-        //
-        // 以前是直接 `onClose?.invoke()` —— 宿主同步 `removeView`，
-        // 对话框「啪」一下就没了，什么过程都看不见。
         Motion.exitSheet(sheet, scrim) { onClose?.invoke() }
     }
 
@@ -558,8 +624,8 @@ class NavSlotDialog(
         private const val PANEL_LEFT = 520
         private const val PANEL_TOP = 150
 
-        /** 槽位行 740×72，行距 88。 */
-        private const val ROW_W = 740
+        /** 槽位行宽 800（与分割线对齐），行高 72。 */
+        private const val ROW_W = 800
         private const val ROW_H = 72
         private const val LIST_H = 512
     }

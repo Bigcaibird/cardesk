@@ -782,6 +782,47 @@ class AdaptapiGateway(private val context: Context) : VehicleGateway {
     }
 
     /**
+     * 写一个功能属性的**自定义（浮点）值**（`ICarFunction.setCustomizeFunctionValue(func, zone, value)`）。
+     *
+     * 领克 820A 逐扇车窗（`BCM_FUNC_WINDOW_POS`）只接受这条浮点写入通道。
+     */
+    override fun writeCustomizeFunctionValue(func: Int, zone: Int, value: Float): Boolean {
+        val f = ensureFunction() ?: run {
+            lastError = "拿不到 ICarFunction 句柄（车机服务未连接或当前应用无权限）"
+            Logx.w(
+                LogTags.VEHICLE,
+                "写入自定义浮点属性失败（拿不到句柄）",
+                "func" to VehicleLog.hex(func),
+                "zone" to zone,
+                "value" to value,
+                "reason" to lastError,
+            )
+            return false
+        }
+        val m = findMethod(f, "setCustomizeFunctionValue", INT, INT, FLOAT) ?: return false
+        val ok = invokeBool(m, f, func, zone, value) == true
+        if (ok) {
+            Logx.d(
+                LogTags.VEHICLE,
+                "写入自定义浮点属性成功",
+                "func" to VehicleLog.hex(func),
+                "zone" to zone,
+                "value" to value,
+            )
+        } else {
+            Logx.w(
+                LogTags.VEHICLE,
+                "写入自定义浮点属性失败",
+                "func" to VehicleLog.hex(func),
+                "zone" to zone,
+                "value" to value,
+                "reason" to lastError,
+            )
+        }
+        return ok
+    }
+
+    /**
      * 固件是否支持这个功能号 / 区域。
      *
      * 按 `(func, zone)` → `(func)` 两档找 `isFunctionSupported`：
@@ -813,6 +854,24 @@ class AdaptapiGateway(private val context: Context) : VehicleGateway {
         }
         findMethod(f, "isFunctionSupported", INT)?.let { m ->
             runCatching { m.invoke(f, func) }.getOrNull()?.let { return functionStatusToBool(it) }
+        }
+        return null
+    }
+
+    /**
+     * 查询车机固件支持的功能取值清单（`ICarFunction.getSupportedFunctionValue(func)`）。
+     *
+     * 一参优先，找不到一参重载再试带 zone=0 的两参重载。
+     */
+    override fun supportedFunctionValues(func: Int): IntArray? {
+        val f = ensureFunction() ?: return null
+        findMethod(f, "getSupportedFunctionValue", INT)?.let { m ->
+            val v = runCatching { m.invoke(f, func) }.getOrNull()
+            if (v is IntArray) return v
+        }
+        findMethod(f, "getSupportedFunctionValue", INT, INT)?.let { m ->
+            val v = runCatching { m.invoke(f, func, 0) }.getOrNull()
+            if (v is IntArray) return v
         }
         return null
     }

@@ -44,16 +44,15 @@ class EnhancedNavBarView(context: Context) : FrameLayout(context) {
 
     /** 放入设计版 Dock，并模拟 FitStrip 的缩放居中。 */
     fun mountDock(dock: android.view.View) {
-        val stable = dock.parent as? FrameLayout
-        if (stable !== this) {
-            stable?.removeView(dock)
-            val wrap = FrameLayout(context).apply { clipChildren = false }
-            wrap.addView(dock, LayoutParams(DESIGN_W.toInt(), DESIGN_H.toInt(), Gravity.TOP or Gravity.START))
-            addView(wrap, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
-            host = wrap
-            // 排障场景：「增强导航栏里 Dock 不显示 / 尺寸不对」——挂载模式变化落盘。
-            Logx.event(LogTags.DOCK, "增强导航栏挂载 Dock", "mode" to "dock")
-        }
+        (dock.parent as? android.view.ViewGroup)?.removeView(dock)
+        removeAllViews()
+        dock.visibility = VISIBLE
+        val wrap = FrameLayout(context).apply { clipChildren = false }
+        wrap.addView(dock, LayoutParams(DESIGN_W.toInt(), DESIGN_H.toInt(), Gravity.TOP or Gravity.START))
+        addView(wrap, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        host = wrap
+        // 排障场景：「增强导航栏里 Dock 不显示 / 尺寸不对」——挂载模式变化落盘。
+        Logx.event(LogTags.DOCK, "增强导航栏挂载 Dock", "mode" to "dock")
         post { fit() }
     }
 

@@ -115,6 +115,14 @@ interface VehicleGateway {
     fun readCustomizeFunctionValue(func: Int, zone: Int): Int? = null
 
     /**
+     * 写一个功能属性的**自定义（浮点）值**（`ICarFunction.setCustomizeFunctionValue(func, zone, value)`）。
+     *
+     * 领克 820A 逐扇车窗开度写入（`BCM_FUNC_WINDOW_POS = 553845504`，
+     * zone = 16 / 32 / 256 / 512，value = 0f 全关 ~ 100f 全开）走这条浮点通道。
+     */
+    fun writeCustomizeFunctionValue(func: Int, zone: Int, value: Float): Boolean = false
+
+    /**
      * 固件**是否支持**这个功能号 / 区域。
      *
      * ## 为什么要有这一条（第六十六轮）
@@ -129,6 +137,14 @@ interface VehicleGateway {
      * - `null` → **固件没有这个方法**，判不了 → 按「支持」继续读（老口径）。
      */
     fun isFunctionSupported(func: Int, zone: Int): Boolean? = null
+
+    /**
+     * 查询车机固件**当前支持**的功能取值列表（`ICarFunction.getSupportedFunctionValue(func)`）。
+     *
+     * 例如驾驶模式（`DM_FUNC_DRIVE_MODE_SELECT = 570491136`）会按本车实际硬件配置
+     * 动态返回可用模式枚举；读不到 / 固件不支持该方法时返回 `null`。
+     */
+    fun supportedFunctionValues(func: Int): IntArray? = null
 
     // -------------------------------------------------- 车辆概览信号
 

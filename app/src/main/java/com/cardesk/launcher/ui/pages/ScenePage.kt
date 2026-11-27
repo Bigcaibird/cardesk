@@ -4,8 +4,10 @@ import android.content.Context
 import android.content.Intent
 import android.animation.ValueAnimator
 import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.LinearGradient
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PointF
@@ -98,11 +100,24 @@ class ScenePage(context: Context) : View(context) {
     /** 底部卡片布局变化（`scene_card_layout_v2`）。 */
     var onCardLayoutChanged: ((List<com.cardesk.launcher.core.CardLayout.Slot>) -> Unit)? = null
 
+    /** 标记首页非 bind 属性是否有变化，供 [bind] 在稳态下跳过无意义全屏重绘。 */
+    private var sceneDirty: Boolean = true
+
     // 媒体（MusicController 推送）
     var mediaTitle: String = "暂无播放"
+        set(value) {
+            if (field == value) return
+            field = value
+            sceneDirty = true
+        }
 
     /** 艺术家：默认是**空串**。 */
     var mediaArtist: String = ""
+        set(value) {
+            if (field == value) return
+            field = value
+            sceneDirty = true
+        }
 
     /**
      * 媒体卡副标题：有歌手显示歌手，没有则退回来源名（画板 `Main.png` 的「通用音乐」）。
@@ -113,6 +128,11 @@ class ScenePage(context: Context) : View(context) {
     private val mediaSubtitle: String
         get() = mediaArtist.ifEmpty { mediaSource }
     var mediaSource: String = "通用音乐"
+        set(value) {
+            if (field == value) return
+            field = value
+            sceneDirty = true
+        }
 
     /**
      * 媒体源 id（第 125 轮）—— 决定卡片上画哪个图标。
@@ -120,6 +140,11 @@ class ScenePage(context: Context) : View(context) {
      * 文案（[mediaSource]）给人看，id 才是机器认的键。
      */
     var mediaSourceId: String = "generic"
+        set(value) {
+            if (field == value) return
+            field = value
+            sceneDirty = true
+        }
 
     /**
      * 媒体源的**真实 App 图标**（第 125 轮）；null = 用自绘符号。
@@ -127,24 +152,63 @@ class ScenePage(context: Context) : View(context) {
      * 由 [com.cardesk.launcher.ui.LauncherView] 在后台线程取好后塞进来。
      */
     var mediaSourceIcon: Bitmap? = null
+        set(value) {
+            if (field === value) return
+            field = value
+            sourceIconShaderBmp = null
+            sourceIconShader = null
+            sceneDirty = true
+        }
 
     /** 真实图标取不到时画哪个自绘符号（蓝牙 / USB / 音符）。 */
     var mediaSourceIconKind: com.cardesk.launcher.core.media.MediaSourceIconKind =
         com.cardesk.launcher.core.media.MediaSourceIconKind.NOTE
+        set(value) {
+            if (field == value) return
+            field = value
+            sceneDirty = true
+        }
 
     var mediaPlaying: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            sceneDirty = true
+        }
     var mediaArtwork: Bitmap? = null
+        set(value) {
+            if (field === value) return
+            field = value
+            coverArtShaderBmp = null
+            coverArtShader = null
+            sceneDirty = true
+        }
 
     /**
      * 播放位置（毫秒）—— 音乐卡进度环用。
      */
     var mediaPositionMs: Long = 0L
+        set(value) {
+            if (field == value) return
+            field = value
+            sceneDirty = true
+        }
 
     /** 曲目总时长（毫秒）—— 音乐卡进度环用；0 = 不知道总时长（不画进度）。 */
     var mediaDurationMs: Long = 0L
+        set(value) {
+            if (field == value) return
+            field = value
+            sceneDirty = true
+        }
 
     /** 封面主色 —— 封面光晕用。null = 自动从 [mediaArtwork] 采样。 */
     var mediaAccent: Int? = null
+        set(value) {
+            if (field == value) return
+            field = value
+            sceneDirty = true
+        }
 
     // -------------------------------------------------- 收藏（第207轮）
     //
@@ -160,6 +224,11 @@ class ScenePage(context: Context) : View(context) {
      */
     var favoriteState: com.cardesk.launcher.core.media.MediaActions.FavoriteState =
         com.cardesk.launcher.core.media.MediaActions.FavoriteState.UNKNOWN
+        set(value) {
+            if (field == value) return
+            field = value
+            sceneDirty = true
+        }
 
     /**
      * 当前会话所在的**播放器包名** —— 用来查这个播放器支不支持收藏。
@@ -167,9 +236,19 @@ class ScenePage(context: Context) : View(context) {
      * 未知包 / 不支持收藏 → **不画收藏按钮**（亮一个点了没反应的按钮更糟）。
      */
     var musicPackage: String? = null
+        set(value) {
+            if (field == value) return
+            field = value
+            sceneDirty = true
+        }
 
     /** 未知播放器的运行时能力探测（会话发了心形评分 → 会支持收藏）。 */
     var actionProbe: com.cardesk.launcher.core.media.MediaActions.Probe? = null
+        set(value) {
+            if (field == value) return
+            field = value
+            sceneDirty = true
+        }
 
     /** 点收藏按钮。 */
     var onFavoriteToggle: (() -> Unit)? = null
@@ -276,6 +355,11 @@ class ScenePage(context: Context) : View(context) {
 
     /** 上一句歌词（淡显）。 */
     var lyricPrev: String = ""
+        set(value) {
+            if (field == value) return
+            field = value
+            sceneDirty = true
+        }
 
     // 第117轮：首页中央从「五行」改成「三行 / KTV 两行」两种布局（见 [lyricLayout]），
     // 所以原来「上 2 句 / 下 2 句」那两个字段连同它们的绘制一起去掉了。
@@ -353,6 +437,11 @@ class ScenePage(context: Context) : View(context) {
 
     /** 当前句歌词（大号高亮）。 */
     var lyricCurrent: String = ""
+        set(value) {
+            if (field == value) return
+            field = value
+            sceneDirty = true
+        }
 
     /**
      * 是否显示**中央大字歌词**（当前句大号 + 上下句淡出）。
@@ -379,7 +468,9 @@ class ScenePage(context: Context) : View(context) {
      */
     var lyricWipe: Float = 0f
         set(value) {
-            field = value.coerceIn(0f, 1f)
+            val clamped = value.coerceIn(0f, 1f)
+            if (kotlin.math.abs(field - clamped) < 0.0005f) return
+            field = clamped
             lyricWipeState.setTarget(field)
             invalidate()
         }
@@ -401,6 +492,11 @@ class ScenePage(context: Context) : View(context) {
 
     /** 下一句歌词（淡显）。 */
     var lyricNext: String = ""
+        set(value) {
+            if (field == value) return
+            field = value
+            sceneDirty = true
+        }
 
     // 第117轮：「下 2 句」那个字段跟 [lyricPrev2] 一起删掉了（首页没有五行布局了）。
 
@@ -463,7 +559,9 @@ class ScenePage(context: Context) : View(context) {
     /** 天气城市（`WeatherDesk.KEY_CITY`）。 */
     var weatherCity: String = ""
         set(value) {
+            if (field == value) return
             field = value
+            sceneDirty = true
             // 排障场景：「天气一直显示获取中 / 城市不对」——每次刷新都打一条，落盘可回溯。
             logWeatherRefresh()
         }
@@ -471,14 +569,18 @@ class ScenePage(context: Context) : View(context) {
     /** 天气描述（`WeatherDesk.KEY_SKY`），决定天气图标。 */
     var weatherSky: String = ""
         set(value) {
+            if (field == value) return
             field = value
+            sceneDirty = true
             logWeatherRefresh()
         }
 
     /** 天气温度（整数，`String.valueOf(num)`）；null = 用车外温度兜底。 */
     var weatherTemp: Int? = null
         set(value) {
+            if (field == value) return
             field = value
+            sceneDirty = true
             logWeatherRefresh()
         }
 
@@ -523,6 +625,11 @@ class ScenePage(context: Context) : View(context) {
      * null = 没有油量数据，进度条为空。
      */
     var fuelPercent: Int? = null
+        set(value) {
+            if (field == value) return
+            field = value
+            sceneDirty = true
+        }
 
     private var info: VehicleInfo? = null
     private var state: HvacState? = null
@@ -558,7 +665,11 @@ class ScenePage(context: Context) : View(context) {
      * 这个字段降级成**「读不到车端状态时的兜底」**，以及「刚下发完还没回读」时的过渡值。
      */
     var windowClosed: Boolean = true
-        set(value) { field = value; invalidate() }
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
 
     /**
      * 「刚下发完、还没等到车端回读」的保护期截止时刻（`SystemClock.uptimeMillis`）。
@@ -585,13 +696,46 @@ class ScenePage(context: Context) : View(context) {
      */
     var onOpenVehicleStatus: (() -> Unit)? = null
 
+    private fun sameVehicleInfo(a: VehicleInfo?, b: VehicleInfo?): Boolean {
+        if (a === b) return true
+        if (a == null || b == null) return false
+        return a.rangeKm == b.rangeKm &&
+            a.odometerKm == b.odometerKm &&
+            a.speedKmh == b.speedKmh &&
+            a.gear == b.gear &&
+            a.ambientTemp == b.ambientTemp &&
+            a.fuelPercent == b.fuelPercent &&
+            a.fuelLiters == b.fuelLiters &&
+            a.doorsClosed == b.doorsClosed &&
+            a.doorsAllClosed == b.doorsAllClosed &&
+            a.hoodClosed == b.hoodClosed &&
+            a.trunkClosed == b.trunkClosed &&
+            a.windowsAllClosed == b.windowsAllClosed &&
+            a.avgFuelConsumption == b.avgFuelConsumption &&
+            a.tripFuelConsumption == b.tripFuelConsumption &&
+            a.tripKm == b.tripKm &&
+            a.tripDurationMs == b.tripDurationMs &&
+            a.trip1Km == b.trip1Km &&
+            a.trip1DurationMin == b.trip1DurationMin &&
+            a.trip1AvgFuel == b.trip1AvgFuel &&
+            a.tires.contentEquals(b.tires) &&
+            (a.windowsOpen === b.windowsOpen ||
+                (a.windowsOpen != null && b.windowsOpen != null && a.windowsOpen.contentEquals(b.windowsOpen)))
+    }
+
     fun bind(info: VehicleInfo, state: HvacState, wallpaper: Int) {
+        val infoChanged = !sameVehicleInfo(this.info, info)
+        val stateChanged = this.state != state
+        val wallpaperChanged = wallpaperIndex != wallpaper
         this.info = info
         this.state = state
         wallpaperIndex = wallpaper
-        // 排障场景：「场景页数据不刷新」——DEBUG 级，只进 Logcat，不占车机存储。
-        Logx.d(LogTags.SCENE, "场景页数据绑定", "wallpaper" to wallpaper)
-        invalidate()
+        if (sceneDirty || infoChanged || stateChanged || wallpaperChanged) {
+            sceneDirty = false
+            // 排障场景：「场景页数据不刷新」——DEBUG 级，只进 Logcat，不占车机存储。
+            Logx.d(LogTags.SCENE, "场景页数据绑定", "wallpaper" to wallpaper)
+            invalidate()
+        }
     }
 
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -643,7 +787,11 @@ class ScenePage(context: Context) : View(context) {
      * `visibility="gone"`，没有导航时不占位。
      */
     var navGuide: DesktopGuide? = null
-        set(value) { field = value; invalidate() }
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
 
     /** 设置导航引导数据（null = 隐藏引导卡）。 */
     fun setGuide(guide: DesktopGuide?) {
@@ -903,6 +1051,21 @@ class ScenePage(context: Context) : View(context) {
         }
 
     var carStatusBottomIndex: Int = -1
+
+    /** 首页底排卡片的自由摆放坐标（id -> (x, y)）。 */
+    private val freeCardPos = LinkedHashMap<String, Pair<Float, Float>>()
+
+    var cardFreePositions: Map<String, Pair<Float, Float>>
+        get() = freeCardPos.toMap()
+        set(value) {
+            if (freeCardPos == value) return
+            freeCardPos.clear()
+            freeCardPos.putAll(value)
+            invalidate()
+        }
+
+    /** 底排卡片自由摆放位置变化时回调持久化。 */
+    var onCardFreePosChanged: ((Map<String, Pair<Float, Float>>) -> Unit)? = null
         set(value) {
             if (field == value) return
             field = value
@@ -2090,7 +2253,7 @@ class ScenePage(context: Context) : View(context) {
         val out = LinkedHashMap<String, RectF>()
         val rowW = rightEnd - left
         val baseWidths = com.cardesk.launcher.core.CardLayout.widths(
-            com.cardesk.launcher.core.CardLayout.active(cardLayout),
+            com.cardesk.launcher.core.CardLayout.active(cardLayout).filterNot { it.id in freeCardPos },
             rowW,
             CARD_GAP,
             naturalWidth = { id -> cardWidth(id) },
@@ -2131,45 +2294,72 @@ class ScenePage(context: Context) : View(context) {
         else -> 0f
     }
 
+    private fun drawCardContent(canvas: Canvas, id: String, drawRect: RectF) {
+        when (id) {
+            com.cardesk.launcher.core.CardLayout.QUICK -> drawQuick(canvas, drawRect)
+            com.cardesk.launcher.core.CardLayout.MUSIC -> drawMusicCard(canvas, drawRect)
+            com.cardesk.launcher.core.CardLayout.CLIMATE -> drawClimateCard(canvas, drawRect)
+            com.cardesk.launcher.core.CardLayout.TIRE -> drawTireCard(canvas, drawRect)
+            com.cardesk.launcher.core.CardLayout.RANGE -> drawRangeCard(canvas, drawRect)
+            com.cardesk.launcher.core.CardLayout.LEGACY_TRIP,
+            com.cardesk.launcher.core.CardLayout.TRIP_CARD -> drawTripCard(canvas, drawRect)
+            com.cardesk.launcher.core.CardLayout.STATUS -> drawStatusBottomCard(canvas, drawRect)
+            com.cardesk.launcher.core.CardLayout.CAR_STATUS -> {
+                val i = info
+                if (i != null) {
+                    val dp = com.cardesk.launcher.core.car3d.Car3dDebugPose.pose
+                    val effDoors = dp?.doors?.map { !it } ?: i.doorsClosed
+                    val effTrunk = dp?.trunk?.let { !it } ?: i.trunkClosed
+                    card(canvas, drawRect)
+                    hits[CAR_STATUS_CARD_HIT_KEY] = RectF(drawRect)
+                    drawCarStatusCardCompact(canvas, drawRect, effDoors, i.hoodClosed, effTrunk, i)
+                }
+            }
+        }
+    }
+
     private fun drawBottomCards(canvas: Canvas) {
         val layout = layoutBottomCards()
         cardRects.clear()
         cardRects.putAll(layout)
+        val rowW = (rightEnd - left).coerceAtLeast(160f)
         for ((id, rect) in layout) {
-            val drawRect = if (id == dragId) {
+            val drawRect = if (id == dragId && !dragFreeCard) {
                 RectF(rect.left + dragDx, rect.top, rect.right + dragDx, rect.bottom)
             } else {
                 rect
             }
-            // 被拖起来的卡片微微放大 —— 看起来是「被拎起来了」而不是「自己在滑」。
             val lifting = id == dragId && dragLift > 0f
             if (lifting) {
                 canvas.save()
                 val s = 1f + (MotionSpec.STATE_BUMP - 1f) * dragLift
                 canvas.scale(s, s, drawRect.centerX(), drawRect.centerY())
             }
-            when (id) {
-                com.cardesk.launcher.core.CardLayout.QUICK -> drawQuick(canvas, drawRect)
-                com.cardesk.launcher.core.CardLayout.MUSIC -> drawMusicCard(canvas, drawRect)
-                com.cardesk.launcher.core.CardLayout.CLIMATE -> drawClimateCard(canvas, drawRect)
-                com.cardesk.launcher.core.CardLayout.TIRE -> drawTireCard(canvas, drawRect)
-                com.cardesk.launcher.core.CardLayout.RANGE -> drawRangeCard(canvas, drawRect)
-                com.cardesk.launcher.core.CardLayout.LEGACY_TRIP,
-                com.cardesk.launcher.core.CardLayout.TRIP_CARD -> drawTripCard(canvas, drawRect)
-                com.cardesk.launcher.core.CardLayout.STATUS -> drawStatusBottomCard(canvas, drawRect)
-                com.cardesk.launcher.core.CardLayout.CAR_STATUS -> {
-                    val i = info
-                    if (i != null) {
-                        val dp = com.cardesk.launcher.core.car3d.Car3dDebugPose.pose
-                        val effDoors = dp?.doors?.map { !it } ?: i.doorsClosed
-                        val effTrunk = dp?.trunk?.let { !it } ?: i.trunkClosed
-                        card(canvas, drawRect)
-                        hits[CAR_STATUS_CARD_HIT_KEY] = RectF(drawRect)
-                        drawCarStatusCardCompact(canvas, drawRect, effDoors, i.hoodClosed, effTrunk, i)
-                    }
-                }
-            }
+            drawCardContent(canvas, id, drawRect)
             if (id == dragId) {
+                drawDragOutline(canvas, drawRect)
+            }
+            if (lifting) canvas.restore()
+        }
+        // 绘制已拖出底部行、自由摆放在首页任意位置的底排卡片（正在被拖的那张最后画以浮在最上层）
+        val activeIds = com.cardesk.launcher.core.CardLayout.active(cardLayout).map { it.id }.toSet()
+        val freeEntries = freeCardPos.entries.filter { it.key in activeIds }
+            .sortedBy { if (dragFreeCard && it.key == dragId) 1 else 0 }
+        for ((id, savedPos) in freeEntries) {
+            val w = cardWidth(id).coerceIn(160f, rowW)
+            val isDragging = dragFreeCard && dragId == id
+            val posX = if (isDragging) dragFreeX else savedPos.first.coerceIn(left, (rightEnd - w).coerceAtLeast(left))
+            val posY = if (isDragging) dragFreeY else savedPos.second.coerceIn(84f, cardTop.coerceAtLeast(84f))
+            val drawRect = RectF(posX, posY, posX + w, posY + cardH)
+            cardRects[id] = drawRect
+            val lifting = isDragging && dragLift > 0f
+            if (lifting) {
+                canvas.save()
+                val s = 1f + (MotionSpec.STATE_BUMP - 1f) * dragLift
+                canvas.scale(s, s, drawRect.centerX(), drawRect.centerY())
+            }
+            drawCardContent(canvas, id, drawRect)
+            if (isDragging) {
                 drawDragOutline(canvas, drawRect)
             }
             if (lifting) canvas.restore()
@@ -2388,17 +2578,23 @@ class ScenePage(context: Context) : View(context) {
         val iconCx = x + 26f * k
         val iconCy = srcY + 12f
         val appIcon = mediaSourceIcon
-        if (appIcon != null) {
+        if (appIcon != null && appIcon.width > 0 && appIcon.height > 0) {
             val half = iconSize / 2f
             val box = RectF(iconCx - half, iconCy - half, iconCx + half, iconCy + half)
-            // 圆角矩形裁剪（与卡片里的封面图一个风格）。
-            val clip = Path().apply {
-                addRoundRect(box, iconSize * 0.22f, iconSize * 0.22f, Path.Direction.CW)
+            val shader = if (sourceIconShaderBmp === appIcon && sourceIconShader != null) {
+                sourceIconShader!!
+            } else {
+                BitmapShader(appIcon, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).also {
+                    sourceIconShaderBmp = appIcon
+                    sourceIconShader = it
+                }
             }
-            canvas.save()
-            canvas.clipPath(clip)
-            canvas.drawBitmap(appIcon, null, box, fill)
-            canvas.restore()
+            bitmapMatrix.reset()
+            bitmapMatrix.setScale(box.width() / appIcon.width.toFloat(), box.height() / appIcon.height.toFloat())
+            bitmapMatrix.postTranslate(box.left, box.top)
+            shader.setLocalMatrix(bitmapMatrix)
+            bitmapPaint.shader = shader
+            canvas.drawRoundRect(box, iconSize * 0.22f, iconSize * 0.22f, bitmapPaint)
         } else {
             fill.color = MediaSources.brandColor(mediaSource)
             com.cardesk.launcher.ui.widget.MediaSourceIcons.drawFallback(
@@ -2443,12 +2639,21 @@ class ScenePage(context: Context) : View(context) {
         // 命中区**先登记再画**（`hits` 每帧开头是清空的）。
         hits["musicCover"] = cover
         withPress(canvas, "musicCover") {
-            if (art != null) {
-                val path = Path().apply { addRoundRect(cover, 22f, 22f, Path.Direction.CW) }
-                canvas.save()
-                canvas.clipPath(path)
-                canvas.drawBitmap(art, null, cover, Paint(Paint.FILTER_BITMAP_FLAG))
-                canvas.restore()
+            if (art != null && art.width > 0 && art.height > 0) {
+                val shader = if (coverArtShaderBmp === art && coverArtShader != null) {
+                    coverArtShader!!
+                } else {
+                    BitmapShader(art, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).also {
+                        coverArtShaderBmp = art
+                        coverArtShader = it
+                    }
+                }
+                bitmapMatrix.reset()
+                bitmapMatrix.setScale(cover.width() / art.width.toFloat(), cover.height() / art.height.toFloat())
+                bitmapMatrix.postTranslate(cover.left, cover.top)
+                shader.setLocalMatrix(bitmapMatrix)
+                bitmapPaint.shader = shader
+                canvas.drawRoundRect(cover, 22f, 22f, bitmapPaint)
             } else {
                 // 第五十一轮：设计板 s01 的通用音乐卡封面是**纯色 `--surfaceSoft` 圆角块**，
                 // 之前画的是「强调色 → surfaceStrong」的渐变，日间模式下和设计板差一截。
@@ -2618,15 +2823,19 @@ class ScenePage(context: Context) : View(context) {
      * `
      * 没有封面时用默认主色。
      */
+    private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val bitmapMatrix = Matrix()
+    private var sourceIconShaderBmp: Bitmap? = null
+    private var sourceIconShader: BitmapShader? = null
+    private var coverArtShaderBmp: Bitmap? = null
+    private var coverArtShader: BitmapShader? = null
+    private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
     private fun drawCoverGlow(canvas: Canvas, rect: RectF) {
         val accent = accentColor()
         val shader = glowShaderFor(rect, accent) ?: return
-        canvas.save()
-        canvas.clipPath(
-            Path().apply { addRoundRect(rect, GLASS_RADIUS, GLASS_RADIUS, Path.Direction.CW) },
-        )
-        canvas.drawRect(rect, Paint(fill).apply { this.shader = shader })
-        canvas.restore()
+        glowPaint.shader = shader
+        canvas.drawRoundRect(rect, GLASS_RADIUS, GLASS_RADIUS, glowPaint)
     }
 
     /** 缓存好的封面光晕渐变（RadialGradient 是原生对象，别每帧重建）。 */
@@ -4044,6 +4253,11 @@ class ScenePage(context: Context) : View(context) {
     private var dragCarStatusStartY = 0f
     private var dragCarStatusX = 0f
     private var dragCarStatusY = 0f
+    private var dragFreeCard = false
+    private var dragFreeStartX = 0f
+    private var dragFreeStartY = 0f
+    private var dragFreeX = 0f
+    private var dragFreeY = 0f
     private var longPressFired = false
 
     // ---------------------------------------------------------------- 壁纸横拖（已去掉）
@@ -4114,7 +4328,18 @@ class ScenePage(context: Context) : View(context) {
         dragId = id
         dragMoved = false
         dragGrabX = downX
+        dragGrabY = downY
         dragDx = 0f
+        if (id in freeCardPos) {
+            val rect = cardRects[id]
+            dragFreeCard = true
+            dragFreeStartX = rect?.left ?: (downX - cardWidth(id) / 2f)
+            dragFreeStartY = rect?.top ?: (downY - cardH / 2f)
+            dragFreeX = dragFreeStartX
+            dragFreeY = dragFreeStartY
+        } else {
+            dragFreeCard = false
+        }
         // 卡片被拎起来了 —— 放大一点，让人看出「拿起来了」。
         animateDragLift(true)
         // 拖拽接管了这只手 —— 按压反馈收掉，别让被按的那块一直缩着。
@@ -4149,6 +4374,8 @@ class ScenePage(context: Context) : View(context) {
                 longPressFired = false
                 dragId = null
                 dragCarStatus = false
+                dragFreeCard = false
+                dragFreeCard = false
                 dragDx = 0f
                 // 按下反馈：记住按着的是哪一块，画的时候把它缩小。
                 startPress(pressKeyAt(x, y))
@@ -4163,8 +4390,9 @@ class ScenePage(context: Context) : View(context) {
                 if (dragCarStatus) {
                     dragCarStatusX = dragCarStatusStartX + (x - dragGrabX)
                     dragCarStatusY = dragCarStatusStartY + (y - dragGrabY)
-                    // 拖入底部卡片行区域：实时并入底部行排布
-                    if (y >= cardTop - 40f) {
+                    val targetH = if (carStatusCardCompact) cardH else CAR_STATUS_CARD_H
+                    // 拖入底部卡片行区域：手指进入热区或卡片主体跨入底部行即并入底部排布
+                    if (y >= cardTop - 50f || dragCarStatusY + targetH * 0.65f >= cardTop) {
                         val bounds = cardRects.entries.map { it.value.left to it.value.right }
                         val hover = cardIndexAt(x, bounds).coerceIn(0, bounds.size)
                         carStatusInBottomRow = true
@@ -4179,9 +4407,23 @@ class ScenePage(context: Context) : View(context) {
                     return true
                 }
                 val id = dragId
+                if (id != null && dragFreeCard) {
+                    dragFreeX = dragFreeStartX + (x - dragGrabX)
+                    dragFreeY = dragFreeStartY + (y - dragGrabY)
+                    dragMoved = true
+                    if (y >= cardTop - 50f || dragFreeY + cardH * 0.65f >= cardTop) {
+                        freeCardPos.remove(id)
+                        onCardFreePosChanged?.invoke(freeCardPos.toMap())
+                        dragFreeCard = false
+                        dragGrabX = x
+                        dragDx = 0f
+                    }
+                    invalidate()
+                    return true
+                }
                 if (id != null) {
-                    // 车况卡从底部行拖出回到上方区域
-                    if (id == com.cardesk.launcher.core.CardLayout.CAR_STATUS && y < cardTop - 60f) {
+                    // 车况卡从底部行拖出回到上方区域（留足滞回带，避免松手微抖弹回原位）
+                    if (id == com.cardesk.launcher.core.CardLayout.CAR_STATUS && y < cardTop - 130f) {
                         val prevRect = cardRects[id]
                         carStatusInBottomRow = false
                         carStatusBottomIndex = -1
@@ -4190,11 +4432,26 @@ class ScenePage(context: Context) : View(context) {
                         dragCarStatus = true
                         dragGrabX = x
                         dragGrabY = y
-                        dragCarStatusStartX = prevRect?.left ?: (x - CAR_STATUS_CARD_W / 2f)
-                        dragCarStatusStartY = prevRect?.top ?: (y - cardH / 2f)
+                        dragCarStatusStartX = x - CAR_STATUS_CARD_W / 2f
+                        dragCarStatusStartY = y - cardH / 2f
                         dragCarStatusX = dragCarStatusStartX
                         dragCarStatusY = dragCarStatusStartY
                         dragMoved = false
+                        invalidate()
+                        return true
+                    }
+                    // 普通底排卡片拖出底部行 → 转为首页全屏自由摆放
+                    if (id != com.cardesk.launcher.core.CardLayout.CAR_STATUS && y < cardTop - 110f) {
+                        val w = cardWidth(id).coerceIn(160f, (rightEnd - left).coerceAtLeast(160f))
+                        dragFreeCard = true
+                        dragGrabX = x
+                        dragGrabY = y
+                        dragFreeStartX = x - w / 2f
+                        dragFreeStartY = y - cardH / 2f
+                        dragFreeX = dragFreeStartX
+                        dragFreeY = dragFreeStartY
+                        freeCardPos[id] = dragFreeX to dragFreeY
+                        dragMoved = true
                         invalidate()
                         return true
                     }
@@ -4250,6 +4507,19 @@ class ScenePage(context: Context) : View(context) {
                     dragCarStatus = false
                     val targetW = CAR_STATUS_CARD_W
                     val targetH = if (carStatusCardCompact) cardH else CAR_STATUS_CARD_H
+                    if (y >= cardTop - 50f || dragCarStatusY + targetH * 0.65f >= cardTop) {
+                        val bounds = cardRects.entries.map { it.value.left to it.value.right }
+                        val hover = cardIndexAt(x, bounds).coerceIn(0, bounds.size)
+                        carStatusInBottomRow = true
+                        carStatusBottomIndex = hover
+                        onCarStatusRowChanged?.invoke(true, hover)
+                        animateDragLift(false)
+                        parent?.requestDisallowInterceptTouchEvent(false)
+                        Logx.event(LogTags.SCENE, "车况卡落入底部行", "index" to hover)
+                        invalidate()
+                        performClick()
+                        return true
+                    }
                     val finalX = dragCarStatusX.coerceIn(left, (rightEnd - targetW).coerceAtLeast(left))
                     val finalY = dragCarStatusY.coerceIn(84f, (cardTop - 8f - targetH).coerceAtLeast(84f))
                     carStatusCardPosX = finalX
@@ -4263,6 +4533,25 @@ class ScenePage(context: Context) : View(context) {
                     return true
                 }
                 val id = dragId
+                if (id != null && dragFreeCard) {
+                    dragFreeCard = false
+                    dragId = null
+                    val w = cardWidth(id).coerceIn(160f, (rightEnd - left).coerceAtLeast(160f))
+                    val finalX = dragFreeX.coerceIn(left, (rightEnd - w).coerceAtLeast(left))
+                    val finalY = dragFreeY.coerceIn(84f, cardTop.coerceAtLeast(84f))
+                    if (y >= cardTop - 50f || finalY + cardH * 0.65f >= cardTop) {
+                        freeCardPos.remove(id)
+                    } else {
+                        freeCardPos[id] = finalX to finalY
+                    }
+                    onCardFreePosChanged?.invoke(freeCardPos.toMap())
+                    animateDragLift(false)
+                    parent?.requestDisallowInterceptTouchEvent(false)
+                    dragMoved = false
+                    invalidate()
+                    performClick()
+                    return true
+                }
                 if (id != null) {
                     dragId = null
                     // 放下：卡片落回原位。
@@ -4302,6 +4591,7 @@ class ScenePage(context: Context) : View(context) {
                 endPress()
                 dragId = null
                 dragCarStatus = false
+                dragFreeCard = false
                 downCardId = null
                 downCarStatusCard = false
                 animateDragLift(false)

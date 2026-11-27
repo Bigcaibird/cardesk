@@ -65,6 +65,26 @@ data class VehicleInfo(
     val windowsAllClosed: Boolean? = null,
     /** 平均油耗（L/100km）；读不到时为 null。 */
     val avgFuelConsumption: Double? = null,
+    /** 电瓶电压（V）；读不到时为 null。 */
+    val batteryVoltage: Float? = null,
+    /** 蓄电池电量状态（`GeelyVehicleProperty.Vehicle_Energy_Level`：1=正常 / 0=偏低）；读不到时为 null。 */
+    val batteryEnergyLevel: Int? = null,
+    /** 车内空气质量指数 AQI（0..1023）；读不到时为 null。 */
+    val aqiIndoor: Int? = null,
+    /** 车内 PM2.5（0..1023）；读不到时为 null。 */
+    val pm25Indoor: Int? = null,
+    /** 保养剩余里程（km）；读不到时为 null。 */
+    val maintenanceKm: Int? = null,
+    /** 电源/点火状态事件值（`AdaptapiSensors.IGNITION_*`）；读不到时为 null。 */
+    val ignitionState: Int? = null,
+    /** 机油液位事件值（`AdaptapiSensors.OIL_LEVEL_*`）；读不到时为 null。 */
+    val oilLevelEvent: Int? = null,
+    /** 制动液位事件值（`AdaptapiSensors.BRAKE_FLUID_*`）；读不到时为 null。 */
+    val brakeFluidEvent: Int? = null,
+    /** 冷却液告警事件值（`AdaptapiSensors.WARN_*`）；读不到时为 null。 */
+    val coolantWarnEvent: Int? = null,
+    /** 低油量告警事件值（`AdaptapiSensors.WARN_*`）；读不到时为 null。 */
+    val fuelLowWarnEvent: Int? = null,
     /**
      * 本次行程油耗（**L，总升数**）；读不到时为 null。
      *
@@ -130,6 +150,8 @@ fun currentVehicleInfo(): VehicleInfo {
     } catch (e: Throwable) {
         return VehicleInfo(source = "未连接")
     }
+    // 后台采样线程顺手刷新「本车支持的驾驶模式」（内部自带节流，不会每秒查 12 路信号）。
+    VehicleController.maybeRefreshSupportedDriveModes(gw)
     // 驾驶模式原始值：日志里要同时给出「模式值」和「短标签」。
     var driveModeRaw: Int? = null
     // 模拟通道：读回自己刚写进去的模式，模拟器上也能看到「切完状态栏跟着变」。
@@ -151,6 +173,16 @@ fun currentVehicleInfo(): VehicleInfo {
             ),
             source = gw.displayName,
             avgFuelConsumption = 6.8,
+            batteryVoltage = 12.6f,
+            batteryEnergyLevel = BatteryVoltageProbe.ENERGY_LEVEL_HIGH,
+            aqiIndoor = gw.simAqiIndoor,
+            pm25Indoor = gw.simPm25Indoor,
+            maintenanceKm = 6500,
+            ignitionState = AdaptapiSensors.IGNITION_ACTIVE,
+            oilLevelEvent = AdaptapiSensors.OIL_LEVEL_OK,
+            brakeFluidEvent = AdaptapiSensors.BRAKE_FLUID_OK,
+            coolantWarnEvent = AdaptapiSensors.WARN_NORMAL,
+            fuelLowWarnEvent = AdaptapiSensors.WARN_NORMAL,
             tripKm = gw.simTrip2Km,
             tripDurationMs = gw.simTrip2Minutes * 60_000L.toDouble(),
             trip1Km = gw.simTrip1Km,
@@ -220,6 +252,7 @@ fun currentVehicleInfo(): VehicleInfo {
             VehicleInfo(
                 rangeKm = range,
                 odometerKm = odometer,
+                speedKmh = AdaptapiSensors.carSpeedKmh().takeIf { it >= 0 } ?: 0,
                 ambientTemp = gw.ambientTempC() ?: Float.NaN,
                 driveModeLabel = driveMode,
                 driveModeRaw = driveModeRaw,
@@ -242,6 +275,16 @@ fun currentVehicleInfo(): VehicleInfo {
                 // 第七十五轮修正：之前直接退 `tripFuelConsumption`（单位是 L），
                 // 会把「本行程烧了 12.3 升」显示成「12.3 L/100km」，差 100 倍。
                 avgFuelConsumption = trip.avgFuelConsumption ?: trip.avgFuelConsumptionFromTrip,
+                batteryVoltage = BatteryVoltageProbe.readVoltage(ctx, signalsReady),
+                batteryEnergyLevel = BatteryVoltageProbe.readEnergyLevel(),
+                aqiIndoor = AdaptapiSensors.aqiIndoor().takeIf { it >= 0 },
+                pm25Indoor = AdaptapiSensors.pm25Indoor().takeIf { it >= 0 },
+                maintenanceKm = AdaptapiSensors.maintenanceKm().takeIf { it > 0 },
+                ignitionState = AdaptapiSensors.ignitionEvent().takeIf { it > 0 },
+                oilLevelEvent = AdaptapiSensors.oilLevelEvent().takeIf { it > 0 },
+                brakeFluidEvent = AdaptapiSensors.brakeFluidEvent().takeIf { it > 0 },
+                coolantWarnEvent = AdaptapiSensors.coolantWarnEvent().takeIf { it > 0 },
+                fuelLowWarnEvent = AdaptapiSensors.fuelLowWarnEvent().takeIf { it > 0 },
                 tripFuelConsumption = trip.tripFuelConsumption,
                 tripKm = trip.tripKm ?: trip2Fallback?.distanceKm,
                 tripDurationMs = trip.tripDurationMs ?: trip2Fallback?.durationMs?.toDouble(),

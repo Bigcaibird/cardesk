@@ -1,13 +1,15 @@
 package com.cardesk.launcher.ui.widget
 
 import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.ColorFilter
+import android.graphics.Matrix
 import android.graphics.Paint
-import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.Shader
 import android.graphics.drawable.Drawable
 import com.cardesk.launcher.core.media.CoverBackdrop
 
@@ -104,6 +106,8 @@ class CoverBackdropDrawable(
 
     /** 模糊后的小图（归我们所有，但上过屏所以换的时候只丢引用）。 */
     private var blurred: Bitmap? = null
+    private var blurredShader: BitmapShader? = null
+    private val shaderMatrix = Matrix()
 
     /**
      * 当前背景亮度的允许区间（相对亮度 `[下限, 上限]`）。
@@ -114,8 +118,9 @@ class CoverBackdropDrawable(
 
     private val facePaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val blurPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
-    private val clipPath = Path()
+    private val drawRect = RectF()
     private val dstRect = Rect()
 
     /**
@@ -157,49 +162,33 @@ class CoverBackdropDrawable(
     override fun draw(canvas: Canvas) {
         val b = bounds
         if (b.isEmpty) return
-        val r = RectF(b)
+        drawRect.set(b)
 
-        // 卡面不透明度（设置里的「卡片不透明度」）。
-        // 封面层要跟卡面**一起**变透明，所以整段放进一个带 alpha 的图层里画。
-        val alpha = surfaceColor ushr 24
-        if (alpha >= 255) {
-            drawFace(canvas, r)
-        } else {
-            val save = canvas.saveLayerAlpha(
-                b.left.toFloat(),
-                b.top.toFloat(),
-                b.right.toFloat(),
-                b.bottom.toFloat(),
-                alpha,
+        // 用 BitmapShader 直接单遍 drawRoundRect + paint.alpha，避免在半透明视频壁纸窗口下
+        // 反复 saveLayerAlpha 分配离屏 FBO + clipPath 模板裁剪导致 Adreno 530 局部闪屏。
+        val alpha = (surfaceColor ushr 24) and 0xFF
+        val small = blurred
+        val shader = blurredShader
+        if (small != null && shader != null && small.width > 0 && small.height > 0) {
+            shaderMatrix.reset()
+            shaderMatrix.setScale(
+                drawRect.width() / small.width.toFloat(),
+                drawRect.height() / small.height.toFloat(),
             )
-            drawFace(canvas, r)
-            canvas.restoreToCount(save)
+            shaderMatrix.postTranslate(drawRect.left, drawRect.top)
+            shader.setLocalMatrix(shaderMatrix)
+            bitmapPaint.shader = shader
+            bitmapPaint.alpha = alpha
+            canvas.drawRoundRect(drawRect, cornerRadius, cornerRadius, bitmapPaint)
+        } else {
+            facePaint.color = surfaceColor
+            canvas.drawRoundRect(drawRect, cornerRadius, cornerRadius, facePaint)
         }
 
         // 描边画在最上层（原来的 `Skin.flat` 也是描边压在填充上）。
         strokePaint.color = strokeColor
         strokePaint.strokeWidth = 1f
-        canvas.drawRoundRect(r, cornerRadius, cornerRadius, strokePaint)
-    }
-
-    /** 卡面 + 封面。 */
-    private fun drawFace(canvas: Canvas, r: RectF) {
-        facePaint.color = surfaceColor
-        canvas.drawRoundRect(r, cornerRadius, cornerRadius, facePaint)
-
-        val small = blurred ?: return
-
-        // 封面：圆角裁剪后铺满整张卡。
-        //
-        // 位图里的像素**已经过亮度映射**（见 [rebuild]），
-        // 所以这里直接画就行 —— 不需要再叠遮罩。
-        clipPath.reset()
-        clipPath.addRoundRect(r, cornerRadius, cornerRadius, Path.Direction.CW)
-        canvas.save()
-        canvas.clipPath(clipPath)
-        bitmapPaint.alpha = 255
-        canvas.drawBitmap(small, null, r, bitmapPaint)
-        canvas.restore()
+        canvas.drawRoundRect(drawRect, cornerRadius, cornerRadius, strokePaint)
     }
 
     override fun setAlpha(alpha: Int) {
@@ -220,6 +209,7 @@ class CoverBackdropDrawable(
         val src = bitmap
         val b = bounds
         blurred = null
+        blurredShader = null
         // 开关关着 → 不生成模糊图（省掉整条「缩到 64px 再拉回来」的管线）。
         if (!coverEnabled) return
         if (src == null || b.width() <= 0 || b.height() <= 0) return
@@ -238,6 +228,7 @@ class CoverBackdropDrawable(
         small.setPixels(mapped, 0, small.width, 0, 0, small.width, small.height)
 
         blurred = small
+        blurredShader = BitmapShader(small, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
     }
 
     /**
@@ -262,7 +253,7 @@ class CoverBackdropDrawable(
             val nh = maxOf(targetH, (nw.toLong() * curRect.height() / curRect.width()).toInt())
             if (nw <= 0 || nh <= 0) return null
             val next = Bitmap.createBitmap(nw, nh, Bitmap.Config.ARGB_8888)
-            Canvas(next).drawBitmap(cur, curRect, Rect(0, 0, nw, nh), bitmapPaint)
+            Canvas(next).drawBitmap(cur, curRect, Rect(0, 0, nw, nh), blurPaint)
             if (cur !== src) cur.recycle()
             cur = next
             curRect = Rect(0, 0, nw, nh)
@@ -270,7 +261,7 @@ class CoverBackdropDrawable(
 
         val small = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
         dstRect.set(0, 0, targetW, targetH)
-        Canvas(small).drawBitmap(cur, curRect, dstRect, bitmapPaint)
+        Canvas(small).drawBitmap(cur, curRect, dstRect, blurPaint)
         if (cur !== src) cur.recycle()
         return small
     }

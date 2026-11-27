@@ -62,6 +62,9 @@ object HostTaskMigration {
     /** 第225轮：守护窗口里最多「搬回」几次（防应用反复抢屏时无限搬）。 */
     private const val VERIFY_MAX_MOVES = 3
 
+    /** 宿主 onPause 后的快速复查时间点（ms）：赶在冷启动跳板 Activity 出窗前拦截。 */
+    private val PAUSE_FAST_CHECK_DELAYS_MS = longArrayOf(40L, 120L)
+
     private val handler = Handler(Looper.getMainLooper())
 
     /** 正在搬移中的包名（看门狗要靠它**暂缓判黑**，见 [isMigrating]）。 */
@@ -69,6 +72,12 @@ object HostTaskMigration {
 
     /** 已取消的搬移（包名 → 待执行的 Runnable）。 */
     private val pending = HashMap<String, Runnable>()
+
+    /** 正在搬移/守护中的包对应的承载面（供 [onHostActivityPaused] 立即复查）。 */
+    private val activeViews = HashMap<String, java.lang.ref.WeakReference<View>>()
+
+    /** 因宿主 Activity 收到 onPause 触发的快速复查 Runnable（取消时一并清理）。 */
+    private val pauseChecks = HashMap<String, MutableList<Runnable>>()
 
     /**
      * 启动承载应用之后调它：**在几秒内**把承载应用的 task 搬到我们的虚拟屏。
@@ -80,8 +89,56 @@ object HostTaskMigration {
         val target = pkg ?: return
         if (target.isBlank()) return
         cancel(target)
-        inFlight += target
+        synchronized(inFlight) {
+            inFlight += target
+            activeViews[target] = java.lang.ref.WeakReference(view)
+        }
         attempt(view, target, 0)
+    }
+
+    /**
+     * 宿主桌面 Activity 收到 `onPause()` 时调用：
+     *
+     * 如果正处于画中画启动后的搬移/守护窗口（[inFlight] 非空），说明极可能是承载应用
+     * （例如高德冷启动时 `UsbFillActivity` 跳 `MainMapActivity`）不带 `launchDisplayId`
+     * 抢到了主屏。立刻复查并在 +40ms / +120ms 再查两次，在对方把全屏黑加载窗画出来、
+     * 把桌面压进 `onStop()` 之前就把它搬回虚拟屏（而不是干等 600ms 轮询）。
+     */
+    fun onHostActivityPaused() {
+        val snapshot: List<Pair<String, View>> = synchronized(inFlight) {
+            if (inFlight.isEmpty()) return
+            inFlight.mapNotNull { pkg ->
+                val v = activeViews[pkg]?.get()
+                if (v != null && v.isAttachedToWindow) pkg to v else null
+            }
+        }
+        for ((pkg, view) in snapshot) {
+            runPauseFastCheck(view, pkg)
+            val list = ArrayList<Runnable>(2)
+            for (delay in PAUSE_FAST_CHECK_DELAYS_MS) {
+                val r = Runnable { runPauseFastCheck(view, pkg) }
+                list += r
+                handler.postDelayed(r, delay)
+            }
+            synchronized(inFlight) {
+                if (inFlight.contains(pkg)) {
+                    pauseChecks.remove(pkg)?.forEach { handler.removeCallbacks(it) }
+                    pauseChecks[pkg] = list
+                } else {
+                    list.forEach { handler.removeCallbacks(it) }
+                }
+            }
+        }
+    }
+
+    private fun runPauseFastCheck(view: View, pkg: String) {
+        synchronized(inFlight) { if (!inFlight.contains(pkg)) return }
+        if (!view.isAttachedToWindow) return
+        val r = runOnce(view, pkg)
+        if (r == Result.MOVED) {
+            Logx.i(LogTags.NAV_UI, "承载任务抢主屏（onPause 实时拦截），已立刻搬回虚拟屏", "pkg" to pkg)
+            startVerify(view, pkg, 0, "onPause 实时拦回", moves = 1)
+        }
     }
 
     /**
@@ -103,7 +160,9 @@ object HostTaskMigration {
     fun cancel(pkg: String) {
         synchronized(inFlight) {
             inFlight.remove(pkg)
+            activeViews.remove(pkg)
             pending.remove(pkg)?.let { handler.removeCallbacks(it) }
+            pauseChecks.remove(pkg)?.forEach { handler.removeCallbacks(it) }
         }
     }
 
@@ -111,9 +170,13 @@ object HostTaskMigration {
     fun cancelAll() {
         synchronized(inFlight) {
             val all = pending.values.toList()
+            val allPause = pauseChecks.values.flatten()
             pending.clear()
+            pauseChecks.clear()
+            activeViews.clear()
             inFlight.clear()
             all.forEach { handler.removeCallbacks(it) }
+            allPause.forEach { handler.removeCallbacks(it) }
         }
     }
 
@@ -229,7 +292,9 @@ object HostTaskMigration {
     private fun finish(pkg: String, moved: Boolean, reason: String) {
         synchronized(inFlight) {
             inFlight.remove(pkg)
+            activeViews.remove(pkg)
             pending.remove(pkg)?.let { handler.removeCallbacks(it) }
+            pauseChecks.remove(pkg)?.forEach { handler.removeCallbacks(it) }
         }
         if (moved) {
             Logx.i(LogTags.NAV_UI, "承载任务搬移完成", "pkg" to pkg, "reason" to reason)

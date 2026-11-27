@@ -196,19 +196,38 @@ object WallpaperContrast {
      * @param tone 区域的亮度分布；null = 还不知道（跟着主题走）
      * @param themeNight 当前主题是不是夜间（分布未知时的兜底）
      */
-    fun inkForTone(tone: WallpaperSampler.Tone?, themeNight: Boolean): Ink {
+    /** 视频壁纸极性迟滞上界：当前深底浅字时，平均亮度需升至 ≥145 才切浅底深字。 */
+    const val VIDEO_SWITCH_TO_LIGHT_LUMA = 145
+
+    /** 视频壁纸极性迟滞下界：当前浅底深字时，平均亮度需降至 ≤110 才切深底浅字。 */
+    const val VIDEO_SWITCH_TO_DARK_LUMA = 110
+
+    fun inkForTone(
+        tone: WallpaperSampler.Tone?,
+        themeNight: Boolean,
+        prevUseDarkInk: Boolean? = null,
+    ): Ink {
         if (tone == null) return if (themeNight) ON_DARK else ON_LIGHT
         val average = tone.average
-        // 方向只看平均值（避免被局部高光带偏）。
-        val darkOnAverage = contrastRatio(ON_DARK.text, average)
-        val lightOnAverage = contrastRatio(ON_LIGHT.text, average)
-        val useDarkInk = darkOnAverage >= lightOnAverage
+        // 方向只看平均值（避免被局部高光带偏），并支持视频壁纸极性迟滞，防止临界帧反复跳变。
+        val avgLuma = luma(average)
+        val useDarkInk = when (prevUseDarkInk) {
+            true -> avgLuma < VIDEO_SWITCH_TO_LIGHT_LUMA
+            false -> avgLuma <= VIDEO_SWITCH_TO_DARK_LUMA
+            null -> {
+                val darkOnAverage = contrastRatio(ON_DARK.text, average)
+                val lightOnAverage = contrastRatio(ON_LIGHT.text, average)
+                darkOnAverage >= lightOnAverage
+            }
+        }
         val base = if (useDarkInk) ON_DARK else ON_LIGHT
-        // 最坏情况：浅字压在整块区域**最亮**的那撮像素上；深字压在**最暗**的那撮上。
+        val toward = if (useDarkInk) 0xFFFFFFFF.toInt() else 0xFF000000.toInt()
+        // 主文字按最坏高光/暗端拉够对比度，但锁定提亮/压暗方向，绝不反向反转；
+        // 次级文字（如三行歌词相邻行）按区域平均色校验，避免局部小高光把浅字压黑或随帧抖动。
         val worst = if (useDarkInk) tone.bright else tone.dark
         return base.copy(
-            text = ensureContrast(base.text, worst, TEXT_MIN_CONTRAST),
-            soft = ensureContrast(base.soft, worst, SOFT_MIN_CONTRAST),
+            text = ensureContrastToward(base.text, worst, TEXT_MIN_CONTRAST, toward),
+            soft = ensureContrastToward(base.soft, average, SOFT_MIN_CONTRAST, toward),
         )
     }
 
@@ -231,6 +250,12 @@ object WallpaperContrast {
         } else {
             0xFF000000.toInt()
         }
+        return ensureContrastToward(color, backdrop, target, toward)
+    }
+
+    /** 按指定目标极性（纯白或纯黑）单向拉够对比度，避免深底浅字被局部高光反向混成黑色。 */
+    fun ensureContrastToward(color: Int, backdrop: Int, target: Double, toward: Int): Int {
+        if (contrastRatio(color, backdrop) >= target) return color
         // 二分：找**最小**的混合比（少动一点，色相尽量保住）。
         var lo = 0f
         var hi = 1f

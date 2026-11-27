@@ -41,8 +41,15 @@ tasks.register("printVersion") {
 tasks.register("bumpVersion") {
     val props = readVersionProps()
     val currentCode = props.getProperty("versionCode")?.trim()?.toIntOrNull() ?: 4123
+    val currentName = props.getProperty("versionName")?.trim().orEmpty()
+        .removeSuffix("-preview").removeSuffix("-system")
     val nextCode = currentCode + 1
-    val nextName = "1.0.${nextCode - 3096}"
+    val semver = Regex("^(\\d+)\\.(\\d+)\\.(\\d+)$").matchEntire(currentName)
+    val nextName = if (semver != null && semver.groupValues[1].toInt() >= 2) {
+        "${semver.groupValues[1]}.${semver.groupValues[2]}.${semver.groupValues[3].toInt() + 1}"
+    } else {
+        "1.0.${nextCode - 3096}"
+    }
     doLast {
         versionFile.writeText(
             buildString {
@@ -51,7 +58,9 @@ tasks.register("bumpVersion") {
                 append("# 第五十七轮起：每次出包由 `tools/release.sh` **自动 +1**，\n")
                 append("# 也可以手动执行 `gradle bumpVersion`。\n")
                 append("#\n")
-                append("# 规则（历轮验证过）：versionName = \"1.0.\" + (versionCode - 3096)\n")
+                append("# 规则：\n")
+                append("#   - 2.x 起采用语义化版本（X.Y.Z），每次自动出包 patch +1（2.0.0 → 2.0.1）\n")
+                append("#   - 历史 1.0.x 规则：versionName = \"1.0.\" + (versionCode - 3096)\n")
                 append("#   4123 → 1.0.1027\n")
                 append("#   $nextCode → $nextName\n")
                 append("#\n")

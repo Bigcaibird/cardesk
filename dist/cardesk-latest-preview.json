@@ -1,16 +1,16 @@
 {
   "schema": 1,
   "channel": "preview",
-  "version": "1.0.1247-preview",
-  "versionCode": 4343,
-  "tag": "v1.0.1247-preview",
-  "name": "CarDesk 4343 / 1.0.1247-preview（开发版）",
-  "notes": "空调弹窗「座舱出风示意」三个按钮（吹脸/吹脚/吹窗）支持点按切换对应出风方向",
-  "publishedAt": "2026-11-25T10:00:41Z",
+  "version": "1.0.1264-preview",
+  "versionCode": 4360,
+  "tag": "v1.0.1264-preview",
+  "name": "CarDesk 4360 / 1.0.1264-preview（开发版）",
+  "notes": "1. 修复设置页关闭时左侧导航栏与右侧内容区不同步退场的卡顿感：两块玻璃面板改由统一硬件层容器同步滑出淡出，关闭末帧不再闪回，打开同步淡入\n2. 沿用上一版性能优化：日夜判定短路与后台缓存、release 非 debuggable 单 DEX 构建、后台暂停 1Hz UI 心跳",
+  "publishedAt": "2026-11-27T08:40:59Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4343-preview.apk",
-    "url": "cardesk/preview/CarDesk-platform-ecarx-cardesk-4343-preview.apk",
-    "size": 2883525,
-    "sha256": "64374d4ef2f4d04bc518bb8690f1d81f56657610786c78330bf4d3291ba95035"
+    "name": "CarDesk-platform-ecarx-cardesk-4360-preview.apk",
+    "url": "cardesk/preview/CarDesk-platform-ecarx-cardesk-4360-preview.apk",
+    "size": 2156220,
+    "sha256": "d48cf380921ec30cadfae80dde40fb63c63c129ab42df231d0e61f344430bcc3"
   }
 }

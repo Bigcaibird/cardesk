@@ -210,6 +210,12 @@ class PipMirrorHost(private val context: Context) {
         }
     }
 
+    /** 切页动画落位后刷新触摸排除区到当前屏幕坐标。 */
+    fun refreshTapExcludeRegion() {
+        if (released || displayId == null) return
+        updateTapExcludeRegion(force = true)
+    }
+
     /** 释放虚拟屏与 Surface（只在真的不再承载时调用）。 */
     fun release() {
         if (released) return

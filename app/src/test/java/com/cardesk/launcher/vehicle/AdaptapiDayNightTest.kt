@@ -138,4 +138,32 @@ class AdaptapiDayNightTest {
         // 没挂上（类不存在 / 车机服务没连上）时读不到 → null，交给下一个来源
         assertNull(AdaptapiDayNight.nightUi())
     }
+
+    @Test
+    fun cachedNightUi_updatesFromReadAndCallback_andPollBacksOffOnUnsupported() {
+        val context = RuntimeEnvironment.getApplication()
+        assertTrue(AdaptapiDayNight.attach(context, force = true))
+
+        FakeDayNightMode.display = 2
+        assertEquals(true, AdaptapiDayNight.nightUi())
+        assertEquals(true, AdaptapiDayNight.cachedNightUi())
+
+        // 车机主动回调明暗变化：缓存立刻更新，无需再调 Binder
+        FakeDayNightMode.fireDisplay(1)
+        idle()
+        assertEquals(false, AdaptapiDayNight.cachedNightUi())
+
+        // 固件返回不支持值 0：nightUi() 返回 null 且进入退避窗口，pollNightUiIfNeeded() 短时间内不重复调用
+        FakeDayNightMode.display = 0
+        assertNull(AdaptapiDayNight.pollNightUiIfNeeded())
+        assertNull(AdaptapiDayNight.cachedNightUi())
+
+        // 退避窗口内即便底层值变化，pollNightUiIfNeeded() 也会跳过同步读，直到退避期满或收到回调
+        FakeDayNightMode.display = 2
+        assertNull(AdaptapiDayNight.pollNightUiIfNeeded())
+        // 收到推送回调立刻打破退避并刷新缓存
+        FakeDayNightMode.fireDisplay(2)
+        idle()
+        assertEquals(true, AdaptapiDayNight.cachedNightUi())
+    }
 }

@@ -19,6 +19,7 @@ class CabinView(context: Context) : View(context) {
         true, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     )
         set(value) {
+            if (field == value) return
             field = value
             invalidate()
         }
@@ -33,6 +34,7 @@ class CabinView(context: Context) : View(context) {
     private var flow = 0f
 
     fun setFlow(face: Boolean, feet: Boolean, wind: Boolean) {
+        if (this.face == face && this.feet == feet && this.wind == wind) return
         this.face = face
         this.feet = feet
         this.wind = wind

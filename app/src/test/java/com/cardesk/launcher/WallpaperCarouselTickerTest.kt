@@ -109,4 +109,21 @@ class WallpaperCarouselTickerTest {
         val after = l.carouselTickCountForTest()
         assertEquals("detach 之后心跳不该再跑", before, after)
     }
+
+    @Test
+    fun `后台 onActivityStopped 心跳停，回前台 onActivityStarted 恢复`() {
+        val l = launcher()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
+        val beforeStop = l.carouselTickCountForTest()
+        l.onActivityStopped()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(3))
+        val afterStop = l.carouselTickCountForTest()
+        assertEquals("切到后台后心跳不该继续跑", beforeStop, afterStop)
+
+        l.onActivityStarted()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(3))
+        val afterStart = l.carouselTickCountForTest()
+        val resumedTicks = afterStart - afterStop
+        assertTrue("回到前台后 3 秒内应恢复心跳（实测 $resumedTicks 次）", resumedTicks in 2..4)
+    }
 }

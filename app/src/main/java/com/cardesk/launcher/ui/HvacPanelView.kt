@@ -287,7 +287,8 @@ class HvacPanelView(context: Context, private val pal: Palette) : FrameLayout(co
     /** 用最新车控状态刷新面板。 */
     fun bind(state: HvacState, source: String) {
         // —— 副标题显示电源状态
-        subtitle.text = if (state.power) "运行中" else "已关机"
+        val subText = if (state.power) "运行中" else "已关机"
+        if (subtitle.text?.toString() != subText) subtitle.text = subText
 
         driverDial.temperature = state.tempDriver
         passengerDial.temperature = state.tempPassenger
@@ -298,7 +299,8 @@ class HvacPanelView(context: Context, private val pal: Palette) : FrameLayout(co
         passengerDial.disabled = !state.power
 
         // —— 风量文案与档位条都跟电源状态联动
-        fanLabel.text = "风量  ${state.fanLevel}  档"
+        val fText = "风量  ${state.fanLevel}  档"
+        if (fanLabel.text?.toString() != fText) fanLabel.text = fText
         fan.level = if (state.power) state.fanLevel else 0
         fan.auto = state.fanAuto
 
@@ -308,7 +310,10 @@ class HvacPanelView(context: Context, private val pal: Palette) : FrameLayout(co
         toggleAc.setActive(state.ac)
         toggleAuto.setActive(state.auto)
         // —— 循环只有内/外两态
-        toggleCirc.bind(if (state.circulation == 0) "内循环" else "外循环", state.circulation == 0)
+        val circText = if (state.circulation == 0) "内循环" else "外循环"
+        val circActive = state.circulation == 0
+        if (toggleCirc.text?.toString() != circText) toggleCirc.bind(circText, toggleCirc.active)
+        toggleCirc.setActive(circActive)
         toggleSync.setActive(state.tempSynced)
         defrostFront.setActive(state.defrostFront)
         defrostRear.setActive(state.defrostRear)

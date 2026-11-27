@@ -224,8 +224,7 @@ object NavSlots {
         enhancedNav: Boolean,
         navStyle: Int,
         slots: List<NavSlot>,
-    ): Boolean = enhancedNav &&
-        navStyle == NAV_STYLE_SLOTS &&
+    ): Boolean = navStyle == NAV_STYLE_SLOTS &&
         slots.any { it.type == NavSlot.TYPE_LYRIC }
 
     /**

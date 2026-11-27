@@ -204,6 +204,32 @@ class HvacLogic(
         send(HvacIds.AUTO, HvacIds.ZONE_GLOBAL, if (on) 1 else 0, op = "AUTO", hold = true)
     }
 
+    /** 显式设置 A/C 开关（自动任务用）。 */
+    fun setAc(on: Boolean) {
+        syncFromVehicle(HvacIds.AC, HvacIds.POWER)
+        if (state.ac == on) return
+        Logx.event(LogTags.HVAC, "A/C", "to" to on)
+        state = if (on) {
+            state.copy(ac = true, power = true, fanLevel = maxOf(state.fanLevel, HvacIds.FAN_MIN_STEP))
+        } else {
+            state.copy(ac = false)
+        }
+        send(HvacIds.AC, HvacIds.ZONE_GLOBAL, if (on) 1 else 0, op = "A/C", hold = true)
+    }
+
+    /** 显式设置 AUTO 开关（自动任务用）。 */
+    fun setAuto(on: Boolean) {
+        syncFromVehicle(HvacIds.AUTO, HvacIds.POWER)
+        if (state.auto == on) return
+        Logx.event(LogTags.HVAC, "AUTO", "to" to on)
+        state = if (on) {
+            state.copy(auto = true, power = true, fanLevel = maxOf(state.fanLevel, HvacIds.FAN_MIN_STEP))
+        } else {
+            state.copy(auto = false)
+        }
+        send(HvacIds.AUTO, HvacIds.ZONE_GLOBAL, if (on) 1 else 0, op = "AUTO", hold = true)
+    }
+
     /**
      * 循环模式：**内 / 外两态**。
      *
@@ -215,6 +241,16 @@ class HvacLogic(
         Logx.event(LogTags.HVAC, "循环模式", "to" to if (next == 0) "内循环" else "外循环")
         state = state.copy(circulation = next)
         send(HvacIds.CIRCULATION, HvacIds.ZONE_GLOBAL, HvacCodec.circulationRaw(next), op = "循环模式", hold = true)
+    }
+
+    /** 显式设置内/外循环（`inner=true` 为内循环，自动任务用）。 */
+    fun setCirculation(inner: Boolean) {
+        syncFromVehicle(HvacIds.CIRCULATION)
+        val target = if (inner) 0 else 1
+        if (state.circulation == target) return
+        Logx.event(LogTags.HVAC, "循环模式", "to" to if (inner) "内循环" else "外循环")
+        state = state.copy(circulation = target)
+        send(HvacIds.CIRCULATION, HvacIds.ZONE_GLOBAL, HvacCodec.circulationRaw(target), op = "循环模式", hold = true)
     }
 
     /**
@@ -462,6 +498,44 @@ class HvacLogic(
                 "zone" to VehicleLog.zoneName(zone),
                 "cleared" to if (heat) "座椅通风" else "座椅加热",
             )
+            write(if (heat) HvacIds.SEAT_VENT else HvacIds.SEAT_HEAT, zone, 0)
+        }
+    }
+
+    /** 显式设置座椅加热/通风档位（0..3；加热与通风互斥，自动任务用）。 */
+    fun setSeatLevel(zone: Int, heat: Boolean, level: Int) {
+        if (!heat && zone != HvacIds.ZONE_DRIVER) {
+            Logx.w(
+                LogTags.HVAC,
+                "副驾座椅通风不可用",
+                "zone" to zone,
+                "reason" to "厂商按左右舵只暴露主驾座通风信号；dcy11 是左舵车",
+            )
+            return
+        }
+        val next = level.coerceIn(0, 3)
+        val current = if (heat) state.seatHeatOf(zone) else state.seatVentOf(zone)
+        if (current == next) return
+        Logx.event(
+            LogTags.HVAC,
+            if (heat) "座椅加热" else "座椅通风",
+            "zone" to VehicleLog.zoneName(zone),
+            "from" to current,
+            "to" to next,
+        )
+        state = when {
+            heat && zone == HvacIds.ZONE_DRIVER ->
+                state.copy(seatHeatDriver = next, seatVentDriver = if (next > 0) 0 else state.seatVentDriver)
+            heat ->
+                state.copy(seatHeatPassenger = next, seatVentPassenger = if (next > 0) 0 else state.seatVentPassenger)
+            zone == HvacIds.ZONE_DRIVER ->
+                state.copy(seatVentDriver = next, seatHeatDriver = if (next > 0) 0 else state.seatHeatDriver)
+            else ->
+                state.copy(seatVentPassenger = next, seatHeatPassenger = if (next > 0) 0 else state.seatHeatPassenger)
+        }
+        val func = if (heat) HvacIds.SEAT_HEAT else HvacIds.SEAT_VENT
+        send(func, zone, HvacCodec.seatRaw(func, next), op = if (heat) "座椅加热" else "座椅通风")
+        if (next > 0) {
             write(if (heat) HvacIds.SEAT_VENT else HvacIds.SEAT_HEAT, zone, 0)
         }
     }

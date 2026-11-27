@@ -2,11 +2,12 @@ package com.cardesk.launcher.ui.widget
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.graphics.Canvas
+import android.graphics.Matrix
 import android.graphics.Paint
-import android.graphics.Path
-import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.Shader
 import android.view.View
 import com.cardesk.launcher.core.Skin
 
@@ -32,13 +33,17 @@ class AlbumArtView(context: Context) : View(context) {
     /** 封面位图；null = 画占位底色。 */
     var bitmap: Bitmap? = null
         set(value) {
+            if (field === value) return
             field = value
+            shaderBitmap = null
+            bitmapShader = null
             invalidate()
         }
 
     /** 圆角半径（设计坐标 px）。 */
     var cornerRadius: Float = 26f
         set(value) {
+            if (field == value) return
             field = value
             invalidate()
         }
@@ -48,6 +53,7 @@ class AlbumArtView(context: Context) : View(context) {
      */
     var placeholderColor: Int = Skin.surfaceSoft
         set(value) {
+            if (field == value) return
             field = value
             invalidate()
         }
@@ -82,51 +88,44 @@ class AlbumArtView(context: Context) : View(context) {
      * 拆成两个画笔后，占位底色怎么改都碰不到封面的不透明度。
      */
     private val placeholderPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-
-    private val path = Path()
-    private val src = Rect()
-    private val dst = Rect()
+    private val rect = RectF()
+    private val shaderMatrix = Matrix()
+    private var shaderBitmap: Bitmap? = null
+    private var bitmapShader: BitmapShader? = null
 
     override fun onDraw(canvas: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
-        val r = RectF(0f, 0f, w, h)
-        path.reset()
-        path.addRoundRect(r, cornerRadius, cornerRadius, Path.Direction.CW)
-        canvas.save()
-        canvas.clipPath(path)
+        rect.set(0f, 0f, w, h)
         val bmp = bitmap
-        if (bmp == null) {
+        if (bmp == null || bmp.width <= 0 || bmp.height <= 0) {
             placeholderPaint.color = placeholderColor
             placeholderPaint.shader = null
-            canvas.drawRect(r, placeholderPaint)
+            canvas.drawRoundRect(rect, cornerRadius, cornerRadius, placeholderPaint)
+            return
+        }
+        // 使用 BitmapShader + drawRoundRect 替代 Canvas.clipPath，兼顾抗锯齿圆角并避免
+        // Adreno 530 半透明窗口下的模板裁剪闪屏。
+        val shader = if (shaderBitmap === bmp && bitmapShader != null) {
+            bitmapShader!!
         } else {
-            // centerCrop：等比缩放到铺满，再居中裁掉多余部分
-            val bw = bmp.width.toFloat()
-            val bh = bmp.height.toFloat()
-            if (bw <= 0f || bh <= 0f) {
-                placeholderPaint.color = placeholderColor
-                placeholderPaint.shader = null
-                canvas.drawRect(r, placeholderPaint)
-            } else {
-                // 封面必须**满不透明度**地画 —— 半透明画笔会露出卡片底色，
-                // 看起来像「图上蒙了一层灰纱」。这里显式钉死 alpha=255，
-                // 免得以后有人往这个画笔上设色时又把它带暗。
-                paint.alpha = 255
-                val scale = maxOf(w / bw, h / bh)
-                val sw = w / scale
-                val sh = h / scale
-                src.set(
-                    ((bw - sw) / 2f).toInt().coerceAtLeast(0),
-                    ((bh - sh) / 2f).toInt().coerceAtLeast(0),
-                    ((bw + sw) / 2f).toInt().coerceAtMost(bmp.width),
-                    ((bh + sh) / 2f).toInt().coerceAtMost(bmp.height),
-                )
-                dst.set(0, 0, width, height)
-                canvas.drawBitmap(bmp, src, dst, paint)
+            BitmapShader(bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).also {
+                shaderBitmap = bmp
+                bitmapShader = it
             }
         }
-        canvas.restore()
+        val bw = bmp.width.toFloat()
+        val bh = bmp.height.toFloat()
+        val scale = maxOf(w / bw, h / bh)
+        val dx = (w - bw * scale) / 2f
+        val dy = (h - bh * scale) / 2f
+        shaderMatrix.reset()
+        shaderMatrix.setScale(scale, scale)
+        shaderMatrix.postTranslate(dx, dy)
+        shader.setLocalMatrix(shaderMatrix)
+        paint.alpha = 255
+        paint.shader = shader
+        canvas.drawRoundRect(rect, cornerRadius, cornerRadius, paint)
     }
 }

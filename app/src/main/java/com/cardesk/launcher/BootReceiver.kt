@@ -95,6 +95,10 @@ class BootReceiver : BroadcastReceiver() {
         runCatching {
             com.cardesk.launcher.vehicle.DriveModeAutoStart.apply(context, "开机广播")
         }.onFailure { Logx.w(LogTags.VEHICLE, "开机自动切换驾驶模式失败", it) }
+        // 开机自动热点：与桌面启动共用 10 分钟冷却，避免重复开关。
+        runCatching {
+            com.cardesk.launcher.core.HotspotController.applyAutoStart(context, "开机广播")
+        }.onFailure { Logx.w(LogTags.SYS, "开机自动热点失败", it) }
     }
 
     /**

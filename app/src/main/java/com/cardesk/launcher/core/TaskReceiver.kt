@@ -64,17 +64,9 @@ class TaskReceiver : BroadcastReceiver() {
             }
             ScheduledTasks.ACTION_HOTSPOT_ON,
             ScheduledTasks.ACTION_HOTSPOT_OFF,
-            -> {
-                // 排障场景：热点动作在无系统签名的车机上必然不可用
-                Logx.w(
-                    LogTags.TASK,
-                    "计划任务执行降级：热点开关需要系统签名",
-                    "id" to task.id,
-                    "action" to task.action,
-                )
-                Toast.makeText(context, "热点开关需要系统签名，此项仅保留入口", Toast.LENGTH_SHORT).show()
-            }
-            else -> launchApp(context, task)
+            -> HotspotController.executeTaskAction(context, task)
+            ScheduledTasks.ACTION_APP -> launchApp(context, task)
+            else -> AutomationEngine.executeAction(context, task)
         }
     }
 

@@ -131,6 +131,81 @@ class MusicController private constructor() {
     /** 上次读「默认媒体源」的时刻。 */
     private var qqSourceCheckedAt = 0L
 
+    /**
+     * 最近收到的 QQ 广播收藏态缓存（按歌名索引，防广播早于 MediaSession 切歌导致丢失）。
+     *
+     * 实车诊断包（2026-11-27）证实：QQ 音乐切歌时会先发 `update_song` / `update_state`（已带新歌
+     * `key_is_fav`），1~5 秒后 Android `MediaSession` 才更新新歌 metadata；旧逻辑把早到的新歌广播
+     * 误判成「迟到的旧歌回报」直接丢弃，等 MediaSession 切过来又把收藏态复位成 UNKNOWN，
+     * 导致后台切歌永远拿不到收藏态，必须把 QQ 音乐切到前台触发新广播才能看到。
+     */
+    private data class CachedQqFav(val state: MediaActions.FavoriteState, val atMs: Long)
+    private val recentQqFavByTitle = LinkedHashMap<String, CachedQqFav>()
+    private var lastQqFavQueryTitle: String = ""
+    private var lastQqFavQueryAt: Long = 0L
+
+    internal fun recordRecentQqFavorite(
+        title: String,
+        state: MediaActions.FavoriteState,
+        now: Long = System.currentTimeMillis(),
+    ) {
+        val key = title.trim()
+        if (key.isEmpty() || !state.known) return
+        recentQqFavByTitle.remove(key)
+        recentQqFavByTitle[key] = CachedQqFav(state, now)
+        while (recentQqFavByTitle.size > 8) {
+            val firstKey = recentQqFavByTitle.keys.firstOrNull() ?: break
+            recentQqFavByTitle.remove(firstKey)
+        }
+    }
+
+    internal fun applyRecentQqFavoriteIfPresent(
+        title: String,
+        now: Long = System.currentTimeMillis(),
+    ): Boolean {
+        val key = title.trim()
+        if (key.isEmpty()) return false
+        val cached = recentQqFavByTitle[key] ?: return false
+        val ageMs = now - cached.atMs
+        if (ageMs < 0L || ageMs > QQ_FAV_CACHE_TTL_MS) {
+            recentQqFavByTitle.remove(key)
+            return false
+        }
+        Logx.i(
+            LogTags.MEDIA,
+            "命中预到达的 QQ 收藏态缓存",
+            "title" to key,
+            "favorited" to cached.state.isFavorited,
+            "ageMs" to ageMs,
+        )
+        setFavoriteState(cached.state)
+        return true
+    }
+
+    /**
+     * 当前曲目是 QQ 音乐且收藏态仍未知时，静默发一条 `CMD_ALLOW_SEND_OUTSIDE` 广播请 QQ 回报一次
+     * `update_state`（含 `key_is_fav`）。该通道是纯定向广播，不会拉起 QQ 音乐界面。
+     */
+    private fun requestQqFavoriteSnapshot(title: String) {
+        val ctx = context ?: return
+        val key = title.trim()
+        if (key.isEmpty()) return
+        val now = System.currentTimeMillis()
+        if (key == lastQqFavQueryTitle && now - lastQqFavQueryAt < QQ_FAV_QUERY_COOLDOWN_MS) return
+        if (now - lastQqFavQueryAt < 2_500L) return
+        lastQqFavQueryTitle = key
+        lastQqFavQueryAt = now
+        val sent = QqBroadcast.openSendDoor(ctx)
+        qqDoorSentAt = now
+        qqDoorSentCount++
+        Logx.i(
+            LogTags.MEDIA,
+            "QQ 收藏态未知，静默请求状态快照",
+            "title" to key,
+            "sent" to sent,
+        )
+    }
+
     /** 「允许对外发送」开门命令**已发送次数**（第128轮，诊断用）。 */
     var qqDoorSentCount: Int = 0
         private set
@@ -294,7 +369,7 @@ class MusicController private constructor() {
      * 新歌的收藏态要么由播放器重发 metadata 带来（网易云），
      * 要么由下一条 `update_song` 广播带来（QQ 音乐）。
      */
-    private fun resetActionStateOnSongChange() {
+    internal fun resetActionStateOnSongChange() {
         setFavoriteState(MediaActions.FavoriteState.UNKNOWN)
         // 换歌了 → 上一首歌挂起的乐观更新没有意义。
         cancelPendingFavorite()
@@ -792,7 +867,17 @@ class MusicController private constructor() {
                 // 网易云重发 metadata（心形评分），QQ 音乐重发 `update_song`（`key_is_fav`）。
                 resetActionStateOnSongChange()
                 readFavoriteFromSession()
+                if (t.pkg == QqBroadcast.PACKAGE && !favoriteState.known) {
+                    if (!applyRecentQqFavoriteIfPresent(t.title)) {
+                        requestQqFavoriteSnapshot(t.title)
+                    }
+                }
                 onTrackReset(t)
+            } else if (t.pkg == QqBroadcast.PACKAGE && !favoriteState.known && t.title.isNotEmpty()) {
+                // 冷启动或后台接续播放时若收藏态仍未知，先查预到达缓存，未命中则静默向 QQ 要一次快照
+                if (!applyRecentQqFavoriteIfPresent(t.title)) {
+                    requestQqFavoriteSnapshot(t.title)
+                }
             }
             // —— 歌词版本复核（第四十轮新增，第七十八轮把触发条件补齐）
             //
@@ -997,7 +1082,11 @@ class MusicController private constructor() {
                 Logx.d(LogTags.MEDIA, "封面结果已过期（当前是别的歌）", "key" to key)
                 return@fetch
             }
-            track = cur.copy(artwork = bmp)
+            if (sessionTrack != null) {
+                sessionTrack = cur.copy(artwork = bmp)
+            } else {
+                broadcastTrack = cur.copy(artwork = bmp)
+            }
             listeners.forEach { it.onMediaChanged(track) }
             // 第134轮：把封面推给原车媒体桥 → 仪表才有图。
             pushArtworkToBridge(track)
@@ -1716,6 +1805,11 @@ class MusicController private constructor() {
         val fav = MediaActions.favoriteFromRaw(payload.favorite)
         if (fav.known) {
             val now = System.currentTimeMillis()
+            // 非 update_fav 的实时播放广播（update_song / update_state / update_album / update_lyric）
+            // 往往比 MediaSession 切歌早到 1~5 秒：先按歌名缓存，避免后面 MediaSession 切歌时丢失收藏态。
+            if (!isFavEvent && payload.title.isNotBlank()) {
+                recordRecentQqFavorite(payload.title, fav, now)
+            }
             val echoGrace = pendingFavorite != null ||
                 now - lastFavoriteSentAt < FAVORITE_ECHO_GRACE_MS
             when (
@@ -1744,6 +1838,9 @@ class MusicController private constructor() {
                     )
                 MediaActions.FavReportVerdict.APPLY -> {
                     // 报文确认到了 → 不再需要乐观兜底（避免它之后又把旧目标写回来）。
+                    if (payload.title.isNotBlank()) {
+                        recordRecentQqFavorite(payload.title, fav, now)
+                    }
                     cancelPendingFavorite()
                     setFavoriteState(fav)
                 }
@@ -2186,6 +2283,12 @@ class MusicController private constructor() {
 
         /** 「默认媒体源」的缓存时长（第126轮；ticker 是 16ms 一次，别每次都读 prefs）。 */
         const val QQ_SOURCE_CACHE_MS = 5_000L
+
+        /** 预到达的 QQ 广播收藏态缓存有效期（覆盖广播比 MediaSession 早到 1~6 秒的窗口）。 */
+        const val QQ_FAV_CACHE_TTL_MS = 30_000L
+
+        /** 同一首歌收藏态未知时，静默向 QQ 要状态快照的最小间隔。 */
+        const val QQ_FAV_QUERY_COOLDOWN_MS = 10_000L
 
         fun songKey(title: String, artist: String): String =
             LyricMatch.buildSongKey(null, LyricMatch.clean(title, artist).title)

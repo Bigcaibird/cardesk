@@ -383,18 +383,70 @@ object AmbientLightController {
      * 全是**同步 binder** —— 在主线程上连着做会卡住一帧。
      * 所以这里只**改状态**，真正的写交给 [writer] 后台线程（见 [writeStateAsync]）。
      */
+    @Volatile private var nightMode = false
+    @Volatile private var screenOffSuspended = false
+    @Volatile private var screenReceiverRegistered = false
+
+    fun shouldRun(context: Context): Boolean {
+        val prefs = Prefs(context.applicationContext)
+        if (!prefs.ambientEnabled) return false
+        if (prefs.ambientNightOnly && !nightMode) return false
+        if (screenOffSuspended) return false
+        return true
+    }
+
+    fun onDayNightChanged(context: Context, isNight: Boolean) {
+        if (nightMode == isNight) return
+        nightMode = isNight
+        syncPolicy(context)
+    }
+
+    fun onScreenStateChanged(context: Context, screenOn: Boolean) {
+        val suspended = !screenOn
+        if (screenOffSuspended == suspended) return
+        screenOffSuspended = suspended
+        Logx.i(LogTags.AMBIENT, "屏幕状态联动氛围灯", "screenOn" to screenOn)
+        syncPolicy(context)
+    }
+
+    fun syncPolicy(context: Context) {
+        val app = context.applicationContext
+        ensureScreenReceiver(app)
+        val active = shouldRun(app)
+        writtenEnabled = null
+        if (active) start(app) else stop(app)
+        writeStateAsync()
+        notifyStatus()
+    }
+
+    private fun ensureScreenReceiver(app: Context) {
+        if (screenReceiverRegistered) return
+        synchronized(this) {
+            if (screenReceiverRegistered) return
+            val filter = android.content.IntentFilter().apply {
+                addAction(android.content.Intent.ACTION_SCREEN_OFF)
+                addAction(android.content.Intent.ACTION_SCREEN_ON)
+            }
+            val receiver = object : android.content.BroadcastReceiver() {
+                override fun onReceive(ctx: Context, intent: android.content.Intent?) {
+                    when (intent?.action) {
+                        android.content.Intent.ACTION_SCREEN_OFF -> onScreenStateChanged(ctx, false)
+                        android.content.Intent.ACTION_SCREEN_ON -> onScreenStateChanged(ctx, true)
+                    }
+                }
+            }
+            runCatching { app.registerReceiver(receiver, filter) }
+                .onSuccess { screenReceiverRegistered = true }
+        }
+    }
+
     fun setEnabled(context: Context, enabled: Boolean) {
         val app = context.applicationContext
         val prefs = Prefs(app)
         val from = prefs.ambientEnabled
         prefs.ambientEnabled = enabled
         Logx.i(LogTags.AMBIENT, "氛围灯开关", "from" to from, "to" to enabled)
-        desiredEnabled = enabled
-        // 强制重写（车控通道可能刚就绪，也可能上一次写失败了）
-        writtenEnabled = null
-        if (enabled) start(app) else stop(app)
-        writeStateAsync()
-        notifyStatus()
+        syncPolicy(app)
     }
 
     /** 开始采集（幂等）。 */

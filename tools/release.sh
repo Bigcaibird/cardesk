@@ -115,14 +115,25 @@ CURRENT_NAME="$(read_prop versionName)"
 # ---------------------------------------------------------------- 1) 升版本号
 # 注意顺序：先把「基础版本号」定下来，再按通道决定 versionName 后缀，
 # **最后**才写回 version.properties —— 否则开发版会把不带 -preview 的名字写进仓库。
+bump_version_name() {
+    local cur="${1%-preview}"
+    cur="${cur%-system}"
+    local next_code="$2"
+    if [[ "$cur" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] && [ "${BASH_REMATCH[1]}" -ge 2 ]; then
+        echo "${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
+    else
+        echo "1.0.$((next_code - 3096))"
+    fi
+}
+
 WROTE_VERSION=0
 if [ -n "$FORCE_CODE" ]; then
     CODE="$FORCE_CODE"
-    NAME="${FORCE_NAME:-1.0.$((CODE - 3096))}"
+    NAME="${FORCE_NAME:-$(bump_version_name "$CURRENT_NAME" "$CODE")}"
     echo "== 指定版本号：$CODE / $NAME"
 elif [ "$BUMP" -eq 1 ]; then
     CODE=$((CURRENT_CODE + 1))
-    NAME="1.0.$((CODE - 3096))"
+    NAME="$(bump_version_name "$CURRENT_NAME" "$CODE")"
     WROTE_VERSION=1
     echo "== 版本号自动 +1：$CURRENT_CODE → $CODE（基础版本号 $NAME）"
 else

@@ -66,6 +66,10 @@ object TaskScheduler {
             "action" to task.action,
             "delaySeconds" to task.delaySeconds,
         )
+        if (!ScheduledTasks.isStartupCondition(task.condition)) {
+            cancel(context, task.id)
+            return
+        }
         if (task.condition == ScheduledTasks.COND_LAUNCH) {
             scheduleLaunch(context, task)
         } else {
@@ -242,17 +246,8 @@ object TaskScheduler {
             }
             ScheduledTasks.ACTION_HOTSPOT_ON,
             ScheduledTasks.ACTION_HOTSPOT_OFF,
-            -> {
-                // 排障场景：热点动作在无系统签名的车机上必然不可用
-                Logx.w(
-                    LogTags.TASK,
-                    "任务执行降级：热点开关需要系统签名",
-                    "id" to task.id,
-                    "action" to task.action,
-                )
-                Toast.makeText(context, "热点开关需要系统签名，此项仅保留入口", Toast.LENGTH_SHORT).show()
-            }
-            else -> {
+            -> HotspotController.executeTaskAction(context, task)
+            ScheduledTasks.ACTION_APP -> {
                 if (task.target.isBlank()) {
                     Logx.w(LogTags.TASK, "任务执行失败：目标应用为空", "id" to task.id)
                     return
@@ -271,6 +266,7 @@ object TaskScheduler {
                     Logx.w(LogTags.TASK, "任务执行失败：打开应用", "id" to task.id, "target" to task.target)
                 }
             }
+            else -> AutomationEngine.executeAction(context, task)
         }
     }
 

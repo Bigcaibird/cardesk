@@ -191,6 +191,17 @@ class LauncherView(context: Context) : FrameLayout(context) {
 
         /** 滚轮翻页的冷却时间（700ms）。 */
         private const val SCROLL_LOCK_MS = 700L
+
+        /**
+         * 导航页离屏预热停放位移（设计坐标 px）。
+         *
+         * 停在屏幕可视区外（-4000px），保持 View.VISIBLE 使画中画的 SurfaceView /
+         * TextureView 提前建好 VirtualDisplay 且切页时不再销毁重建 surface。
+         */
+        private const val OFFSCREEN_PAGE_SHIFT = 4000f
+
+        /** 超过此位移视为「离屏停放态」（而非切页动画中途），进入动画应从标准起点起滑。 */
+        private const val OFFSCREEN_PAGE_THRESHOLD = 2400f
     }
 
     private val prefs = Prefs(context.applicationContext)
@@ -332,12 +343,14 @@ class LauncherView(context: Context) : FrameLayout(context) {
                     // ⇒ 用户看到「开机后视频跳回开头」。
                     // 现在先把位置存下来，重建后 `seekTo` 回去 ⇒ 视频**接着播**。
                     //
-                    // （试过「同一个播放器 `setSurface` 换输出」——
-                    //  实测在模拟器上**画面会黑**（解码器没有真的换输出面），
-                    //  那条路作废。）
+                    // 关键修复：surface 销毁瞬间必须**立刻把画面交回静态/默认壁纸**
+                    // （`concealVideoWallpaperLayer` → `videoPassthrough = false`），
+                    // 否则底层硬件视频层已销毁、窗口与壁纸层又仍是透明，整屏会黑 500~900ms
+                    // 直到新播放器首帧就绪。
                     videoResumePositionMs = runCatching {
                         (videoPlayer?.currentPosition ?: 0).toLong()
                     }.getOrDefault(0L)
+                    concealVideoWallpaperLayer("surface 销毁")
                     releaseVideoPlayer()
                     videoSurfaceLost = true
                 }
@@ -459,6 +472,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
      */
     private val carouselTicker = object : Runnable {
         override fun run() {
+            if (!activityVisible) return
             carouselTickCount++
             checkWallpaperCarousel()
             handler.postDelayed(this, 1000L)
@@ -487,7 +501,12 @@ class LauncherView(context: Context) : FrameLayout(context) {
     private lateinit var statusBar: ShellStatusBar
     private lateinit var dock: DockBarView
     private lateinit var bottomBar: android.view.View
+    /** 直接挂在 `content` 上的底栏外层容器（增强导航栏时是 band，其余时候就是 dock 或 slotsBar）。 */
+    private var bottomBarContainer: android.view.View? = null
     private var slotsBar: NavSlotBarView? = null
+    /** 最近一次通过 StatusBarManager.disable 下发的隐藏状态，避免重复反射调用。 */
+    @Volatile
+    private var lastStatusBarDisabled: Boolean? = null
 
     /**
      * 叠在「Dock 快捷应用配置面板」之上的**应用选择器**（第五十四轮）。
@@ -512,6 +531,8 @@ class LauncherView(context: Context) : FrameLayout(context) {
      */
     private var builtEnhancedNav = false
     private var navSlotDialog: NavSlotDialog? = null
+    /** Dock 拖动排序模式下的顶部悬浮控制条（高度 968，完整让出底部 112px 给 Dock 拖动）。 */
+    private var dockReorderOverlay: FrameLayout? = null
 
     /**
      * 上一次写 policy 时的状态签名（全局 Dock 开关 + RRO 是否生效），第八十七轮。
@@ -818,8 +839,46 @@ class LauncherView(context: Context) : FrameLayout(context) {
         Logx.i(LogTags.APP, "诊断心跳", *extras.toTypedArray())
     }
 
+    /** 宿主 Activity 是否位于屏幕可见态（`onStart`~`onStop`；默认 true 以兼容独立挂树的单测）。 */
+    private var activityVisible = true
+
+    /**
+     * 宿主 Activity 回到屏幕可见态（`onStart`）：恢复视频壁纸、状态栏采样与 1Hz UI 刷新。
+     */
+    fun onActivityStarted() {
+        activityVisible = true
+        resumeVideoWallpaper()
+        slotsBar?.setVisibleOnScreen(true)
+        if (!isAttachedToWindow) return
+        startSystemStatusSampling()
+        if (servicesStarted) {
+            handler.removeCallbacks(ticker)
+            refresh()
+            handler.postDelayed(ticker, 1000L)
+        }
+        handler.removeCallbacks(carouselTicker)
+        handler.postDelayed(carouselTicker, 1000L)
+    }
+
+    /**
+     * 宿主 Activity 离开屏幕（`onStop`）：暂停视频壁纸与所有仅面向桌面可见 UI 的 1Hz 心跳，
+     * 避免切入后台后主线程仍持续每秒刷表/轮播/采样状态栏消耗 CPU。
+     *
+     * 注意：[com.cardesk.launcher.vehicle.VehicleSignalSampler] 保持后台运行，确保熄火/锁车等自动任务照常触发。
+     */
+    fun onActivityStopped() {
+        activityVisible = false
+        handler.removeCallbacks(ticker)
+        handler.removeCallbacks(carouselTicker)
+        systemStatusSampler?.stop()
+        systemStatusSampler = null
+        slotsBar?.setVisibleOnScreen(false)
+        pauseVideoWallpaper()
+    }
+
     private val ticker = object : Runnable {
         override fun run() {
+            if (!activityVisible) return
             refresh()
             handler.postDelayed(this, 1000L)
         }
@@ -889,7 +948,27 @@ class LauncherView(context: Context) : FrameLayout(context) {
         com.cardesk.launcher.core.CardStyle.applyRadius(prefs.cardRadius)
         // 第163轮：写实车模（car3d）开关也按偏好摆好 —— 进程内副本，绘制时只读一个 boolean。
         com.cardesk.launcher.core.car3d.Car3dSettings.load(context, prefs)
-        applyDesktopBackground(0xFF05080F.toInt())
+        applyDesktopBackground(pal.bgTop)
+        // Android 9 / MSM8996 首个 SurfaceView 预热锚点：
+        // 静态壁纸（不透明窗口）冷启动停在首页时，窗口里原本没有任何可见 SurfaceView；
+        // 首次切到导航页时 ActivityView 内部的 SurfaceView 第一次可见会触发 ViewRootImpl
+        // 首次 relayoutWindow 透明打洞，车机上表现为整屏短暂黑屏。
+        // 在启动页遮罩退去之前，于屏外挂一个 1×1 SurfaceView 提前完成窗口一次性 relayout，
+        // 彻底消除冷启动首次切导航页的整屏黑闪（视频壁纸 SurfaceView 模式自带视频层，无需额外锚点）。
+        val willUseSurfaceVideo = prefs.videoWallpaperEnabled &&
+            com.cardesk.launcher.core.VideoWallpaper.has(context) &&
+            com.cardesk.launcher.core.VideoWallpaper.needsTranslucentWindow(videoBackend)
+        if (!willUseSurfaceVideo) {
+            val anchor = android.view.SurfaceView(context).apply {
+                setZOrderOnTop(false)
+                setZOrderMediaOverlay(false)
+                translationX = -OFFSCREEN_PAGE_SHIFT
+                isClickable = false
+                isFocusable = false
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }
+            addView(anchor, LayoutParams(1, 1))
+        }
         addView(background, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         // 第208轮：视频壁纸层**不常驻** —— 播的时候才挂进来（见 [attachVideoWallpaperLayer]）。
         //
@@ -915,6 +994,9 @@ class LauncherView(context: Context) : FrameLayout(context) {
         runCatching {
             com.cardesk.launcher.vehicle.DriveModeAutoStart.apply(context, "桌面启动")
         }.onFailure { Logx.w(LogTags.VEHICLE, "桌面启动自动切换驾驶模式失败", it) }
+        runCatching {
+            com.cardesk.launcher.core.HotspotController.applyAutoStart(context, "桌面启动")
+        }.onFailure { Logx.w(LogTags.SYS, "桌面启动自动热点失败", it) }
         VehicleController.addObserver(vehicleObserver)
         // 360 状态回调：只做三件事 ——
         // 刷新导航栏 360 图标、标记「本桌面开启」、按设置切视角；
@@ -1158,8 +1240,10 @@ class LauncherView(context: Context) : FrameLayout(context) {
 
         // 每秒刷新：首帧已经画出来了，现在开始跑定时刷新。
         handler.removeCallbacks(ticker)
-        handler.post(ticker)
         refresh()
+        if (activityVisible) {
+            handler.postDelayed(ticker, 1000L)
+        }
         com.cardesk.launcher.core.StartupTrace.mark("servicesDone")
 
         // 第九十八轮：桌面起来后检测一次在线更新。
@@ -1300,6 +1384,12 @@ class LauncherView(context: Context) : FrameLayout(context) {
         if (!pipHostingGate.consume(SystemClock.uptimeMillis())) return false
         Logx.i(LogTags.APP, "开始承载画中画", "reason" to reason)
         refreshPip()
+        // 冷启动停留在首页时，将导航页离屏预热停放（VISIBLE + 移出可视区），
+        // 让画中画的 VirtualDisplay 与承载应用在桌面就绪后静默建好，
+        // 避免把 createVirtualDisplay / 首帧布局 / 高德冷启全推迟到首次切导航页那一帧引爆。
+        if (page == PAGE_SCENE && shouldKeepNavPageWarm()) {
+            parkNavPageOffscreen()
+        }
         return true
     }
 
@@ -1401,12 +1491,15 @@ class LauncherView(context: Context) : FrameLayout(context) {
         mark("build:enter")
         applyDesktopBackground(pal.bgTop)
         background.palette = pal
+        background.defaultDayNight = prefs.wallpaperDefaultDayNight
         background.wallpaper = prefs.wallpaper
-        // 自定义壁纸（第 105 轮）：有照片且选中时优先显示；位图异步解，先出底色。
+        // 自定义壁纸（第 105 轮，支持日夜双槽）：有照片且选中时按当前日夜优先显示；位图异步解，先出底色。
         background.custom = prefs.wallpaperCustom &&
             com.cardesk.launcher.core.CustomWallpaper.has(context)
+        background.customUsesNightAsset = background.custom &&
+            com.cardesk.launcher.core.CustomWallpaper.usesDedicatedNight(context, pal.night)
         background.customBitmap =
-            if (background.custom) com.cardesk.launcher.core.CustomWallpaper.cachedBitmap() else null
+            if (background.custom) com.cardesk.launcher.core.CustomWallpaper.cachedForMode(context, pal.night) else null
         if (background.custom) ensureCustomWallpaperLoaded()
         // 第207轮：**视频壁纸**（导入的视频）。
         //
@@ -1423,9 +1516,12 @@ class LauncherView(context: Context) : FrameLayout(context) {
         // 1 秒检查会跑 N 份。
         wallpaperSwitchedAtMs = android.os.SystemClock.uptimeMillis()
         handler.removeCallbacks(carouselTicker)
-        handler.postDelayed(carouselTicker, 1000L)
+        if (activityVisible) {
+            handler.postDelayed(carouselTicker, 1000L)
+        }
         // 壁纸被拖拽切到上一张 / 下一张时落盘
         background.onWallpaperChanged = { index ->
+            prefs.wallpaperDefaultDayNight = false
             prefs.wallpaper = index
             scenePage.showWallpaperHint()
         }
@@ -1482,6 +1578,10 @@ class LauncherView(context: Context) : FrameLayout(context) {
         climate = null
         hvac = null
         navSlotDialog = null
+        dockReorderOverlay = null
+        if (DockBarView.reorderMode) DockBarView.setReorderMode(context, false)
+        recentTasksPage = null
+        bottomBarContainer = null
         taskList = null
         taskEditor = null
         // 退场中的浮层也被这一轮摘掉了 —— 登记一并清空，
@@ -1543,6 +1643,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
             carStatusCardPosY = prefs.carStatusCardPosY
             carStatusInBottomRow = prefs.carStatusInBottomRow
             carStatusBottomIndex = prefs.carStatusBottomIndex
+            cardFreePositions = prefs.cardFreePositions
             onCarStatusCardMoved = { x, y ->
                 prefs.carStatusCardPosX = x
                 prefs.carStatusCardPosY = y
@@ -1550,6 +1651,9 @@ class LauncherView(context: Context) : FrameLayout(context) {
             onCarStatusRowChanged = { inRow, idx ->
                 prefs.carStatusInBottomRow = inRow
                 prefs.carStatusBottomIndex = idx
+            }
+            onCardFreePosChanged = { map ->
+                prefs.cardFreePositions = map
             }
             // 第166轮 C 版：车况卡整卡点击 → 车辆状态面板。
             onOpenVehicleStatus = { openVehiclePage() }
@@ -1679,6 +1783,8 @@ class LauncherView(context: Context) : FrameLayout(context) {
 
         // 底部一体化控制栏：铺满屏宽×112，贴底（底边距 0）
         dock = DockBarView(context).apply {
+            // 最左侧返回键：关闭当前浮层 / 退出画中画全屏 / 返回首页
+            onBack = { this@LauncherView.onBack() }
             // 单击回首页（dockHome「单击返回首页」）
             // 第五十六轮：**先把盖在上面的浮层收掉** —— 抽屉开着的时候点 home，
             // 以前只切页面、抽屉还盖在上面，看起来就是「home 键不生效」。
@@ -1775,6 +1881,8 @@ class LauncherView(context: Context) : FrameLayout(context) {
             return
         }
         prefs.lastAppPkg = pkg
+        // 用户主动全屏打开某应用时，取消该包的画中画搬移守护，避免被拉回虚拟屏。
+        com.cardesk.launcher.ui.embed.HostTaskMigration.cancel(pkg)
         // 506-512 —— 同包全屏时关掉它的浮窗
         floatLayer?.closeForFullscreen(pkg)
         val intent = context.packageManager.getLaunchIntentForPackage(pkg)
@@ -2078,7 +2186,26 @@ class LauncherView(context: Context) : FrameLayout(context) {
             com.cardesk.launcher.MainActivity.ACTION_SPLIT_LONG -> toggleDualPip()
             com.cardesk.launcher.MainActivity.ACTION_CAMERA360 -> showCam()
             com.cardesk.launcher.MainActivity.ACTION_RECENTS -> showRecents()
-            else -> Logx.w(LogTags.DOCK, "未知的全局 Dock 动作", "action" to action)
+            com.cardesk.launcher.MainActivity.ACTION_SETTINGS -> showSettings()
+            else -> when {
+                action.startsWith("${com.cardesk.launcher.MainActivity.ACTION_QUICK_APP_PICK}:") -> {
+                    val idx = action.substringAfter(':').toIntOrNull() ?: 0
+                    showDirectQuickAppPicker(idx)
+                }
+                action.startsWith("${com.cardesk.launcher.MainActivity.ACTION_QUICK_APP_CONFIG}:") -> {
+                    val idx = action.substringAfter(':').toIntOrNull() ?: -1
+                    showDockQuickApps(idx)
+                }
+                action.startsWith("${com.cardesk.launcher.MainActivity.ACTION_PIP1}:") -> {
+                    val pkg = action.substringAfter(':')
+                    if (pkg.isNotBlank()) launchInPip(pkg, first = true)
+                }
+                action.startsWith("${com.cardesk.launcher.MainActivity.ACTION_PIP2}:") -> {
+                    val pkg = action.substringAfter(':')
+                    if (pkg.isNotBlank()) launchInPip(pkg, first = false)
+                }
+                else -> Logx.w(LogTags.DOCK, "未知的全局 Dock 动作", "action" to action)
+            }
         }
     }
 
@@ -2246,6 +2373,11 @@ class LauncherView(context: Context) : FrameLayout(context) {
                 ensureDrawerPage().preloadAsync()
             }.onFailure { Logx.w(LogTags.DRAWER, "预热抽屉页失败", it) }
         }
+        // 首帧之后顺手把导航页预量一次，消除首次切页时的整树 measure/layout 卡顿。
+        if (::navPage.isInitialized && page == PAGE_SCENE && navPage.width == 0 && pageHost.width > 0) {
+            runCatching { layoutPageForAnimation(navPage) }
+                .onFailure { Logx.w(LogTags.NAV_UI, "预热导航页布局失败", it) }
+        }
         mark("warmup:drawer")
     }
 
@@ -2310,6 +2442,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
      * 「已经在显示就直接返回」，于是点多少次都没反应，只能点抽屉以外的地方关。
      */
     private fun toggleDrawer() {
+        if (recentTasksPage != null) closeRecents()
         if (drawerShowing()) {
             Logx.event(LogTags.DRAWER, "Dock 应用键：关闭抽屉")
             closeDrawer()
@@ -2327,7 +2460,12 @@ class LauncherView(context: Context) : FrameLayout(context) {
      * 浮层还盖在上面 —— 用户看到的就是「home 键不生效」。
      */
     private fun goHome() {
+        if (dockReorderOverlay != null) exitDockReorderMode()
         if (drawerShowing()) closeDrawer()
+        if (recentTasksPage != null) closeRecents()
+        if (vehiclePage != null) closeVehiclePage()
+        if (settings != null) closeSettings()
+        if (climate != null) closeClimate()
         if (pipFullscreen) {
             exitPipFullscreen()
             return
@@ -2362,83 +2500,83 @@ class LauncherView(context: Context) : FrameLayout(context) {
         // 首页键（以及系统 HOME）在用户心里的语义就是「回首页」—— 独立验收里
         // 这条被判为 P0：在抽屉 / 分屏 / 导航页点首页键，画面逐字节不变。
         // 所以这里改成：先把所有浮层收掉，再切回 [PAGE_SCENE]。
-        Logx.event(LogTags.DOCK, "外部 HOME：回首页", "page" to page, "settings" to (settings != null))
+        Logx.event(
+            LogTags.DOCK,
+            "外部 HOME：回首页",
+            "page" to page,
+            "settings" to (settings != null),
+            "recents" to (recentTasksPage != null),
+        )
+        if (dockReorderOverlay != null) exitDockReorderMode()
         if (drawerShowing()) closeDrawer()
+        if (recentTasksPage != null) closeRecents()
         if (vehiclePage != null) closeVehiclePage()
         if (settings != null) closeSettings()
         if (climate != null) closeClimate()
         showPage(PAGE_SCENE)
     }
 
-    /**
-     * 底部导航栏：有两套承载（06-F01/F02/F03）——
-     * 普通模式直接放设计版 Dock（第九十四轮起铺满整屏宽 1920×112，贴底）；
-     * 增强导航栏模式把同一个 Dock 塞进贴底子窗的 pill（FitStrip 缩放），或换成槽位条（NavSlotBarView）。
-     */
-    private fun buildBottomBar() {
-        slotsBar = null
-        builtNavStyle = prefs.navStyle
-        builtEnhancedNav = prefs.enhancedNav
-        navSlots = NavSlots.load(prefs)
-        if (prefs.enhancedNav) {
-            val pill = EnhancedNavBarView(context).apply { palette = pal }
-            // —— 宽屏（≥1800px）整层 152px
-            // 里面是 124px 的 navBarPill，pill 距底 28px。
-            val bandHeight = NavSlotBarView.resolveHeightPx(
-                context.resources.displayMetrics.widthPixels,
-                124,
-            )
-            val band = FrameLayout(context)
-            band.addView(
-                pill,
-                LayoutParams(LayoutParams.MATCH_PARENT, 124, Gravity.BOTTOM).apply {
-                    bottomMargin = 28
-                    leftMargin = 28
-                    rightMargin = 28
-                },
-            )
-            content.addView(
-                band,
-                FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, bandHeight, Gravity.BOTTOM),
-            )
-            if (prefs.navStyle == EnhancedNavBarView.MODE_SLOTS) {
-                val bar = NavSlotBarView(context).apply {
-                    palette = this@LauncherView.pal
-                    slots = this@LauncherView.navSlots
-                    // 槽位条形态下，歌词由**导航栏歌词槽**独揽
-                    // ），此时首页中央大字歌词会让位（见
-                    // [slotBarShowsLyric]—— 同一首歌不在屏上出现两处歌词。
-                    showLyric = true
-                    onSlot = { handleSlot(it) }
-                    onTemp = { which, delta ->
-                        val zone = if (which == "passenger") HvacIds.ZONE_PASSENGER else HvacIds.ZONE_DRIVER
-                        if (delta == 0) showClimate() else VehicleController.stepTemp(zone, delta.toFloat())
-                    }
-                    // —— 应用列表槽走最近任务
-                    onRecents = { showRecents() }
-                    // —— 媒体槽三块独立热区
-                    onMediaCover = { showPage(PAGE_NAV) }
-                    onMediaTitle = { showPage(PAGE_NAV) }
-                    onMediaPlay = { MusicController.get().playPause(); refresh() }
-                }
-                slotsBar = bar
-                pill.mountSlots(bar)
-            } else {
-                pill.mountDock(dock)
-            }
-            bottomBar = pill
-        } else {
-            content.addView(
-                dock,
-                // 第九十四轮：Dock 铺满整屏宽（以前 1872、左右各留 24，
-                // 全局 Dock 窗口里会和底色的不透明条对不齐，其它应用里看就是两条缝）。
-                // 第192轮：高 104 → 112（和系统导航预留带一致），底边距仍为 0（贴底）。
-                FrameLayout.LayoutParams(Design.W.toInt(), 112, Gravity.BOTTOM).apply {
-                    bottomMargin = DOCK_BOTTOM_MARGIN
-                },
-            )
-            bottomBar = dock
+    /** 创建并接线一个槽位条视图（增强导航栏内 drawBackdrop=false，贴底通栏时 drawBackdrop=true）。 */
+    private fun createNavSlotBar(drawBackdrop: Boolean): NavSlotBarView = NavSlotBarView(context).apply {
+        palette = this@LauncherView.pal
+        this.drawBackdrop = drawBackdrop
+        cornerRadius = prefs.dockCornerRadius.toFloat()
+        slots = this@LauncherView.navSlots
+        showLyric = true
+        onSlot = { handleSlot(it) }
+        onTemp = { which, delta ->
+            val zone = if (which == "passenger") HvacIds.ZONE_PASSENGER else HvacIds.ZONE_DRIVER
+            if (delta == 0) showClimate() else VehicleController.stepTemp(zone, delta.toFloat())
         }
+        onRecents = { showRecents() }
+        onMediaCover = { showPage(PAGE_NAV) }
+        onMediaTitle = {
+            val track = MusicController.get().track
+            val action = com.cardesk.launcher.core.media.DockMediaLaunch.openCurrentApp(
+                context = context,
+                trackPkg = track?.pkg,
+            )
+            com.cardesk.launcher.core.media.DockMediaLaunch.messageFor(action)?.let { toast(it) }
+        }
+        onMediaPlay = { MusicController.get().playPause(); refresh() }
+    }
+
+    /**
+     * 底部导航栏：统一采用设计版 Dock（1920×112 贴底通栏）。
+     * 导航栏样式 / 槽位条 / 增强导航栏入口已下线，忽略旧偏好残留值防止状态卡死。
+     */
+    private fun buildBottomBar(insertIndex: Int = -1) {
+        slotsBar = null
+        builtNavStyle = EnhancedNavBarView.MODE_DOCK
+        builtEnhancedNav = false
+        (dock.parent as? ViewGroup)?.removeView(dock)
+        dock.visibility = View.VISIBLE
+        val lp = FrameLayout.LayoutParams(Design.W.toInt(), 112, Gravity.BOTTOM).apply {
+            bottomMargin = DOCK_BOTTOM_MARGIN
+        }
+        if (insertIndex in 0..content.childCount) {
+            content.addView(dock, insertIndex, lp)
+        } else {
+            content.addView(dock, lp)
+        }
+        bottomBar = dock
+        bottomBarContainer = dock
+    }
+
+    /** 原地重建底栏（不摘掉设置页）。 */
+    private fun rebuildBottomBar() {
+        val old = bottomBarContainer
+        val oldIndex = if (old != null) content.indexOfChild(old) else -1
+        if (old != null) {
+            content.removeView(old)
+            bottomBarContainer = null
+        }
+        val safeIndex = when {
+            oldIndex >= 0 -> oldIndex
+            settings != null -> content.indexOfChild(settings).takeIf { it >= 0 } ?: content.childCount
+            else -> -1
+        }
+        buildBottomBar(insertIndex = safeIndex)
     }
 
     /**
@@ -2452,11 +2590,8 @@ class LauncherView(context: Context) : FrameLayout(context) {
      * 这里用已经加载好的槽位表（[navSlots]），不要在热路径上反复读盘 ——
      * `NavSlots.load` 读的是带副作用的（布局版本过期会把槽位重置回默认 15 槽）。
      */
-    private fun slotBarShowsLyric(): Boolean = NavSlots.lyricBelongsToNavBar(
-        enhancedNav = prefs.enhancedNav,
-        navStyle = prefs.navStyle,
-        slots = navSlots,
-    )
+    /** 槽位条已下线，歌词统一留在首页中央展示。 */
+    private fun slotBarShowsLyric(): Boolean = false
 
     /**
      * 「最近任务」——Dock 主页键长按、增强导航栏的主页槽双击/长按、应用列表槽长按。
@@ -2574,20 +2709,29 @@ class LauncherView(context: Context) : FrameLayout(context) {
     /** 打开槽位管理面板（对应 dialog_nav_slot_manage）。 */
     fun showNavSlots() {
         if (navSlotDialog != null) return
+        navSlots = NavSlots.load(prefs)
         val dialog = NavSlotDialog(context, pal, navSlots)
         dialog.onChange = { list ->
             navSlots = list.toMutableList()
             NavSlots.save(prefs, list)
+            // 用户实际修改了槽位时，若当前仍是「设计 Dock」样式，自动切到「槽位条」让编辑结果立即可见
+            if (prefs.navStyle != EnhancedNavBarView.MODE_SLOTS) {
+                prefs.navStyle = EnhancedNavBarView.MODE_SLOTS
+                rebuildBottomBar()
+                applyDockVisibility()
+            }
             slotsBar?.slots = list
+            GlobalDockService.refreshStyleAndSlots()
+            settings?.refreshDockPage()
             // 槽位里加/删歌词槽会改变「歌词归导航栏还是归首页中央」的归属，需要重算。
             refresh()
         }
         dialog.onClose = {
-            // 走 [removeAnimated]：它不是 [DialogSheet]（自带外壳），所以今天还是同步摘层；
-            // 等它也提供退场动画了，宿主这边不用再改。
             removeAnimated(dialog) {
                 if (navSlotDialog === dialog) navSlotDialog = null
-                if (prefs.enhancedNav && prefs.navStyle == EnhancedNavBarView.MODE_SLOTS) build()
+                GlobalDockService.refreshStyleAndSlots()
+                settings?.refreshDockPage()
+                refresh()
             }
         }
         navSlotDialog = dialog
@@ -3021,9 +3165,46 @@ class LauncherView(context: Context) : FrameLayout(context) {
         return page.width > 0 && page.height > 0
     }
 
+    /**
+     * 导航页是否需要**离屏保活**（而不是置 `GONE`）。
+     *
+     * 导航页承载画中画时，置 `GONE` 会让 Android 销毁内部 SurfaceView / TextureView 的
+     * 输出面（且冷启动时根本不创建 VirtualDisplay），导致首次切到导航页或反复切页时
+     * 触发 VirtualDisplay 创建、Surface 重建甚至整屏黑闪。
+     * 改为 `VISIBLE` + 移出可视区（[parkNavPageOffscreen]），既不挡触摸也不拆 surface。
+     */
+    private fun shouldKeepNavPageWarm(): Boolean =
+        ::navPage.isInitialized && (
+            navPage.pip.hasContent ||
+                navPage.pipSecondary.hasContent ||
+                (pipHostingGate.isStarted() && prefs.pipApp.isNotBlank())
+            )
+
+    /** 把导航页停放到可视区外（保活 Surface / VirtualDisplay，不遮挡首页也不吃触摸）。 */
+    private fun parkNavPageOffscreen() {
+        if (!::navPage.isInitialized) return
+        if (navPage.width <= 0 || navPage.height <= 0) {
+            layoutPageForAnimation(navPage)
+        }
+        navPage.animate().cancel()
+        navPage.visibility = View.VISIBLE
+        navPage.alpha = 1f
+        navPage.translationX = -OFFSCREEN_PAGE_SHIFT
+        navPage.translationY = 0f
+        navPage.scaleX = 1f
+        navPage.scaleY = 1f
+        if (::scenePage.isInitialized && page == PAGE_SCENE) {
+            pageHost.bringChildToFront(scenePage)
+        }
+    }
+
     /** 无动画时把页面归位。 */
     private fun restPage(view: View, current: Boolean) {
         view.animate().cancel()
+        if (!current && ::navPage.isInitialized && view === navPage && shouldKeepNavPageWarm()) {
+            parkNavPageOffscreen()
+            return
+        }
         view.visibility = if (current) View.VISIBLE else View.GONE
         view.alpha = 1f
         view.translationX = 0f
@@ -3054,23 +3235,14 @@ class LauncherView(context: Context) : FrameLayout(context) {
         val scaleFrom: Float
         val scaleTo: Float
         if (entering) {
-            // 第191轮：**从当前画面接着走**，而不是从头开始。
-            //
-            // 用户连点两下切页时，第二轮动画会打断第一轮：
-            // 那一瞬间页面正停在半路（比如 alpha 0.4、位移 100px）。
-            // 如果这里一律从「alpha 0、位移 ±22% 页宽」重新开始，
-            // 页面会**跳一下** —— 又变成用户说的「僵硬」。
-            //
-            // 判据：
-            // - alpha 在 (0, 1) 之间 → 说明它正淡入/淡出到一半，接着走；
-            // - alpha == 1 → 它是「停好的隐藏页」（`restPage` 归位时置 1），
-            //   要从头淡入（alpha 0）；
-            // - alpha == 0 → 它正淡出到一半，接着走（起点就是 0）。
+            // 离屏停放态（|translationX| >= OFFSCREEN_PAGE_THRESHOLD）视同隐藏归位，
+            // 从标准起始位移与 alpha=0 进场，避免从 -4000px 飞入。
+            val parkedOffscreen = kotlin.math.abs(view.translationX) >= OFFSCREEN_PAGE_THRESHOLD
             val cur = view.alpha
-            alphaFrom = if (cur > 0.01f && cur < 0.99f) cur else 0f
+            alphaFrom = if (!parkedOffscreen && cur > 0.01f && cur < 0.99f) cur else 0f
             alphaTo = 1f
-            // 位移同理：非零说明正飞到一半，从那儿接着飞。
-            transFrom = if (view.translationX != 0f) view.translationX else translation
+            // 位移同理：非零且非离屏停放说明正飞到一半，从那儿接着飞。
+            transFrom = if (!parkedOffscreen && view.translationX != 0f) view.translationX else translation
             transTo = 0f
             scaleFrom = PageTransitionSpec.ENTER_SCALE; scaleTo = 1f
         } else {
@@ -3120,7 +3292,13 @@ class LauncherView(context: Context) : FrameLayout(context) {
                     if (pageAnimators[index] === a) pageAnimators[index] = null
                     // 动画期间又切了页：丢弃这次的结果，交给新一轮动画
                     if (cancelled || gen != pageGen) return
-                    if (!entering && page != index) view.visibility = View.GONE
+                    if (!entering && page != index) {
+                        if (::navPage.isInitialized && view === navPage && shouldKeepNavPageWarm()) {
+                            parkNavPageOffscreen()
+                            return
+                        }
+                        view.visibility = View.GONE
+                    }
                     view.alpha = 1f
                     view.translationX = 0f
                     view.translationY = 0f
@@ -3137,6 +3315,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
 
     private fun showClimate() {
         if (climate != null) return
+        if (recentTasksPage != null) closeRecents()
         Logx.event(LogTags.HVAC, "打开空调浮层")
         val page = ClimatePage(context, pal)
         page.onClose = { closeClimate() }
@@ -3174,6 +3353,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
         val label = info?.driveModeLabel ?: com.cardesk.launcher.vehicle.DriveMode.UNKNOWN_LABEL
         Logx.event(LogTags.DOCK, "状态栏驾驶模式胶囊点击", "mode" to label, "raw" to (info?.driveModeRaw ?: -1))
         if (overlayDialog is com.cardesk.launcher.ui.dialogs.DriveModeDialog) return
+        val supportedModes = com.cardesk.launcher.vehicle.VehicleController.supportedDriveModes(info?.driveModeRaw)
         lateinit var dialog: com.cardesk.launcher.ui.dialogs.DriveModeDialog
         dialog = com.cardesk.launcher.ui.dialogs.DriveModeDialog(
             context,
@@ -3198,6 +3378,7 @@ class LauncherView(context: Context) : FrameLayout(context) {
                     toast("这台车机没有独立的驾驶模式页，已打开原厂设置")
                 }
             },
+            supportedModes = supportedModes,
         )
         dialog.onClose = { closeOverlayDialog(dialog) }
         showOverlayDialog(dialog)
@@ -3546,17 +3727,41 @@ fun toggleCam360() {
             }
         }
         dock.bindQuickApps(apps)
+        GlobalDockService.refreshQuickApps()
     }
 
     /**
-     * 点快捷应用槽位：配了应用就**启动**，空槽位直接去配置。
+     * 点快捷应用槽位：配了应用就**启动**，空槽位直接弹出应用选择器添加。
      */
     private fun handleQuickAppTap(index: Int, pkg: String) {
         if (pkg.isEmpty()) {
-            showDockQuickApps(index)
+            showDirectQuickAppPicker(index)
             return
         }
         launchQuickApp(pkg)
+    }
+
+    /** 直接从 Dock 槽位弹出应用选择器，选完即写入该槽位并刷新 Dock。 */
+    private fun showDirectQuickAppPicker(index: Int) {
+        val currentSlots = DockQuickApps.pad(prefs.dockQuickApps)
+        val slotIndex = index.coerceIn(0, DockQuickApps.SLOTS - 1)
+        val current = currentSlots[slotIndex]
+        val picker = com.cardesk.launcher.ui.dialogs.AppPickerDialog(
+            context,
+            pal,
+            multiSelect = false,
+            preselected = if (current.isEmpty()) emptySet() else setOf(current),
+            title = "选择快捷应用",
+            hintText = "点一下即把这个应用放进 Dock 的第 ${slotIndex + 1} 个快捷槽位",
+        )
+        picker.onPicked = { set ->
+            val pkg = set.firstOrNull().orEmpty()
+            prefs.dockQuickApps = DockQuickApps.withSlot(currentSlots, slotIndex, pkg)
+            refreshDockQuickApps()
+            closeOverlayDialog(picker)
+        }
+        picker.onClose = { closeOverlayDialog(picker) }
+        showOverlayDialog(picker)
     }
 
     /** 启动一个快捷应用。 */
@@ -3595,6 +3800,7 @@ fun toggleCam360() {
         config.onChanged = { list ->
             prefs.dockQuickApps = list
             refreshDockQuickApps()
+            settings?.refreshDockPage()
         }
         config.onClose = { closeOverlayDialog(config) }
         showOverlayDialog(config)
@@ -3813,6 +4019,7 @@ fun toggleCam360() {
         dialog.onChanged = { set ->
             prefs.hideStatusApps = set
             applyOemPolicy()
+            settings?.refreshDockPage()
         }
         dialog.onClose = { closeOverlayDialog(dialog) }
         showOverlayDialog(dialog)
@@ -3893,8 +4100,11 @@ fun toggleCam360() {
                 com.cardesk.launcher.core.SystemOps.setOverscan(context, 0, 0, 0, overscan)
                 lastOverscanApplied = overscan
             }
-            if (prefs.hideStatus) {
-                com.cardesk.launcher.core.SystemOps.setStatusBarDisabled(context, 0x00000008 or 0x00000004)
+            val hideStatusNow = prefs.hideStatus
+            if (lastStatusBarDisabled != hideStatusNow) {
+                val flags = if (hideStatusNow) (0x00000008 or 0x00000004) else 0
+                com.cardesk.launcher.core.SystemOps.setStatusBarDisabled(context, flags)
+                lastStatusBarDisabled = hideStatusNow
             }
             // 签名回主线程记 —— 后面 `syncGlobalDockPolicy()` 靠它避免重复写。
             val signature = policySignature(globalDock, navInsets, overlay)
@@ -3928,6 +4138,7 @@ fun toggleCam360() {
             removeAnimated(dialog) {
                 if (taskEditor === dialog) taskEditor = null
                 taskList?.reload()
+                settings?.refreshTasks()
             }
         }
         dialog.onClose = {
@@ -4104,23 +4315,10 @@ fun toggleCam360() {
 
     private fun showSettings() {
         if (settings != null) return
+        if (recentTasksPage != null) closeRecents()
         Logx.event(LogTags.SETTING, "打开设置页")
-        // 画板 `s01..s25` 全是「设置覆盖整屏」：底部**没有 Dock**（只有状态栏）。
-        // 之前 Dock 一直露在设置面板下面，面板底边与 Dock 之间还压着一条桌面内容。
-        dock.visibility = View.GONE
-        // 第三百零八轮（用户 m02164「设置页也需要显示我们的 dock 栏」）：
-        // 设置页底部**不再**做空白占位，而是继续显示我们自己的 Dock —— 全局 Dock
-        // 窗口（`GlobalDockService`）画的就是 `DockBarView`，让它照常显示即可。
-        //
-        // 历史上这里调过 `setSuppressed(true)` 让窗口隐身（第三百零五轮改成空白
-        // 占位 + PixelCopy 底图），当时是画板口径「设置页底部没有 Dock」且要压住
-        // 原车 `CarNavigationBar`；现在用户要求设置页也带 Dock，而「压住原车栏」
-        // 本来就靠**我们自己的不透明 Dock 窗口**完成，不需要让位。
-        //
-        // 设置页面板高度已让出这条带子（[settingsBottomReserve]，第三百零七轮），
-        // 所以两者不再互相遮挡：面板底边 ≈944，Dock 从 968 起。
-        // 这里防御性地清一次抑制状态：启动页可能刚把它置 true
-        // （`MainActivity.showSplash` → `setSuppressed(true, ...)`）。
+        // 桌面底栏的隐藏统一交给下面挂载完 settings 后的 applyDockVisibility() 处理，
+        // 不再单独把 dock 设成 GONE（增强导航栏模式下单独设 dock=GONE 会导致关设置后 pill 变空白）。
         com.cardesk.launcher.core.dock.GlobalDockService.setSuppressed(false)
         val overlay = SettingsOverlay(
             context,
@@ -4152,19 +4350,13 @@ fun toggleCam360() {
         // 第117轮：按布局取句（预览要跟桌面显示的那几行一致）。
         overlay.lyricPreviewLines = { layout -> previewLyricLines(layout) }
         overlay.onEditNavSlots = {
-            closeSettings()
             showNavSlots()
         }
         // 第154轮：「恢复默认 15 槽位」一键重置后要**当场生效**。
-        // 光落盘不够 —— onApply → onSettingsApplied() 只在「增强导航栏开关」或
-        // 「导航栏样式」变了时才 build() 重建，重置槽位两个都不改 ⇒ 不重建，
-        // 导航栏纹丝不动，重启才生效。
-        //
-        // 这里补的正是「编辑槽位…」面板 onChange 里那三步
-        // （重新读盘 → 刷槽位条 → 重算歌词归属），两边行为就一致了。
         overlay.onNavSlotsChanged = {
             navSlots = NavSlots.load(prefs)
             slotsBar?.slots = navSlots
+            GlobalDockService.refreshStyleAndSlots()
             refresh()
         }
         overlay.onVehicleSource = {
@@ -4174,6 +4366,9 @@ fun toggleCam360() {
         overlay.onShowTasks = {
             closeSettings()
             showTasks()
+        }
+        overlay.onEditTask = { task ->
+            showTaskEditor(task)
         }
         overlay.onShowClusterLyricColor = { slot -> showClusterLyricColorPicker(slot) }
         overlay.onShowUpdate = {
@@ -4196,15 +4391,21 @@ fun toggleCam360() {
         }
         // Dock 快捷应用配置（第五十四轮）：与「长按 Dock 槽位」进同一个面板。
         overlay.onShowDockQuickApps = { showDockQuickApps() }
+        overlay.onReorderDock = { enterDockReorderMode() }
         // 画中画应用选择器
         // 主画 / 副画各一个选择器；双画已开时**不能选同一个应用**。
         overlay.onShowPipPicker = { secondary -> showPipPicker(secondary) }
         // 壁纸（第五十七轮）：设置页里换壁纸 → 桌面立刻生效。
         overlay.onWallpaperChange = { index -> applyWallpaper(index) }
-        // 自定义壁纸（第 105 轮）：导入照片 / 切回照片 / 删除。
-        overlay.onImportWallpaper = { requestWallpaperImport() }
+        overlay.onUseDefaultDayNightWallpaper = { applyDefaultDayNightWallpaper() }
+        // 自定义壁纸（支持日夜双槽）：导入日间/夜间照片、切回、分别删除。
+        overlay.onImportWallpaper = { requestWallpaperImport(night = false) }
+        overlay.onImportNightWallpaper = { requestWallpaperImport(night = true) }
+        overlay.onPickWallpaper = { openImagePicker(night = false) }
+        overlay.onPickNightWallpaper = { openImagePicker(night = true) }
         overlay.onUseCustomWallpaper = { applyCustomWallpaper() }
         overlay.onDeleteCustomWallpaper = { deleteCustomWallpaper() }
+        overlay.onDeleteCustomNightWallpaper = { deleteCustomNightWallpaper() }
         // 第207轮：壁纸轮播 / 视频壁纸。
         overlay.onWallpaperCarouselChange = { on ->
             // 开启时立刻重置计时，让用户马上看到第一轮切换的节奏。
@@ -4227,6 +4428,22 @@ fun toggleCam360() {
         overlay.onPickNightVideoWallpaper = { openVideoPicker(night = true) }
         overlay.onImportNightVideoWallpaper = { requestVideoWallpaperImport(night = true) }
         overlay.onDeleteNightVideoWallpaper = { deleteNightVideoWallpaper() }
+        // 在线壁纸（R2 静态图 / 动态视频）下载导入后立即生效。
+        overlay.onOnlineWallpaperApplied = { kind, night ->
+            when (kind) {
+                com.cardesk.launcher.core.wallpaperstore.WallpaperKind.STATIC -> {
+                    prefs.videoWallpaperEnabled = false
+                    stopVideoWallpaper()
+                    applyCustomWallpaper()
+                }
+                com.cardesk.launcher.core.wallpaperstore.WallpaperKind.VIDEO -> {
+                    prefs.videoWallpaperEnabled = true
+                    prefs.videoWallpaper = true
+                    startVideoWallpaper()
+                    refreshSettingsWallpaper()
+                }
+            }
+        }
         // 卡片风格（第五十八轮）：透明度 / 颜色 / 圆角 → 桌面重算 token 并刷新。
         overlay.onCardStyleChange = { applyCardStyle() }
         overlay.onShowCardColor = { showCardColorPicker() }
@@ -4247,6 +4464,91 @@ fun toggleCam360() {
         applyDockVisibility()
         // 面板上滑 + 遮罩淡入（200ms / 180ms）。
         overlay.playOpen()
+    }
+
+    /** 进入 Dock 栏拖动排序模式：收起设置页、点亮底部 Dock 虚线框并显示上方控制条。 */
+    fun enterDockReorderMode() {
+        if (dockReorderOverlay != null) return
+        if (settings != null) closeSettings()
+        if (drawerShowing()) closeDrawer()
+        if (recentTasksPage != null) closeRecents()
+
+        DockBarView.setReorderMode(context, true)
+        GlobalDockService.refreshVisibility()
+        applyDockVisibility()
+
+        val layer = FrameLayout(context).apply {
+            setBackgroundColor((pal.scrim and 0x00FFFFFF) or (0x44 shl 24))
+            isClickable = true
+            setOnClickListener { exitDockReorderMode() }
+        }
+        val bar = android.widget.LinearLayout(context).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackground(Skin.flat(com.cardesk.launcher.core.Shape.PILL, strong = true))
+            setPadding(28, 12, 18, 12)
+            isClickable = true
+            setOnClickListener { }
+        }
+        bar.addView(
+            Ui.text(context, "按住下方 Dock 按钮或控件左右拖动排序", 20f, Skin.TEXT, bold = true),
+            android.widget.LinearLayout.LayoutParams(-2, -2).apply { rightMargin = 24 },
+        )
+        val resetBtn = Ui.text(context, "恢复默认", 18f, Skin.TEXT_SOFT, bold = true).apply {
+            gravity = Gravity.CENTER
+            setPadding(22, 8, 22, 8)
+            background = Ui.round(Skin.CHIP_FILL, com.cardesk.launcher.core.Shape.PILL, 1f, Skin.CHIP_STROKE)
+            isClickable = true
+            pressFeedback()
+            setOnClickListener {
+                DockBarView.resetOrder(context)
+                toast("已恢复默认 Dock 顺序")
+            }
+        }
+        bar.addView(resetBtn, android.widget.LinearLayout.LayoutParams(-2, 46).apply { rightMargin = 12 })
+
+        val doneBtn = Ui.text(context, "完成", 18f, Skin.ACCENT_INK, bold = true).apply {
+            gravity = Gravity.CENTER
+            setPadding(26, 8, 26, 8)
+            background = Skin.solid(Skin.ACCENT, com.cardesk.launcher.core.Shape.PILL)
+            isClickable = true
+            pressFeedback()
+            setOnClickListener { exitDockReorderMode() }
+        }
+        bar.addView(doneBtn, android.widget.LinearLayout.LayoutParams(-2, 46))
+
+        layer.addView(
+            bar,
+            FrameLayout.LayoutParams(
+                LayoutParams.WRAP_CONTENT,
+                LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
+            ).apply {
+                bottomMargin = 28
+            },
+        )
+        dockReorderOverlay = layer
+        // 高度恰好停在 Dock 上沿（1080 - 112 = 968），完整把底部 112px 留给 Dock 接收拖动触摸
+        content.addView(
+            layer,
+            FrameLayout.LayoutParams(
+                Design.W.toInt(),
+                Design.H.toInt() - DockBarView.DOCK_HEIGHT,
+                Gravity.TOP or Gravity.START,
+            ),
+        )
+        Logx.event(LogTags.DOCK, "进入 Dock 拖动排序模式")
+    }
+
+    /** 退出 Dock 栏拖动排序模式，恢复正常点击 / 长按 / 滑动交互。 */
+    fun exitDockReorderMode() {
+        val layer = dockReorderOverlay ?: return
+        dockReorderOverlay = null
+        content.removeView(layer)
+        DockBarView.setReorderMode(context, false)
+        GlobalDockService.refreshVisibility()
+        applyDockVisibility()
+        Logx.event(LogTags.DOCK, "退出 Dock 拖动排序模式")
     }
 
     private fun closeSettings() {
@@ -4270,9 +4572,13 @@ fun toggleCam360() {
      */
     private fun applyWallpaper(index: Int) {
         val next = com.cardesk.launcher.core.Wallpapers.normalize(index)
+        prefs.wallpaperDefaultDayNight = false
         prefs.wallpaper = next
-        // 选预设 = 关掉自定义壁纸（照片还留着，随时可以再切回去）。
+        // 选预设 = 关掉默认日夜 / 自定义 / 视频壁纸（照片与视频文件都保留，随时可切回）。
         prefs.wallpaperCustom = false
+        prefs.videoWallpaperEnabled = false
+        prefs.videoWallpaper = false
+        background.defaultDayNight = false
         background.custom = false
         background.customBitmap = null
         background.wallpaper = next
@@ -4282,6 +4588,23 @@ fun toggleCam360() {
             scenePage.invalidate()
             scenePage.showWallpaperHint()
         }
+    }
+
+    /** 切换为默认日夜模式壁纸（随日夜自动切换的 L0 流光渐层）。 */
+    private fun applyDefaultDayNightWallpaper() {
+        prefs.wallpaperDefaultDayNight = true
+        prefs.wallpaperCustom = false
+        prefs.videoWallpaperEnabled = false
+        prefs.videoWallpaper = false
+        background.defaultDayNight = true
+        background.custom = false
+        background.customBitmap = null
+        stopVideoWallpaper()
+        if (::scenePage.isInitialized) {
+            scenePage.invalidate()
+        }
+        refreshSettingsWallpaper()
+        toast("已切换为默认日夜壁纸")
     }
 
     // ---------------------------------------------------------- 壁纸轮播（第207轮）
@@ -4363,31 +4686,24 @@ fun toggleCam360() {
         // 第三百一十八轮：**先把画面交回静态壁纸**（图层隐藏），等新播放器首帧就绪再显示。
         // 以前是直接释放旧播放器、图层保持可见 ⇒ 起播那一瞬露黑。
         concealVideoWallpaperLayer("准备起播")
-        // 第208轮：先把上一个播放器释放掉（层先留着 —— 下面还要用它起播）。
-        releaseVideoPlayer()
-        // 第214轮：**先**把窗口切成半透明，再挂视频层。
-        //
-        // 顺序很关键：切 format 会重建窗口 Surface，`SurfaceView` 的 surface
-        // 跟着重建；先挂层再切 format 会白起播一轮（surface 被换掉）。
-        // 先切 format 再挂层，`surfaceCreated` 回调时窗口已经是半透明的了。
-        //
-        // 第227轮：
-        // - 目标 format 由**当前后端**决定（`SurfaceView` ⇒ 半透明；`TextureView` ⇒ 不透明）；
-        // - format 已经是对的时候 [applyVideoWindowFormat] 直接返回 ⇒ 不会重建窗口 surface
-        //   ⇒ 视频**只起播一次**（修掉「开机后视频跳回开头」）。
-        applyVideoWindowFormat(
-            com.cardesk.launcher.core.VideoWallpaper.needsTranslucentWindow(videoBackend),
-        )
-        // 第208轮：视频层**按需挂进窗口**。
-        // `TextureView` 只有 attach 之后才会创建 SurfaceTexture，
-        // 也只有那时候才会回调 `onSurfaceTextureAvailable` ——
-        // 所以「要播视频」= 「把层挂上」，「不播」= 「把层摘掉」。
+        // 切新视频或重起播时必须复位 videoStarted / videoResumePositionMs：
+        // 否则图层已挂在树上（videoLayerAttached=true）时 maybeStartVideoWallpaper() 会因为
+        // videoStarted 仍为 true 直接返回，导致旧播放器被释放后新视频永远不起播（画面定格）。
+        videoStarted = false
+        videoResumePositionMs = 0L
+        videoRetryCount = 0
+        videoPausedByLifecycle = false
         pendingVideoWallpaperStart = true
-        attachVideoWallpaperLayer()
-        // 第228轮：窗口已经切成半透明 ⇒ 画中画要换到**镜像**路线。
-        // 不换的话，承载面还挂着 `ActivityView` 路线的内容 ⇒ 半透明窗口下圆角失效、
-        // 画面与窗口坐标错位、切页残留黑卡（这正是第226轮引入镜像路线要解决的问题）。
-        refreshPip()
+        // 等旧播放器在后台线程彻底 stop/release 并断开 SurfaceView 的 BufferQueue 后再起播新视频，
+        // 避免新旧 MediaPlayer 争抢同一个 Surface 造成解码卡死或画面不动。
+        releaseVideoPlayer {
+            if (!pendingVideoWallpaperStart) return@releaseVideoPlayer
+            applyVideoWindowFormat(
+                com.cardesk.launcher.core.VideoWallpaper.needsTranslucentWindow(videoBackend),
+            )
+            attachVideoWallpaperLayer()
+            refreshPip()
+        }
     }
 
     /**
@@ -4632,7 +4948,7 @@ fun toggleCam360() {
             // 起播期间壁纸照常画（passthrough=false）⇒ 解码器还在预热时看到的是壁纸，不是黑。
             setVideoLayerVisibility(visible = false)
             background.videoPassthrough = false
-            applyDesktopBackground(0xFF05080F.toInt())
+            applyDesktopBackground(pal.bgTop)
             mp.prepareAsync()
             prefs.videoWallpaper = true
             prefs.videoWallpaperEnabled = true
@@ -4657,7 +4973,7 @@ fun toggleCam360() {
             detachVideoWallpaperLayer()
             background.videoPassthrough = false
             applyVideoWindowFormat(false)
-            applyDesktopBackground(0xFF05080F.toInt())
+            applyDesktopBackground(pal.bgTop)
         }
     }
 
@@ -4911,7 +5227,7 @@ fun toggleCam360() {
         videoWallpaperActive = false
         // `background` 是 `val`（构造时就建好了）⇒ 直接改。
         background.videoPassthrough = false
-        applyDesktopBackground(0xFF05080F.toInt())
+        applyDesktopBackground(pal.bgTop)
         com.cardesk.launcher.core.log.Logx.i(
             com.cardesk.launcher.core.log.LogTags.SETTING,
             "视频壁纸图层已隐藏",
@@ -4970,7 +5286,7 @@ fun toggleCam360() {
         detachVideoWallpaperLayer()
         background.videoPassthrough = false
         applyVideoWindowFormat(false)
-        applyDesktopBackground(0xFF05080F.toInt())
+        applyDesktopBackground(pal.bgTop)
     }
 
     /**
@@ -5072,7 +5388,7 @@ fun toggleCam360() {
         // 第214轮：窗口恢复不透明、底色恢复上色。
         videoWallpaperActive = false
         applyVideoWindowFormat(false)
-        applyDesktopBackground(0xFF05080F.toInt())
+        applyDesktopBackground(pal.bgTop)
         prefs.videoWallpaperEnabled = false
         prefs.videoWallpaper = false
         // 第228轮：窗口已经变回**不透明** ⇒ 画中画要换回 `ActivityView` 路线。
@@ -5088,11 +5404,25 @@ fun toggleCam360() {
      * 起播流程里「先把旧播放器放掉、再拿 SurfaceTexture 起新播放器」，
      * 如果这里顺手把层关掉，SurfaceTexture 刚建好就被销毁，起播必然失败。
      */
-    private fun releaseVideoPlayer() {
+    private fun releaseVideoPlayer(onReleased: (() -> Unit)? = null) {
         // 第三百一十八轮：先把引用摘下来，真正的 stop/release 丢到后台线程做
         // （`MediaPlayer.release()` 会等解码线程收尾，主线程做会掉帧）。
         val old = videoPlayer
         videoPlayer = null
+        // 第208轮：播放器放掉之后，Surface 才能放 ——
+        // 顺序反了会让解码器正在用的 surface 提前断开。
+        val oldSurface = videoSurface
+        videoSurface = null
+        // 第227轮：播放器都没了 ⇒ 不存在「等新 surface 接上」这回事了。
+        videoSurfaceLost = false
+        // 第231轮：播放器没了 ⇒ 视频亮度分布作废（墨色回到静态壁纸 / 主题那套）。
+        videoBackdropSampler?.release()
+        videoBackdropSampler = null
+        videoBackdropTopTone = null
+        videoBackdropCenterTone = null
+        videoBackdropAtMs = 0L
+        videoBackdropFailures = 0
+
         if (old != null) {
             val generation = ++videoReleaseGeneration
             val executor = videoCodecExecutor
@@ -5105,26 +5435,22 @@ fun toggleCam360() {
                         runCatching { old.stop() }
                         runCatching { old.release() }
                     }
+                    runCatching { oldSurface?.release() }
+                    if (onReleased != null) {
+                        post { onReleased() }
+                    }
                 }
             }.onFailure {
                 // executor 已经关了（Activity 销毁）⇒ 只能就地放掉。
                 runCatching { old.stop() }
                 runCatching { old.release() }
+                runCatching { oldSurface?.release() }
+                onReleased?.invoke()
             }
+        } else {
+            runCatching { oldSurface?.release() }
+            onReleased?.invoke()
         }
-        // 第208轮：播放器放掉之后，Surface 才能放 ——
-        // 顺序反了会让解码器正在用的 surface 提前断开。
-        runCatching { videoSurface?.release() }
-        videoSurface = null
-        // 第227轮：播放器都没了 ⇒ 不存在「等新 surface 接上」这回事了。
-        videoSurfaceLost = false
-        // 第231轮：播放器没了 ⇒ 视频亮度分布作废（墨色回到静态壁纸 / 主题那套）。
-        videoBackdropSampler?.release()
-        videoBackdropSampler = null
-        videoBackdropTopTone = null
-        videoBackdropCenterTone = null
-        videoBackdropAtMs = 0L
-        videoBackdropFailures = 0
     }
 
     /** 视频壁纸选完后的结果：后台拷贝 + 落盘。 */
@@ -5330,28 +5656,36 @@ fun toggleCam360() {
 
     // ---------------------------------------------------------- 自定义壁纸（第 105 轮）
 
-    /** 系统相册选图的结果：后台解码 + 落盘，成功后立刻切过去。 */
-    fun onWallpaperPicked(uri: android.net.Uri?) {
+    /** 系统相册选图的结果：后台解码 + 落盘，成功后立刻切过去（支持日间 / 夜间两档）。 */
+    fun onWallpaperPicked(uri: android.net.Uri?, night: Boolean = false) {
         if (uri == null) {
             toast("已取消导入壁纸")
             return
         }
-        toast("正在导入壁纸…")
+        toast(if (night) "正在导入夜间静态壁纸…" else "正在导入静态壁纸…")
         Thread {
             val ok = com.cardesk.launcher.core.CustomWallpaper
-                .importFromUri(context.applicationContext, uri)
+                .importFromUri(context.applicationContext, uri, night = night)
             post {
                 if (ok) {
+                    prefs.wallpaperDefaultDayNight = false
                     prefs.wallpaperCustom = true
+                    prefs.videoWallpaperEnabled = false
+                    prefs.videoWallpaper = false
+                    background.defaultDayNight = false
                     background.custom = true
-                    background.customBitmap = com.cardesk.launcher.core.CustomWallpaper.cachedBitmap()
+                    background.customUsesNightAsset =
+                        com.cardesk.launcher.core.CustomWallpaper.usesDedicatedNight(context, pal.night)
+                    background.customBitmap =
+                        com.cardesk.launcher.core.CustomWallpaper.cachedForMode(context, pal.night)
+                    stopVideoWallpaper()
                     ensureCustomWallpaperLoaded()
                     if (::scenePage.isInitialized) {
                         scenePage.invalidate()
                         scenePage.showWallpaperHint()
                     }
                     refreshSettingsWallpaper()
-                    toast("壁纸已导入")
+                    toast(if (night) "夜间静态壁纸已导入" else "日间静态壁纸已导入")
                 } else {
                     toast("导入失败：这张图片解不出来")
                 }
@@ -5359,16 +5693,22 @@ fun toggleCam360() {
         }.start()
     }
 
-    /** 使用已经导入的自定义壁纸。 */
+    /** 使用已经导入的自定义壁纸（按当前日夜模式自动选日间/夜间照片）。 */
     fun applyCustomWallpaper() {
         val core = com.cardesk.launcher.core.CustomWallpaper
         if (!core.has(context)) {
             toast("还没有导入壁纸")
             return
         }
+        prefs.wallpaperDefaultDayNight = false
         prefs.wallpaperCustom = true
+        prefs.videoWallpaperEnabled = false
+        prefs.videoWallpaper = false
+        background.defaultDayNight = false
         background.custom = true
-        background.customBitmap = core.cachedBitmap()
+        background.customUsesNightAsset = core.usesDedicatedNight(context, pal.night)
+        background.customBitmap = core.cachedForMode(context, pal.night)
+        stopVideoWallpaper()
         ensureCustomWallpaperLoaded()
         if (::scenePage.isInitialized) {
             scenePage.invalidate()
@@ -5378,14 +5718,43 @@ fun toggleCam360() {
         toast("已切换为自定义壁纸")
     }
 
-    /** 删除自定义壁纸，回到预设（不会动预设下标）。 */
+    /** 删除日间自定义壁纸（若夜间壁纸仍在则保留，否则回到默认日夜/预设）。 */
     fun deleteCustomWallpaper() {
-        com.cardesk.launcher.core.CustomWallpaper.reset(context)
+        val core = com.cardesk.launcher.core.CustomWallpaper
+        core.resetDay(context)
+        if (core.hasNight(context)) {
+            background.customUsesNightAsset = core.usesDedicatedNight(context, pal.night)
+            background.customBitmap = core.cachedForMode(context, pal.night)
+            if (background.custom) ensureCustomWallpaperLoaded()
+            refreshSettingsWallpaper()
+            toast("已删除日间自定义壁纸")
+            return
+        }
         prefs.wallpaperCustom = false
         background.custom = false
+        background.customUsesNightAsset = false
         background.customBitmap = null
-        applyWallpaper(prefs.wallpaper)
-        refreshSettingsWallpaper()
+        applyDefaultDayNightWallpaper()
+        toast("已删除自定义壁纸")
+    }
+
+    /** 只删除夜间自定义壁纸（日间照常生效，夜间自动沿用日间）。 */
+    fun deleteCustomNightWallpaper() {
+        val core = com.cardesk.launcher.core.CustomWallpaper
+        core.resetNight(context)
+        if (core.hasDay(context)) {
+            background.customUsesNightAsset = false
+            background.customBitmap = core.cachedForMode(context, pal.night)
+            if (background.custom) ensureCustomWallpaperLoaded()
+            refreshSettingsWallpaper()
+            toast("已删除夜间静态壁纸，夜间将沿用日间")
+            return
+        }
+        prefs.wallpaperCustom = false
+        background.custom = false
+        background.customUsesNightAsset = false
+        background.customBitmap = null
+        applyDefaultDayNightWallpaper()
         toast("已删除自定义壁纸")
     }
 
@@ -5395,8 +5764,8 @@ fun toggleCam360() {
     }
 
     /** 打开系统相册选图（结果回到 MainActivity.onActivityResult）。 */
-    private fun requestWallpaperImport() {
-        (context as? com.cardesk.launcher.MainActivity)?.startWallpaperImport()
+    private fun requestWallpaperImport(night: Boolean = false) {
+        (context as? com.cardesk.launcher.MainActivity)?.startWallpaperImport(night = night)
     }
 
     // ---------------------------------------------------------- 应用内图片库（第230轮）
@@ -5404,21 +5773,7 @@ fun toggleCam360() {
     /** 应用内图片选择器（开着的时候只会有一个）。 */
     private var imagePicker: ImagePickerOverlay? = null
 
-    /**
-     * 打开**应用内**的图片选择器（第230轮）。
-     *
-     * ## 为什么不是系统选择器
-     *
-     * 用户反馈真车点「导入壁纸」只弹「没有可用的图片选择器」：
-     * 车机没有相册 / DocumentsUI 接管 `ACTION_OPEN_DOCUMENT`。
-     * 视频壁纸第219轮就是靠应用内列表解决的，图片照同一套做。
-     *
-     * ## 权限
-     *
-     * 读共享存储要 `READ_EXTERNAL_STORAGE`；车机上本包是 uid 1000 系统应用，
-     * 权限天然可用；普通安装（AVD）则要运行时申请。
-     */
-    fun openImagePicker() {
+    fun openImagePicker(night: Boolean = false) {
         if (imagePicker?.isOpen == true) return
         // 设置页先关掉，避免两层浮层叠着。
         closeSettings()
@@ -5431,8 +5786,8 @@ fun toggleCam360() {
         }
 
         val overlay = imagePicker ?: ImagePickerOverlay(context).also { imagePicker = it }
-        overlay.onPick = { item -> importWallpaperFromLibrary(item) }
-        overlay.onUseSystemPicker = { requestWallpaperImport() }
+        overlay.onPick = { item -> importWallpaperFromLibrary(item, night = night) }
+        overlay.onUseSystemPicker = { requestWallpaperImport(night = night) }
         if (overlay.parent == null) {
             content.addView(overlay, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         }
@@ -5441,14 +5796,9 @@ fun toggleCam360() {
 
     /**
      * 从应用内图片列表导入壁纸。
-     *
-     * 直接复用 [onWallpaperPicked] 那条路（后台解码 + 落盘 + 切过去 + 刷新设置页），
-     * 只是 uri 从 content Uri 换成 `file://` ——
-     * `CustomWallpaper.importFromUri` 内部走 `contentResolver.openInputStream`，
-     * 对 `file://` 同样有效。
      */
-    private fun importWallpaperFromLibrary(item: com.cardesk.launcher.core.ImageLibrary.Item) {
-        onWallpaperPicked(android.net.Uri.fromFile(java.io.File(item.path)))
+    private fun importWallpaperFromLibrary(item: com.cardesk.launcher.core.ImageLibrary.Item, night: Boolean = false) {
+        onWallpaperPicked(android.net.Uri.fromFile(java.io.File(item.path)), night = night)
     }
 
     /**
@@ -5549,16 +5899,25 @@ fun toggleCam360() {
     private fun applyBackdropTones(
         top: com.cardesk.launcher.core.WallpaperSampler.Tone?,
         center: com.cardesk.launcher.core.WallpaperSampler.Tone?,
-    ) {
-        if (top === videoBackdropTopTone && center === videoBackdropCenterTone) return
+    ): Boolean {
+        if (top == videoBackdropTopTone && center == videoBackdropCenterTone) return false
+        val prevTopInk = com.cardesk.launcher.core.Skin.overlayTop
+        val prevCenterInk = com.cardesk.launcher.core.Skin.overlayCenter
         videoBackdropTopTone = top
         videoBackdropCenterTone = center
         backdropTop = top?.average
         backdropCenter = center?.average
         com.cardesk.launcher.core.Skin.setVideoBackdrop(top, center)
-        if (::statusBar.isInitialized) statusBar.invalidate()
-        if (::dots.isInitialized) dots.invalidate()
-        if (::scenePage.isInitialized) scenePage.invalidate()
+        val topChanged = com.cardesk.launcher.core.Skin.overlayTop != prevTopInk
+        val centerChanged = com.cardesk.launcher.core.Skin.overlayCenter != prevCenterInk
+        if (topChanged) {
+            if (::statusBar.isInitialized) statusBar.invalidate()
+            if (::dots.isInitialized) dots.invalidate()
+        }
+        if (topChanged || centerChanged) {
+            if (::scenePage.isInitialized) scenePage.invalidate()
+        }
+        return topChanged || centerChanged
     }
 
     /** 视频壁纸亮度采样器（第222轮；第231轮起先解文件、再拷图层）。 */
@@ -5621,18 +5980,19 @@ fun toggleCam360() {
                     return@post
                 }
                 videoBackdropFailures = 0
-                com.cardesk.launcher.core.log.Logx.event(
-                    com.cardesk.launcher.core.log.LogTags.SCENE,
-                    "视频壁纸亮度采样",
-                    "src" to (sampler.lastSource ?: "?"),
-                    "pos" to position,
-                    // 打 luma 而不是 ARGB：排障时一眼能比「背景亮不亮、字该用什么颜色」。
-                    "top" to (top?.let { com.cardesk.launcher.core.WallpaperContrast.luma(it.average) } ?: -1),
-                    "topBright" to (top?.let { com.cardesk.launcher.core.WallpaperContrast.luma(it.bright) } ?: -1),
-                    "center" to (center?.let { com.cardesk.launcher.core.WallpaperContrast.luma(it.average) } ?: -1),
-                    "centerBright" to (center?.let { com.cardesk.launcher.core.WallpaperContrast.luma(it.bright) } ?: -1),
-                )
-                applyBackdropTones(top, center)
+                val inkChanged = applyBackdropTones(top, center)
+                if (inkChanged) {
+                    com.cardesk.launcher.core.log.Logx.event(
+                        com.cardesk.launcher.core.log.LogTags.SCENE,
+                        "视频壁纸亮度采样",
+                        "src" to (sampler.lastSource ?: "?"),
+                        "pos" to position,
+                        "top" to (top?.let { com.cardesk.launcher.core.WallpaperContrast.luma(it.average) } ?: -1),
+                        "topBright" to (top?.let { com.cardesk.launcher.core.WallpaperContrast.luma(it.bright) } ?: -1),
+                        "center" to (center?.let { com.cardesk.launcher.core.WallpaperContrast.luma(it.average) } ?: -1),
+                        "centerBright" to (center?.let { com.cardesk.launcher.core.WallpaperContrast.luma(it.bright) } ?: -1),
+                    )
+                }
             }
         }
     }
@@ -5649,19 +6009,34 @@ fun toggleCam360() {
      */
     private fun ensureCustomWallpaperLoaded() {
         if (!background.custom) return
-        if (background.customBitmap != null) return
+        val nightNow = pal.night
+        val expected = com.cardesk.launcher.core.CustomWallpaper.cachedForMode(context, nightNow)
+        if (expected != null && background.customBitmap === expected) return
+        if (expected != null) {
+            background.customUsesNightAsset =
+                com.cardesk.launcher.core.CustomWallpaper.usesDedicatedNight(context, nightNow)
+            background.customBitmap = expected
+            return
+        }
         if (customLoading) return
         customLoading = true
         Thread {
-            val bmp = com.cardesk.launcher.core.CustomWallpaper.loadScaled(context.applicationContext)
+            val bmp = com.cardesk.launcher.core.CustomWallpaper.loadForMode(context.applicationContext, nightNow)
             post {
                 customLoading = false
                 if (bmp != null && background.custom) {
-                    background.customBitmap = bmp
+                    if (pal.night == nightNow) {
+                        background.customUsesNightAsset =
+                            com.cardesk.launcher.core.CustomWallpaper.usesDedicatedNight(context, nightNow)
+                        background.customBitmap = bmp
+                    } else {
+                        ensureCustomWallpaperLoaded()
+                    }
                 } else if (bmp == null) {
-                    // 文件坏了/被删：安静退回预设，避免一直黑底。
+                    // 文件坏了/被删：安静退回默认日夜壁纸，避免一直黑底。
                     prefs.wallpaperCustom = false
                     background.custom = false
+                    background.customUsesNightAsset = false
                     background.customBitmap = null
                 }
             }
@@ -5766,24 +6141,15 @@ fun toggleCam360() {
 
     private fun onSettingsApplied() {
         Logx.i(LogTags.SETTING, "设置已应用")
-        // 底栏形态变了要整层重建（增强导航栏开/关、设计 Dock ↔ 槽位条）。
-        // 光改 visibility 换不过来：pill 和 Dock 是两套不同的 View 树。
-        // build() 会把 content 整个重建，设置层也跟着被摘掉 ——
-        // 和切日夜主题（applyTheme → build）是同一条路径。
-        if (builtEnhancedNav != prefs.enhancedNav || builtNavStyle != prefs.navStyle) {
-            Logx.i(
-                LogTags.DOCK, "底栏形态变化，重建",
-                "enhancedNav" to prefs.enhancedNav, "style" to prefs.navStyle,
-            )
-            build()
-            return
-        }
+        background.defaultDayNight = prefs.wallpaperDefaultDayNight
         background.wallpaper = prefs.wallpaper
-        // 自定义壁纸（第 105 轮）：设置页里导入/删除后同步到桌面。
+        // 自定义壁纸（第 105 轮，支持日夜双槽）：设置页里导入/删除后同步到桌面。
         background.custom = prefs.wallpaperCustom &&
             com.cardesk.launcher.core.CustomWallpaper.has(context)
+        background.customUsesNightAsset = background.custom &&
+            com.cardesk.launcher.core.CustomWallpaper.usesDedicatedNight(context, pal.night)
         background.customBitmap =
-            if (background.custom) com.cardesk.launcher.core.CustomWallpaper.cachedBitmap() else null
+            if (background.custom) com.cardesk.launcher.core.CustomWallpaper.cachedForMode(context, pal.night) else null
         if (background.custom) ensureCustomWallpaperLoaded()
         applyDockVisibility()
         applyOemPolicy()
@@ -5846,7 +6212,7 @@ fun toggleCam360() {
         val globalCovering = globalReserved &&
             runCatching { com.cardesk.launcher.core.dock.GlobalDockService.isShowing() }
                 .getOrDefault(false)
-        val hide = prefs.hideHomeDock || settings != null || globalCovering
+        val hide = (prefs.hideHomeDock && !DockBarView.reorderMode) || settings != null || globalCovering
         Logx.d(
             LogTags.DOCK,
             "Dock 可见性",
@@ -5859,15 +6225,14 @@ fun toggleCam360() {
             "lowerDock" to prefs.lowerDock,
             "page" to page,
         )
-        if (prefs.enhancedNav) {
-            bottomBar.visibility = if (hide) View.GONE else View.VISIBLE
-        } else {
-            dock.visibility = if (hide) View.GONE else View.VISIBLE
-            val lp = dock.layoutParams as? FrameLayout.LayoutParams
-            if (lp != null) {
-                lp.bottomMargin = if (prefs.lowerDock) 0 else DOCK_BOTTOM_MARGIN
-                dock.layoutParams = lp
-            }
+        val vis = if (hide) View.GONE else View.VISIBLE
+        bottomBarContainer?.let { if (it.visibility != vis) it.visibility = vis }
+        if (dock.visibility != vis) dock.visibility = vis
+        if (dock.translationY != 0f) dock.translationY = 0f
+        val lp = dock.layoutParams as? FrameLayout.LayoutParams
+        if (lp != null && lp.bottomMargin != DOCK_BOTTOM_MARGIN) {
+            lp.bottomMargin = DOCK_BOTTOM_MARGIN
+            dock.layoutParams = lp
         }
         // 自绘状态栏的显隐：——
         // 「隐藏导航页状态栏」打开时，**只在导航页（page==1）隐藏**，第一页仍显示
@@ -5876,11 +6241,12 @@ fun toggleCam360() {
         // 第三十七轮：「隐藏导航页状态栏」这个开关的**默认值改成 false**（见 `Prefs.hideNavStatus`），
         // 所以现在两页都显示状态栏 —— 用户要求「桌面第二页也需要显示状态栏」。
         val hideBar = page == PAGE_NAV && prefs.hideNavStatus
-        statusBar.visibility = if (hideBar) View.GONE else View.VISIBLE
+        val barVis = if (hideBar) View.GONE else View.VISIBLE
+        if (statusBar.visibility != barVis) statusBar.visibility = barVis
         // 第八十二轮：翻页圆点搬进了**状态栏那一行**的中间，
         // 所以状态栏被隐藏时圆点也要一起隐藏 —— 否则它会孤零零浮在屏幕顶部。
-        if (::dots.isInitialized) {
-            dots.visibility = statusBar.visibility
+        if (::dots.isInitialized && dots.visibility != barVis) {
+            dots.visibility = barVis
         }
         // —— 顶部让位（第四十四轮：紧凑）——
         //
@@ -5898,7 +6264,9 @@ fun toggleCam360() {
         // 宽 1832** 的卡片（底边贴 Dock 顶下沿 940，距 Dock 顶 28）。
         //
         // 第五十二轮：状态栏缩到 2/3，内容基线 110 → 73，卡片高度跟着长高。
-        val navTop = if (hideBar) {
+        // 导航页的顶距只取决于 prefs.hideNavStatus（与当前在首页还是导航页无关），
+        // 这样离屏预热的导航页始终与进场后的最终高度一致，切页不再触发 VirtualDisplay.resize。
+        val navTop = if (prefs.hideNavStatus) {
             com.cardesk.launcher.ui.pages.NavPage.NAV_CONTENT_TOP_NO_STATUS
         } else {
             com.cardesk.launcher.ui.pages.NavPage.NAV_CONTENT_TOP
@@ -5948,6 +6316,7 @@ fun toggleCam360() {
         if (resolvePalette().night == pal.night) return false
         Logx.i(LogTags.THEME, "日夜状态变化，重新应用主题")
         applyTheme()
+        com.cardesk.launcher.core.ambient.AmbientLightController.onDayNightChanged(context, pal.night)
         return true
     }
 
@@ -5991,6 +6360,11 @@ fun toggleCam360() {
         // 主线程只读一份算好的不可变快照 —— 一帧的活变成纳秒级。
         // 口径完全不变：采样频率不变、读的通道不变、降级链顺序不变。
         val info = com.cardesk.launcher.vehicle.VehicleSignalSampler.ensureSnapshot()
+        com.cardesk.launcher.core.AutomationEngine.tick(
+            context,
+            prefs,
+            com.cardesk.launcher.core.AutomationEngine.fromVehicle(info, weatherTemp, pal.night),
+        )
         val state = VehicleController.state
         // 时钟： `H:mm`（单小时不补零）
         statusBar.setClock(now)
@@ -6072,6 +6446,8 @@ fun toggleCam360() {
         scenePage.carStatusCardPosY = prefs.carStatusCardPosY
         scenePage.carStatusInBottomRow = prefs.carStatusInBottomRow
         scenePage.carStatusBottomIndex = prefs.carStatusBottomIndex
+        scenePage.cardFreePositions = prefs.cardFreePositions
+        com.cardesk.launcher.core.ambient.AmbientLightController.onDayNightChanged(context, pal.night)
         // 第148轮：「歌曲图片当卡片背景」的开关跟着偏好走。
         //
         // 设置页开关和「点封面图」操作的是**同一个键**（`prefs.navCoverBackdropEnabled`），
@@ -6111,27 +6487,25 @@ fun toggleCam360() {
         scenePage.favoriteState = MusicController.get().favoriteState
         dock.bind(state)
         slotsBar?.let {
-            it.state = state
-            it.palette = pal
-            it.mediaPlaying = playing
-            // 媒体槽标题 / 歌手（：空标题显示「暂无播放」
-            // 歌手为空时是空串
-            it.mediaTitle = track?.title?.ifBlank { "暂无播放" } ?: "暂无播放"
-            it.mediaArtist = track?.artist?.ifBlank { "" } ?: ""
-            // 歌词槽：当前行 / 下一行
-            // 槽位条形态下歌词槽是要显示的
-            // 此时首页中央大字歌词让位（见 [slotBarShowsLyric]）——
-            // 同一首歌不在屏上出现两处歌词（场景页本来就是没有歌词的）。
             val timeline = mediaLyric
             val idx = mediaLyricIndex
-            it.lyricCurrent = if (timeline != null && idx >= 0) timeline.lineAt(idx) else mediaLyricFallback
-            it.lyricNext = if (timeline != null && idx >= 0) timeline.lineAt(idx + 1) else ""
-            // 歌词槽的当前行也带擦除高亮。
-            it.lyricWipe = if (timeline != null && idx >= 0) mediaLyricWipe else 0f
-            // 媒体槽封面
-            it.mediaArtwork = track?.artwork
-            it.showLyric = true
-            it.invalidate()
+            val curLine = if (timeline != null && idx >= 0) timeline.lineAt(idx) else mediaLyricFallback
+            val nextLine = if (timeline != null && idx >= 0) timeline.lineAt(idx + 1) else ""
+            val wipe = if (timeline != null && idx >= 0) mediaLyricWipe else 0f
+            val title = track?.title?.ifBlank { "暂无播放" } ?: "暂无播放"
+            val artist = track?.artist?.ifBlank { "" } ?: ""
+            var dirty = false
+            if (it.state != state) { it.state = state; dirty = true }
+            if (it.palette != pal) { it.palette = pal; dirty = true }
+            if (it.mediaPlaying != playing) { it.mediaPlaying = playing; dirty = true }
+            if (it.mediaTitle != title) { it.mediaTitle = title; dirty = true }
+            if (it.mediaArtist != artist) { it.mediaArtist = artist; dirty = true }
+            if (it.lyricCurrent != curLine) { it.lyricCurrent = curLine; dirty = true }
+            if (it.lyricNext != nextLine) { it.lyricNext = nextLine; dirty = true }
+            if (kotlin.math.abs(it.lyricWipe - wipe) >= 0.0005f) { it.lyricWipe = wipe; dirty = true }
+            if (it.mediaArtwork !== track?.artwork) { it.mediaArtwork = track?.artwork; dirty = true }
+            if (!it.showLyric) { it.showLyric = true; dirty = true }
+            if (dirty) it.invalidate()
         }
         val progress = if ((track?.durationMs ?: 0L) > 0) {
             (track!!.positionMs.toFloat() / track.durationMs.toFloat()).coerceIn(0f, 1f)
@@ -6598,6 +6972,10 @@ fun toggleCam360() {
             removeAnimated(dialog) { if (navSlotDialog === dialog) navSlotDialog = null }
             return true
         }
+        if (dockReorderOverlay != null) {
+            exitDockReorderMode()
+            return true
+        }
         if (vehiclePage != null) {
             closeVehiclePage()
             return true
@@ -6722,23 +7100,29 @@ fun toggleCam360() {
         com.cardesk.launcher.core.HomeKeyRuntime.interceptorStatus =
             homeKeyInterceptor?.statusText ?: "未启动"
         // 第138轮：状态栏连接类图标（蜂窝 / WiFi / 热点 / 蓝牙）按**真实状态**显示。
-        // 采样器跟窗口生命周期起停 —— 后台时不用采（车机本来就在省电）。
-        startSystemStatusSampling()
+        // 采样器跟窗口可见周期起停 —— 后台时不用采（车机本来就在省电）。
+        if (activityVisible) {
+            startSystemStatusSampling()
+        }
         // 第220轮：**车控信号采样**也在后台线程上跑（主线程不再做 30~60 次同步 binder）。
         com.cardesk.launcher.vehicle.VehicleSignalSampler.start(context)
         // 第九十三轮：窗口重建（后台回来 / 重新 addView）时把定时刷新重新挂上 ——
         // onDetachedFromWindow() 里 removeCallbacksAndMessages(null) 会把它清掉。
         if (servicesStarted) {
             handler.removeCallbacks(ticker)
-            handler.post(ticker)
-            refresh()
+            if (activityVisible) {
+                refresh()
+                handler.postDelayed(ticker, 1000L)
+            }
         }
-        // 第211轮：**壁纸轮播心跳**也跟窗口生命周期走 ——
+        // 第211轮：**壁纸轮播心跳**也跟窗口可见周期走 ——
         // 它现在挂在类里的 `handler` 上，detach 时被 `removeCallbacksAndMessages(null)` 一起清掉了，
         // 所以重新 attach 时要再挂上（否则桌面切到后台再回来，轮播就不动了）。
         // 先 `removeCallbacks` 去重 —— attach 可能被调多次。
         handler.removeCallbacks(carouselTicker)
-        handler.postDelayed(carouselTicker, 1000L)
+        if (activityVisible) {
+            handler.postDelayed(carouselTicker, 1000L)
+        }
         // 「向高德索要区域信息」也挪到 startServices()（第九十三轮冷启动修复）：
         // 这是要发广播去问车机/高德的跨进程动作，挂在 onAttachedToWindow 里
         // 就等于排在首帧前面。现在等桌面画出第一帧、服务启动时再要。

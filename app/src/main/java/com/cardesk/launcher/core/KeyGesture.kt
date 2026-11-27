@@ -92,15 +92,24 @@ object KeyGesture {
         /** 上一次抬起后是否还挂着一个「待发的单击」。 */
         private var singlePending = false
 
+        /** 当前这次按下是否落在双击窗口内（用于避免按住第二次期间单机超时误触）。 */
+        private var pendingDouble = false
+
         /**
          * `ACTION_DOWN`。
          *
          * @return 恒为 [Gesture.NONE]（按下本身不产生手势）。
          */
         fun onDown(keyCode: Int, now: Long): Gesture {
+            val withinDouble = lastUpAt > 0L && (now - lastUpAt) <= doubleWindowMs
             downAt = now
             downKey = keyCode
             longFired = false
+            pendingDouble = withinDouble
+            if (withinDouble) {
+                // 第二次按下已落在双击窗内 ⇒ 立即作废挂起的单击，避免按住期间误触发单击。
+                singlePending = false
+            }
             return Gesture.NONE
         }
 
@@ -112,8 +121,10 @@ object KeyGesture {
          */
         fun onUp(keyCode: Int, now: Long): Gesture {
             val wasDown = downKey == keyCode
+            val wasPendingDouble = pendingDouble
             downKey = 0
             downAt = 0L
+            pendingDouble = false
             if (!wasDown) return Gesture.NONE
 
             // ⚠️ 本次按下已经判成长按 ⇒ 抬手**不再挂单击**。
@@ -121,17 +132,21 @@ object KeyGesture {
             // （用户会看到「切了两次」）。这是第218轮端到端测试抓出来的真实缺陷。
             if (longFired) return Gesture.NONE
 
-            val isDouble = lastUpAt > 0L && (now - lastUpAt) <= doubleWindowMs
-            lastUpAt = now
+            val isDouble = wasPendingDouble || (lastUpAt > 0L && (now - lastUpAt) <= doubleWindowMs)
             if (isDouble) {
-                // 双击成立 ⇒ 挂起的单击作废
+                // 双击成立 ⇒ 挂起的单击作废，同时清 lastUpAt 防止第三下连带触发第二次双击
+                lastUpAt = 0L
                 singlePending = false
                 return Gesture.DOUBLE
             }
+            lastUpAt = now
             // 还没到双击窗口 ⇒ 挂一个待发的单击，等 [onSingleTimeout] 定夺。
             singlePending = true
             return Gesture.NONE
         }
+
+        /** 本次按下是否已命中双击窗（供执行端在 DOWN 时立刻取消 singleRunnable）。 */
+        val isDoubleCandidate: Boolean get() = pendingDouble
 
         /**
          * 双击窗口结束（调用方用定时器在窗口到期后调）。

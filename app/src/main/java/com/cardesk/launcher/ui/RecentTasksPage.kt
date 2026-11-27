@@ -20,7 +20,6 @@ import com.cardesk.launcher.core.Skin
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.ui.anim.Motion
-import com.cardesk.launcher.ui.widget.OverlayBackdrop
 
 /**
  * 最近任务页（第九十五轮 C3，对照 UNI 的 `recent_tasks_panel.dart`）。
@@ -61,9 +60,9 @@ class RecentTasksPage(
     }
 
     init {
-        val scrim = OverlayBackdrop(context).apply {
-            palette = this@RecentTasksPage.pal
-            withScrim = false
+        // 半透明轻量遮罩：透出桌面背景，同时清晰区分面板外可点击关闭区域。
+        val scrim = View(context).apply {
+            setBackgroundColor((pal.scrim and 0x00FFFFFF) or (SCRIM_ALPHA shl 24))
             isClickable = true
             setOnClickListener {
                 Logx.event(LogTags.RECENT, "最近任务关闭（点击遮罩）")
@@ -88,44 +87,35 @@ class RecentTasksPage(
         )
 
         val title = Ui.text(context, "最近任务", 40f, Skin.TEXT, bold = true)
-        panel.addView(title, abs(PANEL_PAD, TITLE_TOP, -1, 52))
+        panel.addView(title, abs(PANEL_PAD, TITLE_TOP, -2, 52))
 
-        // 标题旁的任务数量徽标（画板 v6：「最近任务 8 个」）。
-        countBadge = Ui.text(context, "0 个", 16f, Skin.TEXT_SOFT).apply {
+        // 标题旁的任务数量徽标（如「最近任务 8 个」）。
+        countBadge = Ui.text(context, "0 个", 19f, Skin.TEXT_SOFT, bold = true).apply {
             gravity = Gravity.CENTER
-            setPadding(14, 0, 14, 0)
+            setPadding(16, 0, 16, 0)
             background = Ui.round(pal.withAlpha(Skin.TEXT, 0x14), CoreShape.PILL)
         }
-        panel.addView(countBadge, abs(PANEL_PAD + TITLE_TEXT_W, TITLE_TOP + 14, 86, 30))
+        panel.addView(countBadge, abs(PANEL_PAD + TITLE_TEXT_W, TITLE_TOP + 10, -2, 34))
 
-        // 右上「运行内存 3.2 / 4.0 GB」+ 进度条（画板 v6 新增）。
-        val memLabel = Ui.text(context, "运行内存", 14f, Skin.TEXT_DIM)
-        panel.addView(memLabel, abs(MEM_LEFT, TITLE_TOP + 12, 120, 24))
-        memValue = Ui.text(context, "-- / -- GB", 18f, Skin.TEXT_SOFT, bold = true).apply {
+        // 右上「运行内存 3.2 / 4.0 GB」+ 进度条（放大字号方便车机余光一眼看清）。
+        val memLabel = Ui.text(context, "运行内存", MEM_LABEL_SP, Skin.TEXT_DIM, bold = true).apply {
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+        }
+        panel.addView(memLabel, abs(MEM_LEFT, TITLE_TOP + 4, 120, 34))
+        memValue = Ui.text(context, "-- / -- GB", MEM_VALUE_SP, Skin.TEXT, bold = true).apply {
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
         }
-        panel.addView(memValue, abs(MEM_LEFT, TITLE_TOP + 8, MEM_W, 30))
+        panel.addView(memValue, abs(MEM_LEFT + 112, TITLE_TOP, MEM_W - 112, 40))
         memBar = MemoryBar(context)
-        panel.addView(memBar, abs(MEM_LEFT, TITLE_TOP + MEM_BAR_TOP, MEM_W, 6))
+        panel.addView(memBar, abs(MEM_LEFT, TITLE_TOP + MEM_BAR_TOP, MEM_W, 8))
 
-        // 右侧：清空 + 关闭
-        val actions = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        clear = pill("清空", false) {
-            val removed = tasks.clear()
-            Logx.event(LogTags.RECENT, "点击清空最近任务", "removed" to removed)
-            reload()
-        }
+        // 右上角保留「关闭」按钮；「清空」移至页面底部正中。
         val close = pill("关闭", true) { onClose?.invoke() }
-        actions.addView(clear, LinearLayout.LayoutParams(-2, 48).apply { rightMargin = 12 })
-        actions.addView(close, LinearLayout.LayoutParams(-2, 48))
         panel.addView(
-            actions,
-            LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply {
-                topMargin = 30
-                rightMargin = 8
+            close,
+            LayoutParams(LayoutParams.WRAP_CONTENT, 48, Gravity.TOP or Gravity.END).apply {
+                topMargin = 32
+                rightMargin = PANEL_PAD
             },
         )
 
@@ -134,8 +124,8 @@ class RecentTasksPage(
             abs(PANEL_PAD, DIVIDER_TOP, PANEL_W - PANEL_PAD * 2, 1),
         )
 
-        hint = Ui.text(context, "", 18f, Skin.TEXT_DIM).apply { gravity = Gravity.CENTER }
-        panel.addView(hint, abs(PANEL_PAD, GRID_TOP, PANEL_W - PANEL_PAD * 2, 120))
+        hint = Ui.text(context, "", 20f, Skin.TEXT_DIM).apply { gravity = Gravity.CENTER }
+        panel.addView(hint, abs(PANEL_PAD, GRID_TOP, PANEL_W - PANEL_PAD * 2, 140))
 
         val scroll = ScrollView(context).apply {
             isFillViewport = true
@@ -144,6 +134,24 @@ class RecentTasksPage(
         grid = GridLayout(context).apply { columnCount = COLUMNS }
         scroll.addView(grid, FrameLayout.LayoutParams(GRID_W, LayoutParams.WRAP_CONTENT))
         panel.addView(scroll, abs(PANEL_PAD, GRID_TOP, GRID_W, GRID_H))
+
+        // 底部正中「清空」按钮
+        clear = pill("清空", false) {
+            val removed = tasks.clear()
+            Logx.event(LogTags.RECENT, "点击清空最近任务", "removed" to removed)
+            reload()
+        }.apply {
+            textSize = 20f
+            typeface = Typeface.DEFAULT_BOLD
+            minWidth = CLEAR_BTN_W
+            setPadding(36, 10, 36, 10)
+        }
+        panel.addView(
+            clear,
+            LayoutParams(LayoutParams.WRAP_CONTENT, CLEAR_BTN_H, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+                bottomMargin = CLEAR_BOTTOM_MARGIN
+            },
+        )
 
         reload()
         Logx.event(LogTags.RECENT, "最近任务页打开", "state" to tasks.state.name)
@@ -220,15 +228,15 @@ class RecentTasksPage(
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = 2 },
         )
         head.addView(texts, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = 14 })
-        // 「占用 N MB」徽标（画板 v6 新增）：拿不到进程 PSS 时显示 `--`，不编造数字。
+        // 「占用 N MB」徽标（放大字号便于辨认）：拿不到进程 PSS 时显示 `--`，不编造数字。
         val usedMb = ProcMemory.pssMb(context, app.pkg)
         head.addView(
-            Ui.text(context, if (usedMb == null) "占用 --" else "占用 $usedMb MB", 12f, Skin.TEXT_SOFT).apply {
+            Ui.text(context, if (usedMb == null) "占用 --" else "占用 $usedMb MB", CARD_MEM_SP, Skin.TEXT_SOFT, bold = true).apply {
                 gravity = Gravity.CENTER
-                setPadding(12, 0, 12, 0)
-                background = Ui.round(pal.withAlpha(Skin.TEXT, 0x10), CoreShape.PILL)
+                setPadding(14, 0, 14, 0)
+                background = Ui.round(pal.withAlpha(Skin.TEXT, 0x14), CoreShape.PILL)
             },
-            LinearLayout.LayoutParams(-2, 26).apply { leftMargin = 10 },
+            LinearLayout.LayoutParams(-2, 34).apply { leftMargin = 10 },
         )
         box.addView(head, LinearLayout.LayoutParams(-1, -2))
 
@@ -325,29 +333,39 @@ class RecentTasksPage(
         }
 
     companion object {
-        private const val PANEL_W = 1876
-        private const val PANEL_H = 867
-        private const val PANEL_LEFT = 44
-        private const val PANEL_TOP = 73
+        /** 面板宽 1720 水平居中（左右各留 100px 外部遮罩区，点击外区可方便关闭）。 */
+        private const val PANEL_W = 1720
+        private const val PANEL_H = 848
+        private const val PANEL_LEFT = 100
+        private const val PANEL_TOP = 84
         private const val PANEL_PAD = 40
-        private const val TITLE_TOP = 34
-        private const val DIVIDER_TOP = 100
-        private const val GRID_TOP = 124
-        private const val GRID_H = 700
+        private const val TITLE_TOP = 30
+        private const val DIVIDER_TOP = 106
+        private const val GRID_TOP = 128
+        private const val CLEAR_BTN_W = 200
+        private const val CLEAR_BTN_H = 54
+        private const val CLEAR_BOTTOM_MARGIN = 22
+        private const val GRID_H = PANEL_H - GRID_TOP - CLEAR_BTN_H - CLEAR_BOTTOM_MARGIN - 20
         private const val GRID_W = PANEL_W - PANEL_PAD * 2
         private const val COLUMNS = 4
-        private const val CELL_W = 422
-        private const val CELL_H = 193
-        private const val CELL_GAP = 24
-        private const val ICON = 64
+        private const val CELL_GAP = 20
+        private const val CELL_W = (GRID_W - CELL_GAP * (COLUMNS - 1)) / COLUMNS
+        private const val CELL_H = 192
+        private const val ICON = 60
 
-        /** 标题「最近任务」40px bold 的宽度（画板实测徽标从 250 起始 → 相对 206）。 */
+        /** 标题「最近任务」40px bold 的宽度。 */
         private const val TITLE_TEXT_W = 176
 
-        /** 右上运行内存块（画板 10-recent：x1418..1730 → 相对面板 1374..1686）。 */
-        private const val MEM_LEFT = 1371
-        private const val MEM_W = 230
-        private const val MEM_BAR_TOP = 56
+        /** 右上运行内存块（在「关闭」按钮左侧留足空间，放大字号）。 */
+        private const val MEM_W = 340
+        private const val MEM_LEFT = PANEL_W - PANEL_PAD - 104 - 28 - MEM_W
+        private const val MEM_BAR_TOP = 54
+        internal const val MEM_LABEL_SP = 22f
+        internal const val MEM_VALUE_SP = 26f
+        internal const val CARD_MEM_SP = 17f
+
+        /** 遮罩透明度（约 38%），清晰区分面板内外边界。 */
+        private const val SCRIM_ALPHA = 96
     }
 
     /**

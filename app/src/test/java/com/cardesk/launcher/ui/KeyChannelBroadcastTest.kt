@@ -97,8 +97,6 @@ class KeyChannelBroadcastTest {
         prefs.voiceClickAction = Prefs.ACTION_NONE
         prefs.voiceDoubleAction = Prefs.ACTION_NONE
         prefs.voiceLongAction = Prefs.ACTION_NONE
-        prefs.mediaPrevLongAction = Prefs.ACTION_NONE
-        prefs.mediaNextLongAction = Prefs.ACTION_NONE
     }
 
     /** 推进虚拟时钟（毫秒），触发到期的定时器。 */
@@ -194,54 +192,69 @@ class KeyChannelBroadcastTest {
         assertFalse(oem(Press.CLICK, keyCode = 4242))
     }
 
-    // ---------------------------------------------------------------- 媒体键
+    // ---------------------------------------------------------------- 媒体键（已移除增强，一律放行）
 
     @Test
-    fun `媒体键没配长按时不吞按键`() {
-        // 第三百一十五轮修的 bug：以前这里返回 true ⇒ 方控切歌失灵
-        assertFalse(down(KeyActionResolver.KEYCODE_MEDIA_PREVIOUS))
-        assertFalse(up(KeyActionResolver.KEYCODE_MEDIA_PREVIOUS))
-        assertFalse(down(KeyActionResolver.KEYCODE_MEDIA_NEXT))
-        assertFalse(up(KeyActionResolver.KEYCODE_MEDIA_NEXT))
-    }
-
-    @Test
-    fun `媒体键配了长按时短按不执行动作`() {
-        prefs.mediaPrevLongAction = Prefs.ACTION_360_TOGGLE
-        assertTrue(down(KeyActionResolver.KEYCODE_MEDIA_PREVIOUS))
-        // 没按住到阈值就抬手 ⇒ 不执行长按动作（短按由执行端补发回系统）
-        assertTrue(up(KeyActionResolver.KEYCODE_MEDIA_PREVIOUS))
+    fun `媒体键无论 KeyEvent 还是方控广播都一律放行`() {
+        assertFalse(down(KeyEvent.KEYCODE_MEDIA_PREVIOUS))
+        advance(600)
+        assertFalse(up(KeyEvent.KEYCODE_MEDIA_PREVIOUS))
+        assertFalse(down(KeyEvent.KEYCODE_MEDIA_NEXT))
+        advance(600)
+        assertFalse(up(KeyEvent.KEYCODE_MEDIA_NEXT))
+        assertFalse(oem(Press.CLICK, keyCode = OemKeyProtocol.KEY_R_MEDIA_PREV))
+        assertFalse(oem(Press.LONG, keyCode = OemKeyProtocol.KEY_R_MEDIA_PREV))
+        assertFalse(oem(Press.LONG, keyCode = OemKeyProtocol.KEY_R_MEDIA_NEXT))
         assertEquals(0, toggles)
         assertTrue(executed.isEmpty())
     }
 
-    @Test
-    fun `媒体键按住超过阈值执行长按动作`() {
-        prefs.mediaPrevLongAction = Prefs.ACTION_360_TOGGLE
-        assertTrue(down(KeyActionResolver.KEYCODE_MEDIA_PREVIOUS))
-        advance(600)
-        assertEquals(1, toggles)
-        assertTrue(up(KeyActionResolver.KEYCODE_MEDIA_PREVIOUS))
-        assertEquals(1, toggles)
-    }
+    // ------------------------------------------------------------ 设置页自检与开关即时展开
 
-    // ------------------------------------------------------------ 设置页自检
+    @Test
+    fun `开启按键增强开关后立即展开内容且不显示媒体键配置`() {
+        prefs.keysEnhanced = false
+        val activity: Activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        val overlay = SettingsOverlay(activity, prefs, Palettes.night)
+        overlay.showPageKey("keys")
+        shadowOf(Looper.getMainLooper()).idle()
+
+        // 初始关闭：只看到总开关，下方配置区为空
+        val beforeTexts = collectTexts(overlay)
+        assertTrue("缺少启用按键增强开关", beforeTexts.contains("启用按键增强"))
+        assertFalse("开关关闭时不应显示语音键配置", beforeTexts.contains("语音助手 / * 键"))
+
+        // 点击「启用按键增强」开关 ⇒ 无需切换页面即刻展开
+        val sw = findFirstView(overlay) { it.javaClass.simpleName == "BoardSwitch" }
+        assertTrue("找不到启用按键增强的开关控件", sw != null)
+        sw!!.performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertTrue("prefs.keysEnhanced 应已开启", prefs.keysEnhanced)
+        val afterTexts = collectTexts(overlay)
+        assertTrue("开启开关后应立即显示语音键分组", afterTexts.contains("语音助手 / * 键"))
+        assertTrue("开启开关后应立即显示按键通路分组", afterTexts.contains("按键通路（车机广播）"))
+        assertFalse("媒体按键增强配置应已移除", afterTexts.contains("媒体按键（长按）"))
+        assertFalse("媒体长按自测按钮应已移除", afterTexts.contains("媒体长按"))
+        assertFalse("上一曲配置应已移除", afterTexts.contains("上一曲"))
+        assertFalse("下一曲配置应已移除", afterTexts.contains("下一曲"))
+
+        // 点击「切换驾驶模式」后应立即展开「目标驾驶模式」，无需切页
+        val driveChip = findTextView(overlay) { it.text == "切换驾驶模式" }
+        assertTrue("找不到切换驾驶模式选项", driveChip != null)
+        driveChip!!.performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue("选切换驾驶模式后应立即出现目标驾驶模式", collectTexts(overlay).contains("目标驾驶模式"))
+    }
 
     @Test
     fun `设置页自检按钮能把事件喂进执行端`() {
-        // 第三百一十五轮：按键增强面板已合并进设置页 —— 自检按钮就在「按键增强」页底部
         prefs.keysEnhanced = true
-        prefs.mediaPrevLongAction = Prefs.ACTION_360_TOGGLE
+        prefs.voiceLongAction = Prefs.ACTION_360_TOGGLE
         val activity: Activity = Robolectric.buildActivity(Activity::class.java).setup().get()
-        // 挂执行端要在 Activity 建好之后：MainActivity 会把桌面自己的执行端挂上去，
-        // 这里换成用例的执行端，才能数到 toggles
         OemKeyRuntime.attach(activity, prefs, executor)
         val overlay = SettingsOverlay(activity, prefs, Palettes.night)
-        // select 是私有的：直接把设置页切到「按键增强」页
-        SettingsOverlay::class.java
-            .getDeclaredMethod("select", String::class.java)
-            .apply { isAccessible = true }
-            .invoke(overlay, "keys")
+        overlay.showPageKey("keys")
         shadowOf(Looper.getMainLooper()).idle()
 
         val texts = collectTexts(overlay)
@@ -249,12 +262,12 @@ class KeyChannelBroadcastTest {
         assertTrue("缺少最近按键诊断行", texts.contains("最近按键"))
         assertTrue("缺少单击自测按钮", texts.contains("单击"))
         assertTrue("缺少长按自测按钮", texts.contains("长按"))
-        assertTrue("缺少媒体长按自测按钮", texts.contains("媒体长按"))
+        assertFalse("不应再有媒体长按自测按钮", texts.contains("媒体长按"))
 
-        // 点「媒体长按」⇒ 走媒体键长按动作（上一曲 = 360 开关）
-        val button = findTextView(overlay) { it.text == "媒体长按" }
-        assertTrue("找不到媒体长按自测按钮", button != null)
-        button!!.performClick()
+        // 点自测区的「长按」（页面上最后一个「长按」按钮）⇒ 走语音键长按动作（360 开关）
+        val allLong = findAllTextViews(overlay) { it.text == "长按" }
+        assertTrue("找不到长按自测按钮", allLong.size >= 2)
+        allLong.last().performClick()
         shadowOf(Looper.getMainLooper()).idle()
         assertEquals(1, toggles)
     }
@@ -289,6 +302,28 @@ class KeyChannelBroadcastTest {
         if (root is ViewGroup) {
             for (i in 0 until root.childCount) {
                 findTextView(root.getChildAt(i), predicate)?.let { return it }
+            }
+        }
+        return null
+    }
+
+    private fun findAllTextViews(root: View, predicate: (TextView) -> Boolean): List<TextView> {
+        val out = mutableListOf<TextView>()
+        fun walk(view: View) {
+            if (view is TextView && predicate(view)) out += view
+            if (view is ViewGroup) {
+                for (i in 0 until view.childCount) walk(view.getChildAt(i))
+            }
+        }
+        walk(root)
+        return out
+    }
+
+    private fun findFirstView(root: View, predicate: (View) -> Boolean): View? {
+        if (predicate(root)) return root
+        if (root is ViewGroup) {
+            for (i in 0 until root.childCount) {
+                findFirstView(root.getChildAt(i), predicate)?.let { return it }
             }
         }
         return null

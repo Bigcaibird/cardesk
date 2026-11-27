@@ -121,6 +121,8 @@ object Skin {
         // 静态壁纸 / 主题兜底这一路接管 ⇒ 之前的视频分布作废（第231轮）。
         videoTop = null
         videoCenter = null
+        videoTopDark = null
+        videoCenterDark = null
         applyOverlayInk()
     }
 
@@ -133,6 +135,8 @@ object Skin {
      */
     private var videoTop: WallpaperSampler.Tone? = null
     private var videoCenter: WallpaperSampler.Tone? = null
+    private var videoTopDark: Boolean? = null
+    private var videoCenterDark: Boolean? = null
 
     /** 当前壁纸在浮层区的平均颜色（诊断 / 测试用）。 */
     val backdrop: List<Int?> get() = listOf(backdropTop, backdropCenter)
@@ -159,8 +163,12 @@ object Skin {
 
     /** 重算两套浮层墨色。 */
     private fun applyOverlayInk() {
-        overlayTop = overlayInkFor(backdropTop, videoTop)
-        overlayCenter = overlayInkFor(backdropCenter, videoCenter)
+        overlayTop = overlayInkFor(backdropTop, videoTop, videoTopDark).also { ink ->
+            if (videoTop != null) videoTopDark = (ink.surface == WallpaperContrast.ON_DARK.surface)
+        }
+        overlayCenter = overlayInkFor(backdropCenter, videoCenter, videoCenterDark).also { ink ->
+            if (videoCenter != null) videoCenterDark = (ink.surface == WallpaperContrast.ON_DARK.surface)
+        }
     }
 
     /**
@@ -176,10 +184,11 @@ object Skin {
     private fun overlayInkFor(
         backdrop: Int?,
         tone: WallpaperSampler.Tone? = null,
+        prevDark: Boolean? = null,
     ): WallpaperContrast.Ink {
-        // 有分布（视频壁纸）⇒ 按最坏情况算；没有 ⇒ 老口径（平均色）。
+        // 有分布（视频壁纸）⇒ 按最坏情况算并带极性迟滞；没有 ⇒ 老口径（平均色）。
         val ink = if (tone != null) {
-            WallpaperContrast.inkForTone(tone, isNight)
+            WallpaperContrast.inkForTone(tone, isNight, prevDark)
         } else {
             WallpaperContrast.inkFor(backdrop, isNight)
         }

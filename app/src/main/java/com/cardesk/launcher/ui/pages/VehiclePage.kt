@@ -27,6 +27,8 @@ import com.cardesk.launcher.core.car3d.Car3dAssets
 import com.cardesk.launcher.core.car3d.Car3dDebugPose
 import com.cardesk.launcher.core.car3d.Car3dPainter
 import com.cardesk.launcher.core.car3d.CarPose
+import com.cardesk.launcher.vehicle.AdaptapiSensors
+import com.cardesk.launcher.vehicle.BatteryVoltageProbe
 import com.cardesk.launcher.vehicle.TireOrder
 import com.cardesk.launcher.vehicle.VehicleInfo
 import kotlin.math.abs
@@ -95,8 +97,26 @@ class VehiclePage(context: Context, private val pal: Palette) : FrameLayout(cont
     /** 「油量」的百分比读数（画板 78% 那一行）。 */
     private val fuelValue: TextView
 
-    /** 「平均油耗」读数（画板 14.2 kWh/100km 那一行，单位换成 L/100km）。 */
+    /** 「总里程」读数（单位 km）。 */
+    private val odometerValue: TextView
+
+    /** 「平均油耗」读数（单位 L/100km）。 */
     private val avgFuelValue: TextView
+
+    /** 「保养里程」读数（单位 km）。 */
+    private val maintenanceValue: TextView
+
+    /** 「实时车速」读数（单位 km/h）。 */
+    private val speedValue: TextView
+
+    /** 「电瓶电压」读数（单位 V）。 */
+    private val batteryVoltageValue: TextView
+
+    /** 「车内 PM2.5」读数（单位 µg/m³）。 */
+    private val pm25Value: TextView
+
+    /** 「车内 AQI」读数。 */
+    private val aqiValue: TextView
 
     /**
      * 「海拔」读数。
@@ -105,6 +125,14 @@ class VehiclePage(context: Context, private val pal: Palette) : FrameLayout(cont
      * 所以不在 [bind] 里刷，而是由宿主把 `AltitudeDesk.text()` 赋给 [altitudeText]。
      */
     private val altitudeValue: TextView
+
+    /** 右下「传感器监测」胶囊：电源 / 蓄电池 / 机油 / 制动液 / 冷却液 / 油量告警。 */
+    private val sensorIgnitionPill: TextView
+    private val sensorBatteryPill: TextView
+    private val sensorOilPill: TextView
+    private val sensorBrakeFluidPill: TextView
+    private val sensorCoolantPill: TextView
+    private val sensorFuelWarnPill: TextView
     private val tireValues = arrayOfNulls<TextView>(4)
     private val carView: TopCarView
     private val doorLabels = ArrayList<TextView>()
@@ -167,9 +195,11 @@ class VehiclePage(context: Context, private val pal: Palette) : FrameLayout(cont
      */
     var altitudeText: String = "--"
         set(value) {
+            if (field == value) return
             field = value
-            setValue(altitudeValue, value)
-            invalidate()
+            if (altitudeValue.text?.toString() != value) {
+                altitudeValue.text = value
+            }
         }
 
     var onOpenClimate: (() -> Unit)? = null
@@ -215,114 +245,113 @@ class VehiclePage(context: Context, private val pal: Palette) : FrameLayout(cont
         sourceLabel = Ui.text(context, "", 14f, Skin.TEXT_DIM).apply { gravity = Gravity.END }
         panel.addView(sourceLabel, endFrame(360, 20, 36, 27))
 
-        /* ---------- 左列：续航与油量（画板 32,71 / 490×203） ---------- */
+        /* ---------- 左列：续航与油量（占满左列 32,71 / 490×786，放大字号 + 电瓶电压） ---------- */
         val range = card()
-        panel.addView(range, Ui.frame(490, 203, Gravity.TOP or Gravity.START, 32, 71))
+        panel.addView(range, Ui.frame(490, 786, Gravity.TOP or Gravity.START, 32, 71))
 
         range.addView(
-            Ui.text(context, "续航与油量", 16f, Skin.TEXT_SOFT),
-            Ui.frame(-2, -2, Gravity.TOP or Gravity.START, 25, 20),
+            Ui.text(context, "续航与油量", 18f, Skin.TEXT_SOFT),
+            Ui.frame(-2, -2, Gravity.TOP or Gravity.START, 26, 22),
         )
-        // 「386」56px + 小号 km：画板里 km 贴着数字右下角，所以用一行、底部对齐。
+        // 「386」68px + 「km」26px：放大续航数字与单位，更易读。
         val valueRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.BOTTOM
         }
-        // 初值不写假数字：画板上的 386 是运行期 mock 数据，真值由 bind() 填。
-        rangeValue = Ui.text(context, "--", 56f, Skin.TEXT, bold = true)
+        rangeValue = Ui.text(context, "--", 68f, Skin.TEXT, bold = true)
         valueRow.addView(rangeValue, Ui.linear(-2, -2))
         valueRow.addView(
-            Ui.text(context, "km", 22f, Skin.TEXT_DIM),
+            Ui.text(context, "km", 26f, Skin.TEXT_DIM),
             Ui.linear(-2, -2).apply {
                 leftMargin = 10
-                bottomMargin = 10
+                bottomMargin = 12
             },
         )
-        range.addView(valueRow, Ui.frame(320, 74, Gravity.TOP or Gravity.START, 25, 46))
+        range.addView(valueRow, Ui.frame(436, 92, Gravity.TOP or Gravity.START, 26, 56))
 
-        // 两行键值：画板 y≈265 / 297（面板内 127 / 159），右值右对齐到卡内 24。
-        // 画板原文是 78% / 14.2 kWh/100km（电车口径）；这台是燃油车，
-        // 所以标签与单位按车改：油量（fuelPercent）与平均油耗（avgFuelConsumption，L/100km）。
-        // 数据层没有时仍显示 `--`，不编数字。
-        val fuelRow = kvRow("油量", "--", 16f)
-        fuelValue = fuelRow.getChildAt(1) as TextView
-        range.addView(fuelRow, Ui.frame(440, 24, Gravity.TOP or Gravity.START, 25, 122))
-
-        val avgFuelRow = kvRow("平均油耗", "--", 14f)
-        avgFuelValue = avgFuelRow.getChildAt(1) as TextView
-        range.addView(avgFuelRow, Ui.frame(440, 24, Gravity.TOP or Gravity.START, 25, 154))
-
-        // 第三行「海拔」：接在 154+24=178 之后，高 22 → 卡内 200，卡高 203，
-        // 留 3px 底距，不与卡底重叠；与上面两行同为「左标签 16 / 右值 14」。
-        val altitudeRow = kvRow("海拔", "--", 14f)
-        altitudeValue = altitudeRow.getChildAt(1) as TextView
-        range.addView(altitudeRow, Ui.frame(440, 22, Gravity.TOP or Gravity.START, 25, 178))
-
-        /* ---------- 左列：胎压（画板 32,289 / 490×568） ---------- */
-        val tires = card()
-        panel.addView(tires, Ui.frame(490, 568, Gravity.TOP or Gravity.START, 32, 289))
-        tires.addView(
-            Ui.text(context, "胎压监测", 16f, Skin.TEXT_SOFT),
-            Ui.frame(-2, -2, Gravity.TOP or Gravity.START, 24, 20),
-        )
-        tires.addView(
-            Ui.text(context, "kPa", 12f, Skin.TEXT_DIM).apply { gravity = Gravity.END },
-            endFrame(60, 18, 20, 24),
-        )
-
-        // 2×2 灰格：画板 x98..316 / 333..551（219 宽、17 间距），y417..651 / 668..901（234 高）。
-        for (i in 0 until 4) {
-            val row = i / 2
-            val col = i % 2
-            val cell = FrameLayout(context).apply {
-                // 格底是「文字色 7%」的半透明灰：日间≈#ECEDED，夜间自动变成浅一档的深灰。
-                background = Ui.round(tint(Skin.TEXT, 0x12), 20f)
+        // 指标明细：油量、总里程、平均油耗、保养里程、车速、电瓶电压、PM2.5、AQI、海拔
+        val metricTop = 176
+        val metricStep = 64
+        fun addMetricRow(index: Int, key: String, valueSp: Float = 20f, labelSp: Float = 18f): TextView {
+            val row = kvRow(key, "--", valueSp, labelSp)
+            val y = metricTop + index * metricStep
+            range.addView(row, Ui.frame(436, 44, Gravity.TOP or Gravity.START, 26, y))
+            if (index > 0) {
+                range.addView(
+                    View(context).apply { setBackgroundColor(Skin.GLASS_STROKE) },
+                    Ui.frame(436, 1, Gravity.TOP or Gravity.START, 26, y - 10),
+                )
             }
-            tires.addView(
-                cell,
-                Ui.frame(219, 234, Gravity.TOP or Gravity.START, 23 + col * 236, 61 + row * 251),
-            )
-            cell.addView(
-                Ui.text(context, TireOrder.NAMES[i], 16f, Skin.TEXT_SOFT),
-                Ui.frame(-2, -2, Gravity.TOP or Gravity.START, 16, 28),
-            )
-            val valueRow2 = LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.BOTTOM
+            return (row.getChildAt(1) as TextView).apply {
+                fontFeatureSettings = "tnum"
+                gravity = Gravity.END or Gravity.CENTER_VERTICAL
             }
-            val v = Ui.text(context, "--", 40f, Skin.TEXT, bold = true)
-            tireValues[i] = v
-            valueRow2.addView(v, Ui.linear(-2, -2))
-            valueRow2.addView(
-                Ui.text(context, "kPa", 14f, Skin.TEXT_DIM),
-                Ui.linear(-2, -2).apply {
-                    leftMargin = 6
-                    bottomMargin = 4
-                },
-            )
-            cell.addView(
-                valueRow2,
-                Ui.frame(180, 52, Gravity.TOP or Gravity.START, 16, 52),
-            )
         }
 
-        /* ---------- 中列：车门与车窗（画板 552,71 / 782×786） ---------- */
+        fuelValue = addMetricRow(0, "油量", 24f, 19f)
+        odometerValue = addMetricRow(1, "总里程", 21f, 18f)
+        avgFuelValue = addMetricRow(2, "平均油耗", 21f, 18f)
+        maintenanceValue = addMetricRow(3, "保养里程", 20f, 18f)
+        speedValue = addMetricRow(4, "实时车速", 20f, 18f)
+        batteryVoltageValue = addMetricRow(5, "电瓶电压", 22f, 18f)
+        pm25Value = addMetricRow(6, "车内 PM2.5", 20f, 18f)
+        aqiValue = addMetricRow(7, "车内 AQI", 20f, 18f)
+        altitudeValue = addMetricRow(8, "海拔", 20f, 18f).apply { minWidth = 110 }
+
+        /* ---------- 中列：车况与胎压（画板 552,71 / 782×786） ---------- */
         val model = card()
         panel.addView(model, Ui.frame(782, 786, Gravity.TOP or Gravity.START, 552, 71))
         model.addView(
-            Ui.text(context, "车门与车窗", 16f, Skin.TEXT_SOFT),
+            Ui.text(context, "车门与胎压", 18f, Skin.TEXT_SOFT),
             Ui.frame(-2, -2, Gravity.TOP or Gravity.START, 24, 20),
         )
 
-        // 车模：画板车身中心 ≈ abs(823, 520)，即卡内 (227, 382)；视图留出车轮/阴影的余量。
+        // 车模：在左/右胎压徽标之间精确水平居中（中心 x=258），两侧留出等距胎压位
         carView = TopCarView(context, pal)
-        model.addView(carView, Ui.frame(300, 400, Gravity.TOP or Gravity.START, 77, 197))
+        model.addView(carView, Ui.frame(260, 360, Gravity.TOP or Gravity.START, 128, 170))
 
-        // 四门 + 后备箱状态：画板文字 x946、行高 48、首行 y468 → 卡内 (350, 314)。
-        // 胶囊贴在 1247（卡内 651），所以列表宽 300，行内右对齐。
-        // 第246轮多一行「后备箱」，容器高 192 → 240（五行 × 48）。
+        // 四轮胎压（FL=0, FR=1, RL=2, RR=3），相对车模中心 x=258 严格左右对称（各距中心 114px）
+        val tirePos = arrayOf(
+            24 to 215,   // 左前（x=24..144）
+            372 to 215,  // 右前（x=372..492）
+            24 to 415,   // 左后（x=24..144）
+            372 to 415,  // 右后（x=372..492）
+        )
+        for (i in 0 until 4) {
+            val badge = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+                setPadding(10, 10, 10, 10)
+                background = Ui.round(tint(Skin.TEXT, 0x10), 16f)
+            }
+            badge.addView(
+                Ui.text(context, TireOrder.NAMES[i], 13f, Skin.TEXT_DIM),
+                Ui.linear(-2, -2),
+            )
+            val tireRow = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.BOTTOM
+            }
+            val v = Ui.text(context, "--", 26f, Skin.TEXT, bold = true)
+            tireValues[i] = v
+            tireRow.addView(v, Ui.linear(-2, -2))
+            tireRow.addView(
+                Ui.text(context, "kPa", 12f, Skin.TEXT_DIM),
+                Ui.linear(-2, -2).apply {
+                    leftMargin = 3
+                    bottomMargin = 3
+                },
+            )
+            badge.addView(tireRow, Ui.linear(-2, -2).apply { topMargin = 2 })
+            model.addView(
+                badge,
+                Ui.frame(120, 74, Gravity.TOP or Gravity.START, tirePos[i].first, tirePos[i].second),
+            )
+        }
+
+        // 四门 + 后备箱状态：放在中列右侧（x=514..758），与四轮胎压互不遮挡
         val states = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-        model.addView(states, Ui.frame(300, 240, Gravity.TOP or Gravity.START, 350, 314))
+        model.addView(states, Ui.frame(244, 240, Gravity.TOP or Gravity.START, 514, 250))
         for (label in listOf("主驾车门", "副驾车门", "左后车门", "右后车门", "后备箱")) {
             val rowView = FrameLayout(context)
             rowView.addView(
@@ -349,17 +378,14 @@ class VehiclePage(context: Context, private val pal: Palette) : FrameLayout(cont
             states.addView(rowView, Ui.linear(-1, 48))
         }
 
-        /* ---------- 右列：快捷入口（画板 1364,71 / 436×786） ---------- */
+        /* ---------- 右列上：快捷入口（1364,71 / 436×364） ---------- */
         val actions = card()
-        panel.addView(actions, Ui.frame(436, 786, Gravity.TOP or Gravity.START, 1364, 71))
+        panel.addView(actions, Ui.frame(436, 364, Gravity.TOP or Gravity.START, 1364, 71))
         // 画板标题「快捷入口」16px（和其它卡标题同一档）。
         actions.addView(
             Ui.text(context, "快捷入口", 16f, Skin.TEXT_SOFT),
             Ui.frame(-2, -2, Gravity.TOP or Gravity.START, 22, 20),
         )
-        // 画板右列是 3 个真实入口：图标 + 标题 16 粗 + 副标题 12 弱字 + 右侧 ›。
-        // 行高 88、行距 12（步进 100）、圆角 20，与画板行盒一致；
-        // 原来的 6 个「点了只弹 Toast」的模拟动作连同 Toast/Logx 一起删掉。
         val entries = listOf(
             Triple(0, "空调控制", "打开空调调整页"),
             Triple(1, "360 环影", "厂商 AVM 画面"),
@@ -367,11 +393,6 @@ class VehiclePage(context: Context, private val pal: Palette) : FrameLayout(cont
         )
         for ((i, entry) in entries.withIndex()) {
             val (type, title, sub) = entry
-            // 原厂设置是「设置包存在时才可用」：回调没接上就整行置灰、不响应点击，
-            // 副标题仍保持画板文案（不改成「未安装」之类的自造状态）。
-            // 三行都保持可点：宿主**总是**接上 `onOpenOem`（拿不到原厂设置包时它会
-            // 退回 CarDesk 的原厂设置页并如实提示）。若按「构造时回调是否为 null」置灰，
-            // 宿主在构造之后才接线，第三行会永远是灰的（实机踩过）。
             val enabled = true
             val row = FrameLayout(context).apply {
                 background = Ui.round(tint(Skin.TEXT, 0x12), 20f)
@@ -379,7 +400,6 @@ class VehiclePage(context: Context, private val pal: Palette) : FrameLayout(cont
                     isClickable = true
                     Motion.press(this, MotionSpec.PRESS_SCALE_ROW)
                     setOnClickListener {
-                        // 点击时再读一次回调：宿主可能在页面构造之后才接线。
                         when (i) {
                             0 -> onOpenClimate?.invoke()
                             1 -> onOpen360?.invoke()
@@ -407,8 +427,45 @@ class VehiclePage(context: Context, private val pal: Palette) : FrameLayout(cont
             )
             actions.addView(row, Ui.frame(392, 88, Gravity.TOP or Gravity.START, 22, 54 + i * 100))
         }
-        // 画板右下角那行 12px「画板注释：原 6 个动作…」是**设计说明**，不是产品文案；
-        // 渲染到车机上会被用户当成功能描述，所以这里不画（与抽屉底部提示的处理一致）。
+
+        /* ---------- 右列下：传感器监测（1364,457 / 436×400） ---------- */
+        val sensorsCard = card()
+        panel.addView(sensorsCard, Ui.frame(436, 400, Gravity.TOP or Gravity.START, 1364, 457))
+        sensorsCard.addView(
+            Ui.text(context, "传感器监测", 16f, Skin.TEXT_SOFT),
+            Ui.frame(-2, -2, Gravity.TOP or Gravity.START, 22, 20),
+        )
+        val sensorList = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        sensorsCard.addView(sensorList, Ui.frame(392, 324, Gravity.TOP or Gravity.START, 22, 56))
+        fun addSensorRow(label: String, divider: Boolean): TextView {
+            if (divider) {
+                sensorList.addView(
+                    View(context).apply { setBackgroundColor(Skin.GLASS_STROKE) },
+                    Ui.linear(-1, 1),
+                )
+            }
+            val rowView = FrameLayout(context)
+            rowView.addView(
+                Ui.text(context, label, 16f, Skin.TEXT),
+                Ui.frame(-2, -2, Gravity.CENTER_VERTICAL or Gravity.START, 0, 0),
+            )
+            val pill = Ui.text(context, "--", 13f, pal.textFaint).apply {
+                setPadding(14, 6, 14, 6)
+                background = Ui.round(tint(pal.textFaint, 0x1E), Shape.PILL)
+            }
+            rowView.addView(
+                pill,
+                Ui.frame(-2, -2, Gravity.CENTER_VERTICAL or Gravity.END, 0, 0),
+            )
+            sensorList.addView(rowView, Ui.linear(-1, 53))
+            return pill
+        }
+        sensorIgnitionPill = addSensorRow("电源状态", false)
+        sensorBatteryPill = addSensorRow("蓄电池电量", true)
+        sensorOilPill = addSensorRow("机油液位", true)
+        sensorBrakeFluidPill = addSensorRow("制动液位", true)
+        sensorCoolantPill = addSensorRow("冷却液", true)
+        sensorFuelWarnPill = addSensorRow("油量告警", true)
     }
 
     /**
@@ -431,9 +488,14 @@ class VehiclePage(context: Context, private val pal: Palette) : FrameLayout(cont
      * @param valueSp 右值字号。画板里百分比行是 16px、单位较长的行是 14px；
      *   显式传入，避免「初值是 `--`」时按后缀猜字号、数据到位后字号不跟着变。
      */
-    private fun kvRow(key: String, value: String, valueSp: Float = 14f): FrameLayout = FrameLayout(context).apply {
+    private fun kvRow(
+        key: String,
+        value: String,
+        valueSp: Float = 14f,
+        labelSp: Float = 16f,
+    ): FrameLayout = FrameLayout(context).apply {
         addView(
-            Ui.text(context, key, 16f, Skin.TEXT_SOFT),
+            Ui.text(context, key, labelSp, Skin.TEXT_SOFT),
             Ui.frame(-2, -2, Gravity.CENTER_VERTICAL or Gravity.START, 0, 0),
         )
         addView(
@@ -457,6 +519,14 @@ class VehiclePage(context: Context, private val pal: Palette) : FrameLayout(cont
      */
     private fun tint(color: Int, alpha: Int): Int = (color and 0x00FFFFFF) or (alpha shl 24)
 
+    private var lastCarPose: CarPose? = null
+    private val doorBgColors = IntArray(4) { 0 }
+    private var trunkBgColor: Int = 0
+
+    private fun setTextIfChanged(view: TextView, text: String) {
+        if (view.text?.toString() != text) view.text = text
+    }
+
     fun bind(info: VehicleInfo) {
         // 排障场景：「车辆页数据不刷新」——数据绑定用 DEBUG，不落盘。
         Logx.d(
@@ -466,30 +536,121 @@ class VehiclePage(context: Context, private val pal: Palette) : FrameLayout(cont
             "rangeKm" to info.rangeKm,
         )
         // 车模姿态：和首页车况卡同一份数据（调试注入优先，模拟器截图用）。
-        carView.setPose(
-            Car3dDebugPose.pose ?: CarPose.of(
-                info.doorsClosed,
-                info.windowsOpen,
-                info.hoodClosed,
-                info.trunkClosed,
-            ),
+        val pose = Car3dDebugPose.pose ?: CarPose.of(
+            info.doorsClosed,
+            info.windowsOpen,
+            info.hoodClosed,
+            info.trunkClosed,
         )
+        val poseChanged = pose != lastCarPose
+        if (poseChanged) {
+            lastCarPose = pose
+            carView.setPose(pose)
+        }
         // 「386」与「km」拆成两个 TextView 后，这里只写数字，单位常驻。
         setValue(rangeValue, if (info.rangeKm >= 0) "${info.rangeKm}" else "--")
         // 油量：百分比和升数两个口径都有，卡片这一行用百分比（和画板 78% 同一档信息量）。
-        fuelValue.text = info.fuelPercent?.let { "$it%" } ?: "--"
+        setTextIfChanged(fuelValue, info.fuelPercent?.let { "$it%" } ?: "--")
+        setTextIfChanged(
+            odometerValue,
+            if (info.odometerKm > 0) {
+                String.format(java.util.Locale.US, "%,d km", info.odometerKm)
+            } else {
+                "--"
+            },
+        )
         // 平均油耗：数据层给的是 L/100km 的 Double，保留一位小数。
         // `0.0` 是车机「没读到」时的占位值（物理上不可能 0 L/100km），按 `--` 处理，不假装有数。
-        avgFuelValue.text = info.avgFuelConsumption?.takeIf { it > 0.0 }?.let {
-            String.format(java.util.Locale.US, "%.1f L/100km", it)
-        } ?: "--"
+        setTextIfChanged(
+            avgFuelValue,
+            info.avgFuelConsumption?.takeIf { it > 0.0 }?.let {
+                String.format(java.util.Locale.US, "%.1f L/100km", it)
+            } ?: "--",
+        )
+        setTextIfChanged(
+            maintenanceValue,
+            info.maintenanceKm?.takeIf { it > 0 }?.let {
+                String.format(java.util.Locale.US, "%,d km", it)
+            } ?: "--",
+        )
+        setTextIfChanged(speedValue, "${info.speedKmh.coerceAtLeast(0)} km/h")
+        setTextIfChanged(
+            batteryVoltageValue,
+            info.batteryVoltage?.takeIf { it > 0f }?.let {
+                String.format(java.util.Locale.US, "%.1f V", it)
+            } ?: "--",
+        )
+        setTextIfChanged(pm25Value, info.pm25Indoor?.takeIf { it >= 0 }?.let { "$it µg/m³" } ?: "--")
+        setTextIfChanged(aqiValue, info.aqiIndoor?.takeIf { it >= 0 }?.let { "$it" } ?: "--")
+
+        // 右下「传感器监测」胶囊刷新
+        bindSensorPill(
+            sensorIgnitionPill,
+            AdaptapiSensors.ignitionLabel(info.ignitionState),
+            when (info.ignitionState) {
+                AdaptapiSensors.IGNITION_DRIVING, AdaptapiSensors.IGNITION_ACTIVE -> pal.accent
+                AdaptapiSensors.IGNITION_CONVENIENCE -> pal.ok
+                AdaptapiSensors.IGNITION_INACTIVE, AdaptapiSensors.IGNITION_ABANDON -> pal.textDim
+                else -> pal.textFaint
+            },
+        )
+        bindSensorPill(
+            sensorBatteryPill,
+            when (info.batteryEnergyLevel) {
+                BatteryVoltageProbe.ENERGY_LEVEL_HIGH -> "正常"
+                BatteryVoltageProbe.ENERGY_LEVEL_LOW -> "电量偏低"
+                else -> "--"
+            },
+            when (info.batteryEnergyLevel) {
+                BatteryVoltageProbe.ENERGY_LEVEL_HIGH -> pal.ok
+                BatteryVoltageProbe.ENERGY_LEVEL_LOW -> pal.warn
+                else -> pal.textFaint
+            },
+        )
+        bindSensorPill(
+            sensorOilPill,
+            AdaptapiSensors.oilLevelLabel(info.oilLevelEvent),
+            when (info.oilLevelEvent) {
+                AdaptapiSensors.OIL_LEVEL_OK -> pal.ok
+                AdaptapiSensors.OIL_LEVEL_LOW1, AdaptapiSensors.OIL_LEVEL_HIGH -> pal.warn
+                AdaptapiSensors.OIL_LEVEL_LOW2 -> pal.danger
+                else -> pal.textFaint
+            },
+        )
+        bindSensorPill(
+            sensorBrakeFluidPill,
+            AdaptapiSensors.brakeFluidLabel(info.brakeFluidEvent),
+            when (info.brakeFluidEvent) {
+                AdaptapiSensors.BRAKE_FLUID_OK -> pal.ok
+                AdaptapiSensors.BRAKE_FLUID_LOW -> pal.danger
+                else -> pal.textFaint
+            },
+        )
+        bindSensorPill(
+            sensorCoolantPill,
+            AdaptapiSensors.coolantWarnLabel(info.coolantWarnEvent),
+            when (info.coolantWarnEvent) {
+                AdaptapiSensors.WARN_NORMAL -> pal.ok
+                AdaptapiSensors.WARN_ACTIVE -> pal.danger
+                else -> pal.textFaint
+            },
+        )
+        bindSensorPill(
+            sensorFuelWarnPill,
+            AdaptapiSensors.fuelLowWarnLabel(info.fuelLowWarnEvent),
+            when (info.fuelLowWarnEvent) {
+                AdaptapiSensors.WARN_NORMAL -> pal.ok
+                AdaptapiSensors.WARN_ACTIVE -> pal.warn
+                else -> pal.textFaint
+            },
+        )
         for (i in tireValues.indices) {
             val t = info.tires.getOrNull(i) ?: Float.NaN
             // 第三十七轮：单位是 kPa（真车 TPMS 报 240/227/237/235），按整数显示。
             val v = tireValues[i] ?: continue
             setValue(v, if (t.isNaN()) "--" else String.format(java.util.Locale.US, "%d", Math.round(t)))
         }
-        sourceLabel.text = "数据来源：${info.source}"
+        setTextIfChanged(sourceLabel, "数据来源：${info.source}")
         // 车门：优先用四门明细；**整组明细都没有**时才退回整体状态（UI 只有二态）。
         //
         // 第四十五轮起明细是**逐门独立**的，所以「这一扇读不到」与
@@ -499,36 +660,43 @@ class VehiclePage(context: Context, private val pal: Palette) : FrameLayout(cont
         for (i in doorLabels.indices) {
             val closed = if (doors != null) doors.getOrNull(i) else allClosed
             val v = doorLabels[i] ?: continue
-            v.text = when (closed) {
+            val labelText = when (closed) {
                 true -> "已关闭"
                 false -> "已打开"
                 null -> "--"
             }
+            setTextIfChanged(v, labelText)
             val target = when (closed) {
                 true -> pal.ok
                 false -> pal.warn
                 null -> pal.textFaint
             }
-            // 胶囊底跟着状态换色：底色不走渐变（文字渐变就够看出变化了），
-            // 但必须和文字同步，否则会出现「绿字橙底」的中间态。
-            v.background = Ui.round(tint(target, 0x1E), Shape.PILL)
+            // 胶囊底跟着状态换色：只在颜色真变时才重建 background，避免每秒 5 次 requestLayout
+            if (doorBgColors[i] != target) {
+                doorBgColors[i] = target
+                v.background = Ui.round(tint(target, 0x1E), Shape.PILL)
+            }
             fadeDoorColor(i, v, target)
         }
         // 后备箱：与四门同一套三态语义（true 已关闭 / false 已打开 / null 读不到）。
         // `trunkClosed == null` 时不猜 —— 显示「--」而不是默认「已关闭」。
         trunkLabel?.let { v ->
             val closed = info.trunkClosed
-            v.text = when (closed) {
+            val labelText = when (closed) {
                 true -> "已关闭"
                 false -> "已打开"
                 null -> "--"
             }
+            setTextIfChanged(v, labelText)
             val target = when (closed) {
                 true -> pal.ok
                 false -> pal.warn
                 null -> pal.textFaint
             }
-            v.background = Ui.round(tint(target, 0x1E), Shape.PILL)
+            if (trunkBgColor != target) {
+                trunkBgColor = target
+                v.background = Ui.round(tint(target, 0x1E), Shape.PILL)
+            }
             if (trunkColor != target) {
                 val from = trunkColor
                 Motion.animateProgress(v) { t ->
@@ -539,7 +707,7 @@ class VehiclePage(context: Context, private val pal: Palette) : FrameLayout(cont
                 Motion.nudge(v)
             }
         }
-        carView.invalidate()
+        if (poseChanged) carView.invalidate()
     }
 
     /**
@@ -567,6 +735,13 @@ class VehiclePage(context: Context, private val pal: Palette) : FrameLayout(cont
      * 只在文本**真的变了**时才顶：车控是定时刷新的，
      * 不比较的话每轮都在顶，数字会一直抖。
      */
+    private fun bindSensorPill(pill: TextView, label: String, color: Int) {
+        if (pill.text?.toString() == label && pill.currentTextColor == color) return
+        pill.text = label
+        pill.setTextColor(color)
+        pill.background = Ui.round(tint(color, 0x1E), Shape.PILL)
+    }
+
     private fun setValue(view: TextView, text: String) {
         if (view.text?.toString() == text) return
         view.text = text

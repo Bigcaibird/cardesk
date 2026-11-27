@@ -91,6 +91,7 @@ object SystemNavigationPolicy {
         hideNavigation: Boolean = false,
         immersiveNavigationPackages: Collection<String> = emptyList(),
         preserveForeignImmersiveFull: Boolean = false,
+        statusIncludeMode: Boolean = false,
     ): String? {
         val remaining = remainingSegments(current, preserveForeignImmersiveFull)
         val out = ArrayList<String>()
@@ -113,16 +114,34 @@ object SystemNavigationPolicy {
             out.add(NavigationKey + "=*")
         }
         if (hideStatus) {
-            val exemptions = hideStatusPackages
-                .asSequence()
-                .map { it.trim() }
-                .filter { it.isNotEmpty() }
-                .distinct()
-                .sortedWith(String.CASE_INSENSITIVE_ORDER)
-                .map { "-$it" }
-                .toList()
-            val status = (listOf("*") + exemptions).joinToString(ExemptionSeparator)
-            out.add("immersive.status=$status")
+            if (statusIncludeMode) {
+                // 正向生效名单模式（与 OemDockPolicy.buildPolicyValue 语义一致）：
+                // 空集 = 全部应用（*）；含 NO_APPS 哨兵 = 不隐藏任何应用；
+                // 其余 = 只对选中的应用隐藏状态栏。
+                if (!hideStatusPackages.contains(com.cardesk.launcher.core.OemDockPolicy.NO_APPS)) {
+                    val statusApps = com.cardesk.launcher.core.OemDockPolicy.formatApps(
+                        hideStatusPackages
+                            .asSequence()
+                            .map { it.trim() }
+                            .filter { it.isNotEmpty() }
+                            .distinct()
+                            .sortedWith(String.CASE_INSENSITIVE_ORDER)
+                            .toList(),
+                    )
+                    out.add("immersive.status=$statusApps")
+                }
+            } else {
+                val exemptions = hideStatusPackages
+                    .asSequence()
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+                    .distinct()
+                    .sortedWith(String.CASE_INSENSITIVE_ORDER)
+                    .map { "-$it" }
+                    .toList()
+                val status = (listOf("*") + exemptions).joinToString(ExemptionSeparator)
+                out.add("immersive.status=$status")
+            }
         }
         if (out.isEmpty()) {
             return remaining.takeIf { it.isNotEmpty() }?.joinToString(SegmentSeparator)
@@ -139,6 +158,7 @@ object SystemNavigationPolicy {
         hideNavigation: Boolean = false,
         immersiveNavigationPackages: Collection<String> = emptyList(),
         preserveForeignImmersiveFull: Boolean = false,
+        statusIncludeMode: Boolean = false,
     ): Boolean {
         val prefs = prefs(context)
         val current = readPolicy(context)
@@ -160,6 +180,7 @@ object SystemNavigationPolicy {
             hideNavigation,
             immersiveNavigationPackages,
             preserveForeignImmersiveFull,
+            statusIncludeMode,
         )
         val ok = SystemOps.applyPolicyControl(context, value)
         if (ok) {

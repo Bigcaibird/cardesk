@@ -58,10 +58,17 @@ object AdaptapiDayNight {
      */
     private const val MAX_RETRY_INTERVAL_MS = 30_000L
 
-    /**
-     * 连续失败多少次记一条日志（第一次必记）—— 第220轮。
-     */
+    /** 连续失败多少次记一条日志（第一次必记）—— 第220轮。 */
     private const val FAIL_LOG_EVERY = 10
+
+    /**
+     * `getDayNight()` 返回不支持值（如 `0`）后的轮询退避间隔（毫秒）。
+     *
+     * 模拟器或部分车机固件的 `DayNightMode.getDayNight()` 会在不支持时打印
+     * `Unknown DayNightMode value: 0 not supported` 并输出完整堆栈到 `System.err`。
+     * 退避 30 秒可避免后台轮询刷屏；若车端主动推送 `onDayNightChanged` 回调，仍会立刻生效。
+     */
+    private const val UNSUPPORTED_BACKOFF_MS = 30_000L
 
     /**
      * 光感变化的合并延时（毫秒）。
@@ -221,8 +228,45 @@ object AdaptapiDayNight {
         false
     }
 
+    /** 最近一次有效读取或回调推送的夜间态快照（供主线程无锁读取，不触发 Binder IPC）。 */
+    @Volatile
+    private var cachedNightUi: Boolean? = null
+
+    /** 上次 `getDayNight()` 返回不支持值（`nightFromDisplay == null`）的时刻（单调时钟）。 */
+    @Volatile
+    private var lastUnsupportedAt = 0L
+
     /**
-     * 当前是不是夜间（**真·光感**）。
+     * 读取最近一次缓存的光感明暗（**主线程安全、零 Binder 开销**）。
+     *
+     * 缓存由三条路径自动更新：
+     * 1. [attach] 成功时的首轮读取；
+     * 2. 车机主动回调 `onDayNightChanged` / `onDayNightModeChange`；
+     * 3. 后台线程 [VehicleSignalSampler] 定期调用 [pollNightUiIfNeeded]。
+     */
+    fun cachedNightUi(): Boolean? = cachedNightUi
+
+    /**
+     * 供后台线程（[VehicleSignalSampler]）轮询光感并更新 [cachedNightUi]。
+     *
+     * - 通道未挂载时按指数退避重试 [attach]；
+     * - 通道已挂载但固件返回不支持值（如 0）时按 [UNSUPPORTED_BACKOFF_MS] 退避，避免持续刷屏 `System.err`。
+     */
+    fun pollNightUiIfNeeded(): Boolean? {
+        if (!registered) appContext?.let { attach(it) }
+        if (mode == null || getDayNightMethod == null) return cachedNightUi
+        val now = SystemClock.elapsedRealtime()
+        if (lastUnsupportedAt > 0L && now - lastUnsupportedAt < UNSUPPORTED_BACKOFF_MS) {
+            return cachedNightUi
+        }
+        return nightUi()
+    }
+
+    /**
+     * 当前是不是夜间（**真·光感**，直接同步读取通道并刷新缓存）。
+     *
+     * 注意：此方法会通过反射触发一次跨进程读取，不应放在主线程 1Hz 刷新循环中；
+     * 主线程请使用 [cachedNightUi]。
      *
      * @return true=夜间 / false=白天；null = 读不到（调用方回落到下一个来源）
      */
@@ -232,8 +276,16 @@ object AdaptapiDayNight {
         if (!registered) appContext?.let { attach(it) }
         val dn = mode ?: return null
         val m = getDayNightMethod ?: return null
-        val value = runCatching { m.invoke(dn) as? Int }.getOrNull() ?: return null
-        return DayNightSource.nightFromDisplay(value)
+        val value = runCatching { m.invoke(dn) as? Int }.getOrNull()
+        val parsed = value?.let { DayNightSource.nightFromDisplay(it) }
+        if (parsed != null) {
+            cachedNightUi = parsed
+            lastUnsupportedAt = 0L
+        } else {
+            cachedNightUi = null
+            lastUnsupportedAt = SystemClock.elapsedRealtime()
+        }
+        return parsed
     }
 
     /**
@@ -260,6 +312,10 @@ object AdaptapiDayNight {
         registered = false
         lastAttemptAt = 0L
         appContext = null
+        cachedNightUi = null
+        lastUnsupportedAt = 0L
+        failCount = 0
+        retryIntervalMs = RETRY_INTERVAL_MS
     }
 
     // ------------------------------------------------------------------ 回调注册
@@ -293,6 +349,8 @@ object AdaptapiDayNight {
 
     private fun handleDisplay(display: Int) {
         val night = DayNightSource.nightFromDisplay(display) ?: return
+        cachedNightUi = night
+        lastUnsupportedAt = 0L
         Logx.i(LogTags.THEME, "车机昼夜回调·明暗", "display" to display, "night" to night)
         post(night)
     }
@@ -300,6 +358,8 @@ object AdaptapiDayNight {
     private fun handleMode(modeValue: Int) {
         // 「跟随」(3) 时模式本身不定明暗 → 读一次实际明暗
         val night = DayNightSource.nightFromMode(modeValue) ?: nightUi() ?: return
+        cachedNightUi = night
+        lastUnsupportedAt = 0L
         Logx.i(LogTags.THEME, "车机昼夜回调·模式", "mode" to modeValue, "night" to night)
         post(night)
     }

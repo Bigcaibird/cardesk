@@ -28,8 +28,12 @@ import com.cardesk.launcher.MainActivity
 import com.cardesk.launcher.R
 import com.cardesk.launcher.core.DockQuickApps
 import com.cardesk.launcher.core.HomeForeground
+import com.cardesk.launcher.core.NavSlot
+import com.cardesk.launcher.core.NavSlots
 import com.cardesk.launcher.core.OemDockPolicy
+import com.cardesk.launcher.core.Palettes
 import com.cardesk.launcher.core.Prefs
+import com.cardesk.launcher.core.Skin
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
 import com.cardesk.launcher.core.media.DockMediaLaunch
@@ -37,6 +41,9 @@ import com.cardesk.launcher.core.media.LyricTimeline
 import com.cardesk.launcher.core.media.MusicController
 import com.cardesk.launcher.core.media.TrackInfo
 import com.cardesk.launcher.ui.shell.DockBarView
+import com.cardesk.launcher.ui.shell.EnhancedNavBarView
+import com.cardesk.launcher.ui.shell.NavSlotBarView
+import com.cardesk.launcher.vehicle.HvacIds
 import com.cardesk.launcher.vehicle.HvacState
 import com.cardesk.launcher.vehicle.VehicleController
 import java.text.SimpleDateFormat
@@ -107,7 +114,12 @@ class GlobalDockService : Service() {
     private var designLayer: FrameLayout? = null
 
     private var dock: DockBarView? = null
+    private var slotBar: NavSlotBarView? = null
+    private var currentNavStyle = EnhancedNavBarView.MODE_DOCK
     private var params: WindowManager.LayoutParams? = null
+
+    /** 当前挂载在设计层里的有效底栏（设计 Dock 或槽位条）。 */
+    private val activeBarView: View? get() = dock ?: slotBar
 
     /**
      * 桌面是否在前台（**焦点**口径：`onResume`/`onPause`）。
@@ -152,17 +164,28 @@ class GlobalDockService : Service() {
 
     private var tick = 0
 
-    /** 媒体状态变化 → 立刻重绑 Dock 的媒体卡（进度条另外靠 ticker 拉）。 */
+    /** 媒体状态变化 → 立刻重绑 Dock / 槽位条的媒体卡（进度条另外靠 ticker 拉）。 */
     private val mediaListener = object : MusicController.Listener {
         override fun onMediaChanged(track: TrackInfo?) {
             dock?.refreshFromController()
+            bindSlotBarMedia()
         }
 
-        override fun onLyricChanged(timeline: LyricTimeline?, index: Int, wipe: Float) = Unit
+        override fun onLyricChanged(timeline: LyricTimeline?, index: Int, wipe: Float) {
+            slotBar?.let { bar ->
+                bar.lyricCurrent = if (timeline != null && index >= 0) timeline.lineAt(index) else ""
+                bar.lyricNext = if (timeline != null && index >= 0) timeline.lineAt(index + 1) else ""
+                bar.lyricWipe = if (timeline != null && index >= 0) wipe else 0f
+                bar.invalidate()
+            }
+        }
     }
 
     /** 空调状态变化 → 重绑温度 / 风量 / 模式。 */
-    private val hvacObserver: (HvacState) -> Unit = { state -> dock?.bind(state) }
+    private val hvacObserver: (HvacState) -> Unit = { state ->
+        dock?.bind(state)
+        slotBar?.state = state
+    }
 
     /**
      * 1s 刷一次媒体进度。
@@ -175,6 +198,7 @@ class GlobalDockService : Service() {
             if (root == null) return
             tick++
             dock?.refreshFromController()
+            if (slotBar != null) bindSlotBarMedia()
             // 第204轮：前台切到沉浸型 App 时让位（每 tick 判一次，getRunningTasks 很便宜）
             refreshImmersiveForeground()
             // 空调状态平时靠 [hvacObserver] 推，但服务可能比 VehicleController
@@ -314,33 +338,20 @@ class GlobalDockService : Service() {
         nativeInsets = runCatching { NavInsets.applied(this) }.getOrDefault(false)
 
         val layer = FrameLayout(this).apply {
-            // 设计层自己不画东西，Dock 的坐标直接按 1920×112 板子摆。
+            // 设计层自己不画东西，Dock / 槽位条的坐标直接按 1920×112 板子摆。
             clipChildren = false
         }
-        val bar = DockBarView(this).apply {
-            wireCallbacks(this)
-        }
-        layer.addView(
-            bar,
-            FrameLayout.LayoutParams(DESIGN_DOCK_WIDTH, DESIGN_DOCK_HEIGHT).apply {
-                leftMargin = DOCK_LEFT_MARGIN
-                topMargin = 0
-            },
-        )
+        designLayer = layer
+        mountCurrentStyle(layer)
 
         val host = FrameLayout(this).apply {
-            // 不透明底：原车 Dock / 系统导航栏还在窗口下面，
-            // Dock 自带的玻璃底是半透明的（#6b162e2c），不铺不透明底会透出来，
-            // 看起来就像「两个 Dock 叠在一起」。这里用同色系的不透明值。
-            setBackgroundColor(OPAQUE_BAR_COLOR)
             addView(layer, FrameLayout.LayoutParams(DESIGN_WIDTH, DESIGN_BAR_HEIGHT))
         }
 
         host.setOnTouchListener { _, ev -> handleCollapsedTouch(ev) }
 
-        dock = bar
-        designLayer = layer
         root = host
+        applyRootBackground(null, OPAQUE_BAR_COLOR)
         val lp = buildParams()
         params = lp
         applyGeometry()
@@ -358,10 +369,133 @@ class GlobalDockService : Service() {
             "w" to lp.width,
             "h" to lp.height,
             "y" to lp.y,
+            "navStyle" to currentNavStyle,
         )
         bindHvac()
         bindQuickApps()
+        bindSlotBarMedia()
         updateVisibility()
+    }
+
+    /** 在设计层统一挂载「设计 Dock」（导航栏样式与槽位条设置已下线，忽略旧偏好残留）。 */
+    private fun mountCurrentStyle(layer: FrameLayout) {
+        layer.removeAllViews()
+        dock = null
+        slotBar = null
+        currentNavStyle = EnhancedNavBarView.MODE_DOCK
+        val lp = FrameLayout.LayoutParams(DESIGN_DOCK_WIDTH, DESIGN_DOCK_HEIGHT).apply {
+            leftMargin = DOCK_LEFT_MARGIN
+            topMargin = 0
+        }
+        val bar = DockBarView(this).apply {
+            wireCallbacks(this)
+        }
+        dock = bar
+        layer.addView(bar, lp)
+        Logx.i(LogTags.DOCK, "全局 Dock 挂载设计 Dock")
+    }
+
+    /** 设置页切换导航栏样式或修改槽位后，实时刷新全局 Dock 内容。 */
+    private fun reloadStyleAndSlots() {
+        val layer = designLayer ?: return
+        val targetStyle = prefs.navStyle
+        if (targetStyle != currentNavStyle || (targetStyle == EnhancedNavBarView.MODE_SLOTS && slotBar == null)) {
+            mountCurrentStyle(layer)
+        } else if (targetStyle == EnhancedNavBarView.MODE_SLOTS) {
+            slotBar?.let { bar ->
+                bar.palette = if (Skin.isNight) Palettes.night else Palettes.day
+                bar.slots = NavSlots.load(prefs)
+                bar.cornerRadius = prefs.dockCornerRadius.toFloat()
+                bar.invalidate()
+            }
+        }
+        bindHvac()
+        bindQuickApps()
+        bindSlotBarMedia()
+        updateVisibility()
+    }
+
+    /** 绑定槽位条媒体信息与歌词。 */
+    private fun bindSlotBarMedia() {
+        val bar = slotBar ?: return
+        val controller = runCatching { MusicController.get() }.getOrNull() ?: return
+        val track = controller.track
+        bar.palette = if (Skin.isNight) Palettes.night else Palettes.day
+        bar.mediaPlaying = track?.playing == true
+        bar.mediaTitle = track?.title?.ifBlank { "暂无播放" } ?: "暂无播放"
+        bar.mediaArtist = track?.artist?.ifBlank { "" } ?: ""
+        bar.mediaArtwork = track?.artwork
+        bar.invalidate()
+    }
+
+    /** 给全局 Dock 的槽位条接上所有动作回调。 */
+    private fun wireSlotBarCallbacks(bar: NavSlotBarView) {
+        bar.onSlot = { slot -> handleGlobalSlot(slot) }
+        bar.onTemp = { which, delta ->
+            val zone = if (which == NavSlotBarView.ZONE_PASSENGER_KEY) HvacIds.ZONE_PASSENGER else HvacIds.ZONE_DRIVER
+            if (delta == 0) toLauncher(MainActivity.ACTION_CLIMATE)
+            else VehicleController.stepTemp(zone, delta.toFloat())
+        }
+        bar.onRecents = { toLauncher(MainActivity.ACTION_RECENTS) }
+        bar.onMediaCover = { toLauncher(MainActivity.ACTION_MEDIA) }
+        bar.onMediaTitle = {
+            val track = MusicController.get().track
+            val action = DockMediaLaunch.openCurrentApp(
+                context = this,
+                trackPkg = track?.pkg,
+            )
+            DockMediaLaunch.messageFor(action)?.let { toast(it) }
+        }
+        bar.onMediaPlay = { togglePlayback() }
+    }
+
+    /** 全局 Dock 槽位条点击分发。 */
+    private fun handleGlobalSlot(slot: NavSlot) {
+        Logx.event(LogTags.DOCK, "全局 Dock 点击槽位", "type" to slot.type, "action" to slot.actionId, "label" to slot.label)
+        when {
+            slot.type == NavSlot.TYPE_MEDIA -> toLauncher(MainActivity.ACTION_MEDIA)
+            slot.type == NavSlot.TYPE_LYRIC -> toLauncher(MainActivity.ACTION_MEDIA)
+            slot.type == NavSlot.TYPE_DATETIME -> Unit
+            slot.type == NavSlot.TYPE_APP -> {
+                when {
+                    slot.isPip1Launch -> toLauncher("${MainActivity.ACTION_PIP1}:${slot.pkg}")
+                    slot.isPip2Launch -> toLauncher("${MainActivity.ACTION_PIP2}:${slot.pkg}")
+                    else -> launchQuickApp(slot.pkg)
+                }
+            }
+            else -> when (slot.actionId) {
+                NavSlot.ACTION_BACK -> sendSystemBack()
+                NavSlot.ACTION_HOME -> {
+                    if (homeOnScreen || pipFullscreen) {
+                        runCatching { MainActivity.onExternalHome() }
+                            .onFailure { Logx.w(LogTags.DOCK, "外部 HOME 处理失败", it) }
+                    } else {
+                        goHome()
+                    }
+                }
+                NavSlot.ACTION_TASKS -> toLauncher(MainActivity.ACTION_DRAWER)
+                NavSlot.ACTION_SETTINGS -> toLauncher(MainActivity.ACTION_SETTINGS)
+                NavSlot.ACTION_SPLIT -> toLauncher(MainActivity.ACTION_SPLIT)
+                NavSlot.ACTION_CAMERA_360 -> toLauncher(MainActivity.ACTION_CAMERA360)
+                NavSlot.ACTION_MEDIA, NavSlot.ACTION_LYRIC -> toLauncher(MainActivity.ACTION_MEDIA)
+                NavSlot.ACTION_HVAC_POWER -> VehicleController.togglePower()
+                NavSlot.ACTION_HVAC_AC -> VehicleController.toggleAc()
+                NavSlot.ACTION_HVAC_AUTO -> VehicleController.toggleAuto()
+                NavSlot.ACTION_HVAC_CIRC -> VehicleController.toggleCirculation()
+                NavSlot.ACTION_HVAC_DEFROST_FRONT -> VehicleController.toggleDefrostFront()
+                NavSlot.ACTION_HVAC_DEFROST_REAR -> VehicleController.toggleDefrostRear()
+                NavSlot.ACTION_HVAC_FAN -> {
+                    val action = DockFanPolicy.decide(homeOnScreen)
+                    when (action) {
+                        DockFanPolicy.ACTION_OPEN_CLIMATE -> toLauncher(MainActivity.ACTION_CLIMATE)
+                        else -> VehicleController.stepFan(1)
+                    }
+                }
+                NavSlot.ACTION_HVAC_TEMP_DRIVER, NavSlot.ACTION_HVAC_TEMP_PASSENGER ->
+                    toLauncher(MainActivity.ACTION_CLIMATE)
+                else -> Unit
+            }
+        }
     }
 
     /**
@@ -502,6 +636,7 @@ class GlobalDockService : Service() {
         root = null
         designLayer = null
         dock = null
+        slotBar = null
         params = null
         showing = false
         startWindow()
@@ -531,6 +666,7 @@ class GlobalDockService : Service() {
             nativeInsets = nativeInsets,
             homeForeground = homeForeground,
             immersiveAppForeground = immersiveAppForeground,
+            hideHomeDock = prefs.hideHomeDock && !DockBarView.reorderMode,
         )
         // 第205轮：沉浸 App 前台时不再彻底隐藏，而是「收起」——
         // 窗口留着接上滑手势，内容藏起来、底透明，画面仍然全屏。
@@ -582,7 +718,7 @@ class GlobalDockService : Service() {
         if (wasCollapsed && visible) applyGeometry()
         view.visibility = if (visible) View.VISIBLE else View.INVISIBLE
         applyRootBackground(null, if (visible) OPAQUE_BAR_COLOR else android.graphics.Color.TRANSPARENT)
-        dock?.visibility = if (visible) View.VISIBLE else View.GONE
+        activeBarView?.visibility = if (visible) View.VISIBLE else View.GONE
     }
 
     /**
@@ -596,6 +732,18 @@ class GlobalDockService : Service() {
         val vg = view as? android.view.ViewGroup ?: return
         if (bitmap != null && !bitmap.isRecycled) {
             vg.background = BitmapDrawable(view.resources, bitmap)
+        } else if (color == OPAQUE_BAR_COLOR) {
+            val radiusDesign = runCatching { prefs.dockCornerRadius.toFloat() }.getOrDefault(0f)
+            val (w, _) = runCatching { realSize() }.getOrDefault(DESIGN_WIDTH to 1080)
+            val radiusPx = radiusDesign * (w / DESIGN_WIDTH.toFloat())
+            if (radiusPx > 0.5f) {
+                vg.background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(color)
+                    cornerRadii = floatArrayOf(radiusPx, radiusPx, radiusPx, radiusPx, 0f, 0f, 0f, 0f)
+                }
+            } else {
+                vg.setBackgroundColor(color)
+            }
         } else {
             vg.setBackgroundColor(color)
         }
@@ -634,7 +782,7 @@ class GlobalDockService : Service() {
             suppressedCoverBitmap,
             if (suppressedCoverColor != 0) suppressedCoverColor else OPAQUE_BAR_COLOR,
         )
-        dock?.visibility = View.GONE
+        activeBarView?.visibility = View.GONE
     }
 
     /**
@@ -661,7 +809,7 @@ class GlobalDockService : Service() {
             }
         }
         applyRootBackground(null, android.graphics.Color.TRANSPARENT)
-        dock?.visibility = View.GONE
+        activeBarView?.visibility = View.GONE
     }
 
     /** 从底部上滑时展开我们自己的 Dock（几秒后自动收起）。 */
@@ -672,8 +820,8 @@ class GlobalDockService : Service() {
         collapsed = false
         view.visibility = View.VISIBLE
         applyGeometry()
-        (view as? android.view.ViewGroup)?.setBackgroundColor(OPAQUE_BAR_COLOR)
-        dock?.visibility = View.VISIBLE
+        applyRootBackground(null, OPAQUE_BAR_COLOR)
+        activeBarView?.visibility = View.VISIBLE
         scheduleCollapse()
     }
 
@@ -818,6 +966,13 @@ class GlobalDockService : Service() {
         // 页号由桌面切页时同步过来（[onActivePage]）——
         // 写死 0 的话，站在画中画页上 home 键还会高亮成「当前页」。
         bar.activePage = lastActivePage
+        bar.onBack = {
+            if (homeOnScreen || pipFullscreen) {
+                if (!MainActivity.onExternalBack()) sendSystemBack()
+            } else {
+                sendSystemBack()
+            }
+        }
         bar.onHome = {
             // 画中画全屏时，主页键 = **退出全屏**。
             //
@@ -911,8 +1066,13 @@ class GlobalDockService : Service() {
             if (front) VehicleController.toggleDefrostFront() else VehicleController.toggleDefrostRear()
         }
 
-        bar.onQuickApp = { _, pkg -> launchQuickApp(pkg) }
-        bar.onQuickAppLongPress = { toast("需回桌面配置") }
+        bar.onQuickApp = { index, pkg ->
+            if (pkg.isEmpty()) toLauncher("${MainActivity.ACTION_QUICK_APP_PICK}:$index")
+            else launchQuickApp(pkg)
+        }
+        bar.onQuickAppLongPress = { index ->
+            toLauncher("${MainActivity.ACTION_QUICK_APP_CONFIG}:$index")
+        }
     }
 
     /**
@@ -933,6 +1093,7 @@ class GlobalDockService : Service() {
             .onFailure { Logx.w(LogTags.DOCK, "全局 Dock 播放键下发失败", it) }
         Logx.event(LogTags.DOCK, "全局 Dock 播放键", "wasPlaying" to playing)
         dock?.refreshFromController()
+        bindSlotBarMedia()
     }
 
     /**
@@ -944,13 +1105,17 @@ class GlobalDockService : Service() {
      * 失败就 toast 说明，绝不崩。
      */
     private fun sendSystemBack() {
-        Logx.event(LogTags.DOCK, "全局 Dock 主页长按：系统返回")
+        Logx.event(LogTags.DOCK, "全局 Dock 返回键：系统返回")
         val worker = Thread {
             val result = runCatching { Instrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK) }
             if (result.isFailure) {
-                val error = result.exceptionOrNull() ?: RuntimeException("sendKeyDownUpSync failed")
-                Logx.w(LogTags.DOCK, "注入返回键失败（缺 INJECT_EVENTS？）", error)
-                main.post { toast("缺少按键注入权限，无法返回") }
+                val fallback = com.cardesk.launcher.core.SystemOps.injectKey(this, KeyEvent.KEYCODE_BACK) ||
+                    com.cardesk.launcher.core.SystemOps.injectKeyViaShell(KeyEvent.KEYCODE_BACK)
+                if (!fallback) {
+                    val error = result.exceptionOrNull() ?: RuntimeException("sendKeyDownUpSync failed")
+                    Logx.w(LogTags.DOCK, "注入返回键失败（缺 INJECT_EVENTS？）", error)
+                    main.post { toast("缺少按键注入权限，无法返回") }
+                }
             }
         }
         worker.name = "cardesk-global-dock-back"
@@ -1037,8 +1202,10 @@ class GlobalDockService : Service() {
 
     private fun bindHvac() {
         if (!VehicleController.initialized) return
-        runCatching { dock?.bind(VehicleController.state) }
-            .onFailure { Logx.w(LogTags.DOCK, "全局 Dock 绑定空调状态失败", it) }
+        runCatching {
+            dock?.bind(VehicleController.state)
+            slotBar?.state = VehicleController.state
+        }.onFailure { Logx.w(LogTags.DOCK, "全局 Dock 绑定空调状态失败", it) }
     }
 
     private fun bindQuickApps() {
@@ -1117,6 +1284,7 @@ class GlobalDockService : Service() {
             }
         }
         dock = null
+        slotBar = null
         designLayer = null
         root = null
         params = null
@@ -1406,6 +1574,34 @@ class GlobalDockService : Service() {
         fun onActivePage(page: Int) {
             lastActivePage = page
             active?.setActivePage(page)
+        }
+
+        /** 快捷应用配置变更后立即同步到全局 Dock 悬浮窗。 */
+        fun refreshQuickApps() {
+            val svc = active ?: return
+            svc.main.post { svc.bindQuickApps() }
+        }
+
+        /** 导航栏样式或槽位列表变更后立即同步到全局 Dock 悬浮窗。 */
+        fun refreshStyleAndSlots() {
+            val svc = active ?: return
+            svc.main.post { svc.reloadStyleAndSlots() }
+        }
+
+        /** 「隐藏桌面 Dock」等开关变更后立即重新计算全局 Dock 可见性。 */
+        fun refreshVisibility() {
+            val svc = active ?: return
+            svc.main.post { svc.updateVisibility() }
+        }
+
+        /** Dock 圆角变更后同步刷新全局 Dock 宿主圆角底板。 */
+        fun refreshCornerRadius() {
+            val svc = active ?: return
+            svc.main.post {
+                if (svc.showing && !svc.blank && !svc.collapsed) {
+                    svc.applyRootBackground(null, OPAQUE_BAR_COLOR)
+                }
+            }
         }
 
         /**

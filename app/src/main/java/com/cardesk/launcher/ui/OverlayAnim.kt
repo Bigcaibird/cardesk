@@ -62,27 +62,28 @@ object OverlayAnim {
     )
 
     /**
-     * 打开动画：面板从下方 [SLIDE_PX] 处滑上来，遮罩淡入。
+     * 打开动画：面板从下方 [SLIDE_PX] 处滑上来并淡入，遮罩淡入。
      *
-     * @param panel 面板（玻璃卡）
+     * @param panel 面板（玻璃卡或双面板容器）
      * @param scrim 遮罩（可空）
      */
     fun open(panel: View?, scrim: View?) {
         if (panel != null) {
             panel.animate().cancel()
             panel.translationY = SLIDE_PX
-            panel.alpha = 1f
+            panel.alpha = 0f
             panel.animate()
                 .translationY(0f)
                 .alpha(1f)
                 .setDuration(OPEN_DURATION)
                 .setInterpolator(INTERPOLATOR)
+                .withLayer()
                 .start()
         }
         if (scrim != null) {
             scrim.animate().cancel()
             scrim.alpha = 0f
-            scrim.animate().alpha(1f).setDuration(OPEN_SCRIM_DURATION).start()
+            scrim.animate().alpha(1f).setDuration(OPEN_SCRIM_DURATION).withLayer().start()
         }
     }
 
@@ -93,14 +94,25 @@ object OverlayAnim {
      *
      * 两个动画 `playTogether`
      * 回调挂在 **set** 上，因此要等 240ms 的下滑和 200ms 的淡出都结束才摘层。
+     *
+     * @param resetOnEnd 动画结束后要不要复位 `translationY=0 / alpha=1`：
+     *   视图会被复用（如抽屉隐藏后再次显示）时传 true；
+     *   视图马上在 [onEnd] 里被 `removeView` 摘掉时传 false，避免摘除前闪回一帧可见。
      */
-    fun close(panel: View?, scrim: View?, onEnd: () -> Unit) {
+    fun close(panel: View?, scrim: View?, onEnd: () -> Unit) =
+        close(panel, scrim, resetOnEnd = true, onEnd = onEnd)
+
+    fun close(panel: View?, scrim: View?, resetOnEnd: Boolean, onEnd: () -> Unit) {
         if (panel == null) {
             onEnd()
             return
         }
         panel.animate().cancel()
         scrim?.animate()?.cancel()
+        val prevLayer = panel.layerType
+        if (prevLayer == View.LAYER_TYPE_NONE) {
+            panel.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        }
         val slide = ObjectAnimator.ofFloat(panel, View.TRANSLATION_Y, panel.translationY, SLIDE_PX).apply {
             duration = CLOSE_DURATION
             interpolator = INTERPOLATOR
@@ -109,7 +121,7 @@ object OverlayAnim {
             duration = CLOSE_FADE_DURATION
             interpolator = INTERPOLATOR
         }
-        scrim?.animate()?.alpha(0f)?.setDuration(CLOSE_FADE_DURATION)?.start()
+        scrim?.animate()?.alpha(0f)?.setDuration(CLOSE_FADE_DURATION)?.withLayer()?.start()
         val set = AnimatorSet().apply {
             playTogether(slide, fade)
             addListener(object : AnimatorListenerAdapter() {
@@ -117,15 +129,23 @@ object OverlayAnim {
 
                 override fun onAnimationCancel(animation: Animator) {
                     cancelled = true
+                    if (prevLayer == View.LAYER_TYPE_NONE) {
+                        panel.setLayerType(View.LAYER_TYPE_NONE, null)
+                    }
                 }
 
                 override fun onAnimationEnd(animation: Animator) {
+                    if (prevLayer == View.LAYER_TYPE_NONE) {
+                        panel.setLayerType(View.LAYER_TYPE_NONE, null)
+                    }
                     // 被取消（比如紧接着又打开）就不摘层、不复位。
                     if (cancelled) return
-                    // 动画结束后把面板复位（translationY=0 / alpha=1）
-                    // 这样下次打开是「从 56 处滑上来」而不是从残留位置滑。
-                    panel.translationY = 0f
-                    panel.alpha = 1f
+                    if (resetOnEnd) {
+                        // 动画结束后把面板复位（translationY=0 / alpha=1）
+                        // 这样下次打开是「从 56 处滑上来」而不是从残留位置滑。
+                        panel.translationY = 0f
+                        panel.alpha = 1f
+                    }
                     onEnd()
                 }
             })

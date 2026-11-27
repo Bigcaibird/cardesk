@@ -47,13 +47,14 @@ object OemKeyRuntime {
     @Volatile
     private var headless: KeyActionExecutor? = null
 
-    /**
-     * 去重窗口（毫秒）。
-     *
-     * 同一条方控事件可能从两条通路各来一次（清单接收器 + 动态注册），
-     * 车机固件也可能把一次按键发两遍 ⇒ 用它挡住重复执行。
-     */
+    /** 去重窗口（毫秒）。 */
     private const val DEDUPE_WINDOW_MS = 200L
+
+    /** Input 与 car_signal 双通道仲裁窗口（毫秒）。 */
+    private const val INPUT_SIGNAL_ARBITRATION_MS = 120L
+
+    /** 实时通道接管后屏蔽同一次方控广播的窗口（毫秒；覆盖长按 500ms + 抬手延迟）。 */
+    private const val RAW_VOICE_SUPPRESS_OEM_MS = 900L
 
     /** 清单接收器通路。 */
     const val PATH_MANIFEST = "manifest"
@@ -61,11 +62,19 @@ object OemKeyRuntime {
     /** 动态注册通路。 */
     const val PATH_DYNAMIC = "dynamic"
 
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
     /** 上一次处理的事件（去重用）。 */
     private var lastKeyCode = 0
     private var lastPress: OemKeyProtocol.Press? = null
     private var lastPath: String = ""
     private var lastAt = 0L
+
+    @Volatile
+    private var lastRawInputAt = -1L
+
+    @Volatile
+    private var lastRawVoiceAt = -1L
 
     /** Activity 就绪后挂上它的执行端。 */
     fun attach(context: Context, prefs: Prefs, executor: KeyActionExecutor) {
@@ -129,9 +138,38 @@ object OemKeyRuntime {
         val executor = attached ?: headless(app, prefs).also {
             Logx.d(LogTags.KEYS, "按键增强：桌面界面不在，用无界面执行端处理方控")
         }
+        if (OemKeyProtocol.isVoiceKey(event.keyCode) &&
+            lastRawVoiceAt >= 0L &&
+            now - lastRawVoiceAt <= RAW_VOICE_SUPPRESS_OEM_MS
+        ) {
+            Logx.i(LogTags.KEYS, "按键增强：语音键已由实时通道接管，吞掉广播", "keyCode" to event.keyCode)
+            return true
+        }
         return runCatching { executor.onOemKey(event) }.getOrElse { error ->
             Logx.w(LogTags.KEYS, "按键增强：处理方控广播失败", error, "keyCode" to event.keyCode)
             false
+        }
+    }
+
+    /**
+     * 来自 `Input.requestKeysInterception` 或 `EcarxSignals.SIG_VOICE` 的实时按下/抬起。
+     */
+    fun onRawVoiceKey(context: Context, keyCode: Int, down: Boolean, source: String) {
+        val now = SystemClock.uptimeMillis()
+        if (source == "signal" && lastRawInputAt >= 0L && now - lastRawInputAt <= INPUT_SIGNAL_ARBITRATION_MS) {
+            return
+        }
+        if (source == "input") {
+            lastRawInputAt = now
+        }
+        lastRawVoiceAt = now
+        val app = context.applicationContext ?: context
+        val prefs = attachedPrefs ?: Prefs(app)
+        if (!prefs.keysEnhanced) return
+        val executor = attached ?: headless(app, prefs)
+        val action = if (down) android.view.KeyEvent.ACTION_DOWN else android.view.KeyEvent.ACTION_UP
+        mainHandler.post {
+            executor.onKeyEvent(android.view.KeyEvent(action, keyCode), now)
         }
     }
 

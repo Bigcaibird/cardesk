@@ -39,7 +39,7 @@ class TaskListDialog(
     context: Context,
     pal: Palette,
     private val prefs: Prefs,
-) : DialogSheet(context, pal, 1040, 700, "计划任务", 440, 150) {
+) : DialogSheet(context, pal, 1040, 700, "自动任务", 440, 150) {
 
     var onEdit: ((ScheduledTask?) -> Unit)? = null
     var onChange: (() -> Unit)? = null
@@ -58,14 +58,30 @@ class TaskListDialog(
 
     init {
         // 标题（设计板 s06：(40,34) 38px bold）
-        addTitle("计划任务", 38f, 40, 34)
-        // 「新建」= 右上角 accent 纯文字（right=36 top=36，22px）
+        addTitle("自动任务", 38f, 40, 34)
+        // 「导入示例」+「新建」= 右上角操作
+        val presets = Ui.text(context, "导入示例", 20f, pal.textDim, bold = false).apply {
+            gravity = Gravity.CENTER
+            pressFeedback()
+            setOnClickListener {
+                val tasks = ScheduledTasks.load(prefs)
+                val existingIds = tasks.map { it.id }.toSet()
+                val added = ScheduledTasks.examplePresets().filter { it.id !in existingIds }
+                if (added.isNotEmpty()) {
+                    tasks.addAll(added)
+                    ScheduledTasks.save(prefs, tasks)
+                    onChange?.invoke()
+                    reload()
+                }
+            }
+        }
+        placeEnd(presets, 118, 37)
         val add = Ui.text(context, "新建", 22f, pal.accent, bold = true).apply {
             gravity = Gravity.CENTER
             pressFeedback()
             setOnClickListener {
                 // 排障场景：点了「新建」没进编辑器 —— 记一下
-                Logx.event(LogTags.TASK, "新建计划任务")
+                Logx.event(LogTags.TASK, "新建自动任务")
                 onEdit?.invoke(null)
             }
         }
@@ -81,8 +97,8 @@ class TaskListDialog(
         }
         place(scroll, 40, 136, ROW_W, 460)
 
-        // 底部说明（保留原有文案）+ 关闭键（设计板 s06 右上角给了「新建」，关闭键放右下角）
-        place(Ui.text(context, "开机或进桌面后自动打开某个 App", 19f, pal.textFaint), 40, 618)
+        // 底部说明 + 关闭键
+        place(Ui.text(context, "满足传感器/状态条件或开机后自动执行对应动作", 19f, pal.textFaint), 40, 618)
         place(closePill(), panelWidth - 36 - 150, 602, 150, 66)
         reload()
     }
@@ -96,7 +112,7 @@ class TaskListDialog(
         if (tasks.isEmpty()) {
             // 空态文案
             listBox.addView(
-                Ui.text(context, "开机或进桌面后自动打开某个 App\n例如：开机 8 秒后打开导航", 22f, pal.textDim),
+                Ui.text(context, "暂无自动任务，可点击右上角「导入示例」或「新建」\n例如：温度 ≤ 10℃ 开主驾座椅加热，AQI ≥ 100 切内循环", 22f, pal.textDim),
                 Ui.linear(-1, 80),
             )
             return
@@ -224,10 +240,8 @@ class TaskListDialog(
     }
 
     private fun actionLabel(task: ScheduledTask): String = when (task.action) {
-        ScheduledTasks.ACTION_URL -> "打开链接 ${task.target}"
-        ScheduledTasks.ACTION_HOTSPOT_ON -> "开启热点"
-        ScheduledTasks.ACTION_HOTSPOT_OFF -> "关闭热点"
-        else -> "打开 ${appLabel(task.target)}"
+        ScheduledTasks.ACTION_APP -> "打开 ${appLabel(task.target)}"
+        else -> ScheduledTasks.actionLabel(task)
     }
 
     private fun appLabel(pkg: String): String {
@@ -266,10 +280,11 @@ class TaskEditorDialog(
 
     var onSaved: (() -> Unit)? = null
 
-    private var condition = existing?.condition ?: ScheduledTasks.COND_BOOT
+    private var condition = existing?.condition ?: ScheduledTasks.COND_TEMP_LT
+    private var threshold = existing?.threshold ?: ScheduledTasks.defaultThreshold(condition)
     private var delay = existing?.delaySeconds ?: ScheduledTasks.DELAY_DEFAULT
-    private var target = existing?.target ?: ""
-    private var action = existing?.action ?: ScheduledTasks.ACTION_APP
+    private var target = existing?.target ?: if (existing == null) "2" else ""
+    private var action = existing?.action ?: ScheduledTasks.ACTION_SEAT_HEAT_DRIVER
 
     /** 「执行动作」选择器是否展开（设计稿里动作行右端是 chevron，点开才出选项）。 */
     private var actionPickerOpen = false
@@ -279,17 +294,8 @@ class TaskEditorDialog(
 
     private var appBox: LinearLayout? = null
 
-    /**
-     * 延时秒数的**读数**（变了要顶一下）。
-     *
-     * 每次 [render] 都会重建这一行，所以这里存的是**当前这一版**的视图 ——
-     * 改完秒数之后顶一下的，正是刚加进去的那一行。
-     *
-     * 不能做成「建一次一直复用」：视图只能有一个父节点，
-     * 旧行被 [render] 丢掉之后它的父节点还在，
-     * 再把它塞进新行会直接抛「already has a parent」。
-     */
     private lateinit var delayLabel: TextView
+    private lateinit var thresholdLabel: TextView
 
     init {
         render()
@@ -344,24 +350,57 @@ class TaskEditorDialog(
         // 30px 空档 → 「触发条件」标签落在 (40,248)
         content.addView(View(context), Ui.linear(960, 30))
         content.addView(Ui.text(context, "触发条件", 20f, pal.textFaint), Ui.linear(960, 32))
-        // 分段控件 (40,280)：底 surfaceSoft + 1px 描边 + 圆角 999，选中项 accent 底 + accentInk 字
         val conditions = ScheduledTasks.conditions()
-        val condSeg = segmented(conditions.map { it.second to (it.first == condition) }) { index ->
-            val from = condition
-            condition = conditions[index].first
-            // 排障场景：任务条件选错（开机后 / 进桌面后）—— 记下切换
-            Logx.event(
-                LogTags.TASK,
-                "任务条件变更",
-                "id" to (existing?.id ?: "new"),
-                "from" to from,
-                "to" to condition,
+        content.addView(
+            chipGrid(conditions, condition, columns = 4) { nextCond ->
+                val from = condition
+                condition = nextCond
+                if (ScheduledTasks.needsThreshold(nextCond)) {
+                    threshold = ScheduledTasks.defaultThreshold(nextCond)
+                }
+                Logx.event(
+                    LogTags.TASK,
+                    "任务条件变更",
+                    "id" to (existing?.id ?: "new"),
+                    "from" to from,
+                    "to" to condition,
+                )
+                render()
+            },
+            Ui.linear(960, -2),
+        )
+        if (ScheduledTasks.needsThreshold(condition)) {
+            content.addView(View(context), Ui.linear(960, 12))
+            val unit = ScheduledTasks.thresholdUnit(condition)
+            val thRow = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            thresholdLabel = Ui.text(
+                context,
+                "触发阈值：${ScheduledTasks.formatThreshold(condition, threshold)}$unit",
+                21f,
+                pal.textDim,
             )
-            render()
+            thRow.addView(thresholdLabel, LinearLayout.LayoutParams(0, -2, 1f))
+            val step = ScheduledTasks.thresholdStep(condition)
+            val stepText = if (step % 1f == 0f) step.toInt().toString() else String.format(java.util.Locale.US, "%.1f", step)
+            val thMinus = chip("−$stepText$unit", sizePx = 20f) {
+                threshold -= step
+                render()
+                Motion.nudge(thresholdLabel)
+            }
+            val thPlus = chip("+$stepText$unit", sizePx = 20f) {
+                threshold += step
+                render()
+                Motion.nudge(thresholdLabel)
+            }
+            thRow.addView(thMinus, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = 10 })
+            thRow.addView(thPlus, LinearLayout.LayoutParams(-2, -2))
+            content.addView(thRow, Ui.linear(960, 56))
         }
-        content.addView(condSeg, Ui.linear(-2, -2))
-        // 49px 空档 → 「执行动作」标签落在 (40,386)
-        content.addView(View(context), Ui.linear(960, 49))
+        // 30px 空档 → 「执行动作」
+        content.addView(View(context), Ui.linear(960, 30))
         content.addView(Ui.text(context, "执行动作", 20f, pal.textFaint), Ui.linear(960, 32))
         // 动作选择行 (40,418) 960×76 圆角 18，右端 chevron 26px textFaint
         val actionRow = LinearLayout(context).apply {
@@ -387,58 +426,72 @@ class TaskEditorDialog(
         content.addView(actionRow, Ui.linear(960, 76))
         content.addView(View(context), Ui.linear(960, 12))
 
-        // 动作选项：点开动作行才出现（设计板 s07 的静止画面里没有这一排）
+        // 动作选项：点开动作行才出现
         if (actionPickerOpen) {
-            val actions = listOf(
-                ScheduledTasks.ACTION_APP to "打开应用",
-                ScheduledTasks.ACTION_URL to "打开链接",
-                ScheduledTasks.ACTION_HOTSPOT_ON to "开热点",
-                ScheduledTasks.ACTION_HOTSPOT_OFF to "关热点",
+            val actions = ScheduledTasks.actions()
+            content.addView(
+                chipGrid(actions, action, columns = 4) { nextAction ->
+                    val from = action
+                    action = nextAction
+                    actionPickerOpen = false
+                    if (ScheduledTasks.isSeatAction(action) && target.toIntOrNull() == null) {
+                        target = "2"
+                    }
+                    Logx.event(
+                        LogTags.TASK,
+                        "任务动作变更",
+                        "id" to (existing?.id ?: "new"),
+                        "from" to from,
+                        "to" to action,
+                    )
+                    render()
+                },
+                Ui.linear(960, -2),
             )
-            val actionSeg = segmented(actions.map { it.second to (it.first == action) }) { index ->
-                val from = action
-                action = actions[index].first
-                actionPickerOpen = false
-                // 排障场景：任务动作选错 —— 记下切换
-                Logx.event(
-                    LogTags.TASK,
-                    "任务动作变更",
-                    "id" to (existing?.id ?: "new"),
-                    "from" to from,
-                    "to" to action,
-                )
-                render()
-            }
-            content.addView(actionSeg, Ui.linear(-2, -2))
             content.addView(View(context), Ui.linear(960, 12))
         }
 
-        // 延时秒数（—— 延迟行文案「等 N 秒再打开（0=立即）」）
-        val delayRow = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+        // 延时秒数（仅开机/进桌面条件需要）
+        if (ScheduledTasks.isStartupCondition(condition)) {
+            val delayRow = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            delayLabel = Ui.text(context, "等 $delay 秒再执行（0=立即）", 21f, pal.textDim)
+            delayRow.addView(delayLabel, LinearLayout.LayoutParams(0, -2, 1f))
+            val minus = chip("−5s", sizePx = 20f) {
+                val from = delay
+                delay = (delay - 5).coerceAtLeast(0)
+                Logx.d(LogTags.TASK, "任务延迟调整", "from" to from, "to" to delay)
+                render()
+                Motion.nudge(delayLabel)
+            }
+            val plus = chip("+5s", sizePx = 20f) {
+                val from = delay
+                delay = (delay + 5).coerceAtMost(ScheduledTasks.DELAY_MAX)
+                Logx.d(LogTags.TASK, "任务延迟调整", "from" to from, "to" to delay)
+                render()
+                Motion.nudge(delayLabel)
+            }
+            delayRow.addView(minus, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = 10 })
+            delayRow.addView(plus, LinearLayout.LayoutParams(-2, -2))
+            content.addView(delayRow, Ui.linear(960, 56))
         }
-        delayLabel = Ui.text(context, "等 $delay 秒再打开（0=立即）", 21f, pal.textDim)
-        delayRow.addView(delayLabel, LinearLayout.LayoutParams(0, -2, 1f))
-        val minus = chip("−5s", sizePx = 20f) {
-            val from = delay
-            delay = (delay - 5).coerceAtLeast(0)
-            // 排障场景：延迟秒数调了没生效 —— 记下调整前后
-            Logx.d(LogTags.TASK, "任务延迟调整", "from" to from, "to" to delay)
-            render()
-            // 秒数变了 —— 读数顶一下，让「动了」被看见
-            Motion.nudge(delayLabel)
+
+        // 座椅档位选择（座椅加热/通风动作）
+        if (ScheduledTasks.isSeatAction(action)) {
+            content.addView(Ui.text(context, "目标档位", 20f, pal.textFaint), Ui.linear(960, 32))
+            val levels = listOf("1" to "1 档", "2" to "2 档", "3" to "3 档", "0" to "关闭")
+            val activeLevel = target.toIntOrNull()?.coerceIn(0, 3)?.toString() ?: "2"
+            content.addView(
+                chipGrid(levels, activeLevel, columns = 4) { lvl ->
+                    target = lvl
+                    render()
+                },
+                Ui.linear(960, -2),
+            )
+            content.addView(View(context), Ui.linear(960, 12))
         }
-        val plus = chip("+5s", sizePx = 20f) {
-            val from = delay
-            delay = (delay + 5).coerceAtMost(ScheduledTasks.DELAY_MAX)
-            Logx.d(LogTags.TASK, "任务延迟调整", "from" to from, "to" to delay)
-            render()
-            Motion.nudge(delayLabel)
-        }
-        delayRow.addView(minus, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = 10 })
-        delayRow.addView(plus, LinearLayout.LayoutParams(-2, -2))
-        content.addView(delayRow, Ui.linear(960, 56))
 
         // 动作明细：应用列表 / 链接 / 热点说明
         when (action) {
@@ -465,6 +518,18 @@ class TaskEditorDialog(
 
             else -> {
             }
+        }
+
+        // 左下角「删除」（仅编辑已有任务时显示）
+        if (existing != null) {
+            val delBtn = Ui.text(context, "删除", 24f, pal.danger, bold = true).apply {
+                gravity = Gravity.CENTER
+                background = Ui.round(Skin.surfaceSoft, Shape.PILL, 1f, Skin.NAV_STROKE)
+                setPadding(36, 14, 36, 14)
+                pressFeedback()
+                setOnClickListener { deleteExisting() }
+            }
+            place(delBtn, 36, panelHeight - 32 - 63, -2, 63)
         }
 
         // 右下角按钮组：「取消 / 保存」（设计板 s07：right=36 bottom=32）
@@ -530,12 +595,54 @@ class TaskEditorDialog(
     private fun inputLabel(): String =
         if (action == ScheduledTasks.ACTION_URL) "链接地址" else "任务名称"
 
-    private fun actionLabel(): String = when (action) {
-        ScheduledTasks.ACTION_URL -> "打开链接 ${target}"
-        ScheduledTasks.ACTION_HOTSPOT_ON -> "开热点"
-        ScheduledTasks.ACTION_HOTSPOT_OFF -> "关热点"
-        else -> "选择应用或动作"
+    private fun chipGrid(
+        items: List<Pair<String, String>>,
+        selectedKey: String,
+        columns: Int,
+        onSelect: (String) -> Unit,
+    ): LinearLayout {
+        val container = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        items.chunked(columns).forEach { chunk ->
+            val row = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            chunk.forEachIndexed { idx, (key, label) ->
+                val active = key == selectedKey
+                val btn = Ui.text(context, label, 20f, if (active) pal.accentInk else pal.textDim, bold = active).apply {
+                    gravity = Gravity.CENTER
+                    background = if (active) {
+                        Ui.round(pal.accent, Shape.PILL)
+                    } else {
+                        Ui.round(Skin.surfaceSoft, Shape.PILL, 1f, Skin.NAV_STROKE)
+                    }
+                    setPadding(16, 12, 16, 12)
+                    pressFeedback()
+                    setOnClickListener { onSelect(key) }
+                }
+                row.addView(
+                    btn,
+                    LinearLayout.LayoutParams(0, -2, 1f).apply {
+                        if (idx < chunk.size - 1) rightMargin = 10
+                    },
+                )
+            }
+            for (pad in chunk.size until columns) {
+                row.addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
+            }
+            container.addView(row, Ui.linear(-1, -2, 0f, 0, 10))
+        }
+        return container
     }
+
+    private fun actionLabel(): String = ScheduledTasks.actionLabel(
+        ScheduledTask(
+            id = existing?.id ?: "",
+            condition = condition,
+            action = action,
+            target = target,
+        ),
+    )
 
     private fun save() {
         val tasks = ScheduledTasks.load(prefs)
@@ -546,6 +653,8 @@ class TaskEditorDialog(
         // 只有**新建**才置 enabled = true；编辑时保留任务原来的开关状态，
         // 否则「编辑一个已停用的任务」会把它悄悄改回启用。
         val enabled = existing?.enabled ?: true
+        val cooldown = existing?.takeIf { it.condition == condition }?.cooldownSeconds
+            ?: ScheduledTasks.defaultCooldown(condition)
         val task = ScheduledTask(
             id = id,
             condition = condition,
@@ -553,6 +662,8 @@ class TaskEditorDialog(
             target = target,
             delaySeconds = delay,
             enabled = enabled,
+            threshold = threshold,
+            cooldownSeconds = cooldown,
         )
         if (index >= 0) tasks[index] = task else tasks.add(task)
         ScheduledTasks.save(prefs, tasks)
@@ -568,6 +679,23 @@ class TaskEditorDialog(
             "delaySeconds" to delay,
             "enabled" to enabled,
             "total" to tasks.size,
+        )
+        onSaved?.invoke()
+    }
+
+    private fun deleteExisting() {
+        val targetTask = existing ?: return
+        val tasks = ScheduledTasks.load(prefs)
+        tasks.removeAll { it.id == targetTask.id }
+        ScheduledTasks.save(prefs, tasks)
+        TaskScheduler.cancel(context, targetTask.id)
+        Logx.event(
+            LogTags.TASK,
+            "删除自动任务",
+            "id" to targetTask.id,
+            "condition" to targetTask.condition,
+            "action" to targetTask.action,
+            "remaining" to tasks.size,
         )
         onSaved?.invoke()
     }

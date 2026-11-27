@@ -52,6 +52,7 @@ class TempDialView(context: Context) : View(context) {
 
     var palette: Palette = Palettes.night
         set(value) {
+            if (field == value) return
             field = value
             invalidate()
         }
@@ -90,6 +91,7 @@ class TempDialView(context: Context) : View(context) {
 
     var caption: String = "主驾"
         set(value) {
+            if (field == value) return
             field = value
             invalidate()
         }
@@ -103,6 +105,7 @@ class TempDialView(context: Context) : View(context) {
      */
     var dimmed: Boolean = false
         set(value) {
+            if (field == value) return
             field = value
             invalidate()
         }
@@ -110,6 +113,7 @@ class TempDialView(context: Context) : View(context) {
     /** 真正拦截触摸（关机时用）。 */
     var disabled: Boolean = false
         set(value) {
+            if (field == value) return
             field = value
             invalidate()
         }

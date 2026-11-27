@@ -60,5 +60,82 @@ class DriveModeTest {
         assertEquals("赛道模式", DriveMode.fullLabel(DriveMode.SELECTION_TRACK))
         assertEquals("个性化模式", DriveMode.fullLabel(DriveMode.SELECTION_CUSTOM))
         assertEquals("经济模式PHEV", DriveMode.fullLabel(DriveMode.SELECTION_ECO_PHEV))
+        assertEquals("标准模式", DriveMode.fullLabel(DriveMode.SELECTION_COMFORT_HEV))
+        assertEquals("雪地模式", DriveMode.fullLabel(DriveMode.SELECTION_SNOW))
+    }
+
+    @Test
+    fun resolveSupportedModes_sortsDeduplicatesAndFiltersInvalid() {
+        val raw = intArrayOf(
+            DriveMode.SELECTION_XC,
+            DriveMode.READ_ERROR,
+            DriveMode.SELECTION_SPORT,
+            DriveMode.SELECTION_CUSTOM,
+            999999,
+            DriveMode.SELECTION_ECO,
+            DriveMode.SELECTION_SPORT,
+            DriveMode.SELECTION_COMFORT,
+        )
+        val resolved = DriveMode.resolveSupportedModes(raw)
+        org.junit.Assert.assertArrayEquals(
+            intArrayOf(
+                DriveMode.SELECTION_ECO,
+                DriveMode.SELECTION_COMFORT,
+                DriveMode.SELECTION_SPORT,
+                DriveMode.SELECTION_CUSTOM,
+                DriveMode.SELECTION_XC,
+            ),
+            resolved,
+        )
+    }
+
+    @Test
+    fun resolveSupportedModes_fallsBackToDefaultWhenEmptyOrNull() {
+        org.junit.Assert.assertArrayEquals(DriveMode.SUPPORTED_VALUES, DriveMode.resolveSupportedModes(null))
+        org.junit.Assert.assertArrayEquals(DriveMode.SUPPORTED_VALUES, DriveMode.resolveSupportedModes(intArrayOf()))
+        org.junit.Assert.assertArrayEquals(
+            DriveMode.SUPPORTED_VALUES,
+            DriveMode.resolveSupportedModes(intArrayOf(DriveMode.READ_ERROR, DriveMode.READ_UNKNOWN, 0)),
+        )
+    }
+
+    @Test
+    fun resolveSupportedModes_includesValidCurrentModeIfMissing() {
+        val resolved = DriveMode.resolveSupportedModes(
+            intArrayOf(DriveMode.SELECTION_ECO, DriveMode.SELECTION_COMFORT),
+            currentRaw = DriveMode.SELECTION_HYBRID,
+        )
+        org.junit.Assert.assertArrayEquals(
+            intArrayOf(
+                DriveMode.SELECTION_ECO,
+                DriveMode.SELECTION_COMFORT,
+                DriveMode.SELECTION_HYBRID,
+            ),
+            resolved,
+        )
+    }
+
+    @Test
+    fun vehicleController_refreshesDynamicSupportedModesFromGateway() {
+        val gw = MockVehicleGateway().apply {
+            simSupportedDriveModes = intArrayOf(
+                DriveMode.SELECTION_POWER,
+                DriveMode.SELECTION_PURE,
+                DriveMode.SELECTION_HYBRID,
+                DriveMode.SELECTION_COMFORT_HEV,
+            )
+        }
+        VehicleController.resetSupportedDriveModesCache()
+        VehicleController.maybeRefreshSupportedDriveModes(gw, force = true)
+        org.junit.Assert.assertArrayEquals(
+            intArrayOf(
+                DriveMode.SELECTION_COMFORT_HEV,
+                DriveMode.SELECTION_PURE,
+                DriveMode.SELECTION_HYBRID,
+                DriveMode.SELECTION_POWER,
+            ),
+            VehicleController.supportedDriveModes(),
+        )
+        VehicleController.resetSupportedDriveModesCache()
     }
 }

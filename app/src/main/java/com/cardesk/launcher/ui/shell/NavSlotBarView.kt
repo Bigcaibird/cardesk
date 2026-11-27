@@ -2,10 +2,14 @@ package com.cardesk.launcher.ui.shell
 
 import android.animation.ValueAnimator
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.graphics.Canvas
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.graphics.Shader
 import android.graphics.Typeface
 import android.os.Handler
 import android.os.Looper
@@ -48,20 +52,40 @@ class NavSlotBarView(context: Context) : View(context) {
 
     var palette: Palette = Palettes.night
         set(value) {
+            if (field == value) return
             field = value
             invalidate()
         }
 
     var slots: List<NavSlot> = NavSlots.defaults()
         set(value) {
+            if (field == value) return
             field = value
             requestLayout()
+            invalidate()
+            syncClockTicker()
+        }
+
+    /** 是否自绘通栏玻璃底板（直接作为底栏或全局 Dock 时为 true，嵌在 EnhancedNavBarView pill 内为 false）。 */
+    var drawBackdrop: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
+
+    /** 顶部圆角（设计 px，与 DockBarView 同步跟随 Prefs.dockCornerRadius）。 */
+    var cornerRadius: Float = 0f
+        set(value) {
+            if (field == value) return
+            field = value
             invalidate()
         }
 
     var state: HvacState? = null
         set(value) {
             val prev = field
+            if (prev == value) return
             field = value
             // 温度数值变了 → 给数字一个短暂的放大脉冲。
             //
@@ -100,7 +124,9 @@ class NavSlotBarView(context: Context) : View(context) {
      */
     var lyricWipe: Float = 0f
         set(value) {
-            field = value.coerceIn(0f, 1f)
+            val clamped = value.coerceIn(0f, 1f)
+            if (kotlin.math.abs(field - clamped) < 0.0005f) return
+            field = clamped
             lyricWipeState.setTarget(field)
             invalidate()
         }
@@ -147,6 +173,9 @@ class NavSlotBarView(context: Context) : View(context) {
         strokeJoin = Paint.Join.ROUND
     }
     private val hits = LinkedHashMap<String, RectF>()
+    private val hitSlots = HashMap<String, NavSlot>()
+    private val appIconCache = HashMap<String, android.graphics.drawable.Drawable?>()
+    private val bgPath = Path()
     private val timeFmt = SimpleDateFormat("HH:mm", Locale.CHINA)
     private val hmsFmt = SimpleDateFormat("HH:mm:ss", Locale.CHINA)
     // `yyyy年M月d日`
@@ -159,6 +188,50 @@ class NavSlotBarView(context: Context) : View(context) {
     private var tapCount = 0
     private var longPressFired = false
     private var downSlot: NavSlot? = null
+    /** 单击/双击主页槽的延迟回调里使用，避免 ACTION_UP 立刻把 downSlot 置空后单击永远不触发。 */
+    private var pendingHomeSlot: NavSlot? = null
+
+    /** 当前宿主窗口是否可见（LauncherView 退到后台 onStop 时置 false，停掉无意义的 1Hz 时钟重绘）。 */
+    private var visibleOnScreen = true
+
+    fun setVisibleOnScreen(visible: Boolean) {
+        if (visibleOnScreen == visible) return
+        visibleOnScreen = visible
+        syncClockTicker()
+        if (visible && isAttachedToWindow && slots.any { it.isDatetime }) {
+            invalidate()
+        }
+    }
+
+    private val clockTicker = object : Runnable {
+        override fun run() {
+            if (!visibleOnScreen || !isAttachedToWindow || slots.none { it.isDatetime }) return
+            invalidate()
+            handler.postDelayed(this, 1_000L)
+        }
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        cornerRadius = runCatching { com.cardesk.launcher.core.Prefs(context).dockCornerRadius.toFloat() }.getOrDefault(0f)
+        live.add(java.lang.ref.WeakReference(this))
+        syncClockTicker()
+    }
+
+    override fun onDetachedFromWindow() {
+        live.removeAll { it.get() == null || it.get() === this }
+        handler.removeCallbacks(clockTicker)
+        handler.removeCallbacks(longPressRunnable)
+        handler.removeCallbacks(homeTapRunnable)
+        super.onDetachedFromWindow()
+    }
+
+    private fun syncClockTicker() {
+        handler.removeCallbacks(clockTicker)
+        if (visibleOnScreen && isAttachedToWindow && slots.any { it.isDatetime }) {
+            handler.postDelayed(clockTicker, 1_000L)
+        }
+    }
 
     // —— 按压反馈 ——
     //
@@ -173,72 +246,156 @@ class NavSlotBarView(context: Context) : View(context) {
     private val tempDriverPulse = ValuePulse()
     private val tempPassengerPulse = ValuePulse()
 
-    /** 1dp 约 1.6px（本控件只在 1920×1080 设计坐标系里使用）。 */
-    private val u = 1.6f
+    /** 1dp 约 1.6px（本控件只在 1920×1080 设计坐标系里使用），超宽时在 onDraw 里自动等比缩放。 */
+    private var u = 1.6f
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = MeasureSpec.getSize(widthMeasureSpec)
         val h = MeasureSpec.getSize(heightMeasureSpec)
-        setMeasuredDimension(w, if (h > 0) h else (46 * u).toInt())
+        setMeasuredDimension(w, if (h > 0) h else (46 * 1.6f).toInt())
     }
 
-    private fun slotWidth(slot: NavSlot): Float = when {
-        slot.isEmpty -> 3f * u
-        slot.type == NavSlot.TYPE_MEDIA -> 200f * u
-        slot.type == NavSlot.TYPE_LYRIC -> 150f * u
-        NavSlots.isTempSlot(slot) -> 112f * u
-        slot.type == NavSlot.TYPE_DATETIME -> 96f * u
-        NavSlots.isTextToggle(slot) -> 56f * u
-        NavSlots.isHvacAction(slot.actionId) && slot.actionId == "hvac_fan" -> 46f * u
-        else -> 44f * u
+    private fun slotWidth(slot: NavSlot, unit: Float = u): Float = when {
+        slot.isEmpty -> 3f * unit
+        slot.type == NavSlot.TYPE_MEDIA -> 200f * unit
+        slot.type == NavSlot.TYPE_LYRIC -> 150f * unit
+        NavSlots.isTempSlot(slot) -> 112f * unit
+        slot.type == NavSlot.TYPE_DATETIME -> 96f * unit
+        NavSlots.isTextToggle(slot) -> 56f * unit
+        NavSlots.isHvacAction(slot.actionId) && slot.actionId == "hvac_fan" -> 46f * unit
+        else -> 44f * unit
+    }
+
+    /** 估算所有可见槽位按基准 unit 排列时的总宽（用于超宽缩放与水平居中）。 */
+    private fun measureTotalWidth(unit: Float): Float {
+        var total = 0f
+        var hvacDividerDone = false
+        var hasNonEmptyBefore = false
+        var lastGap = 0f
+        for (slot in slots) {
+            if (!showLyric && slot.type == NavSlot.TYPE_LYRIC) continue
+            val w = slotWidth(slot, unit)
+            if (slot.isEmpty) {
+                total += w + 3f * unit
+                lastGap = 3f * unit
+                continue
+            }
+            if (!hvacDividerDone && hasNonEmptyBefore && NavSlots.isHvacAction(slot.actionId)) {
+                total += 9f * unit
+                hvacDividerDone = true
+            }
+            hasNonEmptyBefore = true
+            val gap = margin(slot, unit)
+            total += w + gap
+            lastGap = gap
+        }
+        return (total - lastGap).coerceAtLeast(0f)
+    }
+
+    private fun drawGlassBackdrop(canvas: Canvas, w: Float, h: Float) {
+        val radius = cornerRadius.coerceIn(0f, minOf(h, w) / 2f)
+        val rect = RectF(0f, 0f, w, h)
+        if (radius <= 0f) {
+            com.cardesk.launcher.core.Glass.card(
+                canvas,
+                rect,
+                0f,
+                com.cardesk.launcher.core.Skin.NAV_BG,
+                shadow = false,
+                sheen = true,
+                stroke = com.cardesk.launcher.core.Skin.GLASS_STROKE,
+            )
+            return
+        }
+        bgPath.reset()
+        bgPath.addRoundRect(
+            rect,
+            floatArrayOf(radius, radius, radius, radius, 0f, 0f, 0f, 0f),
+            Path.Direction.CW,
+        )
+        canvas.save()
+        canvas.clipPath(bgPath)
+        com.cardesk.launcher.core.Glass.card(
+            canvas,
+            rect,
+            0f,
+            com.cardesk.launcher.core.Skin.NAV_BG,
+            shadow = false,
+            sheen = true,
+            stroke = 0,
+        )
+        canvas.restore()
+        stroke.color = com.cardesk.launcher.core.Skin.GLASS_STROKE
+        stroke.strokeWidth = 1f
+        canvas.drawPath(bgPath, stroke)
     }
 
     override fun onDraw(canvas: Canvas) {
+        val w = width.toFloat()
         val h = height.toFloat()
+        if (w <= 0f || h <= 0f) return
+        if (drawBackdrop) {
+            drawGlassBackdrop(canvas, w, h)
+        }
         hits.clear()
-        val contentH = h - 8f * u
+        hitSlots.clear()
+        val padX = if (drawBackdrop) 20f else 8f
+        val availW = (w - padX * 2f).coerceAtLeast(1f)
+        val baseU = 1.6f
+        val baseTotal = measureTotalWidth(baseU)
+        val fitScale = if (baseTotal > availW) (availW / baseTotal).coerceAtLeast(0.5f) else 1f
+        u = baseU * fitScale
+        val totalW = baseTotal * fitScale
+        val contentH = (h - 8f * baseU).coerceAtLeast(h * 0.65f)
         val top = (h - contentH) / 2f
-        var x = 0f
+        var x = ((w - totalW) / 2f).coerceAtLeast(padX)
         var hvacDividerDone = false
         var hasNonEmptyBefore = false
 
-        for (slot in slots) {
+        for ((index, slot) in slots.withIndex()) {
             // 歌词槽被关掉时整个跳过：不画、也不占宽度（不留空位）。
             if (!showLyric && slot.type == NavSlot.TYPE_LYRIC) continue
-            val w = slotWidth(slot)
+            val sw = slotWidth(slot, u)
             if (slot.isEmpty) {
                 fill.color = palette.withAlpha(palette.stroke, 0x26)
-                canvas.drawRoundRect(RectF(x, top + 6 * u, x + w, top + contentH - 6 * u), 2f, 2f, fill)
-                x += w + 3 * u
+                canvas.drawRoundRect(RectF(x, top + 6 * baseU, x + sw, top + contentH - 6 * baseU), 2f, 2f, fill)
+                x += sw + 3 * u
                 continue
             }
             if (!hvacDividerDone && hasNonEmptyBefore && NavSlots.isHvacAction(slot.actionId)) {
                 val dx = x + 4 * u
                 fill.color = palette.withAlpha(palette.stroke, 0x55)
-                canvas.drawRoundRect(RectF(dx, top + 12 * u, dx + 1.2f * u, top + contentH - 12 * u), 1f, 1f, fill)
+                canvas.drawRoundRect(RectF(dx, top + 12 * baseU, dx + 1.2f * baseU, top + contentH - 12 * baseU), 1f, 1f, fill)
                 x += 9 * u
                 hvacDividerDone = true
             }
             hasNonEmptyBefore = true
-            drawSlot(canvas, slot, x, top, w, contentH)
-            x += w + margin(slot)
+            drawSlot(canvas, slot, index, x, top, sw, contentH)
+            x += sw + margin(slot, u)
         }
     }
 
-    private fun margin(slot: NavSlot): Float = when {
-        slot.type == NavSlot.TYPE_MEDIA || slot.type == NavSlot.TYPE_LYRIC -> 8f * u
-        NavSlots.isTempSlot(slot) -> 4f * u
-        else -> 4f * u
+    private fun margin(slot: NavSlot, unit: Float = u): Float = when {
+        slot.type == NavSlot.TYPE_MEDIA || slot.type == NavSlot.TYPE_LYRIC -> 8f * unit
+        NavSlots.isTempSlot(slot) -> 4f * unit
+        else -> 4f * unit
     }
 
-    private fun drawSlot(canvas: Canvas, slot: NavSlot, x: Float, top: Float, w: Float, h: Float) {
+    private fun registerHit(baseKey: String, rect: RectF, slot: NavSlot, index: Int): String {
+        val key = if (!hits.containsKey(baseKey)) baseKey else "$baseKey#$index"
+        hits[key] = rect
+        hitSlots[key] = slot
+        return key
+    }
+
+    private fun drawSlot(canvas: Canvas, slot: NavSlot, index: Int, x: Float, top: Float, w: Float, h: Float) {
         when {
             slot.type == NavSlot.TYPE_MEDIA -> drawMedia(canvas, x, top, w, h, slot)
             slot.type == NavSlot.TYPE_LYRIC -> drawLyric(canvas, x, top, w, h, slot)
-            slot.type == NavSlot.TYPE_DATETIME -> drawDatetime(canvas, x, top, w, h, slot)
+            slot.type == NavSlot.TYPE_DATETIME -> drawDatetime(canvas, index, x, top, w, h, slot)
             NavSlots.isTempSlot(slot) -> drawTemp(canvas, x, top, w, h, slot)
-            NavSlots.isTextToggle(slot) -> drawTextToggle(canvas, x, top, w, h, slot)
-            else -> drawIconAction(canvas, x, top, w, h, slot)
+            NavSlots.isTextToggle(slot) -> drawTextToggle(canvas, index, x, top, w, h, slot)
+            else -> drawIconAction(canvas, index, x, top, w, h, slot)
         }
     }
 
@@ -261,7 +418,7 @@ class NavSlotBarView(context: Context) : View(context) {
 
     // ------------------------------------------------------------------ 九种槽位
 
-    private fun drawIconAction(canvas: Canvas, x: Float, top: Float, w: Float, h: Float, slot: NavSlot) {
+    private fun drawIconAction(canvas: Canvas, index: Int, x: Float, top: Float, w: Float, h: Float, slot: NavSlot) {
         val active = when (slot.actionId) {
             "hvac_power" -> state?.power == true
             "hvac_circ" -> (state?.circulation ?: 0) != 0
@@ -269,97 +426,116 @@ class NavSlotBarView(context: Context) : View(context) {
             "hvac_defrost_rear" -> state?.defrostRear == true
             else -> false
         }
-        // 命中区的 key 与 [hits] 里登记的保持一致，按压反馈才能对上。
-        val key = slot.actionId.ifBlank { "slot${slot.hashCode()}" }
+        val baseKey = slot.actionId.ifBlank { if (slot.pkg.isNotBlank()) "app_${slot.pkg}" else "slot_$index" }
+        val key = registerHit(baseKey, RectF(x, top, x + w, top + h), slot, index)
         val cx = x + w / 2f
         val cy = top + h / 2f
         withPress(canvas, key, cx, cy) {
             tile(canvas, x, top, w, h, active)
-            when (slot.actionId) {
-                "back" -> {
-                    icon.color = palette.text
-                    val p = Path()
-                    p.moveTo(cx + 8 * u, cy - 8 * u)
-                    p.lineTo(cx - 8 * u, cy)
-                    p.lineTo(cx + 8 * u, cy + 8 * u)
-                    canvas.drawPath(p, icon)
+            if (slot.type == NavSlot.TYPE_APP && slot.pkg.isNotBlank()) {
+                val appIcon = appIconCache.getOrPut(slot.pkg) {
+                    runCatching { context.packageManager.getApplicationIcon(slot.pkg) }.getOrNull()
                 }
-                "home" -> {
-                    icon.color = palette.text
-                    // 第七十七轮：与桌面 Dock 的 home 键**共用同一份房子形状**
-                    // （见 [HomeHouseIcon]）—— 同一个「主页」不能两处两个样。
-                    HomeHouseIcon.draw(canvas, cx, cy, 9f * u, icon)
+                if (appIcon != null) {
+                    val iconSize = (minOf(w, h) * 0.68f).toInt().coerceAtLeast(24)
+                    val left = (cx - iconSize / 2f).toInt()
+                    val iconTop = (cy - iconSize / 2f).toInt()
+                    val clipRect = RectF(left.toFloat(), iconTop.toFloat(), (left + iconSize).toFloat(), (iconTop + iconSize).toFloat())
+                    val clip = Path().apply { addRoundRect(clipRect, iconSize * 0.22f, iconSize * 0.22f, Path.Direction.CW) }
+                    canvas.save()
+                    canvas.clipPath(clip)
+                    appIcon.setBounds(left, iconTop, left + iconSize, iconTop + iconSize)
+                    appIcon.draw(canvas)
+                    canvas.restore()
+                } else {
+                    label(canvas, slot.label.take(2), cx, cy, 13f * u, palette.text, bold = true)
                 }
-                "tasks" -> {
-                    icon.color = palette.text
-                    for (r in 0..2) canvas.drawCircle(cx - 6 * u, cy - 7 * u + r * 7 * u, 1.8f * u, icon)
-                    for (r in 0..2) {
-                        canvas.drawLine(cx - 1 * u, cy - 7 * u + r * 7 * u, cx + 9 * u, cy - 7 * u + r * 7 * u, icon)
+            } else {
+                when (slot.actionId) {
+                    "back" -> {
+                        icon.color = palette.text
+                        val p = Path()
+                        p.moveTo(cx + 8 * u, cy - 8 * u)
+                        p.lineTo(cx - 8 * u, cy)
+                        p.lineTo(cx + 8 * u, cy + 8 * u)
+                        canvas.drawPath(p, icon)
                     }
-                }
-                "split" -> {
-                    icon.color = palette.text
-                    canvas.drawRoundRect(RectF(cx - 9 * u, cy - 8 * u, cx - 1 * u, cy + 8 * u), 2f, 2f, icon)
-                    canvas.drawRoundRect(RectF(cx + 1 * u, cy - 8 * u, cx + 9 * u, cy + 8 * u), 2f, 2f, icon)
-                }
-                "camera_360" -> label(canvas, "360", cx, cy, 15f * u, if (active) palette.accent else palette.text, true)
-                "settings" -> {
-                    icon.color = palette.text
-                    canvas.drawCircle(cx, cy, 5.5f * u, icon)
-                    icon.color = palette.text
-                    canvas.drawCircle(cx, cy, 10f * u, icon)
-                }
-                "media" -> label(canvas, "♪", cx, cy, 17f * u, palette.text, true)
-                "lyric" -> label(canvas, "词", cx, cy, 15f * u, palette.text, true)
-                "hvac_power" -> {
-                    icon.color = if (active) palette.accent else palette.text
-                    canvas.drawRoundRect(RectF(cx - 2 * u, cy - 10 * u, cx + 2 * u, cy - 2 * u), 2f, 2f, icon)
-                    canvas.drawArc(RectF(cx - 8 * u, cy - 8 * u, cx + 8 * u, cy + 8 * u), -60f, 300f, false, icon)
-                }
-                "hvac_fan" -> {
-                    icon.color = if (state?.fanAuto == true) palette.accent else palette.text
-                    for (k in 0..2) {
-                        val ang = -Math.PI / 2 + k * 2 * Math.PI / 3
-                        canvas.drawOval(
-                            RectF(
-                                cx + (Math.cos(ang) * 5 * u - 4 * u).toFloat(),
-                                cy + (Math.sin(ang) * 5 * u - 4 * u).toFloat(),
-                                cx + (Math.cos(ang) * 5 * u + 4 * u).toFloat(),
-                                cy + (Math.sin(ang) * 5 * u + 4 * u).toFloat(),
-                            ),
-                            icon,
-                        )
+                    "home" -> {
+                        icon.color = palette.text
+                        // 第七十七轮：与桌面 Dock 的 home 键**共用同一份房子形状**
+                        // （见 [HomeHouseIcon]）—— 同一个「主页」不能两处两个样。
+                        HomeHouseIcon.draw(canvas, cx, cy, 9f * u, icon)
                     }
-                    val level = state?.fanLevel ?: 0
-                    for (i in 0 until 7) {
-                        val bx = cx - 15f * u + i * 4.6f * u
-                        fill.color = if (i < level) palette.accent else palette.withAlpha(palette.stroke, 0x66)
-                        canvas.drawRect(RectF(bx, top + h - 9 * u, bx + 3.2f * u, top + h - 4 * u), fill)
+                    "tasks" -> {
+                        icon.color = palette.text
+                        for (r in 0..2) canvas.drawCircle(cx - 6 * u, cy - 7 * u + r * 7 * u, 1.8f * u, icon)
+                        for (r in 0..2) {
+                            canvas.drawLine(cx - 1 * u, cy - 7 * u + r * 7 * u, cx + 9 * u, cy - 7 * u + r * 7 * u, icon)
+                        }
                     }
+                    "split" -> {
+                        icon.color = palette.text
+                        canvas.drawRoundRect(RectF(cx - 9 * u, cy - 8 * u, cx - 1 * u, cy + 8 * u), 2f, 2f, icon)
+                        canvas.drawRoundRect(RectF(cx + 1 * u, cy - 8 * u, cx + 9 * u, cy + 8 * u), 2f, 2f, icon)
+                    }
+                    "camera_360" -> label(canvas, "360", cx, cy, 15f * u, if (active) palette.accent else palette.text, true)
+                    "settings" -> {
+                        icon.color = palette.text
+                        canvas.drawCircle(cx, cy, 5.5f * u, icon)
+                        icon.color = palette.text
+                        canvas.drawCircle(cx, cy, 10f * u, icon)
+                    }
+                    "media" -> label(canvas, "♪", cx, cy, 17f * u, palette.text, true)
+                    "lyric" -> label(canvas, "词", cx, cy, 15f * u, palette.text, true)
+                    "hvac_power" -> {
+                        icon.color = if (active) palette.accent else palette.text
+                        canvas.drawRoundRect(RectF(cx - 2 * u, cy - 10 * u, cx + 2 * u, cy - 2 * u), 2f, 2f, icon)
+                        canvas.drawArc(RectF(cx - 8 * u, cy - 8 * u, cx + 8 * u, cy + 8 * u), -60f, 300f, false, icon)
+                    }
+                    "hvac_fan" -> {
+                        icon.color = if (state?.fanAuto == true) palette.accent else palette.text
+                        for (k in 0..2) {
+                            val ang = -Math.PI / 2 + k * 2 * Math.PI / 3
+                            canvas.drawOval(
+                                RectF(
+                                    cx + (Math.cos(ang) * 5 * u - 4 * u).toFloat(),
+                                    cy + (Math.sin(ang) * 5 * u - 4 * u).toFloat(),
+                                    cx + (Math.cos(ang) * 5 * u + 4 * u).toFloat(),
+                                    cy + (Math.sin(ang) * 5 * u + 4 * u).toFloat(),
+                                ),
+                                icon,
+                            )
+                        }
+                        val level = state?.fanLevel ?: 0
+                        for (i in 0 until 7) {
+                            val bx = cx - 15f * u + i * 4.6f * u
+                            fill.color = if (i < level) palette.accent else palette.withAlpha(palette.stroke, 0x66)
+                            canvas.drawRect(RectF(bx, top + h - 9 * u, bx + 3.2f * u, top + h - 4 * u), fill)
+                        }
+                    }
+                    "hvac_circ" -> {
+                        icon.color = if (active) palette.accent else palette.text
+                        canvas.drawArc(RectF(cx - 9 * u, cy - 9 * u, cx + 9 * u, cy + 9 * u), 40f, 280f, false, icon)
+                        canvas.drawLine(cx + 6 * u, cy - 7 * u, cx + 10 * u, cy - 8 * u, icon)
+                    }
+                    "hvac_defrost_front" -> {
+                        icon.color = if (active) palette.accent else palette.text
+                        canvas.drawArc(RectF(cx - 10 * u, cy + 1 * u, cx + 10 * u, cy + 15 * u), 180f, 180f, false, icon)
+                        for (k in -1..1) canvas.drawLine(cx + k * 4 * u, cy - 5 * u, cx + k * 4 * u, cy + 2 * u, icon)
+                    }
+                    "hvac_defrost_rear" -> {
+                        icon.color = if (active) palette.accent else palette.text
+                        canvas.drawRect(RectF(cx - 10 * u, cy - 6 * u, cx + 10 * u, cy + 8 * u), icon)
+                        canvas.drawLine(cx - 12 * u, cy + 8 * u, cx + 12 * u, cy + 8 * u, icon)
+                        for (k in -1..1) canvas.drawLine(cx + k * 4 * u, cy - 2 * u, cx + k * 4 * u, cy + 4 * u, icon)
+                    }
+                    else -> label(canvas, slot.label.take(2), cx, cy, 13f * u, palette.text)
                 }
-                "hvac_circ" -> {
-                    icon.color = if (active) palette.accent else palette.text
-                    canvas.drawArc(RectF(cx - 9 * u, cy - 9 * u, cx + 9 * u, cy + 9 * u), 40f, 280f, false, icon)
-                    canvas.drawLine(cx + 6 * u, cy - 7 * u, cx + 10 * u, cy - 8 * u, icon)
-                }
-                "hvac_defrost_front" -> {
-                    icon.color = if (active) palette.accent else palette.text
-                    canvas.drawArc(RectF(cx - 10 * u, cy + 1 * u, cx + 10 * u, cy + 15 * u), 180f, 180f, false, icon)
-                    for (k in -1..1) canvas.drawLine(cx + k * 4 * u, cy - 5 * u, cx + k * 4 * u, cy + 2 * u, icon)
-                }
-                "hvac_defrost_rear" -> {
-                    icon.color = if (active) palette.accent else palette.text
-                    canvas.drawRect(RectF(cx - 10 * u, cy - 6 * u, cx + 10 * u, cy + 8 * u), icon)
-                    canvas.drawLine(cx - 12 * u, cy + 8 * u, cx + 12 * u, cy + 8 * u, icon)
-                    for (k in -1..1) canvas.drawLine(cx + k * 4 * u, cy - 2 * u, cx + k * 4 * u, cy + 4 * u, icon)
-                }
-                else -> label(canvas, slot.label.take(2), cx, cy, 13f * u, palette.text)
             }
         }
-        hits[key] = RectF(x, top, x + w, top + h)
     }
 
-    private fun drawTextToggle(canvas: Canvas, x: Float, top: Float, w: Float, h: Float, slot: NavSlot) {
+    private fun drawTextToggle(canvas: Canvas, index: Int, x: Float, top: Float, w: Float, h: Float, slot: NavSlot) {
         val active = when (slot.actionId) {
             "hvac_ac" -> state?.ac == true
             "hvac_auto" -> state?.auto == true
@@ -370,11 +546,11 @@ class NavSlotBarView(context: Context) : View(context) {
             "hvac_auto" -> "AUTO"
             else -> slot.actionId
         }
-        withPress(canvas, slot.actionId, x + w / 2f, top + h / 2f) {
+        val key = registerHit(slot.actionId, RectF(x, top, x + w, top + h), slot, index)
+        withPress(canvas, key, x + w / 2f, top + h / 2f) {
             tile(canvas, x, top, w, h, active)
             label(canvas, labelText, x + w / 2f, top + h / 2f, 14f * u, if (active) palette.accent else palette.text, true)
         }
-        hits[slot.actionId] = RectF(x, top, x + w, top + h)
     }
 
     /**
@@ -411,7 +587,7 @@ class NavSlotBarView(context: Context) : View(context) {
         hits["temp_dec_$zoneKey"] = RectF(x, top, x + arrow, top + h)
     }
 
-    private fun drawDatetime(canvas: Canvas, x: Float, top: Float, w: Float, h: Float, slot: NavSlot) {
+    private fun drawDatetime(canvas: Canvas, index: Int, x: Float, top: Float, w: Float, h: Float, slot: NavSlot) {
         val now = Date()
         //
         // - 主行 = 时间（时分 / 时分秒，星期跟在时间后面），日期类槽位只显示日期；
@@ -422,7 +598,8 @@ class NavSlotBarView(context: Context) : View(context) {
         val time = if (withSec) hmsFmt.format(now) else timeFmt.format(now)
         val primary = if (withWeek) "$time ${weekFmt.format(now)}" else time
 
-        withPress(canvas, "datetime", x + w / 2f, top + h / 2f) {
+        val key = registerHit("datetime", RectF(x, top, x + w, top + h), slot, index)
+        withPress(canvas, key, x + w / 2f, top + h / 2f) {
             text.textAlign = Paint.Align.CENTER
             text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
             text.color = palette.textDim
@@ -435,8 +612,12 @@ class NavSlotBarView(context: Context) : View(context) {
                 canvas.drawText(primary, x + w / 2f, top + h / 2f - 3 * u, text)
             }
         }
-        hits["datetime"] = RectF(x, top, x + w, top + h)
     }
+
+    private val coverBitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val coverBitmapMatrix = Matrix()
+    private var coverShaderBmp: Bitmap? = null
+    private var coverShader: BitmapShader? = null
 
     /**
      * 媒体槽：三块独立热区——
@@ -450,14 +631,23 @@ class NavSlotBarView(context: Context) : View(context) {
         val art = mediaArtwork
         // 封面 / 标题 / 播放键是三块独立热区，按压反馈也各自独立。
         withPress(canvas, "media_cover", x + 6 * u + cover / 2f, cy) {
-            if (art != null) {
-                // 有专辑图 → 裁剪成圆角贴上去（圆角 16）
+            if (art != null && art.width > 0 && art.height > 0) {
+                // 有专辑图 → BitmapShader 单遍圆角绘制，避免 clipPath 模板裁剪闪屏
                 val coverRect = RectF(x + 6 * u, cy - cover / 2f, x + 6 * u + cover, cy + cover / 2f)
-                val clip = Path().apply { addRoundRect(coverRect, 7f * u, 7f * u, Path.Direction.CW) }
-                canvas.save()
-                canvas.clipPath(clip)
-                canvas.drawBitmap(art, null, coverRect, Paint(Paint.FILTER_BITMAP_FLAG))
-                canvas.restore()
+                val shader = if (coverShaderBmp === art && coverShader != null) {
+                    coverShader!!
+                } else {
+                    BitmapShader(art, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).also {
+                        coverShaderBmp = art
+                        coverShader = it
+                    }
+                }
+                coverBitmapMatrix.reset()
+                coverBitmapMatrix.setScale(coverRect.width() / art.width.toFloat(), coverRect.height() / art.height.toFloat())
+                coverBitmapMatrix.postTranslate(coverRect.left, coverRect.top)
+                shader.setLocalMatrix(coverBitmapMatrix)
+                coverBitmapPaint.shader = shader
+                canvas.drawRoundRect(coverRect, 7f * u, 7f * u, coverBitmapPaint)
             } else {
                 fill.color = palette.withAlpha(palette.accent, 0xCC)
                 canvas.drawRoundRect(RectF(x + 6 * u, cy - cover / 2f, x + 6 * u + cover, cy + cover / 2f), 7f * u, 7f * u, fill)
@@ -608,8 +798,10 @@ class NavSlotBarView(context: Context) : View(context) {
 
     /** 主页槽单击 / 双击判定。 */
     private val homeTapRunnable = Runnable {
+        val slot = pendingHomeSlot
+        pendingHomeSlot = null
         if (tapCount == 1) {
-            downSlot?.let { onSlot?.invoke(it) }
+            slot?.let { onSlot?.invoke(it) }
         } else {
             Logx.event(LogTags.DOCK, "导航栏主页槽双击：打开最近任务")
             onRecents?.invoke()
@@ -673,10 +865,12 @@ class NavSlotBarView(context: Context) : View(context) {
         )
         when (slot.actionId) {
             NavSlot.ACTION_HOME -> {
+                pendingHomeSlot = slot
                 tapCount++
                 if (tapCount > 2) {
                     handler.removeCallbacks(homeTapRunnable)
                     tapCount = 0
+                    pendingHomeSlot = null
                     Logx.event(LogTags.DOCK, "导航栏主页槽三击：打开最近任务")
                     onRecents?.invoke()
                     return
@@ -689,11 +883,12 @@ class NavSlotBarView(context: Context) : View(context) {
         }
     }
 
-    /** 命中区 → 槽位（actionId 命中优先，其次按类型命中）。 */
-    private fun slotForHit(hit: String): NavSlot? = slots.firstOrNull {
-        (it.actionId.ifBlank { "slot${it.hashCode()}" }) == hit ||
-            (hit == "datetime" && NavSlots.isDatetime(it))
-    }
+    /** 命中区 → 槽位（优先从本次绘制登记的精确映射取，兼容重复槽位）。 */
+    private fun slotForHit(hit: String): NavSlot? =
+        hitSlots[hit] ?: slots.firstOrNull {
+            (it.actionId.ifBlank { "slot${it.hashCode()}" }) == hit ||
+                (hit == "datetime" && NavSlots.isDatetime(it))
+        }
 
     /** 命中区 key（与 [handleUp] 用同一套判定）。 */
     private fun hitKeyAt(x: Float, y: Float): String? =
@@ -803,5 +998,20 @@ class NavSlotBarView(context: Context) : View(context) {
          */
         fun resolveHeightPx(screenWidth: Int, designedHeightPx: Int): Int =
             if (screenWidth < WIDE_SCREEN_MIN_WIDTH) maxOf(1, designedHeightPx) else WIDE_HEIGHT_PX
+
+        private val live =
+            java.util.concurrent.CopyOnWriteArrayList<java.lang.ref.WeakReference<NavSlotBarView>>()
+
+        /** 设置页改完圆角后同步刷新所有活着的槽位条实例。 */
+        fun refreshAll(context: Context) {
+            val radius = runCatching {
+                com.cardesk.launcher.core.Prefs(context.applicationContext).dockCornerRadius.toFloat()
+            }.getOrDefault(0f)
+            for (ref in live) {
+                val v = ref.get() ?: continue
+                v.cornerRadius = radius
+                v.invalidate()
+            }
+        }
     }
 }

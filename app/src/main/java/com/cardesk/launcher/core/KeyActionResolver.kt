@@ -35,9 +35,6 @@ object KeyActionResolver {
     /** 语音键：单击 / 双击 / 长按。 */
     enum class VoiceSlot { CLICK, DOUBLE, LONG }
 
-    /** 媒体键：上一曲 / 下一曲（只配了长按）。 */
-    enum class MediaSlot { PREV, NEXT }
-
     /**
      * 语音键某一种手势对应的动作。
      *
@@ -48,12 +45,6 @@ object KeyActionResolver {
         VoiceSlot.CLICK -> Action(prefs.voiceClickAction, prefs.voiceClickMode)
         VoiceSlot.DOUBLE -> Action(prefs.voiceDoubleAction, prefs.voiceDoubleMode)
         VoiceSlot.LONG -> Action(prefs.voiceLongAction, prefs.voiceLongMode)
-    }
-
-    /** 媒体键长按对应的动作。 */
-    fun media(prefs: Prefs, slot: MediaSlot): Action = when (slot) {
-        MediaSlot.PREV -> Action(prefs.mediaPrevLongAction, prefs.mediaPrevLongMode)
-        MediaSlot.NEXT -> Action(prefs.mediaNextLongAction, prefs.mediaNextLongMode)
     }
 
     /**
@@ -92,22 +83,9 @@ object KeyActionResolver {
      */
     val VOICE_KEY_CODES: IntArray get() = OemKeyProtocol.VOICE_KEY_CODES
 
-    /** 媒体上一曲 keyCode（`KEYCODE_MEDIA_PREVIOUS`，标准码）。 */
-    const val KEYCODE_MEDIA_PREVIOUS = 88
-
-    /** 媒体下一曲 keyCode（`KEYCODE_MEDIA_NEXT`，标准码）。 */
-    const val KEYCODE_MEDIA_NEXT = 87
-
     /** 是否是候选语音键。 */
     fun isVoiceKey(keyCode: Int): Boolean = OemKeyProtocol.isVoiceKey(keyCode)
 
-    /** 是媒体上一曲键（含方控私有码 `200088`）。 */
-    fun isMediaPrev(keyCode: Int): Boolean = OemKeyProtocol.isMediaPrev(keyCode)
-
-    /** 是媒体下一曲键（含方控私有码 `200087`）。 */
-    fun isMediaNext(keyCode: Int): Boolean = OemKeyProtocol.isMediaNext(keyCode)
-
-    /** 是不是本模块关心的按键（语音键 / 媒体上一曲 / 下一曲）。 */
-    fun isHandled(keyCode: Int): Boolean =
-        isVoiceKey(keyCode) || isMediaPrev(keyCode) || isMediaNext(keyCode)
+    /** 是不是本模块关心的按键（仅语音键；媒体键一律放行给车机/系统）。 */
+    fun isHandled(keyCode: Int): Boolean = isVoiceKey(keyCode)
 }

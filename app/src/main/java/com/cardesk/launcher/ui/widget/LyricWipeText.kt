@@ -182,6 +182,7 @@ class WipeLyricTextView(context: Context) : View(context) {
     /** 歌词内容。 */
     var text: String = ""
         set(value) {
+            if (field == value) return
             field = value
             // 换句就重新起滚（锚点 = 换句的时刻）。
             marqueeState.setText(value, SystemClock.uptimeMillis())
@@ -244,7 +245,9 @@ class WipeLyricTextView(context: Context) : View(context) {
      */
     var wipeTarget: Float = 0f
         set(value) {
-            field = value.coerceIn(0f, 1f)
+            val clamped = value.coerceIn(0f, 1f)
+            if (kotlin.math.abs(field - clamped) < 0.001f) return
+            field = clamped
             wipeState.setTarget(field)
             invalidate()
         }

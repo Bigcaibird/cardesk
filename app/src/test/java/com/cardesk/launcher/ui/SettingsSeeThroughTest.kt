@@ -105,22 +105,36 @@ class SettingsSeeThroughTest {
     }
 
     @Test
-    fun `设置页的背景板确实铺了首页同一张L0`() {
-        // 第242轮设计改造：背景板从 `OverlayBackdrop`（自己压一层 scrim）
-        // 改成 `BackgroundView`（画的就是首页那张 L0：壁纸 + 设计底色 + 柔光），
-        // 画板要求设置页与首页是同一张背景，不再靠「把桌面压暗 26%」近似。
+    fun `设置页的背景板使用轻量透出遮罩不再铺第二张BackgroundView`() {
         val activity = Robolectric.buildActivity(com.cardesk.launcher.MainActivity::class.java).setup().get()
         val overlay = SettingsOverlay(activity, Prefs(activity), Palettes.night)
         val f = SettingsOverlay::class.java.getDeclaredField("scrimView")
         f.isAccessible = true
-        val scrim = f.get(overlay)
-        assertTrue("背景板应该是 BackgroundView（L0 同一张），实际是 $scrim", scrim is BackgroundView)
+        val scrim = f.get(overlay) as android.view.View
+        assertTrue("背景板不该再是 BackgroundView（避免双倍整屏重绘）", scrim !is BackgroundView)
         assertTrue("背景板不该再是 OverlayBackdrop", scrim !is OverlayBackdrop)
-        assertEquals(
-            "背景板的 palette 必须跟宿主一致（否则日夜切换时背景不跟着换）",
-            Palettes.night,
-            (scrim as BackgroundView).palette,
-        )
+        val bg = scrim.background as android.graphics.drawable.ColorDrawable
+        assertEquals(SettingsOverlay.SHELL_SCRIM_ALPHA, (bg.color ushr 24) and 0xFF)
+    }
+
+    @Test
+    fun `设置页左右两块面板共享同一个动画容器_关闭时同步退场`() {
+        val activity = Robolectric.buildActivity(com.cardesk.launcher.MainActivity::class.java).setup().get()
+        val overlay = SettingsOverlay(activity, Prefs(activity), Palettes.night)
+        val containerField = SettingsOverlay::class.java.getDeclaredField("panesContainer").apply { isAccessible = true }
+        val container = containerField.get(overlay) as FrameLayout
+        assertEquals("左右两块玻璃面板应同属 panesContainer 以保证同步开关动画", 2, container.childCount)
+        val panelField = SettingsOverlay::class.java.getDeclaredField("panelView").apply { isAccessible = true }
+        val contentPanel = panelField.get(overlay) as View
+        assertTrue("右侧内容面板应挂在 panesContainer 内", contentPanel.parent === container)
+        val navPanel = (0 until container.childCount).map { container.getChildAt(it) }.first { it !== contentPanel }
+        assertTrue("左侧导航面板应与右侧面板共用同一个动画父容器", navPanel.parent === container)
+
+        var ended = false
+        overlay.playClose { ended = true }
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(400))
+        assertTrue("关闭动画结束后应回调 onEnd", ended)
+        assertEquals("关闭结束后容器保持透明避免摘除前闪回", 0f, container.alpha, 0.001f)
     }
 
     @Test

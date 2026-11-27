@@ -36,6 +36,8 @@
         -->
         <permission name="android.permission.SET_APPOP"/>
         <permission name="android.permission.STATUS_BAR"/>
+        <permission name="android.permission.TETHER_PRIVILEGED"/>
+        <permission name="android.permission.NETWORK_SETTINGS"/>
         <permission name="android.permission.WRITE_SECURE_SETTINGS"/>
         <permission name="android.permission.WRITE_SETTINGS"/>
     </privapp-permissions>

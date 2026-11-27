@@ -384,4 +384,32 @@ class QqBroadcastTest {
             ),
         )
     }
+
+    @Test
+    fun `QQ广播早于MediaSession切歌到达时缓存收藏态并随后命中`() {
+        val controller = MusicController.get()
+        controller.resetActionStateOnSongChange()
+        assertEquals(MediaActions.FavoriteState.UNKNOWN, controller.favoriteState)
+
+        // 模拟 08:44:04 实车时序：update_song(董小姐, fav=1) 比 MediaSession 早到 1.3 秒
+        val t0 = 1_000_000L
+        controller.recordRecentQqFavorite("董小姐", MediaActions.FavoriteState.FAVORITED, now = t0)
+        // 切歌前对旧歌不误命中
+        assertFalse(controller.applyRecentQqFavoriteIfPresent("陪我看日出", now = t0 + 500L))
+        assertEquals(MediaActions.FavoriteState.UNKNOWN, controller.favoriteState)
+
+        // 1.3 秒后 MediaSession 切到「董小姐」→ 立即命中预到达缓存，无需切前台
+        assertTrue(controller.applyRecentQqFavoriteIfPresent("董小姐", now = t0 + 1_350L))
+        assertEquals(MediaActions.FavoriteState.FAVORITED, controller.favoriteState)
+
+        // 超过 TTL（30s）后缓存过期不再误用
+        controller.resetActionStateOnSongChange()
+        assertFalse(
+            controller.applyRecentQqFavoriteIfPresent(
+                "董小姐",
+                now = t0 + MusicController.QQ_FAV_CACHE_TTL_MS + 1L,
+            ),
+        )
+        assertEquals(MediaActions.FavoriteState.UNKNOWN, controller.favoriteState)
+    }
 }

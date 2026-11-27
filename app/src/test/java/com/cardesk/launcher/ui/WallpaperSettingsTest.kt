@@ -123,4 +123,26 @@ class WallpaperSettingsTest {
         assertEquals("默认壁纸下标", Wallpapers.DEFAULT_INDEX, prefs.wallpaper)
         assertEquals("紫晖雪山", Wallpapers.name(prefs.wallpaper))
     }
+
+    @Test
+    fun 壁纸页展示默认日夜壁纸且点击可切回() {
+        val a = activity()
+        val prefs = Prefs(a.applicationContext)
+        prefs.wallpaperDefaultDayNight = false
+        prefs.wallpaper = 4
+        val overlay = SettingsOverlay(a, prefs, Palettes.night)
+        overlay.showPageKey("wallpaper")
+        shadowOf(Looper.getMainLooper()).idle()
+
+        var defaultClicked = false
+        overlay.onUseDefaultDayNightWallpaper = { defaultClicked = true }
+
+        val cards = findAll(overlay, com.cardesk.launcher.ui.widget.DayNightWallpaperCardView::class.java)
+        assertEquals("壁纸页应该展示默认日夜壁纸预览卡", 1, cards.size)
+        cards[0].performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertTrue("点击默认日夜壁纸应落盘", prefs.wallpaperDefaultDayNight)
+        assertTrue("点击默认日夜壁纸应触发回调", defaultClicked)
+    }
 }

@@ -54,10 +54,10 @@ class NavSlotsLyricTest {
         )
     }
 
-    /** 增强导航栏没开 → 就算样式值是槽位条也不算数。 */
+    /** 非增强导航栏下选槽位条（含全局 Dock / 贴底通栏槽位条）时，歌词同样归导航栏。 */
     @Test
-    fun enhancedNavMustBeOn() {
-        assertFalse(
+    fun slotStyleWorksWithoutEnhancedNav() {
+        assertTrue(
             NavSlots.lyricBelongsToNavBar(
                 enhancedNav = false,
                 navStyle = NavSlots.NAV_STYLE_SLOTS,

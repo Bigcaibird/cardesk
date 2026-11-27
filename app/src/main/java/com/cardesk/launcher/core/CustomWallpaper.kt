@@ -36,39 +36,79 @@ object CustomWallpaper {
     const val TARGET_H = 1080
 
     private const val DIR = "custom_wallpaper"
-    private const val FILE = "wallpaper.jpg"
+    private const val FILE_DAY = "wallpaper.jpg"
+    private const val FILE_NIGHT = "wallpaper_night.jpg"
     private const val QUALITY = 88
 
-    /** 单槽缓存：当前自定义壁纸的全屏位图（只有一张）。 */
+    /** 双槽缓存：日间与夜间自定义壁纸的全屏位图（各最多留一张）。 */
     @Volatile
-    private var cached: Bitmap? = null
+    private var cachedDay: Bitmap? = null
 
-    fun file(context: Context): File = File(File(context.filesDir, DIR), FILE)
+    @Volatile
+    private var cachedNight: Bitmap? = null
 
-    fun has(context: Context): Boolean {
-        val f = file(context)
+    fun dayFile(context: Context): File = File(File(context.filesDir, DIR), FILE_DAY)
+
+    fun nightFile(context: Context): File = File(File(context.filesDir, DIR), FILE_NIGHT)
+
+    fun file(context: Context, night: Boolean = false): File =
+        if (night) nightFile(context) else dayFile(context)
+
+    fun hasDay(context: Context): Boolean {
+        val f = dayFile(context)
         return f.isFile && f.length() > 0
     }
 
-    /** 已解码的当前自定义壁纸（没有就返回 null）。 */
-    fun cachedBitmap(): Bitmap? = cached
+    fun hasNight(context: Context): Boolean {
+        val f = nightFile(context)
+        return f.isFile && f.length() > 0
+    }
 
-    /** 丢掉单槽缓存（删除 / 重新导入时调用）。 */
-    fun invalidate() {
-        val old = cached
-        cached = null
-        if (old != null && !old.isRecycled) old.recycle()
+    /** 是否已导入任意一张自定义静态壁纸（日间或夜间）。 */
+    fun has(context: Context): Boolean = hasDay(context) || hasNight(context)
+
+    /** 当前日夜模式下是否命中了**独立夜间静态壁纸**（命中时绘制不再叠加人工压暗 scrim）。 */
+    fun usesDedicatedNight(context: Context, night: Boolean): Boolean = night && hasNight(context)
+
+    /** 按日夜模式选择生效的落盘文件：夜间优先夜间图、缺省回退日间图；日间优先日间图、缺省回退夜间图。 */
+    fun activeSlotIsNight(context: Context, night: Boolean): Boolean = when {
+        night && hasNight(context) -> true
+        !night && hasDay(context) -> false
+        hasDay(context) -> false
+        else -> true
+    }
+
+    /** 已解码的指定槽位自定义壁纸（没有就返回 null）。 */
+    fun cachedBitmap(night: Boolean = false): Bitmap? =
+        (if (night) cachedNight else cachedDay)?.takeIf { !it.isRecycled }
+
+    /** 已解码的当前日夜模式生效位图（未缓存则返回 null）。 */
+    fun cachedForMode(context: Context, night: Boolean): Bitmap? =
+        if (!has(context)) null else cachedBitmap(activeSlotIsNight(context, night))
+
+    /** 丢掉缓存（传 null 清两槽；传 true/false 只清对应槽位）。 */
+    fun invalidate(night: Boolean? = null) {
+        if (night == null || !night) {
+            val old = cachedDay
+            cachedDay = null
+            if (old != null && !old.isRecycled) old.recycle()
+        }
+        if (night == null || night) {
+            val old = cachedNight
+            cachedNight = null
+            if (old != null && !old.isRecycled) old.recycle()
+        }
     }
 
     /**
-     * 解码落盘的预缩放副本（后台线程调用，结果进单槽缓存）。
+     * 解码落盘的预缩放副本（后台线程调用，结果进对应槽位缓存）。
      *
      * @return 解码失败（文件损坏/被删）时返回 null。
      */
-    fun loadScaled(context: Context): Bitmap? {
-        cached?.let { if (!it.isRecycled) return it }
-        val f = file(context)
-        if (!f.isFile) return null
+    fun loadScaled(context: Context, night: Boolean = false): Bitmap? {
+        cachedBitmap(night)?.let { return it }
+        val f = file(context, night)
+        if (!f.isFile || f.length() <= 0L) return null
         return try {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeFile(f.absolutePath, bounds)
@@ -80,11 +120,35 @@ object CustomWallpaper {
             val decoded = BitmapFactory.decodeFile(f.absolutePath, opts) ?: return null
             val fitted = fitTo(decoded, TARGET_W, TARGET_H)
             if (fitted !== decoded) decoded.recycle()
-            cached = fitted
+            if (night) cachedNight = fitted else cachedDay = fitted
             fitted
         } catch (e: Exception) {
             Logx.w(LogTags.SETTING, "自定义壁纸解码失败", e)
             null
+        }
+    }
+
+    /** 按日夜模式加载生效的自定义静态壁纸（夜间优先夜间图、缺省自动回退日间图）。 */
+    fun loadForMode(context: Context, night: Boolean): Bitmap? {
+        if (!has(context)) return null
+        val slotNight = activeSlotIsNight(context, night)
+        return loadScaled(context, slotNight) ?: loadScaled(context, !slotNight)
+    }
+
+    /**
+     * 从本地文件导入静态壁纸（后台线程调用，供在线壁纸下载后复用同一套缩放裁切链路）。
+     */
+    fun importFromFile(context: Context, source: File, night: Boolean = false): Boolean {
+        return try {
+            if (!source.isFile || source.length() <= 0L) {
+                Logx.w(LogTags.SETTING, "自定义壁纸导入失败：文件不存在或为空", "path" to source.absolutePath)
+                return false
+            }
+            val bytes = source.inputStream().use { readAllBounded(it) }
+            importBytes(context, bytes, night)
+        } catch (e: Exception) {
+            Logx.w(LogTags.SETTING, "自定义壁纸从文件导入失败", e, "path" to source.absolutePath)
+            false
         }
     }
 
@@ -93,7 +157,7 @@ object CustomWallpaper {
      *
      * 失败都返回 false 并写日志，调用方只需要提示用户。
      */
-    fun importFromUri(context: Context, uri: Uri): Boolean {
+    fun importFromUri(context: Context, uri: Uri, night: Boolean = false): Boolean {
         return try {
             val resolver = context.contentResolver
             // content:// 的流可能只能读一次（相册 provider 常见）：整个读进内存再解两遍。
@@ -102,54 +166,71 @@ object CustomWallpaper {
                     Logx.w(LogTags.SETTING, "自定义壁纸导入失败：打不开图片")
                     return false
                 }
-            if (bytes.isEmpty()) {
-                Logx.w(LogTags.SETTING, "自定义壁纸导入失败：图片为空")
-                return false
-            }
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
-                Logx.w(LogTags.SETTING, "自定义壁纸导入失败：读不到图片尺寸")
-                return false
-            }
-            val opts = BitmapFactory.Options().apply {
-                inSampleSize = computeSampleSize(bounds.outWidth, bounds.outHeight, TARGET_W, TARGET_H)
-                inPreferredConfig = Bitmap.Config.ARGB_8888
-            }
-            val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
-                ?: run {
-                    Logx.w(LogTags.SETTING, "自定义壁纸导入失败：解码为空")
-                    return false
-                }
-            val orientation = parseJpegOrientation(bytes)
-            val rotated = if (orientation != 0) rotate(decoded, orientation) else decoded
-            val fitted = fitTo(rotated, TARGET_W, TARGET_H)
-            if (rotated !== decoded) decoded.recycle()
-            if (fitted !== rotated) rotated.recycle()
-            val out = file(context)
-            out.parentFile?.mkdirs()
-            FileOutputStream(out).use { fitted.compress(Bitmap.CompressFormat.JPEG, QUALITY, it) }
-            fitted.recycle()
-            invalidate()
-            Logx.i(
-                LogTags.SETTING,
-                "自定义壁纸已导入",
-                "srcW" to bounds.outWidth,
-                "srcH" to bounds.outHeight,
-                "sample" to opts.inSampleSize,
-                "bytes" to out.length(),
-            )
-            true
+            importBytes(context, bytes, night)
         } catch (e: Exception) {
             Logx.w(LogTags.SETTING, "自定义壁纸导入失败", e)
             false
         }
     }
 
-    /** 删除自定义壁纸（文件 + 缓存）。 */
+    private fun importBytes(context: Context, bytes: ByteArray, night: Boolean): Boolean {
+        if (bytes.isEmpty()) {
+            Logx.w(LogTags.SETTING, "自定义壁纸导入失败：图片为空")
+            return false
+        }
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            Logx.w(LogTags.SETTING, "自定义壁纸导入失败：读不到图片尺寸")
+            return false
+        }
+        val opts = BitmapFactory.Options().apply {
+            inSampleSize = computeSampleSize(bounds.outWidth, bounds.outHeight, TARGET_W, TARGET_H)
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+            ?: run {
+                Logx.w(LogTags.SETTING, "自定义壁纸导入失败：解码为空")
+                return false
+            }
+        val orientation = parseJpegOrientation(bytes)
+        val rotated = if (orientation != 0) rotate(decoded, orientation) else decoded
+        val fitted = fitTo(rotated, TARGET_W, TARGET_H)
+        if (rotated !== decoded) decoded.recycle()
+        if (fitted !== rotated) rotated.recycle()
+        val out = file(context, night)
+        out.parentFile?.mkdirs()
+        FileOutputStream(out).use { fitted.compress(Bitmap.CompressFormat.JPEG, QUALITY, it) }
+        fitted.recycle()
+        invalidate(night)
+        Logx.i(
+            LogTags.SETTING,
+            "自定义壁纸已导入",
+            "night" to night,
+            "srcW" to bounds.outWidth,
+            "srcH" to bounds.outHeight,
+            "sample" to opts.inSampleSize,
+            "bytes" to out.length(),
+        )
+        return true
+    }
+
+    /** 删除日间自定义壁纸。 */
+    fun resetDay(context: Context) {
+        invalidate(night = false)
+        runCatching { dayFile(context).delete() }
+    }
+
+    /** 删除夜间自定义壁纸。 */
+    fun resetNight(context: Context) {
+        invalidate(night = true)
+        runCatching { nightFile(context).delete() }
+    }
+
+    /** 删除全部自定义壁纸（日间 + 夜间，文件 + 缓存）。 */
     fun reset(context: Context) {
-        invalidate()
-        runCatching { file(context).delete() }
+        resetDay(context)
+        resetNight(context)
     }
 
     // ------------------------------------------------------------------ 纯函数（可单测）
@@ -273,6 +354,10 @@ object CustomWallpaper {
         return 0
     }
 
-    /** 供「资源占用」口径的自检：当前缓存位图的字节数。 */
-    fun cachedBytes(): Long = cached?.let { it.byteCount.toLong() } ?: 0L
+    /** 供「资源占用」口径的自检：当前缓存位图的总字节数（日间 + 夜间）。 */
+    fun cachedBytes(): Long {
+        val d = cachedDay?.takeIf { !it.isRecycled }?.byteCount?.toLong() ?: 0L
+        val n = cachedNight?.takeIf { !it.isRecycled }?.byteCount?.toLong() ?: 0L
+        return d + n
+    }
 }

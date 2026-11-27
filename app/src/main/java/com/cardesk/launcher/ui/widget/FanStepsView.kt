@@ -20,6 +20,7 @@ class FanStepsView(context: Context) : View(context) {
 
     var palette: Palette = Palettes.night
         set(value) {
+            if (field == value) return
             field = value
             invalidate()
         }
@@ -35,6 +36,7 @@ class FanStepsView(context: Context) : View(context) {
 
     var auto: Boolean = false
         set(value) {
+            if (field == value) return
             field = value
             invalidate()
         }

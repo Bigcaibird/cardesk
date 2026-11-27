@@ -322,8 +322,11 @@ object SystemOps {
     }
 
     /**
-     * 设置 overscan（反射实现）。
-     * 原车 Dock 下移时把底部裁掉 50px。
+     * 设置 overscan（安全兜底）。
+     *
+     * 注意：在领克 820A Android 9 实车/复原镜像上调用 `IWindowManager.setOverscan`
+     * 会触发 `SurfaceFlinger::getAnimationFrameStats` SIGSEGV 导致系统重启，
+     * 因此禁止反射 `IWindowManager.setOverscan`，只保留 `Display.setOverscan` 探测。
      */
     fun setOverscan(context: Context, left: Int, top: Int, right: Int, bottom: Int): Boolean {
         val result = runCatching {

@@ -30,11 +30,18 @@ object OemKeyRegistry {
 
     /** 当前注册的接收器（null = 没注册）。 */
     private var registered: OemKeyReceiver? = null
+    private var voiceInterceptor: com.cardesk.launcher.vehicle.VoiceKeyInterceptor? = null
 
     /** 动态注册（幂等）。 */
     fun start(context: Context) {
-        if (registered != null) return
         val app = context.applicationContext ?: context
+        if (voiceInterceptor == null) {
+            voiceInterceptor = com.cardesk.launcher.vehicle.VoiceKeyInterceptor(app).also { it.start() }
+        }
+        com.cardesk.launcher.vehicle.EcarxSignals.onVoiceKeySignal = { down ->
+            OemKeyRuntime.onRawVoiceKey(app, OemKeyProtocol.KEY_R_VOICE_ASSIST, down, source = "signal")
+        }
+        if (registered != null) return
         val filter = IntentFilter().apply {
             addCategory(Intent.CATEGORY_DEFAULT)
             addAction(OemKeyProtocol.ACTION_MEDIA_BUTTON)
@@ -54,6 +61,9 @@ object OemKeyRegistry {
 
     /** 取消动态注册（幂等）。 */
     fun stop(context: Context) {
+        com.cardesk.launcher.vehicle.EcarxSignals.onVoiceKeySignal = null
+        voiceInterceptor?.stop()
+        voiceInterceptor = null
         val receiver = registered ?: return
         registered = null
         val app = context.applicationContext ?: context
@@ -63,4 +73,7 @@ object OemKeyRegistry {
 
     /** 是否已动态注册（诊断用）。 */
     fun isRegistered(): Boolean = registered != null
+
+    /** 语音键 Input 通道状态（诊断快照用）。 */
+    fun voiceInterceptorStatus(): String = voiceInterceptor?.statusText ?: "未启动"
 }

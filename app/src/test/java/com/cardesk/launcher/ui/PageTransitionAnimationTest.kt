@@ -191,4 +191,67 @@ class PageTransitionAnimationTest {
             scene.visibility,
         )
     }
+
+    /**
+     * 离屏预热停放（`translationX = -4000f`、`VISIBLE`）的导航页在首次切入时，
+     * 必须从标准起始位移（`+22%`）滑入，绝不能从 `-4000px` 飞进来。
+     */
+    @Test
+    fun offscreenParkedNavPageEntersFromStandardOffset() {
+        val nav = navPage()
+        nav.visibility = View.VISIBLE
+        nav.translationX = -4000f
+        nav.alpha = 1f
+
+        dock().onSplit?.invoke()
+
+        val expected = PageTransitionSpec.travelPx(nav.width)
+        assertEquals(
+            "离屏停放的导航页进场时应回到标准起始位移",
+            expected,
+            nav.translationX,
+            1f,
+        )
+        assertEquals("离屏停放的导航页进场时应从 alpha=0 淡入", 0f, nav.alpha, 0.01f)
+    }
+
+    /**
+     * 静态壁纸冷启动时应预挂一个屏外 1×1 SurfaceView 锚点，
+     * 让 Android 9 的首次 relayoutWindow 发生在启动页遮罩期间而非首次切导航页时。
+     */
+    @Test
+    fun staticWallpaperMountsOffscreenSurfaceWarmupAnchor() {
+        var found = false
+        for (i in 0 until launcher.childCount) {
+            val child = launcher.getChildAt(i)
+            if (child is android.view.SurfaceView &&
+                child.layoutParams.width == 1 &&
+                child.layoutParams.height == 1 &&
+                child.translationX <= -2400f
+            ) {
+                found = true
+                break
+            }
+        }
+        assertTrue("静态壁纸模式下应存在 1×1 屏外 SurfaceView 预热锚点", found)
+    }
+
+    /**
+     * 视频壁纸 SurfaceView 的 surface 被销毁时，必须立刻把壁纸让路态关闭
+     * （`background.videoPassthrough = false`），防止底层视频层消失后整屏露黑。
+     */
+    @Test
+    fun videoSurfaceDestroyedRestoresStaticBackdropImmediately() {
+        val bg = field<com.cardesk.launcher.ui.widget.BackgroundView>("background")!!
+        val sv = field<android.view.SurfaceView>("videoSurfaceView")!!
+        bg.videoPassthrough = true
+        assertTrue(bg.videoPassthrough)
+
+        val conceal = LauncherView::class.java.getDeclaredMethod("concealVideoWallpaperLayer", String::class.java)
+        conceal.isAccessible = true
+        conceal.invoke(launcher, "test")
+
+        assertTrue("surface 销毁后壁纸层必须立刻恢复绘制（不再透明漏黑）", !bg.videoPassthrough)
+        assertNotNull(sv)
+    }
 }

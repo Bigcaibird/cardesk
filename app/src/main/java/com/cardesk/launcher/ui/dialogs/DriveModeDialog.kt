@@ -42,8 +42,18 @@ class DriveModeDialog(
     currentRaw: Int?,
     private val onSwitch: (Int) -> Unit,
     private val onMoreSettings: () -> Unit,
-) : DialogSheet(context, pal, PANEL_W, PANEL_H, "驾驶模式", PANEL_LEFT, PANEL_TOP) {
+    supportedModes: IntArray = DriveMode.UI_MODE_VALUES,
+) : DialogSheet(
+    context,
+    pal,
+    PANEL_W,
+    panelHeightFor(DriveMode.resolveSupportedModes(supportedModes, currentRaw).size),
+    "驾驶模式",
+    PANEL_LEFT,
+    panelTopFor(DriveMode.resolveSupportedModes(supportedModes, currentRaw).size),
+) {
 
+    private val modes: IntArray = DriveMode.resolveSupportedModes(supportedModes, currentRaw)
     private var currentValue: Int = currentRaw ?: DriveMode.SELECTION_NONE
     private var pendingValue: Int? = null
     private var busy = false
@@ -52,6 +62,8 @@ class DriveModeDialog(
     private val chips = ArrayList<Pair<FrameLayout, Int>>()
 
     init {
+        val grid = gridSpec(modes.size)
+
         // 标题 28 粗体：画板 ink 高 37，基线落面板内 y≈60。
         body.addView(
             Ui.text(context, panelTitle, 28f, pal.text, bold = true),
@@ -81,46 +93,61 @@ class DriveModeDialog(
             Ui.frame(672, -2, Gravity.CENTER_VERTICAL or Gravity.START, 44, 0),
         )
 
-        // 三张模式卡（画板 592/841/1090，228×140，间距 21，y=472）。
-        for (index in DriveMode.UI_MODE_VALUES.indices) {
-            val value = DriveMode.UI_MODE_VALUES[index]
-            val label = DriveMode.UI_MODE_LABELS[index]
-            val card = buildModeCard(index, label)
+        // 动态模式卡网格：3 项保持与画板完全一致的 3×1（232×138，间距 23），
+        // 4 项单行 4 列，5~6 项 3×2，7~12 项 4 列多行。
+        for (index in modes.indices) {
+            val value = modes[index]
+            val label = DriveMode.fullLabel(value)
+            val card = buildModeCard(value, label, grid)
             val active = isCurrent(value)
             paintCard(card, active)
             card.setOnClickListener { request(value, label) }
             card.pressFeedback()
             chips += card to value
-            body.addView(card, Ui.frame(CARD_W, CARD_H, Gravity.TOP or Gravity.START, 39 + index * (CARD_W + 23), 176))
+            val row = index / grid.cols
+            val col = index % grid.cols
+            val left = GRID_LEFT + col * (grid.cardW + grid.gapX)
+            val top = GRID_TOP + row * (grid.cardH + grid.gapY)
+            body.addView(card, Ui.frame(grid.cardW, grid.cardH, Gravity.TOP or Gravity.START, left, top))
         }
 
         // 页脚：左「打开原厂驾驶模式页」+ 右「关闭」主按钮。
+        val footerTop = grid.footerTop
         val more = Ui.text(context, "打开原厂驾驶模式页", 16f, pal.text).apply {
             background = Ui.round(tint(pal.text, 0x0F), 20f)
             gravity = Gravity.CENTER
             pressFeedback()
             setOnClickListener { onMoreSettings() }
         }
-        body.addView(more, Ui.frame(232, 56, Gravity.TOP or Gravity.START, 39, 345))
+        body.addView(more, Ui.frame(232, 56, Gravity.TOP or Gravity.START, 39, footerTop))
         val close = Ui.text(context, "关闭", 16f, pal.accentInk, bold = true).apply {
             background = Ui.round(pal.accent, 20f)
             gravity = Gravity.CENTER
             pressFeedback()
             setOnClickListener { onClose?.invoke() }
         }
-        body.addView(close, Ui.frame(179, 56, Gravity.TOP or Gravity.START, 600, 345))
+        body.addView(close, Ui.frame(179, 56, Gravity.TOP or Gravity.START, 600, footerTop))
 
         refreshStatus()
     }
 
-    /** 一张模式卡：36px 线稿图标 + 20px 标签，垂直排列居中。 */
-    private fun buildModeCard(index: Int, label: String): FrameLayout = FrameLayout(context).apply {
-        background = Ui.round(tint(pal.text, 0x0C), 20f)
-        addView(ModeIcon(context, index), Ui.frame(36, 36, Gravity.TOP or Gravity.CENTER_HORIZONTAL, 0, 28))
-        addView(
-            Ui.text(context, label, 20f, pal.text, bold = true).apply { gravity = Gravity.CENTER },
-            Ui.frame(-1, 28, Gravity.TOP or Gravity.CENTER_HORIZONTAL, 0, 76),
-        )
+    /** 一张模式卡：36px 线稿图标 + 标签，垂直排列居中。 */
+    private fun buildModeCard(modeValue: Int, label: String, grid: GridSpec): FrameLayout {
+        val compact = grid.cardH < CARD_H
+        val iconTop = if (compact) 20 else 28
+        val labelTop = if (compact) 64 else 76
+        val textSize = if (grid.cardW < 200) 17f else 20f
+        return FrameLayout(context).apply {
+            background = Ui.round(tint(pal.text, 0x0C), 20f)
+            addView(ModeIcon(context, modeValue), Ui.frame(36, 36, Gravity.TOP or Gravity.CENTER_HORIZONTAL, 0, iconTop))
+            addView(
+                Ui.text(context, label, textSize, pal.text, bold = true).apply {
+                    gravity = Gravity.CENTER
+                    setSingleLine(true)
+                },
+                Ui.frame(-1, 28, Gravity.TOP or Gravity.CENTER_HORIZONTAL, 0, labelTop),
+            )
+        }
     }
 
     private fun isCurrent(value: Int): Boolean =
@@ -244,8 +271,8 @@ class DriveModeDialog(
     /** `text` 色按 alpha 叠在面板上：画板的卡片底 / 次级按钮底都是这个口径。 */
     private fun tint(color: Int, alpha: Int): Int = (color and 0x00FFFFFF) or (alpha shl 24)
 
-    /** 模式卡里的 36px 线稿图标：电池（经济）/ 太阳（舒适）/ 山景（运动）。 */
-    private class ModeIcon(context: Context, private val type: Int) : View(context) {
+    /** 模式卡里的 36px 线稿图标（按模式功能号选图标，不依赖下标顺序）。 */
+    private class ModeIcon(context: Context, private val modeValue: Int) : View(context) {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             strokeWidth = 2.4f
@@ -259,9 +286,16 @@ class DriveModeDialog(
             val h = height.toFloat()
             canvas.save()
             canvas.translate((w - 36f) / 2f, (h - 36f) / 2f)
-            when (type) {
-                // 经济：电池 + 闪电。
-                0 -> {
+            when (DriveMode.normalizeModeId(modeValue)) {
+                // 经济 / 节能 / 混动 / 纯电：电池 + 闪电。
+                DriveMode.SELECTION_ECO,
+                DriveMode.SELECTION_ECO_PHEV,
+                DriveMode.SELECTION_ECO_PLUS,
+                DriveMode.SELECTION_SAVE,
+                DriveMode.SELECTION_PURE,
+                DriveMode.SELECTION_HYBRID,
+                DriveMode.SELECTION_PHEV,
+                -> {
                     val body = RectF(6f, 10f, 28f, 28f)
                     canvas.drawRoundRect(body, 4f, 4f, paint)
                     canvas.drawLine(28f, 16f, 32f, 16f, paint)
@@ -273,8 +307,10 @@ class DriveModeDialog(
                     }
                     canvas.drawPath(bolt, paint)
                 }
-                // 舒适：太阳 + 光芒。
-                1 -> {
+                // 舒适 / 标准：太阳 + 光芒。
+                DriveMode.SELECTION_COMFORT,
+                DriveMode.SELECTION_COMFORT_HEV,
+                -> {
                     canvas.drawCircle(18f, 18f, 7f, paint)
                     for (i in 0 until 8) {
                         val a = Math.toRadians(i * 45.0).toFloat()
@@ -285,7 +321,26 @@ class DriveModeDialog(
                         canvas.drawLine(cx, cy, dx, dy, paint)
                     }
                 }
-                // 运动：山景 + 太阳。
+                // 个性化：三条调节滑杆。
+                DriveMode.SELECTION_CUSTOM -> {
+                    canvas.drawLine(6f, 10f, 30f, 10f, paint)
+                    canvas.drawCircle(13f, 10f, 3f, paint)
+                    canvas.drawLine(6f, 18f, 30f, 18f, paint)
+                    canvas.drawCircle(23f, 18f, 3f, paint)
+                    canvas.drawLine(6f, 26f, 30f, 26f, paint)
+                    canvas.drawCircle(16f, 26f, 3f, paint)
+                }
+                // 雪地：六角雪花。
+                DriveMode.SELECTION_SNOW -> {
+                    for (i in 0 until 3) {
+                        val a = Math.toRadians(i * 60.0).toFloat()
+                        val dx = cos(a) * 12f
+                        val dy = sin(a) * 12f
+                        canvas.drawLine(18f - dx, 18f - dy, 18f + dx, 18f + dy, paint)
+                    }
+                    canvas.drawCircle(18f, 18f, 3.2f, paint)
+                }
+                // 运动 / 赛道 / 越野 / 动力 / 陡坡缓降等：山景 + 太阳。
                 else -> {
                     val mountain = Path().apply {
                         moveTo(4f, 30f); lineTo(14f, 15f); lineTo(21f, 25f)
@@ -299,13 +354,57 @@ class DriveModeDialog(
         }
     }
 
+    private data class GridSpec(
+        val cols: Int,
+        val rows: Int,
+        val cardW: Int,
+        val cardH: Int,
+        val gapX: Int,
+        val gapY: Int,
+        val footerTop: Int,
+        val panelH: Int,
+    )
+
     private companion object {
         const val PANEL_W = 817
         const val PANEL_H = 438
         const val PANEL_LEFT = 551
         const val PANEL_TOP = 298
+        const val GRID_LEFT = 39
+        const val GRID_TOP = 176
+        const val GRID_W = 742
         const val CARD_W = 232
         const val CARD_H = 138
+
+        fun gridSpec(count: Int): GridSpec {
+            val safe = count.coerceAtLeast(1)
+            val cols = when {
+                safe <= 3 -> safe
+                safe == 4 -> 4
+                safe <= 6 -> 3
+                else -> 4
+            }
+            val rows = (safe + cols - 1) / cols
+            val gapX = if (cols >= 4) 16 else 23
+            val cardW = if (cols == 3) CARD_W else (GRID_W - (cols - 1) * gapX) / cols
+            val cardH = when {
+                rows == 1 -> CARD_H
+                rows == 2 -> 118
+                else -> 112
+            }
+            val gapY = if (rows <= 2) 16 else 14
+            val gridH = rows * cardH + (rows - 1) * gapY
+            val footerTop = GRID_TOP + gridH + 31
+            val panelH = footerTop + 56 + 37
+            return GridSpec(cols, rows, cardW, cardH, gapX, gapY, footerTop, panelH)
+        }
+
+        fun panelHeightFor(count: Int): Int = gridSpec(count).panelH
+
+        fun panelTopFor(count: Int): Int {
+            val h = panelHeightFor(count)
+            return if (h == PANEL_H) PANEL_TOP else ((1080 - h) / 2).coerceAtLeast(80)
+        }
 
         /** 危险色：读失败/切换失败的提示色。 */
         val SKIN_DANGER_TEXT: Int = 0xFFE05B5B.toInt()

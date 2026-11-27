@@ -53,26 +53,11 @@ class KeyActionResolverTest {
     }
 
     @Test
-    fun `媒体键长按取各自的配置`() {
-        val p = prefs()
-        p.mediaPrevLongAction = Prefs.ACTION_DRIVE_MODE
-        p.mediaNextLongAction = Prefs.ACTION_360_TOGGLE
-        assertEquals(
-            Prefs.ACTION_DRIVE_MODE,
-            KeyActionResolver.media(p, KeyActionResolver.MediaSlot.PREV).action,
-        )
-        assertEquals(
-            Prefs.ACTION_360_TOGGLE,
-            KeyActionResolver.media(p, KeyActionResolver.MediaSlot.NEXT).action,
-        )
-    }
-
-    @Test
     fun `默认全是无动作`() {
         val p = prefs()
         assertTrue(KeyActionResolver.voice(p, KeyActionResolver.VoiceSlot.CLICK).isNone)
         assertTrue(KeyActionResolver.voice(p, KeyActionResolver.VoiceSlot.DOUBLE).isNone)
-        assertTrue(KeyActionResolver.media(p, KeyActionResolver.MediaSlot.PREV).isNone)
+        assertTrue(KeyActionResolver.voice(p, KeyActionResolver.VoiceSlot.LONG).isNone)
     }
 
     @Test
@@ -97,18 +82,12 @@ class KeyActionResolverTest {
     }
 
     @Test
-    fun `媒体键 keyCode 识别`() {
-        assertTrue(KeyActionResolver.isMediaPrev(88))
-        assertTrue(KeyActionResolver.isMediaNext(87))
-        assertFalse(KeyActionResolver.isMediaPrev(87))
-        assertFalse(KeyActionResolver.isMediaNext(88))
-    }
-
-    @Test
-    fun `只管语音键和两个媒体键`() {
+    fun `只管语音键且媒体键不再拦截`() {
         assertTrue(KeyActionResolver.isHandled(108))
-        assertTrue(KeyActionResolver.isHandled(87))
-        assertTrue(KeyActionResolver.isHandled(88))
+        assertFalse(KeyActionResolver.isHandled(87))
+        assertFalse(KeyActionResolver.isHandled(88))
+        assertFalse(KeyActionResolver.isHandled(200087))
+        assertFalse(KeyActionResolver.isHandled(200088))
         assertFalse(KeyActionResolver.isHandled(4)) // BACK
         assertFalse(KeyActionResolver.isHandled(66)) // ENTER
     }

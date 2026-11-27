@@ -105,4 +105,17 @@ class KeyGestureTest {
         assertEquals(KeyGesture.Gesture.SINGLE, d.onSingleTimeout())
         assertEquals(KeyGesture.Gesture.NONE, d.onSingleTimeout())
     }
+
+    @Test
+    fun `第二次按下落在双击窗内但抬起略超窗仍判双击且不误发单击`() {
+        val d = detector()
+        d.onDown(200231, 1000L)
+        d.onUp(200231, 1050L)
+        // 间隔 300ms（<= 380ms）按下第二次，但按住 150ms 才抬起（1500 - 1050 = 450ms > 380ms）
+        d.onDown(200231, 1350L)
+        // 按住第二次期间即使超时回调跑了，也不应误发单击
+        assertEquals(KeyGesture.Gesture.NONE, d.onSingleTimeout())
+        assertEquals(KeyGesture.Gesture.DOUBLE, d.onUp(200231, 1500L))
+        assertEquals(KeyGesture.Gesture.NONE, d.onSingleTimeout())
+    }
 }

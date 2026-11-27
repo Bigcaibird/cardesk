@@ -182,6 +182,12 @@ object GlobalDockPolicyGate {
                 "hideDock" to prefs.hideDock,
                 "immersiveNavigation" to false,
             )
+            val navImmersiveApps = LinkedHashSet<String>(OemDockPolicy.IMMERSIVE_MEDIA_APPS)
+            // 当用户开启「隐藏桌面 Dock」时，在桌面包里同时沉浸原车导航栏，
+            // 避免全局 Dock 窗口在桌面隐身后把底下的原车 CarNavigationBar 露出来。
+            if (prefs.hideHomeDock) {
+                navImmersiveApps.add(context.packageName)
+            }
             return SystemNavigationPolicy.apply(
                 context = context,
                 hideStatus = prefs.hideStatus,
@@ -195,9 +201,11 @@ object GlobalDockPolicyGate {
                 // 原车 CarNavigationBar 就靠这条策略一起藏住 —— 真车 A/B 实测
                 // `immersive.navigation=<包>` 能让它 mPolicyVisibility=false。
                 // 只列具体包，不写 `*`：预留带对其它 App 仍然有效。
-                immersiveNavigationPackages = OemDockPolicy.IMMERSIVE_MEDIA_APPS,
+                immersiveNavigationPackages = navImmersiveApps,
                 // 别人写的 immersive.full 段（真车上的 hywebview）原样保留。
                 preserveForeignImmersiveFull = true,
+                // 「状态栏生效应用」是正向生效名单（选中即隐藏），与非全局路径保持同一语义。
+                statusIncludeMode = true,
             )
         }
         // 没有预留区：让原车导航栏整体让位（B 方案，Lead 已在模拟器验过）。
@@ -224,8 +232,8 @@ object GlobalDockPolicyGate {
      * （否则底边就空了）。
      */
     private fun restoreNormal(context: Context, prefs: Prefs): Boolean {
-        val immersivePackages =
-            if (prefs.oemNavImmersive) listOf(context.packageName) else emptyList()
+        // 桌面始终沉浸原车导航栏（避免点击桌面 Dock 误唤原车栏），不再依赖已下线的独立开关或增强导航栏。
+        val immersivePackages = listOf(context.packageName)
         val value = OemDockPolicy.buildPolicyValue(
             hideDock = prefs.hideDock,
             hideStatus = prefs.hideStatus,

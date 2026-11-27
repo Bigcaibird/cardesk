@@ -88,6 +88,18 @@ object EcarxSignals {
     const val SIG_DST_TO_EMPTY = 29524
     const val SIG_SCR_DST_TO_EMPTY = 29720
 
+    /** 电瓶电压信号 id = 29386（`car_signal` 通道，单位 V）。 */
+    const val SIG_BATTERY_VOLTAGE = 29386
+
+    /** 方控语音键实时按下/抬起信号 id = 29498（1=按下，0=抬起）。 */
+    const val SIG_VOICE = 29498
+
+    @Volatile
+    var onVoiceKeySignal: ((Boolean) -> Unit)? = null
+
+    @Volatile
+    private var lastVoiceSignalDown = false
+
     /**
      * 挡位信号 id = 29693（`car_signal` 通道）。
      *
@@ -416,7 +428,7 @@ object EcarxSignals {
             val add = filterCls.getMethod("add", Integer.TYPE)
             for (id in intArrayOf(
                 SIG_DOOR_DRVR, SIG_DOOR_PASS, SIG_DOOR_DRVR_RE, SIG_DOOR_PASS_RE,
-                SIG_HOOD, SIG_TRUNK, SIG_DST_TO_EMPTY, SIG_SCR_DST_TO_EMPTY, SIG_GEAR,
+                SIG_HOOD, SIG_TRUNK, SIG_DST_TO_EMPTY, SIG_SCR_DST_TO_EMPTY, SIG_GEAR, SIG_VOICE,
             )) {
                 add.invoke(filter, id)
             }
@@ -430,6 +442,7 @@ object EcarxSignals {
                     // 挡位也在同一个回调里识别：args 的形状随固件版本不一样，
                     // 所以不解析参数、直接用捕获的 manager 读 [SIG_GEAR]，再和上次值比。
                     notifyGearChangedFromCallback(sm)
+                    notifyVoiceChangedFromCallback(sm)
                 }
                 null
             }
@@ -472,6 +485,16 @@ object EcarxSignals {
             "raw" to raw,
         )
         onGearChanged?.invoke(gear)
+    }
+
+    private fun notifyVoiceChangedFromCallback(sm: Any) {
+        val cb = onVoiceKeySignal ?: return
+        val raw = readInt(sm, SIG_VOICE) ?: return
+        val down = raw == 1
+        if (down == lastVoiceSignalDown) return
+        lastVoiceSignalDown = down
+        Logx.d(LogTags.KEYS, "方控语音信号变化", "down" to down, "raw" to raw)
+        cb.invoke(down)
     }
 
     /**
@@ -540,6 +563,17 @@ object EcarxSignals {
         }
         Logx.d(LogTags.SIGNAL, "续航读取失败", "signalReady" to (sm != null), "phevReady" to (phevManager != null))
         return null
+    }
+
+    /** 电瓶电压（V）：`car_signal` 通道 [SIG_BATTERY_VOLTAGE]（29386）。 */
+    fun batteryVoltage(): Float? {
+        val sm = signalManager ?: return null
+        val raw = readFloat(sm, SIG_BATTERY_VOLTAGE) ?: return null
+        return when {
+            raw in 5f..30f -> raw
+            raw in 50f..300f -> raw / 10f
+            else -> null
+        }
     }
 
     /**
@@ -680,6 +714,28 @@ object EcarxSignals {
                 is Float -> v.toInt()
                 is Double -> v.toInt()
                 is Boolean -> if (v) 1 else 0
+                else -> null
+            }
+        }
+        return null
+    }
+
+    private fun readFloat(manager: Any, signalId: Int): Float? {
+        val names = arrayOf(
+            "getSignalValue", "getSignalFloatValue", "getFloatSignalValue",
+            "getValue", "getSignal", "getSignalValueByKey",
+        )
+        for (name in names) {
+            val method = runCatching {
+                manager.javaClass.methods.firstOrNull {
+                    it.name == name && it.parameterTypes.size == 1 && it.parameterTypes[0] == Integer.TYPE
+                }
+            }.getOrNull() ?: continue
+            val v = runCatching { method.invoke(manager, signalId) }.getOrNull() ?: continue
+            return when (v) {
+                is Float -> v
+                is Double -> v.toFloat()
+                is Int -> v.toFloat()
                 else -> null
             }
         }

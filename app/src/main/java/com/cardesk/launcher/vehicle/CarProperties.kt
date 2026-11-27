@@ -1204,6 +1204,9 @@ object CarProperties {
         }
     }
 
+    /** 已连上的 `android.car.Car` 实例（供 `CarDiagnosticManager` 等复用，避免重复 `createCar`）。 */
+    fun carHandle(): Any? = car
+
     /**
      * 这个属性在这台车机上的**类型名**（`Integer` / `Float` / `byte[]` / `String` …）。
      *

@@ -233,8 +233,11 @@ object VehicleController {
 
     fun togglePower() = act("电源") { togglePower() }
     fun toggleAc() = act("A/C") { toggleAc() }
+    fun setAc(on: Boolean) = act("A/C") { setAc(on) }
     fun toggleAuto() = act("AUTO") { toggleAuto() }
+    fun setAuto(on: Boolean) = act("AUTO") { setAuto(on) }
     fun toggleCirculation() = act("循环模式") { toggleCirculation() }
+    fun setCirculation(inner: Boolean) = act("循环模式") { setCirculation(inner) }
     fun stepFan(delta: Int) = act("风量") { stepFan(delta) }
     /** MAX 风量：7↔3 两态切换，未开机先上电（场景页 MAX 键）。 */
     fun toggleMaxFan() = act("MAX风量") { toggleMaxFan() }
@@ -247,6 +250,8 @@ object VehicleController {
     /** 按位掩码设吹风（face=1 / leg=2 / window=4）。 */
     fun setBlowingMask(mask: Int) = act("吹风模式(掩码)") { setBlowingMask(mask) }
     fun cycleSeat(zone: Int, heat: Boolean) = act(if (heat) "座椅加热" else "座椅通风") { cycleSeat(zone, heat) }
+    fun setSeatLevel(zone: Int, heat: Boolean, level: Int) =
+        act(if (heat) "座椅加热" else "座椅通风") { setSeatLevel(zone, heat, level) }
 
     /**
      * 切驾驶模式（第九十五轮补丁）：给状态栏「驾驶模式 · xx」胶囊的快捷面板用。
@@ -320,6 +325,74 @@ object VehicleController {
             }
         }
         return false
+    }
+
+    // ------------------------------------------------------------ 动态驾驶模式清单
+
+    /** 车机动态返回的原始支持驾驶模式列表（由后台采样线程刷新，主线程只读缓存）。 */
+    @Volatile
+    private var supportedDriveModesRaw: IntArray? = null
+
+    /** 最近一次向车机查询支持驾驶模式的单调时间戳（毫秒）。 */
+    @Volatile
+    private var supportedDriveModesAt: Long = 0L
+
+    /**
+     * 返回本车当前支持的驾驶模式（按规范顺序排好，无主线程 binder 开销）。
+     *
+     * 尚未采到或固件返回空列表时自动回落到 [DriveMode.SUPPORTED_VALUES]（经济 / 舒适 / 运动）。
+     *
+     * @param currentRaw 可选的当前模式原始值；若有效但不在动态列表里，会自动补入保证高亮与可读。
+     */
+    fun supportedDriveModes(currentRaw: Int? = null): IntArray =
+        DriveMode.resolveSupportedModes(supportedDriveModesRaw, currentRaw)
+
+    /**
+     * 后台线程节流刷新「本车支持的驾驶模式」。
+     *
+     * `CarFunctionSupported.getSupportedFunctionValue(DM_FUNC_DRIVE_MODE_SELECT)` 每次要查
+     * 12 路 `PaDm*` 信号，不需要每秒刷一次：已有非空结果时 15 秒刷一次，空/未查时 3 秒重试。
+     */
+    internal fun maybeRefreshSupportedDriveModes(gw: VehicleGateway, force: Boolean = false) {
+        val now = runCatching { SystemClock.elapsedRealtime() }.getOrElse { System.currentTimeMillis() }
+        val existing = supportedDriveModesRaw
+        val minInterval = if (existing != null && existing.isNotEmpty()) {
+            SUPPORTED_MODES_REFRESH_MS
+        } else {
+            SUPPORTED_MODES_RETRY_MS
+        }
+        if (!force && supportedDriveModesAt > 0L && now - supportedDriveModesAt < minInterval) {
+            return
+        }
+        supportedDriveModesAt = now
+        val raw = runCatching { gw.supportedFunctionValues(DriveMode.FUNCTION_DRIVE_MODE_SELECT) }.getOrNull()
+        val prev = supportedDriveModesRaw
+        if (raw != null && raw.isNotEmpty()) {
+            val resolved = DriveMode.resolveSupportedModes(raw)
+            if (prev == null || !prev.contentEquals(resolved)) {
+                supportedDriveModesRaw = resolved
+                Logx.i(
+                    LogTags.SIGNAL,
+                    "动态读取支持驾驶模式",
+                    "channel" to runCatching { gw.id }.getOrDefault("?"),
+                    "count" to resolved.size,
+                    "modes" to resolved.joinToString(",") { "${DriveMode.chipLabel(it)}($it)" },
+                )
+            }
+        } else if (prev == null) {
+            Logx.d(
+                LogTags.SIGNAL,
+                "动态驾驶模式列表为空，使用默认兜底",
+                "channel" to runCatching { gw.id }.getOrDefault("?"),
+                "rawNull" to (raw == null),
+            )
+        }
+    }
+
+    /** 单测或切换网关时重置动态驾驶模式缓存。 */
+    internal fun resetSupportedDriveModesCache() {
+        supportedDriveModesRaw = null
+        supportedDriveModesAt = 0L
     }
 
     /**
@@ -825,6 +898,11 @@ object VehicleController {
         // 单独报类型与各通道结果，避免「UI 显示 -- 但不知道卡在哪」。
         lines += "行程1 信号：${TripSignals.probe()}"
 
+        // 电瓶电压候选通道 + OBD2 + Android 电源/内核节点 + 扩展传感器自检
+        runCatching { BatteryVoltageProbe.diagnosticLines(ctx) }
+            .onSuccess { lines += it }
+            .onFailure { lines += "电瓶电压探测异常：${it.javaClass.simpleName}: ${it.message}" }
+
         val text = lines.joinToString("\n")
         Logx.i(LogTags.SIGNAL, "车辆信号自检", "report" to text.replace("\n", " | "))
         return text
@@ -933,6 +1011,7 @@ object VehicleController {
             old.on360State = null
         }
         gateway = gw
+        resetSupportedDriveModesCache()
         // 排障场景：通道实现切换（AdaptAPI / AOSP Car / 模拟车）必须留痕——
         // 「车控点了没反应」时，第一件事就是确认当前到底跑在哪条通道上。
         Logx.i(LogTags.VEHICLE, "切换车控通道实现", "from" to previous, "to" to gw.id, "impl" to gw.displayName)
@@ -1034,4 +1113,10 @@ object VehicleController {
 
     /** 视角下发后的回读校验间隔（是 700ms）。 */
     private const val VIEW_VERIFY_MS = 800L
+
+    /** 已获取到动态驾驶模式列表后的刷新间隔（毫秒）。 */
+    private const val SUPPORTED_MODES_REFRESH_MS = 15_000L
+
+    /** 尚未获取到动态驾驶模式列表时的重试间隔（毫秒）。 */
+    private const val SUPPORTED_MODES_RETRY_MS = 3_000L
 }

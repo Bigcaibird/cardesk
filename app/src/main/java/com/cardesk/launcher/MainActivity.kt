@@ -689,7 +689,7 @@ class MainActivity : Activity() {
         runCatching {
             if (!com.cardesk.launcher.core.ambient.AmbientLightController.isEnabled(applicationContext)) return@runCatching
             Logx.i(LogTags.AMBIENT, "恢复上次开着的氛围灯")
-            com.cardesk.launcher.core.ambient.AmbientLightController.start(applicationContext)
+            com.cardesk.launcher.core.ambient.AmbientLightController.syncPolicy(applicationContext)
         }.onFailure { Logx.w(LogTags.AMBIENT, "恢复氛围灯失败", it) }
     }
 
@@ -817,8 +817,8 @@ class MainActivity : Activity() {
         Logx.i(LogTags.APP, "onStart")
         HomeForeground.isOnScreen = true
         GlobalDockService.onHomeOnScreen(true)
-        // 第三百一十八轮：回到前台，视频壁纸接着播（后台时是暂停的）。
-        whenLauncherReady { view -> view.resumeVideoWallpaper() }
+        // 回到前台：恢复视频壁纸与桌面 1Hz UI/轮播/状态栏采样刷新（后台时暂停以节省 CPU/电量）。
+        whenLauncherReady { view -> view.onActivityStarted() }
     }
 
     /**
@@ -830,8 +830,8 @@ class MainActivity : Activity() {
         Logx.i(LogTags.APP, "onStop")
         HomeForeground.isOnScreen = false
         GlobalDockService.onHomeOnScreen(false)
-        // 第三百一十八轮：窗口离开屏幕 ⇒ 暂停视频（别再占解码器、别再耗电）。
-        whenLauncherReady { view -> view.pauseVideoWallpaper() }
+        // 窗口离开屏幕：暂停视频壁纸、1Hz 桌面 UI 刷新、壁纸轮播与状态栏采样（车控后台采样仍保留以触发自动任务）。
+        whenLauncherReady { view -> view.onActivityStopped() }
         super.onStop()
     }
 
@@ -897,6 +897,9 @@ class MainActivity : Activity() {
         // （82ms ~ 1.5s），窗口却一直亮着；光看 onPause 分不清是
         // 画中画承载面抢焦点（第144轮已知）还是别的 App 真的盖上来了。
         logTopTasks("onPause")
+        // 画中画冷启动守护：如果正处于承载应用启动搬移期，立刻拦截跳到主屏的 Activity，
+        // 避免高德跳板（UsbFillActivity → MainMapActivity）在主屏盖出一帧全屏黑窗。
+        com.cardesk.launcher.ui.embed.HostTaskMigration.onHostActivityPaused()
         // 桌面退到后台 → 全局窗口该出来了（别的应用现在是前台）。
         GlobalDockService.onHomeForeground(false)
         // 第130轮：桌面不在前台 → 画中画不做黑屏自愈（别把用户的应用抢回画中画）。
@@ -1187,7 +1190,8 @@ class MainActivity : Activity() {
      *    车机里有图片文件就能选；
      * 3. 结果在 [onActivityResult] 里带回 [LauncherView.onWallpaperPicked]。
      */
-    fun startWallpaperImport() {
+    fun startWallpaperImport(night: Boolean = false) {
+        val reqCode = if (night) REQ_WALLPAPER_NIGHT else REQ_WALLPAPER
         val strategies = com.cardesk.launcher.core.ImagePicker.strategies()
         for (strategy in strategies) {
             val intent = com.cardesk.launcher.core.ImagePicker.buildIntent(strategy)
@@ -1203,12 +1207,13 @@ class MainActivity : Activity() {
                 continue
             }
             val ok = runCatching {
-                startActivityForResult(intent, REQ_WALLPAPER)
+                startActivityForResult(intent, reqCode)
             }.isSuccess
             if (ok) {
                 com.cardesk.launcher.core.log.Logx.i(
                     com.cardesk.launcher.core.log.LogTags.SETTING,
                     "静态壁纸：已拉起系统图片选择器",
+                    "night" to night,
                     "strategy" to strategy.describe(),
                     "handler" to (resolved.activityInfo?.packageName ?: "?"),
                 )
@@ -1231,12 +1236,13 @@ class MainActivity : Activity() {
             "车机没有系统图片选择器，已打开车机里的图片列表",
             android.widget.Toast.LENGTH_SHORT,
         ).show()
-        launcher?.openImagePicker()
+        launcher?.openImagePicker(night = night)
     }
 
     @Suppress("DEPRECATION")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (requestCode == REQ_WALLPAPER) {
+        if (requestCode == REQ_WALLPAPER || requestCode == REQ_WALLPAPER_NIGHT) {
+            val night = requestCode == REQ_WALLPAPER_NIGHT
             // 第230轮：与视频壁纸同样的多级兜底 ——
             // 车机文件管理器返回的 Intent 常常没有 `data`。
             val uri = if (resultCode == RESULT_OK) {
@@ -1247,6 +1253,7 @@ class MainActivity : Activity() {
             com.cardesk.launcher.core.log.Logx.i(
                 com.cardesk.launcher.core.log.LogTags.SETTING,
                 "静态壁纸：收到选图结果",
+                "night" to night,
                 "resultCode" to resultCode,
                 "uri" to (uri?.toString() ?: "null"),
                 "hasData" to (data != null),
@@ -1259,7 +1266,7 @@ class MainActivity : Activity() {
                     android.widget.Toast.LENGTH_SHORT,
                 ).show()
             }
-            launcher?.onWallpaperPicked(uri)
+            launcher?.onWallpaperPicked(uri, night = night)
             return
         }
         if (requestCode == REQ_VIDEO_WALLPAPER || requestCode == REQ_VIDEO_WALLPAPER_NIGHT) {
@@ -1370,6 +1377,9 @@ class MainActivity : Activity() {
         /** 第三百一十八轮：夜间版视频的请求码。 */
         private const val REQ_VIDEO_WALLPAPER_NIGHT = 0x5103
 
+        /** 夜间版静态壁纸的请求码。 */
+        private const val REQ_WALLPAPER_NIGHT = 0x5104
+
         /**
          * 当前活着的桌面 Activity（全局 Dock 要把动作递进来时用）。
          *
@@ -1397,6 +1407,18 @@ class MainActivity : Activity() {
         fun onExternalHome() {
             val act = instance ?: return
             act.launcher?.handleExternalHome()
+        }
+
+        /** 全局 Dock 点击「返回」键且桌面在前台/画中画全屏态时，交由桌面自身处理返回栈。 */
+        @JvmStatic
+        fun onExternalBack(): Boolean {
+            val act = instance ?: return false
+            if (act.isFinishing) return false
+            act.runOnUiThread {
+                runCatching { act.launcher?.onBack() }
+                    .onFailure { Logx.w(LogTags.DOCK, "外部 BACK 处理失败", it) }
+            }
+            return true
         }
 
         /**
@@ -1471,6 +1493,21 @@ class MainActivity : Activity() {
 
         /** 回桌面并打开最近任务（Dock 主页键长按 / 导航栏「最近任务」槽）。 */
         const val ACTION_RECENTS = "recents"
+
+        /** 回桌面并直接打开指定 Dock 快捷应用槽位的应用选择器（`quick_app_pick:<index>`）。 */
+        const val ACTION_QUICK_APP_PICK = "quick_app_pick"
+
+        /** 回桌面并打开指定 Dock 快捷应用槽位的配置面板（`quick_app_config:<index>`）。 */
+        const val ACTION_QUICK_APP_CONFIG = "quick_app_config"
+
+        /** 回桌面并打开设置页（导航栏「设置」槽）。 */
+        const val ACTION_SETTINGS = "settings"
+
+        /** 回桌面并在主画中画启动应用（`pip1:<pkg>`）。 */
+        const val ACTION_PIP1 = "pip1"
+
+        /** 回桌面并在副画中画启动应用（`pip2:<pkg>`）。 */
+        const val ACTION_PIP2 = "pip2"
 
         /** 启动页淡出时长（毫秒）。要短到不挡操作，长到不闪。 */
         const val SPLASH_FADE_MS = 220L

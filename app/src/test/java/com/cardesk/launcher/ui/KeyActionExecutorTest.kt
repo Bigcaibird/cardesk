@@ -60,8 +60,6 @@ class KeyActionExecutorTest {
         prefs.voiceClickAction = Prefs.ACTION_NONE
         prefs.voiceDoubleAction = Prefs.ACTION_NONE
         prefs.voiceLongAction = Prefs.ACTION_NONE
-        prefs.mediaPrevLongAction = Prefs.ACTION_NONE
-        prefs.mediaNextLongAction = Prefs.ACTION_NONE
 
         toggle360Count = 0
         executed.clear()
@@ -104,8 +102,8 @@ class KeyActionExecutorTest {
     /** Android 14 起的语音键新值。 */
     private val voiceKeyNew = 231
 
-    private val mediaPrevKey = KeyActionResolver.KEYCODE_MEDIA_PREVIOUS
-    private val mediaNextKey = KeyActionResolver.KEYCODE_MEDIA_NEXT
+    private val mediaPrevKey = KeyEvent.KEYCODE_MEDIA_PREVIOUS
+    private val mediaNextKey = KeyEvent.KEYCODE_MEDIA_NEXT
 
     // ------------------------------------------------------------------ 长按
 
@@ -167,27 +165,18 @@ class KeyActionExecutorTest {
         assertTrue("执行来源应是单击", executed[0].second.contains("单击"))
     }
 
-    /** 媒体上一曲长按 ⇒ 执行媒体键的动作。 */
+    /** 媒体上一曲 / 下一曲按键已移除增强 ⇒ 按下/抬起一律放行不消费。 */
     @Test
-    fun 媒体上一曲长按执行媒体动作() {
-        prefs.mediaPrevLongAction = Prefs.ACTION_360_TOGGLE
-
-        press(mediaPrevKey)
+    fun 媒体上一曲和下一曲一律放行不拦截() {
+        assertFalse(executor.onKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, mediaPrevKey), now()))
         advance(KeyGestureThreshold.LONG + 100)
+        assertFalse(executor.onKeyEvent(KeyEvent(KeyEvent.ACTION_UP, mediaPrevKey), now()))
 
-        assertEquals("媒体长按应执行一次", 1, executed.size)
-        assertEquals(Prefs.ACTION_360_TOGGLE, executed[0].first)
-    }
-
-    /** 媒体下一曲长按 ⇒ 执行媒体键的动作。 */
-    @Test
-    fun 媒体下一曲长按执行媒体动作() {
-        prefs.mediaNextLongAction = Prefs.ACTION_360_TOGGLE
-
-        press(mediaNextKey)
+        assertFalse(executor.onKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, mediaNextKey), now()))
         advance(KeyGestureThreshold.LONG + 100)
+        assertFalse(executor.onKeyEvent(KeyEvent(KeyEvent.ACTION_UP, mediaNextKey), now()))
 
-        assertEquals("媒体长按应执行一次", 1, executed.size)
+        assertEquals("媒体键不应触发任何按键增强动作", 0, executed.size)
     }
 
     /** 长按只能触发一次（定时器不会重复触发）。 */

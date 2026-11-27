@@ -115,4 +115,56 @@ class RecentTasksPageTest {
             findAll(view, TextView::class.java).firstOrNull { it.text == "暂无最近任务" && it.visibility == View.VISIBLE },
         )
     }
+
+    @Test
+    fun 清空按钮位于底部正中且运行内存字体放大并支持点击外区关闭() {
+        val view = page()
+        var closed = 0
+        view.onClose = { closed++ }
+
+        val clearBtn = findAll(view, TextView::class.java).first { it.text == "清空" }
+        val panel = clearBtn.parent as ViewGroup
+        val panelCenterX = panel.width / 2f
+        val clearCenterX = (clearBtn.left + clearBtn.right) / 2f
+        assertTrue(
+            "清空按钮应水平居中：panelCenterX=$panelCenterX clearCenterX=$clearCenterX",
+            kotlin.math.abs(panelCenterX - clearCenterX) <= 4f,
+        )
+        assertTrue(
+            "清空按钮应位于面板下方区域：clearTop=${clearBtn.top} panelH=${panel.height}",
+            clearBtn.top > panel.height * 0.75f,
+        )
+
+        val memLabel = findAll(view, TextView::class.java).first { it.text == "运行内存" }
+        val cardMem = findAll(view, TextView::class.java).first { it.text.toString().startsWith("占用 ") }
+        assertTrue("运行内存标签字号应放大（>=20px）", memLabel.textSize >= 20f)
+        assertTrue("单卡占用内存字号应放大（>=16px）", cardMem.textSize >= 16f)
+
+        // 面板左右应留出外部可点遮罩区
+        assertTrue("面板左边距应留出外部区域", panel.left >= 80)
+        assertTrue("面板右边距应留出外部区域", view.width - panel.right >= 80)
+
+        // 点击遮罩层应触发 onClose
+        val scrim = view.getChildAt(0)
+        scrim.performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue("点击面板外遮罩应关闭最近任务", closed == 1)
+    }
+
+    @Test
+    fun 按Home键可关闭最近任务页() {
+        val activity = org.robolectric.Robolectric.buildActivity(com.cardesk.launcher.MainActivity::class.java).setup().get()
+        shadowOf(Looper.getMainLooper()).idle()
+        val launcher = findAll(activity.window.decorView, LauncherView::class.java).first()
+        val showRecents = LauncherView::class.java.getDeclaredMethod("showRecents").apply { isAccessible = true }
+        val recentsField = LauncherView::class.java.getDeclaredField("recentTasksPage").apply { isAccessible = true }
+
+        showRecents.invoke(launcher)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertNotNull("打开后 recentTasksPage 应非空", recentsField.get(launcher))
+
+        launcher.handleExternalHome()
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(400))
+        assertTrue("按外部/Dock HOME 键应关闭最近任务页", recentsField.get(launcher) == null)
+    }
 }

@@ -85,9 +85,16 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         create("system") {
-            initWith(getByName("debug"))
-            if (rootProject.file("platform-key/cardesk-platform.jks").exists()) {
-                signingConfig = signingConfigs.getByName("platform")
+            // 继承 release 而非 debug：关闭 debuggable，解锁 Android 9 ART 完整 AOT/JIT 优化，
+            // 并减少 `.art mmap` 私有脏页（实测可省约 4~5 MiB）；同时保持 isMinifyEnabled = false
+            // 以避免破坏车机私有 SDK 反射。需要调试通道时可传 `-PcardeskDebuggable=true`。
+            initWith(getByName("release"))
+            val debuggableOverride = (project.findProperty("cardeskDebuggable") as String?)?.toBoolean() == true
+            isDebuggable = debuggableOverride
+            signingConfig = if (rootProject.file("platform-key/cardesk-platform.jks").exists()) {
+                signingConfigs.getByName("platform")
+            } else {
+                signingConfigs.getByName("debug")
             }
             applicationIdSuffix = ""
             // 第三百零九轮：在线更新分「正式版 / 开发版」两条通道，开发版的
@@ -103,6 +110,12 @@ android {
         // 车机是 Android 9（API 28），Java 8 字节码原生支持，没有兼容问题。
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
+    }
+
+    // system 变体关闭 debuggable 后，AGP 会把 lintVitalAnalyzeSystem 挂进 assembleSystem，
+    // 而离线工具链缓存里没有 lint-gradle，关闭 checkReleaseBuilds 以保持 --offline 构建可用。
+    lint {
+        checkReleaseBuilds = false
     }
 
     kotlinOptions {
