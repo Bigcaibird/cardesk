@@ -663,6 +663,19 @@ class Prefs(context: Context) {
         get() = DockQuickApps.parse(stringValue(DockQuickApps.KEY, ""))
         set(value) = setStringValue(DockQuickApps.KEY, DockQuickApps.toCsv(value))
 
+    /** 桌面「快捷应用」卡片槽位配置（定长 4 槽，保留空位）。 */
+    var sceneQuickApps: List<String>
+        get() = SceneQuickApps.parse(stringValue(SceneQuickApps.KEY, ""))
+        set(value) {
+            setStringValue(SceneQuickApps.KEY, SceneQuickApps.toCsv(value))
+            setFlag(SceneQuickApps.CONFIGURED_KEY, true)
+        }
+
+    /** 桌面「快捷应用」卡片是否由用户自定义过（未自定义时自动填充默认应用）。 */
+    var sceneQuickAppsConfigured: Boolean
+        get() = flag(SceneQuickApps.CONFIGURED_KEY, false)
+        set(value) = setFlag(SceneQuickApps.CONFIGURED_KEY, value)
+
     /** Dock 栏按钮与控件的自定义顺序（16 项 ID 逗号分隔）。 */
     var dockOrder: List<String>
         get() = DockOrder.parse(stringValue(DockOrder.KEY, ""))

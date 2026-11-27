@@ -134,8 +134,21 @@ class ClusterLyricsService : Service() {
         var lastReport: String = "未启用"
             private set
 
-        /** 活着的实例：设置项改了可以**原地**改样式，不用重连窗口。 */
+        /** 活着的实例：设置项改了可以**原地**改样式，关闭时也可立即同步拆窗。 */
         private var live: WeakReference<ClusterLyricsService>? = null
+
+        /** 当前挂在副屏 WindowManager 上的窗口引用（兜底防孤儿窗口残留在副屏上）。 */
+        @Volatile
+        private var activeWindow: Pair<WindowManager, ClusterLyricsView>? = null
+
+        private fun removeActiveWindowNow() {
+            val pair = activeWindow ?: return
+            activeWindow = null
+            val (wm, view) = pair
+            runCatching { view.visibility = android.view.View.GONE }
+            runCatching { wm.removeViewImmediate(view) }
+                .onFailure { runCatching { wm.removeView(view) } }
+        }
 
         /**
          * 一块可投递的屏。
@@ -233,13 +246,28 @@ class ClusterLyricsService : Service() {
             }
         }
 
-        /** 开关变了：开就起服务，关就停。 */
+        /** 开关变了：开就起服务，关就立刻同步拆窗并停服务。 */
         fun apply(context: Context) {
             val app = context.applicationContext
             if (Prefs(app).clusterOverlayEnabled) {
                 start(app)
             } else {
-                app.stopService(Intent(app, ClusterLyricsService::class.java))
+                lastReport = "已关闭"
+                val svc = live?.get()
+                if (svc != null) {
+                    if (Looper.myLooper() == Looper.getMainLooper()) {
+                        svc.shutdownNow("switch-off")
+                    } else {
+                        svc.handler.post { svc.shutdownNow("switch-off") }
+                    }
+                } else if (activeWindow != null) {
+                    if (Looper.myLooper() == Looper.getMainLooper()) {
+                        removeActiveWindowNow()
+                    } else {
+                        Handler(Looper.getMainLooper()).post { removeActiveWindowNow() }
+                    }
+                }
+                runCatching { app.stopService(Intent(app, ClusterLyricsService::class.java)) }
             }
         }
 
@@ -402,17 +430,20 @@ class ClusterLyricsService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // 通知栏上的「停止投射」：把开关也关掉，免得下次开机又被拉起来。
-        if (intent?.action == ACTION_STOP) {
-            Prefs(applicationContext).clusterOverlayEnabled = false
-            lastReport = "已关闭"
-            stopSelf()
+        // 通知栏上的「停止投射」或开关已关：必须先把 startForeground 补齐（Android O+ 要求），
+        // 再立刻同步拆窗、收通知并停服，返回 START_NOT_STICKY 避免系统重新拉起。
+        if (intent?.action == ACTION_STOP || !Prefs(applicationContext).clusterOverlayEnabled) {
+            if (intent?.action == ACTION_STOP) {
+                Prefs(applicationContext).clusterOverlayEnabled = false
+            }
+            runCatching { startForeground(NOTIFICATION_ID, buildNotification()) }
+            shutdownNow(if (intent?.action == ACTION_STOP) "action-stop" else "start-disabled")
             return START_NOT_STICKY
         }
         // 被系统重启（START_STICKY）时也要保证前台通知在位。
         runCatching { startForeground(NOTIFICATION_ID, buildNotification()) }
         reconcile("start-command")
-        return START_STICKY
+        return if (Prefs(applicationContext).clusterOverlayEnabled) START_STICKY else START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -420,13 +451,28 @@ class ClusterLyricsService : Service() {
     override fun onDestroy() {
         runCatching { MusicController.get().release("ClusterLyricsService") }
         displayManager?.unregisterDisplayListener(displayListener)
+        stopFrames()
         stopFeed()
         handler.removeCallbacksAndMessages(null)
         detach("service-destroyed")
+        if (!Prefs(applicationContext).clusterOverlayEnabled) {
+            lastReport = "已关闭"
+        }
         // 收掉前台通知，否则状态栏会留一条常驻。
         runCatching { stopForeground(true) }
-        live = null
+        if (live?.get() === this) live = null
         super.onDestroy()
+    }
+
+    /** 立即同步关停投射：停帧、停喂数、清延迟重试、拆副屏窗口、收通知并停服。 */
+    internal fun shutdownNow(reason: String) {
+        stopFrames()
+        stopFeed()
+        handler.removeCallbacksAndMessages(null)
+        detach(reason)
+        lastReport = "已关闭"
+        runCatching { stopForeground(true) }
+        stopSelf()
     }
 
     /**
@@ -506,6 +552,10 @@ class ClusterLyricsService : Service() {
      *    状态页写着已开启，屏上什么都没有，日志里也没有。
      */
     private fun pump() {
+        if (!Prefs(applicationContext).clusterOverlayEnabled) {
+            shutdownNow("pump-disabled")
+            return
+        }
         val snapshot = readSnapshot()
         // 日夜态变了 → 换一套配色（第一百三十七轮）。
         //
@@ -578,6 +628,13 @@ class ClusterLyricsService : Service() {
         Choreographer.getInstance().postFrameCallback(frameCallback)
     }
 
+    private fun stopFrames() {
+        if (frameScheduled) {
+            runCatching { Choreographer.getInstance().removeFrameCallback(frameCallback) }
+            frameScheduled = false
+        }
+    }
+
     private fun tick() {
         val view = panel ?: return
         // 每帧重画当前快照：擦除进度是连续量，不重画就停在原地。
@@ -596,11 +653,8 @@ class ClusterLyricsService : Service() {
     private fun reconcile(reason: String) {
         val prefs = Prefs(applicationContext)
         if (!prefs.clusterOverlayEnabled) {
-            stopFeed()
-            detach("$reason:disabled")
-            // 开关关着还留着一个前台服务，只会让状态栏多一条常驻通知。
-            // 这里主动收掉（`stopService` 也会走到这里，但那条路不保证）。
-            if (reason != "service-created") stopSelf()
+            // 开关已关：立即同步拆窗停服，不再保留前台通知或延迟重试。
+            shutdownNow("$reason:disabled")
             return
         }
         // Android 6+ 光在清单里声明 SYSTEM_ALERT_WINDOW 不够，
@@ -709,6 +763,10 @@ class ClusterLyricsService : Service() {
     }
 
     private fun reattach(reason: String) {
+        if (!Prefs(applicationContext).clusterOverlayEnabled) {
+            shutdownNow("$reason:disabled")
+            return
+        }
         val dm = displayManager ?: return
         val display = dm.getDisplay(attachedDisplayId)
         if (display == null || !display.isValid()) {
@@ -726,6 +784,10 @@ class ClusterLyricsService : Service() {
      * 再把 View 加到**那块屏**的 WindowManager 上。
      */
     private fun attach(target: Display, reason: String) {
+        if (!Prefs(applicationContext).clusterOverlayEnabled) {
+            shutdownNow("$reason:disabled")
+            return
+        }
         detach("$reason:reattach")
         try {
             val displayContext = createDisplayContext(target)
@@ -787,6 +849,7 @@ class ClusterLyricsService : Service() {
 
             panel = view
             displayWindows = windows
+            activeWindow = windows to view
             attachedDisplayId = target.displayId
             failures = 0
             lastReport = "已投射 · " + target.name + " · ID " + target.displayId
@@ -822,10 +885,16 @@ class ClusterLyricsService : Service() {
     }
 
     private fun detach(reason: String) {
+        stopFrames()
         val windows = displayWindows
         val view = panel
         if (windows != null && view != null) {
+            runCatching { view.visibility = android.view.View.GONE }
             runCatching { windows.removeViewImmediate(view) }
+                .onFailure { runCatching { windows.removeView(view) } }
+        }
+        if (activeWindow?.second === view || (windows == null && view == null)) {
+            removeActiveWindowNow()
         }
         panel = null
         displayWindows = null

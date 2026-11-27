@@ -81,18 +81,29 @@ class GlassDrawable(
         if (shadow) drawShadow(canvas)
 
         val bmp = Glass.backdrop
-        if (bmp != null && !bmp.isRecycled) {
+        if (bmp != null && !bmp.isRecycled && bmp.width > 0 && bmp.height > 0) {
             if (bmp !== backdropBmp || backdropShader == null) {
                 backdropBmp = bmp
                 backdropShader = BitmapShader(bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
             }
-            canvas.getMatrix(mat)
-            mat.getValues(values)
-            val sx = bmp.width / Design.W
-            val sy = bmp.height / Design.H
+            // BitmapShader 的 localMatrix 方向为「位图坐标 → 画布坐标」：
+            // 480×270 的模糊缩略图铺满 1920×1080 设计坐标需要放大 (Design.W / bmp.width, Design.H / bmp.height)，
+            // 再按本 View 在设计根容器内的偏移 (-ox, -oy) 对齐背后壁纸对应切片。
+            val sx = Design.W / bmp.width.toFloat()
+            val sy = Design.H / bmp.height.toFloat()
+            var ox = 0f
+            var oy = 0f
+            var v = callback as? android.view.View
+            val designW = Design.W.toInt()
+            val designH = Design.H.toInt()
+            while (v != null && !(v.width == designW && v.height == designH)) {
+                ox += v.left - v.scrollX
+                oy += v.top - v.scrollY
+                v = v.parent as? android.view.View
+            }
             mat.reset()
             mat.setScale(sx, sy)
-            mat.postTranslate(values[2] * sx, values[5] * sy)
+            if (ox != 0f || oy != 0f) mat.postTranslate(-ox, -oy)
             backdropShader?.let { s ->
                 s.setLocalMatrix(mat)
                 bmpPaint.shader = s

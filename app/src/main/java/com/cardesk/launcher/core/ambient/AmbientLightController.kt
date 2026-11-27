@@ -411,6 +411,7 @@ object AmbientLightController {
 
     fun syncPolicy(context: Context) {
         val app = context.applicationContext
+        appContext = app
         ensureScreenReceiver(app)
         val active = shouldRun(app)
         writtenEnabled = null
@@ -489,6 +490,7 @@ object AmbientLightController {
 
     /** 停止采集（幂等）。 */
     fun stop(context: Context) {
+        appContext = context.applicationContext
         desiredEnabled = false
         writtenEnabled = null
         onRender {

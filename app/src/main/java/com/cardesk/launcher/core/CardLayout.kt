@@ -362,25 +362,40 @@ object CardLayout {
                 widths[rangeIndex] = leftover
             }
         } else {
-            // 续航卡隐藏或被设成固定档位：剩余宽度在「自适应」卡之间均分/分摊。
+            // 续航卡隐藏或被设成固定档位：剩余宽度在「自适应」卡之间均分/分摊；
+            // 若全部可见卡均为固定档位，则按各卡目标宽度等比微调铺满整行，避免把全部余量/欠量堆到最后一张卡上。
             val targets = slots.indices.filter { slots[it].size == Size.AUTO }
-            val pool = targets.ifEmpty { listOf(slots.lastIndex) }
-            if (leftover >= 0f) {
-                val share = leftover / pool.size
-                for (i in pool) widths[i] += share
-            } else {
-                // 固定档位太宽：自适应卡按比例收窄，保证整行不溢出。
-                val totalAuto = pool.sumOf { base[it].toDouble() }.toFloat()
-                val deficit = -leftover
-                if (totalAuto > 0f) {
-                    val keep = (1f - deficit / totalAuto).coerceIn(0.4f, 1f)
-                    for (i in pool) widths[i] = base[i] * keep
+            if (targets.isNotEmpty()) {
+                if (leftover >= 0f) {
+                    val share = leftover / targets.size
+                    for (i in targets) widths[i] += share
                 } else {
-                    widths[pool.last()] = (widths[pool.last()] + leftover).coerceAtLeast(minWidth)
+                    val totalAuto = targets.sumOf { base[it].toDouble() }.toFloat()
+                    val deficit = -leftover
+                    if (totalAuto > 0f) {
+                        val keep = (1f - deficit / totalAuto).coerceIn(0.4f, 1f)
+                        for (i in targets) widths[i] = base[i] * keep
+                    }
+                }
+            } else {
+                val totalFixed = base.sum()
+                if (totalFixed > 0f) {
+                    val scale = ((rowWidth - gaps) / totalFixed).coerceAtLeast(0.4f)
+                    for (i in slots.indices) widths[i] = base[i] * scale
                 }
             }
         }
-        return slots.mapIndexed { i, slot -> slot.id to widths[i].coerceAtLeast(minWidth * 0.75f) }
+        val result = slots.mapIndexed { i, slot -> slot.id to widths[i].coerceAtLeast(minWidth * 0.75f) }.toMutableList()
+        // 兜底防溢出：当全部可见卡都设成固定「大」档且张数较多时，等比收缩到 rowWidth 内，严禁把右侧卡片顶出屏幕。
+        val maxTotal = (rowWidth - gaps).coerceAtLeast(1f)
+        val actualTotal = result.sumOf { it.second.toDouble() }.toFloat()
+        if (actualTotal > maxTotal + 0.5f && actualTotal > 0f) {
+            val scale = maxTotal / actualTotal
+            for (i in result.indices) {
+                result[i] = result[i].first to (result[i].second * scale)
+            }
+        }
+        return result
     }
 
     /** 顺序持久化通道（由宿主注入，例如 [PrefsStore]）。 */

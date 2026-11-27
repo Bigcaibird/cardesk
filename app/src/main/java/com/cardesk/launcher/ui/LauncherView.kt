@@ -1604,6 +1604,8 @@ class LauncherView(context: Context) : FrameLayout(context) {
             onOpenNav = { showPage(PAGE_NAV) }
             onOpenPhone = { toast("蓝牙电话（模拟）") }
             onOpenDrawer = { showDrawer() }
+            onConfigureQuickApps = { slot -> showSceneQuickApps(slot) }
+            onPickQuickAppSlot = { slot -> showDirectSceneQuickAppPicker(slot) }
             onOpenMusic = { showPage(PAGE_NAV) }
             // 第三十二轮：**去掉**「左右滑换背景主题」手势
             // （原）。
@@ -3836,6 +3838,76 @@ fun toggleCam360() {
         content.addView(picker, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
+    /** 打开桌面「快捷应用」卡片配置面板（4 槽位自由更换与排序）。 */
+    fun showSceneQuickApps(focusSlot: Int = -1) {
+        val defaults = if (::scenePage.isInitialized) scenePage.currentQuickAppPackages() else emptyList()
+        val config = com.cardesk.launcher.ui.dialogs.SceneQuickAppsDialog(
+            context,
+            pal,
+            com.cardesk.launcher.core.SceneQuickApps.PrefsStore(prefs),
+            defaultPkgs = defaults,
+            focusSlot = focusSlot,
+        )
+        config.onRequestPicker = { index, current -> showSceneQuickAppPicker(index, current, config) }
+        config.onChanged = {
+            if (::scenePage.isInitialized) scenePage.refreshQuickApps()
+        }
+        config.onClose = { closeOverlayDialog(config) }
+        showOverlayDialog(config)
+    }
+
+    /** 点桌面快捷应用卡片空槽「+」时直接弹出单选应用选择器，选完即写入该槽位。 */
+    private fun showDirectSceneQuickAppPicker(slotIndex: Int) {
+        val currentSlots = if (prefs.sceneQuickAppsConfigured) {
+            com.cardesk.launcher.core.SceneQuickApps.normalize(prefs.sceneQuickApps)
+        } else {
+            val defaults = if (::scenePage.isInitialized) scenePage.currentQuickAppPackages() else emptyList()
+            com.cardesk.launcher.core.SceneQuickApps.normalize(defaults)
+        }
+        val idx = slotIndex.coerceIn(0, com.cardesk.launcher.core.SceneQuickApps.SLOTS - 1)
+        val current = currentSlots[idx]
+        val picker = com.cardesk.launcher.ui.dialogs.AppPickerDialog(
+            context,
+            pal,
+            multiSelect = false,
+            preselected = if (current.isEmpty()) emptySet() else setOf(current),
+            title = "选择桌面快捷应用",
+            hintText = "点一下即把这个应用放进快捷应用卡第 ${idx + 1} 个槽位",
+        )
+        picker.onPicked = { set ->
+            val pkg = set.firstOrNull().orEmpty()
+            prefs.sceneQuickApps = com.cardesk.launcher.core.SceneQuickApps.withSlot(currentSlots, idx, pkg)
+            if (::scenePage.isInitialized) scenePage.refreshQuickApps()
+            closeOverlayDialog(picker)
+        }
+        picker.onClose = { closeOverlayDialog(picker) }
+        showOverlayDialog(picker)
+    }
+
+    /** 叠在桌面快捷应用配置面板之上的应用选择器。 */
+    private fun showSceneQuickAppPicker(
+        index: Int,
+        current: String,
+        config: com.cardesk.launcher.ui.dialogs.SceneQuickAppsDialog,
+    ) {
+        val picker = com.cardesk.launcher.ui.dialogs.AppPickerDialog(
+            context,
+            pal,
+            multiSelect = false,
+            preselected = if (current.isEmpty()) emptySet() else setOf(current),
+            title = "选择桌面快捷应用",
+            hintText = "点一下即把这个应用放进快捷应用卡第 ${index + 1} 个槽位",
+        )
+        picker.onPicked = { set ->
+            val pkg = set.firstOrNull().orEmpty()
+            config.applyPicked(index, pkg)
+            closeQuickAppPicker(picker)
+        }
+        picker.onClose = { closeQuickAppPicker(picker) }
+        quickAppPicker = picker
+        content.addView(picker, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+    }
+
     /**
      * 关掉叠在配置面板之上的应用选择器（第五十四轮）。
      *
@@ -4391,6 +4463,7 @@ fun toggleCam360() {
         }
         // Dock 快捷应用配置（第五十四轮）：与「长按 Dock 槽位」进同一个面板。
         overlay.onShowDockQuickApps = { showDockQuickApps() }
+        overlay.onShowSceneQuickApps = { showSceneQuickApps(-1) }
         overlay.onReorderDock = { enterDockReorderMode() }
         // 画中画应用选择器
         // 主画 / 副画各一个选择器；双画已开时**不能选同一个应用**。

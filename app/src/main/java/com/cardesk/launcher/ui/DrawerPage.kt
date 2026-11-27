@@ -512,8 +512,14 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
         }
         val order = prefs.appOrder
         val rank = order.withIndex().associate { (i, pkg) -> pkg to i }
+        val enabledByPkg = HashMap<String, Boolean>(apps.size)
+        for (info in apps) {
+            enabledByPkg[info.activityInfo.packageName] = isEnabled(info)
+        }
+        // 可用应用排在前，已禁用应用统一置于列表尾部；各组内按用户排序与显示名排序。
         val ordered = apps.sortedWith(
             compareBy(
+                { if (enabledByPkg[it.activityInfo.packageName] == true) 0 else 1 },
                 { rank[it.activityInfo.packageName] ?: Int.MAX_VALUE },
                 { displayLabel(it, pm) },
             )
@@ -524,8 +530,9 @@ class DrawerPage(context: Context, private val pal: Palette) : FrameLayout(conte
             if (!unique.containsKey(pkg)) unique[pkg] = info
         }
         return unique.values.map { info ->
+            val pkg = info.activityInfo.packageName
             val display = displayLabel(info, pm)
-            val enabled = isEnabled(info)
+            val enabled = enabledByPkg[pkg] ?: isEnabled(info)
             val icon: Drawable? = try {
                 info.loadIcon(pm)
             } catch (_: Exception) {

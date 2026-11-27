@@ -114,18 +114,21 @@ object Glass {
         shadow: Boolean = true,
         sheen: Boolean = true,
         stroke: Int = if (Skin.isNight) 0x1FFFFFFF else 0x59FFFFFF,
+        offsetX: Float = 0f,
+        offsetY: Float = 0f,
     ) {
         if (shadow) drawShadow(canvas, rect, radius)
 
         val bmp = backdrop
-        if (bmp != null && !bmp.isRecycled) {
+        if (bmp != null && !bmp.isRecycled && bmp.width > 0 && bmp.height > 0) {
             if (bmp !== cachedShaderBmp || cachedShader == null) {
                 cachedShaderBmp = bmp
                 cachedShader = android.graphics.BitmapShader(
                     bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP,
                 )
             }
-            shaderMatrix.setScale(bmp.width / Design.W, bmp.height / Design.H)
+            shaderMatrix.setScale(Design.W / bmp.width.toFloat(), Design.H / bmp.height.toFloat())
+            if (offsetX != 0f || offsetY != 0f) shaderMatrix.postTranslate(-offsetX, -offsetY)
             cachedShader?.let { s ->
                 s.setLocalMatrix(shaderMatrix)
                 bitmapPaint.shader = s

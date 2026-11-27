@@ -139,4 +139,26 @@ class SettingsLayoutTest {
         prefs.overlayWidthPct = 5
         assertEquals("低于下限要被夹到 10%", 10, prefs.overlayWidthPct)
     }
+
+    @Test
+    fun `左侧导航菜单文字居中且字号和触控行高足够大防误触`() {
+        val ov = overlay()
+        val rows = navRows(ov)
+        assertTrue("导航菜单不能为空", rows.isNotEmpty())
+        assertTrue("导航条目字号应放大到 >= 24px", SettingsOverlay.NAV_ITEM >= 24f)
+        assertTrue("导航条目行高应达到车机防误触热区 >= 48px", SettingsOverlay.TREE_ITEM_H >= 48)
+        assertTrue("条目行距应大于行高留出安全间隔", SettingsOverlay.TREE_ITEM_STEP > SettingsOverlay.TREE_ITEM_H)
+        for ((key, row) in rows) {
+            assertEquals(
+                "导航项「$key」文字应水平垂直居中",
+                android.view.Gravity.CENTER,
+                row.gravity,
+            )
+            assertEquals(
+                "导航项「$key」布局高度应为 TREE_ITEM_H",
+                SettingsOverlay.TREE_ITEM_H,
+                row.layoutParams.height,
+            )
+        }
+    }
 }

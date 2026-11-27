@@ -800,10 +800,19 @@ class ScenePage(context: Context) : View(context) {
 
     // ---------------------------------------------------------------- 快捷入口
 
-    /** 快捷入口位。 */
+    /** 快捷入口位（pkg 为空串时表示空槽，卡片上画「+ 添加」）。 */
     data class QuickApp(val pkg: String, val label: String, val icon: Drawable?)
 
+    /** 点击快捷应用卡右上角「编辑 ›」回调（slotIndex = -1 打开完整配置面板）。 */
+    var onConfigureQuickApps: ((slotIndex: Int) -> Unit)? = null
+
+    /** 点击快捷应用卡空槽「+」回调：直接打开该槽位的应用选择器。 */
+    var onPickQuickAppSlot: ((slotIndex: Int) -> Unit)? = null
+
     private var quickApps: List<QuickApp> = emptyList()
+
+    /** 当前卡片展示的包名列表（配置面板在未自定义时用于预览当前默认槽位）。 */
+    fun currentQuickAppPackages(): List<String> = quickApps.map { it.pkg }
 
     /** 直接指定快捷入口（测试 / 外部注入用）。 */
     fun setQuickApps(apps: List<QuickApp>) {
@@ -812,20 +821,51 @@ class ScenePage(context: Context) : View(context) {
     }
 
     /**
-     * 读取真实可启动应用作为快捷入口
-     * 取前 4 个，显示真实图标与名称。
+     * 刷新快捷入口列表：
+     * - 用户自定义过（`Prefs.sceneQuickAppsConfigured == true`）→ 严格按 4 个槽位加载（空槽画「+」）；
+     * - 未自定义 → 自动取前 4 个可用可启动应用（优先排除桌面自身）。
      */
     fun refreshQuickApps() {
         val pm = context.packageManager
+        val prefs = com.cardesk.launcher.core.Prefs(context.applicationContext)
+        if (prefs.sceneQuickAppsConfigured) {
+            val slots = com.cardesk.launcher.core.SceneQuickApps.normalize(prefs.sceneQuickApps)
+            quickApps = slots.map { pkg ->
+                if (pkg.isEmpty()) {
+                    QuickApp("", "", null)
+                } else {
+                    val info = runCatching { pm.getApplicationInfo(pkg, 0) }.getOrNull()
+                    if (info == null || !info.enabled) {
+                        QuickApp("", "", null)
+                    } else {
+                        val label = runCatching { pm.getApplicationLabel(info).toString() }.getOrDefault(pkg)
+                        val icon = runCatching { pm.getApplicationIcon(info) }.getOrNull()
+                        QuickApp(pkg, label, icon)
+                    }
+                }
+            }
+            Logx.i(
+                LogTags.SCENE,
+                "快捷入口列表加载（自定义）",
+                "shown" to quickApps.count { it.pkg.isNotEmpty() },
+                "pkgs" to quickApps.joinToString(",") { it.pkg },
+            )
+            invalidate()
+            return
+        }
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         val resolved = try {
             pm.queryIntentActivities(intent, 0)
+                .distinctBy { it.activityInfo?.packageName.orEmpty() }
+                .filter { it.activityInfo?.applicationInfo?.enabled != false }
         } catch (t: Throwable) {
             // 排障场景：「快捷入口是空的」——查询失败必须留痕，否则看不出是没权限还是没应用。
             Logx.w(LogTags.SCENE, "快捷入口列表查询失败", t, "reason" to t.message)
             emptyList()
         }
-        quickApps = resolved.take(QUICK_SLOTS).map { r ->
+        val nonSelf = resolved.filter { it.activityInfo?.packageName != context.packageName }
+        val pool = if (nonSelf.size >= QUICK_SLOTS) nonSelf else resolved
+        quickApps = pool.take(QUICK_SLOTS).map { r ->
             QuickApp(
                 r.activityInfo?.packageName.orEmpty(),
                 r.loadLabel(pm)?.toString().orEmpty(),
@@ -865,23 +905,27 @@ class ScenePage(context: Context) : View(context) {
      */
     private fun drawTripCard(canvas: Canvas, rect: RectF) {
         card(canvas, rect)
+        canvas.save()
+        canvas.clipRect(rect.left + 2f, rect.top + 2f, rect.right - 2f, rect.bottom - 2f)
         val i = info
+        val padScale = (rect.width() / 360f).coerceIn(0.75f, 1f)
+        val leftX = rect.left + TRIP_COL_LEFT * padScale
+        val trailing = TRIP_CELL_TRAILING * padScale
         text.textAlign = Paint.Align.LEFT
         text.typeface = Typeface.DEFAULT
         // 第189轮：标题字号 22 → 24（[TRIP_TITLE_SP]）。
         text.textSize = TRIP_TITLE_SP
         text.color = Skin.TEXT_DIM
-        canvas.drawText("行程", rect.left + 20f, rect.top + TRIP_TITLE_BASE, text)
+        canvas.drawText("行程", leftX, rect.top + TRIP_TITLE_BASE, text)
 
         // 第244轮（用户反馈「留白太多，时长和总里程可以往右一点」）：
         // 按画板实测把两列改成 左列起点 14、右列起点 51.8% 卡宽（429 卡 ⇒ 222），
         // 行距收紧成 标签基线 51/104、数值基线 77/130（原来数值贴到卡底 143）。
-        val leftX = rect.left + TRIP_COL_LEFT
         val splitX = rect.left + rect.width() * TRIP_COL_SPLIT
         val colX = floatArrayOf(leftX, splitX)
         val rowTop = floatArrayOf(rect.top + TRIP_CELL_TOP_1, rect.top + TRIP_CELL_TOP_2)
-        val cellW1 = splitX - leftX - TRIP_CELL_TRAILING
-        val cellW2 = rect.right - TRIP_CELL_TRAILING - splitX
+        val cellW1 = (splitX - leftX - trailing).coerceAtLeast(24f)
+        val cellW2 = (rect.right - trailing - splitX).coerceAtLeast(24f)
         val cellWS = floatArrayOf(cellW1, cellW2)
         val cellW = minOf(cellW1, cellW2)
         // 第189轮：四个数值**一起**量，取都放得下的最大字号（见 [fitValueSize]）——
@@ -905,6 +949,7 @@ class ScenePage(context: Context) : View(context) {
         drawTripCell(canvas, colX[1], rowTop[0], "时长", values[1], cellWS[1], labelSp, valueSp)
         drawTripCell(canvas, colX[0], rowTop[1], "平均油耗", values[2], cellWS[0], labelSp, valueSp)
         drawTripCell(canvas, colX[1], rowTop[1], "总里程", values[3], cellWS[1], labelSp, valueSp)
+        canvas.restore()
     }
 
     /**
@@ -912,13 +957,18 @@ class ScenePage(context: Context) : View(context) {
      */
     private fun drawStatusBottomCard(canvas: Canvas, rect: RectF) {
         card(canvas, rect)
+        canvas.save()
+        canvas.clipRect(rect.left + 2f, rect.top + 2f, rect.right - 2f, rect.bottom - 2f)
         val i = info
+        val padScale = (rect.width() / 360f).coerceIn(0.75f, 1f)
+        val leftX = rect.left + TRIP_COL_LEFT * padScale
+        val trailing = TRIP_CELL_TRAILING * padScale
         text.textAlign = Paint.Align.LEFT
         text.typeface = Typeface.DEFAULT
         // 第189轮：和行程卡同一档字号（两个卡在底排并排，字号不一致会很扎眼）。
         text.textSize = TRIP_TITLE_SP
         text.color = Skin.TEXT_DIM
-        canvas.drawText("车门车窗", rect.left + 20f, rect.top + TRIP_TITLE_BASE, text)
+        canvas.drawText("车门车窗", leftX, rect.top + TRIP_TITLE_BASE, text)
 
         val doors = i?.doorsClosed
         val doorText = when {
@@ -947,12 +997,11 @@ class ScenePage(context: Context) : View(context) {
         // 第244轮（用户反馈「留白太多，时长和总里程可以往右一点」）：
         // 按画板实测把两列改成 左列起点 14、右列起点 51.8% 卡宽（429 卡 ⇒ 222），
         // 行距收紧成 标签基线 51/104、数值基线 77/130（原来数值贴到卡底 143）。
-        val leftX = rect.left + TRIP_COL_LEFT
         val splitX = rect.left + rect.width() * TRIP_COL_SPLIT
         val colX = floatArrayOf(leftX, splitX)
         val rowTop = floatArrayOf(rect.top + TRIP_CELL_TOP_1, rect.top + TRIP_CELL_TOP_2)
-        val cellW1 = splitX - leftX - TRIP_CELL_TRAILING
-        val cellW2 = rect.right - TRIP_CELL_TRAILING - splitX
+        val cellW1 = (splitX - leftX - trailing).coerceAtLeast(24f)
+        val cellW2 = (rect.right - trailing - splitX).coerceAtLeast(24f)
         val cellWS = floatArrayOf(cellW1, cellW2)
         val cellW = minOf(cellW1, cellW2)
         // 第189轮：和行程卡一样，四个值一起量字号（这里的最长值是「部分不可读」）。
@@ -969,6 +1018,7 @@ class ScenePage(context: Context) : View(context) {
         drawTripCell(canvas, colX[1], rowTop[0], "车窗", values[1], cellWS[1], labelSp, valueSp)
         drawTripCell(canvas, colX[0], rowTop[1], "后备箱", values[2], cellWS[0], labelSp, valueSp)
         drawTripCell(canvas, colX[1], rowTop[1], "引擎盖", values[3], cellWS[1], labelSp, valueSp)
+        canvas.restore()
     }
 
     // ---------------------------------------------------------------- 底部卡片顺序
@@ -2265,7 +2315,7 @@ class ScenePage(context: Context) : View(context) {
             baseWidths.add(idx, com.cardesk.launcher.core.CardLayout.CAR_STATUS to CAR_STATUS_CARD_W)
             val totalGap = CARD_GAP * (baseWidths.size - 1).coerceAtLeast(0)
             val sumW = baseWidths.sumOf { it.second.toDouble() }.toFloat()
-            val avail = (rowW - totalGap).coerceAtLeast(160f * baseWidths.size)
+            val avail = (rowW - totalGap).coerceAtLeast(1f)
             if (sumW > avail && sumW > 0f) {
                 val scale = avail / sumW
                 for (i in baseWidths.indices) {
@@ -2292,6 +2342,14 @@ class ScenePage(context: Context) : View(context) {
         com.cardesk.launcher.core.CardLayout.STATUS -> STATUS_BOTTOM_CARD_W
         com.cardesk.launcher.core.CardLayout.CAR_STATUS -> CAR_STATUS_CARD_W
         else -> 0f
+    }
+
+    /** 自由摆放模式下单张卡片的宽度：严格遵循该卡片在设置里的尺寸档位（小 / 中 / 自适应 / 大）。 */
+    private fun freeCardWidth(id: String): Float {
+        val rowW = (rightEnd - left).coerceAtLeast(160f)
+        val slotScale = com.cardesk.launcher.core.CardLayout.active(cardLayout)
+            .firstOrNull { it.id == id }?.size?.scale ?: 1f
+        return (cardWidth(id) * slotScale).coerceIn(160f, rowW)
     }
 
     private fun drawCardContent(canvas: Canvas, id: String, drawRect: RectF) {
@@ -2342,11 +2400,12 @@ class ScenePage(context: Context) : View(context) {
             if (lifting) canvas.restore()
         }
         // 绘制已拖出底部行、自由摆放在首页任意位置的底排卡片（正在被拖的那张最后画以浮在最上层）
-        val activeIds = com.cardesk.launcher.core.CardLayout.active(cardLayout).map { it.id }.toSet()
-        val freeEntries = freeCardPos.entries.filter { it.key in activeIds }
+        val activeSlots = com.cardesk.launcher.core.CardLayout.active(cardLayout).filter { it.visible }
+        val slotById = activeSlots.associateBy { it.id }
+        val freeEntries = freeCardPos.entries.filter { it.key in slotById }
             .sortedBy { if (dragFreeCard && it.key == dragId) 1 else 0 }
         for ((id, savedPos) in freeEntries) {
-            val w = cardWidth(id).coerceIn(160f, rowW)
+            val w = freeCardWidth(id)
             val isDragging = dragFreeCard && dragId == id
             val posX = if (isDragging) dragFreeX else savedPos.first.coerceIn(left, (rightEnd - w).coerceAtLeast(left))
             val posY = if (isDragging) dragFreeY else savedPos.second.coerceIn(84f, cardTop.coerceAtLeast(84f))
@@ -2395,48 +2454,138 @@ class ScenePage(context: Context) : View(context) {
     }
 
     /**
-     * 快捷入口卡（设计板 s01 左下第 1 张，338×150）。
+     * 快捷应用卡：自适应所有卡片尺寸（极窄 160px / 小 / 中 / 自适应 / 大），严禁图标与文字溢出。
      *
-     * 版式：标题「快捷应用」21px 弱文字（左 18 / 上 10），
-     * 下面一排 68×68 圆角 18 的图标底板（surfaceSoft），图标居中，
-     * 名称 17px 次文字贴在底板下方 8px。
+     * - 顶栏与「快捷车控」/「车况」卡统一：左侧 16px 标题「快捷应用」，右侧「编辑 ›」入口；
+     * - 宽 ≥ 220px：单行均分 N 个圆角槽位（图标底板 + 缩放图标 + 单行省略文案，或空槽「+ 添加」）；
+     * - 宽 < 220px（极窄小卡）：自动切换 2×2 紧凑图标网格，避免 4 列挤爆导致溢出或裁字。
      */
     private fun drawQuick(canvas: Canvas, rect: RectF) {
         card(canvas, rect)
-        cardTitle(canvas, rect, "快捷应用")
+        canvas.save()
+        canvas.clipRect(rect.left + 2f, rect.top + 2f, rect.right - 2f, rect.bottom - 2f)
+        cardTitle(canvas, rect, "快捷应用", size = 16f, baseline = 23f)
+
+        // 右上角「编辑 ›」快捷配置入口（与车况卡「详情 ›」同一视觉语言）
+        val configLabel = if (rect.width() >= 195f) "编辑 ›" else "编辑"
+        val cfgRight = rect.right - 14f
+        val cfgLeft = (rect.right - 74f).coerceAtLeast(rect.left + 96f)
+        hits["quickConfig"] = RectF(cfgLeft, rect.top, rect.right, rect.top + 34f)
+        withPress(canvas, "quickConfig") {
+            text.textAlign = Paint.Align.RIGHT
+            text.typeface = Typeface.DEFAULT
+            text.textSize = 13f
+            text.color = Skin.ACCENT
+            canvas.drawText(configLabel, cfgRight, rect.top + 23f, text)
+        }
+
         val apps = quickApps
         if (apps.isEmpty()) {
             drawLegacyQuick(canvas, rect)
+            canvas.restore()
             return
         }
-        for (i in apps.indices) {
-            val slotLeft = rect.left + QUICK_PAD + i * (QUICK_SLOT_W + QUICK_SLOT_GAP)
-            val cx = slotLeft + QUICK_SLOT_W / 2f
-            val iconTop = rect.top + QUICK_CONTENT_TOP
-            val app = apps[i]
-            // 图标底板：68×68 圆角 18 的 surfaceSoft 方块（设计板 `.appicon`）
-            // 命中区**先登记再画**（`hits` 每帧开头是清空的）。
-            hits["quick$i"] = RectF(slotLeft, rect.top, slotLeft + QUICK_SLOT_W, rect.bottom)
-            // 按下时这一格（含名称）缩一点。
-            withPress(canvas, "quick$i") {
-                canvas.drawRoundRect(
-                    RectF(slotLeft, iconTop, slotLeft + QUICK_SLOT_W, iconTop + QUICK_SLOT_W),
-                    18f, 18f,
-                    Paint(fill).apply { color = Skin.surfaceSoft },
-                )
-                if (app.icon != null) {
-                    drawIcon(canvas, app.icon, cx, iconTop + QUICK_SLOT_W / 2f, QUICK_GLYPH)
-                } else {
-                    fill.color = Skin.TEXT_SOFT
-                    canvas.drawCircle(cx, iconTop + QUICK_SLOT_W / 2f, 13f, fill)
+
+        val n = apps.size.coerceIn(1, QUICK_SLOTS)
+        val contentTop = rect.top + 34f
+        val compactGrid = rect.width() < 220f && n > 2
+        if (compactGrid) {
+            val cols = 2
+            val rows = (n + 1) / 2
+            val padX = 10f
+            val padBottom = 10f
+            val gapX = 8f
+            val gapY = 8f
+            val cellW = ((rect.width() - padX * 2f - gapX * (cols - 1)) / cols).coerceAtLeast(24f)
+            val cellH = ((rect.height() - 34f - padBottom - gapY * (rows - 1)) / rows).coerceAtLeast(24f)
+            val chipRadius = (minOf(cellW, cellH) * 0.28f).coerceIn(8f, 14f)
+            val glyphSize = (minOf(cellW, cellH) * 0.64f).coerceIn(18f, 34f)
+            for (i in 0 until n) {
+                val col = i % cols
+                val row = i / cols
+                val left = rect.left + padX + col * (cellW + gapX)
+                val top = contentTop + row * (cellH + gapY)
+                val cell = RectF(left, top, left + cellW, top + cellH)
+                hits["quick$i"] = cell
+                val app = apps[i]
+                withPress(canvas, "quick$i") {
+                    canvas.drawRoundRect(cell, chipRadius, chipRadius, Paint(fill).apply { color = chipFill() })
+                    if (app.pkg.isEmpty()) {
+                        drawQuickPlus(canvas, cell.centerX(), cell.centerY(), glyphSize * 0.42f)
+                    } else if (app.icon != null) {
+                        drawIcon(canvas, app.icon, cell.centerX(), cell.centerY(), glyphSize)
+                    } else {
+                        drawQuickFallbackGlyph(canvas, app.label, cell.centerX(), cell.centerY(), glyphSize * 0.5f)
+                    }
                 }
-                text.textAlign = Paint.Align.CENTER
-                text.typeface = Typeface.DEFAULT
-                text.textSize = 17f
-                text.color = Skin.TEXT_SOFT
-                canvas.drawText(clipLabel(app.label, QUICK_SLOT_W + 16f), cx, iconTop + QUICK_SLOT_W + 8f + 13f, text)
+            }
+        } else {
+            val padX = (rect.width() * 0.038f).coerceIn(10f, 18f)
+            val padBottom = 12f
+            val availW = (rect.width() - padX * 2f).coerceAtLeast(60f)
+            val availH = (rect.height() - 34f - padBottom).coerceAtLeast(56f)
+            val gap = (availW * 0.03f).coerceIn(6f, 16f)
+            val slotW = ((availW - gap * (n - 1)) / n).coerceAtLeast(24f)
+            val chipRadius = (slotW * 0.22f).coerceIn(10f, 18f)
+            val labelSize = (slotW * 0.20f).coerceIn(11f, 14f)
+            val labelBand = labelSize + 10f
+            val iconBox = minOf(slotW - 12f, availH - labelBand - 10f).coerceIn(26f, 56f)
+            val iconBoxRadius = (iconBox * 0.28f).coerceIn(8f, 16f)
+            val glyphSize = (iconBox * 0.72f).coerceIn(20f, 44f)
+            val iconTop = contentTop + ((availH - labelBand) - iconBox) / 2f + 2f
+            val labelY = contentTop + availH - 8f
+
+            for (i in 0 until n) {
+                val slotLeft = rect.left + padX + i * (slotW + gap)
+                val cell = RectF(slotLeft, contentTop, slotLeft + slotW, contentTop + availH)
+                val cx = cell.centerX()
+                val iconCy = iconTop + iconBox / 2f
+                val app = apps[i]
+                hits["quick$i"] = cell
+                withPress(canvas, "quick$i") {
+                    canvas.drawRoundRect(cell, chipRadius, chipRadius, Paint(fill).apply { color = chipFill() })
+                    val boxRect = RectF(cx - iconBox / 2f, iconTop, cx + iconBox / 2f, iconTop + iconBox)
+                    canvas.drawRoundRect(boxRect, iconBoxRadius, iconBoxRadius, Paint(fill).apply { color = Skin.surfaceSoft })
+                    if (app.pkg.isEmpty()) {
+                        drawQuickPlus(canvas, cx, iconCy, iconBox * 0.26f)
+                    } else if (app.icon != null) {
+                        drawIcon(canvas, app.icon, cx, iconCy, glyphSize)
+                    } else {
+                        drawQuickFallbackGlyph(canvas, app.label, cx, iconCy, iconBox * 0.36f)
+                    }
+                    text.textAlign = Paint.Align.CENTER
+                    text.typeface = Typeface.DEFAULT
+                    text.textSize = labelSize
+                    text.color = if (app.pkg.isEmpty()) Skin.TEXT_DIM else Skin.TEXT_SOFT
+                    val caption = if (app.pkg.isEmpty()) "添加" else app.label
+                    canvas.drawText(clipLabel(caption, (slotW - 6f).coerceAtLeast(16f)), cx, labelY, text)
+                }
             }
         }
+        canvas.restore()
+    }
+
+    /** 快捷应用空槽「+」图标。 */
+    private fun drawQuickPlus(canvas: Canvas, cx: Float, cy: Float, half: Float) {
+        stroke.color = Skin.TEXT_DIM
+        stroke.strokeWidth = 2.4f
+        canvas.drawLine(cx - half, cy, cx + half, cy, stroke)
+        canvas.drawLine(cx, cy - half, cx, cy + half, stroke)
+    }
+
+    /** 应用取不到图标时的首字占位。 */
+    private fun drawQuickFallbackGlyph(canvas: Canvas, label: String, cx: Float, cy: Float, textSp: Float) {
+        val ch = label.trim().take(1)
+        if (ch.isEmpty()) {
+            fill.color = Skin.TEXT_SOFT
+            canvas.drawCircle(cx, cy, (textSp * 0.5f).coerceAtLeast(6f), fill)
+            return
+        }
+        text.textAlign = Paint.Align.CENTER
+        text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        text.textSize = textSp.coerceIn(13f, 22f)
+        text.color = Skin.TEXT_SOFT
+        canvas.drawText(ch, cx, cy + text.textSize * 0.35f, text)
     }
 
     /**
@@ -2457,33 +2606,48 @@ class ScenePage(context: Context) : View(context) {
         canvas.drawText(title, rect.left + 18f, rect.top + baseline, text)
     }
 
-    /** 没有可启动应用时的兜底：原来的「车辆 / 导航 / 电话 / 全部」四个入口。 */
+    /** 没有可启动应用时的兜底：自适应铺满「车辆 / 导航 / 电话 / 全部」四个入口，绝不溢出。 */
     private fun drawLegacyQuick(canvas: Canvas, rect: RectF) {
         val labels = listOf("车辆", "导航", "电话", "全部")
+        val padX = (rect.width() * 0.038f).coerceIn(10f, 18f)
+        val padBottom = 12f
+        val contentTop = rect.top + 34f
+        val availW = (rect.width() - padX * 2f).coerceAtLeast(60f)
+        val availH = (rect.height() - 34f - padBottom).coerceAtLeast(56f)
+        val gap = (availW * 0.03f).coerceIn(6f, 16f)
+        val slotW = ((availW - gap * 3f) / 4f).coerceAtLeast(24f)
+        val chipRadius = (slotW * 0.22f).coerceIn(10f, 18f)
+        val labelSize = (slotW * 0.20f).coerceIn(11f, 14f)
+        val iconScale = (minOf(slotW, availH - labelSize - 18f) / 56f).coerceIn(0.45f, 1f)
+        val iconCy = contentTop + (availH - labelSize - 10f) / 2f + 2f
+        val labelY = contentTop + availH - 8f
+
         for (i in 0..3) {
-            val slotLeft = rect.left + QUICK_PAD + i * (QUICK_SLOT_W + QUICK_SLOT_GAP)
-            val cx = slotLeft + QUICK_SLOT_W / 2f
-            val iconCy = rect.top + QUICK_CONTENT_TOP + QUICK_SLOT_W / 2f
-            fill.color = Skin.TEXT
-            // 命中区**先登记再画**（`hits` 每帧开头是清空的）。
-            hits["quick$i"] = RectF(slotLeft, rect.top, slotLeft + QUICK_SLOT_W, rect.bottom)
-            // 兜底入口同样有按压反馈 —— 按下时这一格缩一点。
+            val slotLeft = rect.left + padX + i * (slotW + gap)
+            val cell = RectF(slotLeft, contentTop, slotLeft + slotW, contentTop + availH)
+            val cx = cell.centerX()
+            hits["quick$i"] = cell
             withPress(canvas, "quick$i") {
+                canvas.drawRoundRect(cell, chipRadius, chipRadius, Paint(fill).apply { color = chipFill() })
+                canvas.save()
+                canvas.translate(cx, iconCy)
+                canvas.scale(iconScale, iconScale)
+                fill.color = Skin.TEXT
                 when (i) {
                     0 -> { // 车
                         stroke.color = Skin.TEXT
                         stroke.strokeWidth = 2.6f
-                        val carR = RectF(cx - 20f, iconCy - 13f, cx + 20f, iconCy + 15f)
+                        val carR = RectF(-20f, -13f, 20f, 15f)
                         canvas.drawRoundRect(carR, 10f, 10f, stroke)
-                        canvas.drawCircle(cx - 13f, iconCy + 17f, 4f, fill)
-                        canvas.drawCircle(cx + 13f, iconCy + 17f, 4f, fill)
+                        canvas.drawCircle(-13f, 17f, 4f, fill)
+                        canvas.drawCircle(13f, 17f, 4f, fill)
                     }
                     1 -> { // 导航箭头
                         val path = Path().apply {
-                            moveTo(cx, iconCy - 20f)
-                            lineTo(cx + 16f, iconCy + 18f)
-                            lineTo(cx, iconCy + 10f)
-                            lineTo(cx - 16f, iconCy + 18f)
+                            moveTo(0f, -20f)
+                            lineTo(16f, 18f)
+                            lineTo(0f, 10f)
+                            lineTo(-16f, 18f)
                             close()
                         }
                         canvas.drawPath(path, fill)
@@ -2492,29 +2656,30 @@ class ScenePage(context: Context) : View(context) {
                         stroke.color = Skin.TEXT
                         stroke.strokeWidth = 3f
                         val path = Path().apply {
-                            moveTo(cx - 16f, iconCy - 16f)
-                            lineTo(cx - 6f, iconCy - 6f)
-                            lineTo(cx - 12f, iconCy + 2f)
-                            quadTo(cx + 2f, iconCy + 16f, cx + 14f, iconCy + 10f)
-                            lineTo(cx + 18f, iconCy - 2f)
-                            lineTo(cx + 6f, iconCy - 6f)
+                            moveTo(-16f, -16f)
+                            lineTo(-6f, -6f)
+                            lineTo(-12f, 2f)
+                            quadTo(2f, 16f, 14f, 10f)
+                            lineTo(18f, -2f)
+                            lineTo(6f, -6f)
                         }
                         canvas.drawPath(path, stroke)
                     }
                     else -> { // 4 格
                         for (row in 0..1) for (col in 0..1) {
                             canvas.drawRoundRect(
-                                RectF(cx - 16f + col * 18f, iconCy - 16f + row * 18f, cx - 2f + col * 18f, iconCy - 2f + row * 18f),
+                                RectF(-16f + col * 18f, -16f + row * 18f, -2f + col * 18f, -2f + row * 18f),
                                 4f, 4f, fill,
                             )
                         }
                     }
                 }
+                canvas.restore()
                 text.textAlign = Paint.Align.CENTER
                 text.typeface = Typeface.DEFAULT
-                text.textSize = 16f
+                text.textSize = labelSize
                 text.color = Skin.TEXT_SOFT
-                canvas.drawText(labels[i], cx, rect.top + cardH - 22f, text)
+                canvas.drawText(clipLabel(labels[i], (slotW - 6f).coerceAtLeast(16f)), cx, labelY, text)
             }
         }
     }
@@ -2556,24 +2721,17 @@ class ScenePage(context: Context) : View(context) {
         val w = rect.width()
         val h = rect.height()
         card(canvas, rect)
+        canvas.save()
+        canvas.clipRect(rect.left + 2f, rect.top + 2f, rect.right - 2f, rect.bottom - 2f)
         // 卡被压窄时（卡片库加卡 / 小档）整体按比例缩，避免控件跑出卡片。
-        // 第243轮：基准宽度改成设计板实测的 666（Main.png 333..999）。
         val k = (w / MUSIC_CARD_W).coerceIn(0.55f, 1f)
-        // 封面光晕。
-        // 里它是音乐卡的**背景层**（marginStart/End = -24 → 铺满整张卡）
-        // 画在封面 / 文字 / 进度环**之下**。
-        // 设计板（Main.png 333..999）的媒体卡**没有**左侧青色光晕，
-        // 所以第243轮起不再画这层（drawCoverGlow 保留给旧布局的其他调用方）。
 
-        // ① 来源行（图标 + 名称 + 箭头）—— 设计板放在卡片**左上角**
+        // ① 来源行（图标 + 名称 + 箭头）—— 卡片左上角
         text.textAlign = Paint.Align.LEFT
         text.typeface = Typeface.DEFAULT
         text.textSize = (14f * k).coerceAtLeast(11f)
         text.color = Skin.TEXT_DIM
         val srcY = top + 8f
-        // 第125轮：来源图标（真实 App 图标优先，取不到用自绘符号）。
-        // 图标与原来的品牌色圆点**同中心**（x+22k / srcY+12k），文字起点也不变，
-        // 所以只是把那个小圆点换成了图标，版式没有漂。
         val iconSize = 18f * k
         val iconCx = x + 26f * k
         val iconCy = srcY + 12f
@@ -2602,41 +2760,35 @@ class ScenePage(context: Context) : View(context) {
             )
         }
         text.color = Skin.TEXT_DIM
-        canvas.drawText(mediaSource, x + 40f * k, srcY + 18f, text)
-        val srcNameW = text.measureText(mediaSource)
+        val srcMaxW = (w - 64f * k).coerceAtLeast(36f)
+        val shownSource = clipLabel(mediaSource, srcMaxW)
+        canvas.drawText(shownSource, x + 40f * k, srcY + 18f, text)
+        val srcNameW = text.measureText(shownSource)
         stroke.color = Skin.TEXT_DIM
         stroke.strokeWidth = 1.6f
         val chx = x + 40f * k + srcNameW + 6f * k
         val chy = srcY + 12f
-        // 来源行可点（sceneSource 的独立点击区）
-        //
-        // 命中区**先登记再画** —— [withPress] 要靠它算缩放中心，
-        // 而 `hits` 每帧开头是清空的。
-        hits["source"] = RectF(x + 14f * k, srcY, chx + 14f * k, srcY + 30f)
-        // 整张媒体卡（第244轮）：来源弹层要弹在**卡片上方**，需要一个卡片矩形。
+        hits["source"] = RectF(x + 14f * k, srcY, (chx + 14f * k).coerceAtMost(rect.right - 8f), srcY + 30f)
         hits["musicCard"] = RectF(rect)
-        // 下拉箭头是「这里能展开来源菜单」的入口 —— 按下时它自己缩一点。
         withPress(canvas, "source") {
             canvas.drawLine(chx, chy, chx + 5f, chy + 5f, stroke)
             canvas.drawLine(chx + 5f, chy + 5f, chx + 10f * k, chy, stroke)
         }
 
-        // ② 播放键 / 进度环的圆心（第208轮：收藏心形的位置要围着它算，先算出来）
-        //
-        // 两者同心，都在一个 64×64 的 FrameLayout 里，播放按钮 `layout_gravity="center"`。
-        // 64×64 容器的右边缘 = 卡片右 − paddingEnd 18。
-        val bx = x + w - 24f * k - MUSIC_PLAY_RADIUS * k
-        val by = top + h / 2f
+        // ② 封面与正文区在来源行下方垂直居中（小尺寸变窄时封面不再偏上、底部不再空出一大截）
+        val bodyTop = top + 34f
+        val bodyBottom = (top + h - 12f).coerceAtLeast(bodyTop + 48f)
+        val bodyH = bodyBottom - bodyTop
+        val coverSize = minOf(84f * k, bodyH - 4f).coerceIn(48f, 84f)
+        val coverTop = bodyTop + (bodyH - coverSize) / 2f
+        val padX = (22f * k).coerceIn(12f, 22f)
+        val cover = RectF(x + padX, coverTop, x + padX + coverSize, coverTop + coverSize)
+        val coverRadius = (20f * k).coerceIn(12f, 22f)
+        val playR = MUSIC_PLAY_RADIUS * k
+        val bx = x + w - padX - playR
+        val by = cover.centerY()
 
-        // ③ 封面 68×68 圆角 18（设计板 `.appicon`）
-        val coverSize = 84f * k
-        // 第248轮：用户指出「媒体源（QQ音乐）这几个字压住封面」——
-        // 来源行基线在 top+26，封面原来从 top+27 起，只差 1px，14px 的字看起来就压在图上。
-        // 封面整体下移 9px（top+36），它自己的垂直中心仍在卡内居中偏下，不与底边撞。
-        val cover = RectF(x + 24f * k, top + 36f, x + 24f * k + coverSize, top + 36f + coverSize)
         val art = mediaArtwork
-        // 封面是「打开音乐页」的入口 —— 按下时整块缩一点。
-        // 命中区**先登记再画**（`hits` 每帧开头是清空的）。
         hits["musicCover"] = cover
         withPress(canvas, "musicCover") {
             if (art != null && art.width > 0 && art.height > 0) {
@@ -2653,111 +2805,92 @@ class ScenePage(context: Context) : View(context) {
                 bitmapMatrix.postTranslate(cover.left, cover.top)
                 shader.setLocalMatrix(bitmapMatrix)
                 bitmapPaint.shader = shader
-                canvas.drawRoundRect(cover, 22f, 22f, bitmapPaint)
+                canvas.drawRoundRect(cover, coverRadius, coverRadius, bitmapPaint)
             } else {
-                // 第五十一轮：设计板 s01 的通用音乐卡封面是**纯色 `--surfaceSoft` 圆角块**，
-                // 之前画的是「强调色 → surfaceStrong」的渐变，日间模式下和设计板差一截。
-                // 画板 `Main.png` 的封面块是**浅灰**（约 #E9EAEC），不是几乎透明的
-                // `surfaceSoft`（62% 白叠在白卡上等于看不见）。
-                canvas.drawRoundRect(cover, 22f, 22f, Paint(fill).apply {
+                canvas.drawRoundRect(cover, coverRadius, coverRadius, Paint(fill).apply {
                     color = chipFill()
                 })
+                val noteScale = (coverSize / 84f).coerceIn(0.65f, 1f)
+                stroke.color = Skin.TEXT_DIM
+                stroke.strokeWidth = (3f * noteScale).coerceAtLeast(2f)
+                canvas.drawLine(
+                    cover.centerX() + 4f * noteScale, cover.centerY() - 14f * noteScale,
+                    cover.centerX() + 4f * noteScale, cover.centerY() + 6f * noteScale,
+                    stroke,
+                )
+                canvas.drawCircle(
+                    cover.centerX() - 2f * noteScale,
+                    cover.centerY() + 11f * noteScale,
+                    5.5f * noteScale,
+                    stroke,
+                )
+                canvas.drawLine(
+                    cover.centerX() + 4f * noteScale, cover.centerY() - 14f * noteScale,
+                    cover.centerX() + 13f * noteScale, cover.centerY() - 10f * noteScale,
+                    stroke,
+                )
             }
-            stroke.color = Skin.TEXT_DIM
-            stroke.strokeWidth = 3f
-            canvas.drawLine(cover.centerX() + 4f, cover.centerY() - 14f, cover.centerX() + 4f, cover.centerY() + 6f, stroke)
-            canvas.drawCircle(cover.centerX() - 2f, cover.centerY() + 11f, 5.5f, stroke)
-            canvas.drawLine(cover.centerX() + 4f, cover.centerY() - 14f, cover.centerX() + 13f, cover.centerY() - 10f, stroke)
         }
 
-        // ④ 文本列（封面右边距 14 → x = 18 + 68 + 14 = 100）
-        val tx = cover.right + 12f * k
+        // ④ 文本列
+        val tx = cover.right + (12f * k).coerceAtLeast(8f)
         val ringR = MusicCardVisuals.ringRadius(MUSIC_RING_SIZE, MUSIC_RING_STROKE) * k
-        // 文本列的**自然上限**（让到进度环外侧）。
-        val textColWMax = (x + w - 18f * k - ringR * 2f - 10f * k - tx).coerceAtLeast(24f)
+        val textColWMax = (bx - ringR - (10f * k).coerceAtLeast(6f) - tx).coerceAtLeast(24f)
 
-        // 先量一遍文字**实际占多宽** —— 收藏心形要摆在「歌名」和「播放键」**中间**，
-        // 位置得跟着歌名长度走（歌名越长，心形越往左）。
-        //
-        // 量的时候要把画笔设成**和真正绘制时一样**（`clipLabel` 用的是当前画笔度量）。
         text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        text.textSize = (22f * k).coerceAtLeast(15f)
+        text.textSize = (22f * k).coerceIn(15f, 22f)
         val titleText = clipLabel(mediaTitle, textColWMax)
         val titleW = text.measureText(titleText)
         text.typeface = Typeface.DEFAULT
-        text.textSize = (14f * k).coerceAtLeast(11f)
-        // 画板 `Main.png` 的媒体卡在没有歌手信息时，副标题显示的是**来源名**
-        // （「暂无播放」下面那行「通用音乐」）。真实播放时歌手存在，就显示歌手。
+        text.textSize = (14f * k).coerceIn(11f, 14f)
         val artistText = clipLabel(mediaSubtitle, textColWMax)
         val artistW = text.measureText(artistText)
-        // 文字实际占位的右缘（歌名 / 歌手取宽的那个）—— **定位用**（还没截断）
         val textEdge = tx + maxOf(titleW, artistW)
 
-        // ⑤ 收藏心形（第209轮：**摆在歌名和播放键中间**）
-        //
-        // 第208轮把它贴在播放键左边（间隙只有 6），看着像和播放键连成一块；
-        // 用户要求**离播放键远一点、放到歌名和播放键中间**。
-        //
-        // 几何（设计坐标，k = 卡片宽 / 338）：
-        //   可摆区间 = [歌名右缘 + 8, 播放键左缘 − 6]（两端都是**最小间隙**）；
-        //   心形在这个区间里**居中**；
-        //   竖直方向仍与播放键**同一条中线**（by）。
-        //
-        // 空间不够时（歌名特别长）→ 贴着播放键放，**绝不压到字上**。
-        //
-        // **播放器不支持收藏就不画**（亮一个点了没反应的按钮更糟）。
+        // ⑤ 收藏心形（极窄卡避免压住封面与标题）
         val favSize = MUSIC_FAV_ICON_SIZE * k
-        val favRect = if (favoriteSupported()) {
+        val favRightBound = bx - playR - MUSIC_FAV_GAP * k
+        val favRect = if (favoriteSupported() && favRightBound - tx >= favSize + 36f) {
             val leftBound = textEdge + MUSIC_FAV_TEXT_GAP * k
-            val rightBound = bx - MUSIC_PLAY_RADIUS * k - MUSIC_FAV_GAP * k
-            val avail = (rightBound - leftBound).coerceAtLeast(0f)
+            val avail = (favRightBound - leftBound).coerceAtLeast(0f)
             val actual = minOf(favSize, avail)
-            val fl = if (avail >= favSize * 0.6f) {
+            val fl = (if (avail >= favSize * 0.6f) {
                 leftBound + (avail - actual) / 2f
             } else {
-                rightBound - favSize
-            }
-            // 卡片太矮时别把心形顶出卡外。
-            val minTop = top + 4f * k
-            val maxTop = (top + h - 4f * k - favSize).coerceAtLeast(minTop)
+                favRightBound - favSize
+            }).coerceAtLeast(tx + 32f)
+            val minTop = bodyTop + 2f
+            val maxTop = (bodyBottom - favSize).coerceAtLeast(minTop)
             val ft = (by - favSize / 2f).coerceIn(minTop, maxTop)
             RectF(fl, ft, fl + favSize, ft + favSize)
         } else {
             null
         }
 
-        // 文本列的右边界：有心形时还要让开**心形左边缘**，
-        // 否则歌名/歌手会从心形底下穿过去。
         val textColW = if (favRect != null) {
             minOf(textColWMax, favRect.left - MUSIC_FAV_TEXT_GAP * k - tx).coerceAtLeast(24f)
         } else {
             textColWMax
         }
 
-        // 标题 26px 粗体
+        // 标题与副标题围绕封面中线对称排版
         text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        text.textSize = (22f * k).coerceAtLeast(15f)
+        text.textSize = (22f * k).coerceIn(15f, 22f)
         text.color = Skin.TEXT
         val titleFinal = clipLabel(mediaTitle, textColW)
         val titleWFinal = text.measureText(titleFinal)
-        // 封面 27..111（中线 69）：标题基线 66、副标题 88，两行夹着中线。
-        canvas.drawText(titleFinal, tx, top + 66f, text)
+        canvas.drawText(titleFinal, tx, by - 5f, text)
 
-        // 艺术家 18px（没有就留空，默认空串）
         text.typeface = Typeface.DEFAULT
-        text.textSize = (14f * k).coerceAtLeast(11f)
+        text.textSize = (14f * k).coerceIn(11f, 14f)
         text.color = Skin.TEXT_SOFT
         val artistFinal = clipLabel(mediaSubtitle, textColW)
         val artistWFinal = text.measureText(artistFinal)
-        canvas.drawText(artistFinal, tx, top + 90f, text)
+        canvas.drawText(artistFinal, tx, by + 19f, text)
 
-        // 文字**实际画出来**占位的右缘（歌名/歌手取宽的那个）。
-        // 注意用的是**最终截断后**的宽度 —— 歌名太长被截了的话，右缘要跟着缩。
         musicTextRight = tx + maxOf(titleWFinal, artistWFinal)
 
-        // ⑥ 收藏心形（第209轮：摆在歌名和播放键中间）
-        //
-        // 命中区**先登记再画**（`hits` 每帧开头是清空的）。
+        // ⑥ 收藏心形
         favRect?.let { r ->
             hits[FAVORITE_HIT_KEY] = r
             val filled = favoriteState.known && favoriteState.isFavorited
@@ -2777,20 +2910,11 @@ class ScenePage(context: Context) : View(context) {
         }
 
         // 进度环 + 播放按钮
-        // 两者同心，都在一个 64×64 的 FrameLayout 里，播放按钮 `layout_gravity="center"`。
-        // 圆心 bx/by 在上面第②步已经算好。
-        // 进度环在播放按钮**之下**（里 是 sceneMusicPlay 的前一个兄弟节点）。
         drawMusicRing(canvas, bx, by, k)
-        // 命中区**先登记再画**（`hits` 每帧开头是清空的，[withPress] 要靠它算缩放中心）。
-        hits[PLAY_HIT_KEY] = RectF(
-            bx - MUSIC_PLAY_RADIUS * k, by - MUSIC_PLAY_RADIUS * k,
-            bx + MUSIC_PLAY_RADIUS * k, by + MUSIC_PLAY_RADIUS * k,
-        )
-        // 播放键：按下时整块（含进度环外的圆底）缩一点。
+        hits[PLAY_HIT_KEY] = RectF(bx - playR, by - playR, bx + playR, by + playR)
         withPress(canvas, PLAY_HIT_KEY) {
-            // 设计板：播放键是**纯白实心圆**（L3 级），夜间用浮层色。
             canvas.drawCircle(
-                bx, by, MUSIC_PLAY_RADIUS * k,
+                bx, by, playR,
                 Paint(fill).apply { color = if (Skin.isNight) Skin.surfaceStrong else 0xFFFFFFFF.toInt() },
             )
             fill.color = Skin.TEXT
@@ -2807,6 +2931,7 @@ class ScenePage(context: Context) : View(context) {
                 canvas.drawPath(tri, fill)
             }
         }
+        canvas.restore()
     }
 
     /**
@@ -2920,19 +3045,24 @@ class ScenePage(context: Context) : View(context) {
         val x = rect.left
         val top = rect.top
         card(canvas, rect)
+        canvas.save()
+        canvas.clipRect(rect.left + 2f, rect.top + 2f, rect.right - 2f, rect.bottom - 2f)
         // 第248轮：用户指出「快捷车控」压住下面的按钮。
         // 原因是标题用 21px、基线 top+27，而 chip 从 top+26 起 —— 字的下缘正好落在 chip 上。
         // 这里改成 16px、基线 top+23，并把 chip 整体下移到 top+34。
         cardTitle(canvas, rect, "快捷车控", size = 16f, baseline = 23f)
         val k = (rect.width() / CLIMATE_CARD_W).coerceIn(0.55f, 1.25f)
-        val pad = CLIMATE_CARD_PAD * k
-        val gap = CLIMATE_SEAT_GAP * k
+        val pad = (CLIMATE_CARD_PAD * k).coerceIn(10f, CLIMATE_CARD_PAD)
+        val gap = (CLIMATE_SEAT_GAP * k).coerceIn(6f, CLIMATE_SEAT_GAP)
         val seatW = ((rect.width() - pad * 2f - gap * 2f) / 3f).coerceAtLeast(24f)
         val s = state
-        // 第244轮：chip 从「高 70、卡顶 30」放大到「高 100、卡顶 26」，
-        // 卡片高 150 ⇒ 下方只剩 24px 留白，不再是一半空的。
-        val seatTop = top + 34f * k
-        val seatH = 96f * k
+        // 纵向范围按卡片实际高度铺满（车况卡缩成小卡并入底排导致本卡变窄时，
+        // 高度仍为 cardH，不能再拿横向缩放系数 k 去缩 seatTop / seatH，否则按钮偏上、底部大片留白）。
+        val contentTop = 34f
+        val seatTop = top + contentTop
+        val seatH = (rect.height() - contentTop - pad).coerceAtLeast(56f)
+        val iconK = minOf(k.coerceAtLeast(0.76f), seatH / 96f, seatW / 64f).coerceIn(0.58f, 1.15f)
+        val chipRadius = (18f * k).coerceIn(10f, 18f)
         // 命中区**先登记再画**（`hits` 每帧开头是清空的，[withPress] 要靠它算缩放中心）。
         hits["seatHeat"] = RectF(x + pad, seatTop, x + pad + seatW, seatTop + seatH)
         hits["seatVent"] = RectF(x + pad + seatW + gap, seatTop, x + pad + seatW * 2f + gap, seatTop + seatH)
@@ -2940,13 +3070,13 @@ class ScenePage(context: Context) : View(context) {
         withPress(canvas, "seatHeat") {
             seat(
                 canvas, x + pad, seatTop, seatW, seatH,
-                "主驾加热", s?.seatHeatDriver ?: 0, Skin.WARN, k,
+                "主驾加热", s?.seatHeatDriver ?: 0, Skin.WARN, k, iconK, chipRadius,
             )
         }
         withPress(canvas, "seatVent") {
             seat(
                 canvas, x + pad + seatW + gap, seatTop, seatW, seatH,
-                "主驾通风", s?.seatVentDriver ?: 0, Skin.ACCENT_LIGHT, k,
+                "主驾通风", s?.seatVentDriver ?: 0, Skin.ACCENT_LIGHT, k, iconK, chipRadius,
             )
         }
         // MAX 风量：`HvacController.isPower() && getFanSpeed() >= 7`
@@ -2958,28 +3088,31 @@ class ScenePage(context: Context) : View(context) {
         withPress(canvas, "maxFan") {
             // 画板 `Main.png` 1024..1422 的 chip 是「浅灰底 + 深色线稿」，不是白玻璃：
             // 底色 = 主文字色 9.4%（日间 ≈ #E7EAEA，夜间自动变成比卡面浅一档的灰）。
-            canvas.drawRoundRect(mxR, 18f * k, 18f * k, Paint(fill).apply { color = chipFill() })
+            canvas.drawRoundRect(mxR, chipRadius, chipRadius, Paint(fill).apply { color = chipFill() })
             val mxColor = if (maxOn) Skin.ACCENT else Skin.TEXT_SOFT
             stroke.color = mxColor
-            stroke.strokeWidth = (2f * k).coerceAtLeast(1.2f)
+            stroke.strokeWidth = (2f * iconK).coerceAtLeast(1.3f)
             val fcx = mxR.centerX()
             // 画板的「最大风挡」图标：上一条出风格栅（圆角矩形）+ 下面三条风线。
-            val ventTop = seatTop + CHIP_ICON_TOP * k
+            // 纵向与座椅按钮居中对齐：图标落在上半区中线，文案落在统一基线。
+            val ventTotalH = 29f * iconK
+            val ventTop = seatTop + ((seatH * 0.56f) - ventTotalH) / 2f + 2f
             canvas.drawRoundRect(
-                RectF(fcx - 16f * k, ventTop, fcx + 16f * k, ventTop + 13f * k),
-                3f * k, 3f * k, stroke,
+                RectF(fcx - 16f * iconK, ventTop, fcx + 16f * iconK, ventTop + 13f * iconK),
+                3f * iconK, 3f * iconK, stroke,
             )
             for (i in 0..2) {
-                val y = ventTop + 19f * k + i * 5f * k
-                canvas.drawLine(fcx - 13f * k, y, fcx + 13f * k, y, stroke)
+                val y = ventTop + 19f * iconK + i * 5f * iconK
+                canvas.drawLine(fcx - 13f * iconK, y, fcx + 13f * iconK, y, stroke)
             }
             text.textAlign = Paint.Align.CENTER
             text.typeface = Typeface.DEFAULT
-            text.textSize = (15f * k).coerceAtLeast(10f)
+            text.textSize = (15f * k).coerceIn(12f, 15f)
             text.color = mxColor
-            val fanLabelY = seatTop + CHIP_LABEL_BASELINE * k
+            val fanLabelY = seatTop + seatH * 0.73f
             canvas.drawText(fitText("最大风挡", seatW - 8f * k), mxR.centerX(), fanLabelY, text)
         }
+        canvas.restore()
     }
 
     /**
@@ -2990,7 +3123,7 @@ class ScenePage(context: Context) : View(context) {
      */
     private fun chipFill(): Int = (Skin.TEXT and 0x00FFFFFF) or (0x12 shl 24)
 
-    /** 座椅位：图标 + 文案 + 3 段进度；[k] 是卡片宽度不足时的等比缩放。 */
+    /** 座椅位：图标 + 文案 + 3 段进度；[k] 是卡片宽度系数，[iconK] 控制图标等比缩放。 */
     private fun seat(
         canvas: Canvas,
         x: Float,
@@ -3001,36 +3134,38 @@ class ScenePage(context: Context) : View(context) {
         level: Int,
         tint: Int,
         k: Float = 1f,
+        iconK: Float = k,
+        chipRadius: Float = (18f * k).coerceIn(12f, 18f),
     ) {
         val r = RectF(x, top, x + w, top + h)
         // 浅灰底（画板 chip 比卡面暗一档），不是白玻璃。
-        canvas.drawRoundRect(r, 18f * k, 18f * k, Paint(fill).apply { this.color = chipFill() })
-        // 座椅轮廓：画板的线稿是 **22×26**（不是 30px 大图标），居中留白更多。
+        canvas.drawRoundRect(r, chipRadius, chipRadius, Paint(fill).apply { this.color = chipFill() })
+        // 座椅轮廓：居中摆在按钮上半区，避免变窄时图标挤到顶端。
         stroke.color = if (level > 0) tint else Skin.TEXT_SOFT
-        stroke.strokeWidth = (2f * k).coerceAtLeast(1.2f)
-        val sw = 26f * k
-        val sh = 30f * k
+        stroke.strokeWidth = (2f * iconK).coerceAtLeast(1.3f)
+        val sw = 26f * iconK
+        val sh = 30f * iconK
         val cx = r.centerX()
-        val sy = top + CHIP_ICON_TOP * k
-        canvas.drawRoundRect(RectF(cx - sw / 2f, sy, cx + sw / 2f, sy + sh), 8f * k, 8f * k, stroke)
-        canvas.drawLine(cx - sw / 2f - 5f * k, sy + 6f * k, cx - sw / 2f, sy + sh - 4f * k, stroke)
-        canvas.drawLine(cx + sw / 2f + 5f * k, sy + 6f * k, cx + sw / 2f, sy + sh - 4f * k, stroke)
-        // 文案 15px（第244轮随 chip 放大），基线距 chip 顶 78。
+        val sy = top + ((h * 0.56f) - sh) / 2f + 2f
+        canvas.drawRoundRect(RectF(cx - sw / 2f, sy, cx + sw / 2f, sy + sh), 8f * iconK, 8f * iconK, stroke)
+        canvas.drawLine(cx - sw / 2f - 5f * iconK, sy + 6f * iconK, cx - sw / 2f, sy + sh - 4f * iconK, stroke)
+        canvas.drawLine(cx + sw / 2f + 5f * iconK, sy + 6f * iconK, cx + sw / 2f, sy + sh - 4f * iconK, stroke)
+        // 文案按按钮实际高度落基线，与「最大风挡」平齐。
         text.textAlign = Paint.Align.CENTER
         text.typeface = Typeface.DEFAULT
-        text.textSize = (15f * k).coerceAtLeast(10f)
+        text.textSize = (15f * k).coerceIn(12f, 15f)
         text.color = if (level > 0) tint else Skin.TEXT_SOFT
-        val labelY = top + CHIP_LABEL_BASELINE * k
+        val labelY = top + h * 0.73f
         // 卡片被压得很窄时，长标签按卡宽裁剪，避免文字跑出卡外。
         canvas.drawText(fitText(label, w - 8f * k), cx, labelY, text)
         // 三档档位（第248轮：用户要求「通风加热是三档，现在没有档位体现」；
         // 第249轮再改：用户要求「放到按钮的底部，改成 --- 这种形式」）。
-        // 形制与空调弹窗里的 ChipButton 完全一致：三根横杠、整组居中、离底边 10px，
+        // 形制与空调弹窗里的 ChipButton 完全一致：三根横杠、整组居中、离底边 12px，
         // 亮 = 已开档数，暗 = 剩余档位。两处必须同形，否则同一个信息在首页和弹窗里长得不一样。
-        val dashW = 12f * k
-        val dashH = 3.2f * k
-        val dashGap = 4f * k
-        val dashCy = top + h - 11f * k
+        val dashW = (12f * iconK).coerceAtMost((w - 16f) / 3.6f).coerceAtLeast(6f)
+        val dashH = (3.2f * iconK).coerceAtLeast(2.4f)
+        val dashGap = (4f * iconK).coerceAtLeast(2.5f)
+        val dashCy = top + h - 12f
         val totalW = 3 * dashW + 2 * dashGap
         for (i in 0 until 3) {
             fill.color = if (i < level) tint else CardStyle.scaleAlpha(Skin.TEXT_SOFT, 0.45f)
@@ -3196,34 +3331,48 @@ class ScenePage(context: Context) : View(context) {
         val top = rect.top
         val w = rect.width()
         card(canvas, rect)
+        canvas.save()
+        canvas.clipRect(rect.left + 2f, rect.top + 2f, rect.right - 2f, rect.bottom - 2f)
 
-        // 标题「续航」—— 画板 16px（`Main.png` y819），不是 21px
+        val k = (w / 266f).coerceIn(0.62f, 1.1f)
+        val padX = (22f * k).coerceIn(14f, 22f)
+        val innerW = (w - padX * 2f).coerceAtLeast(48f)
+
+        // 标题「续航」—— 与下方数值、油量条左缘严格对齐
         text.textAlign = Paint.Align.LEFT
         text.typeface = Typeface.DEFAULT
         text.textSize = 16f
         text.color = Skin.TEXT_DIM
-        canvas.drawText("续航", x + 22f, top + 32f, text)
+        canvas.drawText("续航", x + padX, top + 30f, text)
 
-        // 数值 + 单位（卡被压窄时整体缩小，避免数字压到右边缘）
-        val k = (w / 266f).coerceIn(0.7f, 1.1f)
+        // 数值 + 单位（窄卡或四位数续航时自动降字号，确保 km 不压右边缘）
         val range = info?.rangeKm?.takeIf { it >= 0 }
         val shown = range?.toString() ?: "--"
+        var valueSp = (56f * k).coerceIn(30f, 56f)
+        val unitSp = (18f * k).coerceIn(12f, 18f)
+        text.typeface = Typeface.DEFAULT
+        text.textSize = unitSp
+        val unitW = text.measureText("km")
+        val maxValueW = (innerW - unitW - 6f).coerceAtLeast(24f)
         text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        // 画板：数字 56 粗、单位 18（卡宽 266，`k` 只在卡被压窄时才缩）
-        text.textSize = 56f * k
-        // 第136轮：续航按剩余里程分级着色（>100 常态 / ≤100 黄 / ≤50 红）。
+        while (valueSp > 24f) {
+            text.textSize = valueSp
+            if (text.measureText(shown) <= maxValueW) break
+            valueSp -= 2f
+        }
+        text.textSize = valueSp
         text.color = rangeValueColor(range)
         val shownW = text.measureText(shown)
-        canvas.drawText(shown, x + 22f * k, top + 80f, text)
+        canvas.drawText(shown, x + padX, top + 80f, text)
         text.typeface = Typeface.DEFAULT
-        text.textSize = 18f * k
+        text.textSize = unitSp
         text.color = Skin.TEXT_DIM
-        canvas.drawText("km", x + 22f * k + shownW + 6f, top + 80f, text)
+        canvas.drawText("km", x + padX + shownW + 6f, top + 80f, text)
 
-        // 油量条 6px（画板 y903..909）
+        // 油量条 6px
         val barY = top + 100f
-        val barX = x + 22f * k
-        val barW = w - 44f * k
+        val barX = x + padX
+        val barW = innerW
         fill.color = Skin.surfaceStrong
         canvas.drawRoundRect(RectF(barX, barY, barX + barW, barY + 6f), 3f, 3f, fill)
         val fuel = fuelPercent
@@ -3233,18 +3382,16 @@ class ScenePage(context: Context) : View(context) {
             canvas.drawRoundRect(RectF(barX, barY, barX + barW * ratio, barY + 6f), 3f, 3f, fill)
         }
 
-        // 油量文案（画板 14px，基线贴着卡底 12px）
+        // 油量文案
         text.typeface = Typeface.DEFAULT
-        text.textSize = 14f
+        text.textSize = (14f * k).coerceIn(11f, 14f)
         text.color = Skin.TEXT_DIM
         text.textAlign = Paint.Align.LEFT
         canvas.drawText(
-            // 第136轮：除了百分比，再给出**具体剩余升数**（`燃料剩余 · 34.1 L · 62%`）。
-            fitText(fuelSummaryText(info?.fuelLiters, fuel), w - 44f * k),
-            x + 22f * k, top + 131f, text,
+            fitText(fuelSummaryText(info?.fuelLiters, fuel), innerW),
+            x + padX, top + 131f, text,
         )
-
-        // `SceneDesktop.disableShortClick(sceneCarCard)`（:703）：续航卡不可点
+        canvas.restore()
     }
 
     /**
@@ -3437,15 +3584,30 @@ class ScenePage(context: Context) : View(context) {
         effTrunk: Boolean?,
         i: VehicleInfo,
     ) {
+        canvas.save()
+        canvas.clipRect(r.left + 2f, r.top + 2f, r.right - 2f, r.bottom - 2f)
+        val scale = (r.width() / CAR_STATUS_CARD_W).coerceIn(0.58f, 1.05f)
+        val padX = (16f * scale).coerceIn(10f, 16f)
         text.textAlign = Paint.Align.LEFT
         text.typeface = Typeface.DEFAULT
         text.textSize = 14f
         text.color = Skin.TEXT_DIM
-        canvas.drawText("车况", r.left + 16f, r.top + 24f, text)
+        canvas.drawText("车况", r.left + padX, r.top + 24f, text)
         text.textAlign = Paint.Align.RIGHT
         text.color = Skin.ACCENT
-        canvas.drawText("详情 ›", r.right - 16f, r.top + 24f, text)
+        canvas.drawText("详情 ›", r.right - padX, r.top + 24f, text)
         text.textAlign = Paint.Align.LEFT
+
+        val valueSp = (26f * scale).coerceIn(15f, 26f)
+        val unitSp = (14f * scale).coerceIn(10f, 14f)
+        val gap = (4f * scale).coerceAtLeast(2f)
+        text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        text.textSize = valueSp
+        val sampleValW = text.measureText("2.4")
+        text.typeface = Typeface.DEFAULT
+        text.textSize = unitSp
+        val sampleUnitW = text.measureText("bar")
+        val tireColW = sampleValW + gap + sampleUnitW + (8f * scale).coerceAtLeast(4f)
 
         val assetDir = CarModels.assetDir(carModel)
         val dir = if (Car3dSettings.enabled) assetDir else null
@@ -3458,8 +3620,9 @@ class ScenePage(context: Context) : View(context) {
 
         val carCx = r.centerX()
         val carCy = r.centerY() + 8f
-        val maxBoxW = 104f
-        val maxBoxH = (r.width() - 164f).coerceIn(130f, 196f)
+        val availCarW = (r.width() - padX * 2f - tireColW * 2f).coerceIn(68f, 196f)
+        val maxBoxH = availCarW
+        val maxBoxW = (104f * (availCarW / 150f).coerceIn(0.62f, 1f)).coerceIn(58f, 104f)
         val baseArea = RectF(carCx - maxBoxW / 2f, carCy - maxBoxH / 2f, carCx + maxBoxW / 2f, carCy + maxBoxH / 2f)
         val usedView = Car3dAssets.usedView(context, dir, cardView)
         val slot = Car3dAssets.slotOf(context, dir, usedView)
@@ -3480,7 +3643,7 @@ class ScenePage(context: Context) : View(context) {
         val painted = car3d.paint(canvas, context, cardView, unrotRect, fit = false)
         canvas.restoreToCount(clipSave)
         if (!painted) {
-            val frame = CarTopPainter.frame(carCx, carCy, 64f, 152f)
+            val frame = CarTopPainter.frame(carCx, carCy, maxBoxW * 0.62f, maxBoxH * 0.85f)
             CarTopPainter.draw(canvas, frame, CarTopGeometryFactory.of(carModel), carColors)
         }
         canvas.restoreToCount(save)
@@ -3492,14 +3655,14 @@ class ScenePage(context: Context) : View(context) {
 
         // 车头朝左时四轮方位：左前(0)=左下，右前(1)=左上，左后(2)=右下，右后(3)=右上。
         val topRowY = r.top + 58f
-        val botRowY = r.bottom - 30f
+        val botRowY = r.bottom - 26f
+        val sideGap = (8f * scale).coerceAtLeast(4f)
         val wheelSlots = arrayOf(
-            Triple(carVisualRect.left - 8f, botRowY, -1),  // 0 左前
-            Triple(carVisualRect.left - 8f, topRowY, -1),  // 1 右前
-            Triple(carVisualRect.right + 8f, botRowY, +1), // 2 左后
-            Triple(carVisualRect.right + 8f, topRowY, +1), // 3 右后
+            Triple(carVisualRect.left - sideGap, botRowY, -1),  // 0 左前
+            Triple(carVisualRect.left - sideGap, topRowY, -1),  // 1 右前
+            Triple(carVisualRect.right + sideGap, botRowY, +1), // 2 左后
+            Triple(carVisualRect.right + sideGap, topRowY, +1), // 3 右后
         )
-        val padX = 16f
         val minLeft = r.left + padX
         val maxRight = r.right - padX
         for (k in 0 until 4) {
@@ -3511,26 +3674,26 @@ class ScenePage(context: Context) : View(context) {
 
             text.textAlign = Paint.Align.LEFT
             text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            text.textSize = 26f
+            text.textSize = valueSp
             val vw = text.measureText(value)
             text.typeface = Typeface.DEFAULT
-            text.textSize = 14f
+            text.textSize = unitSp
             val uw = text.measureText("bar")
-            val gap = 4f
             val totalW = vw + gap + uw
             val rawLeft = if (dirSide < 0) edge - totalW else edge
             val startX = rawLeft.coerceIn(minLeft, (maxRight - totalW).coerceAtLeast(minLeft))
 
             text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            text.textSize = 26f
+            text.textSize = valueSp
             text.color = if (abnormal) Skin.WARN else Skin.TEXT
             canvas.drawText(value, startX, cy, text)
 
             text.typeface = Typeface.DEFAULT
-            text.textSize = 14f
+            text.textSize = unitSp
             text.color = Skin.TEXT_SOFT
             canvas.drawText("bar", startX + vw + gap, cy, text)
         }
+        canvas.restore()
     }
 
     /** 拖拽高亮描边。 */
@@ -4333,7 +4496,7 @@ class ScenePage(context: Context) : View(context) {
         if (id in freeCardPos) {
             val rect = cardRects[id]
             dragFreeCard = true
-            dragFreeStartX = rect?.left ?: (downX - cardWidth(id) / 2f)
+            dragFreeStartX = rect?.left ?: (downX - freeCardWidth(id) / 2f)
             dragFreeStartY = rect?.top ?: (downY - cardH / 2f)
             dragFreeX = dragFreeStartX
             dragFreeY = dragFreeStartY
@@ -4442,7 +4605,7 @@ class ScenePage(context: Context) : View(context) {
                     }
                     // 普通底排卡片拖出底部行 → 转为首页全屏自由摆放
                     if (id != com.cardesk.launcher.core.CardLayout.CAR_STATUS && y < cardTop - 110f) {
-                        val w = cardWidth(id).coerceIn(160f, (rightEnd - left).coerceAtLeast(160f))
+                        val w = freeCardWidth(id)
                         dragFreeCard = true
                         dragGrabX = x
                         dragGrabY = y
@@ -4536,7 +4699,7 @@ class ScenePage(context: Context) : View(context) {
                 if (id != null && dragFreeCard) {
                     dragFreeCard = false
                     dragId = null
-                    val w = cardWidth(id).coerceIn(160f, (rightEnd - left).coerceAtLeast(160f))
+                    val w = freeCardWidth(id)
                     val finalX = dragFreeX.coerceIn(left, (rightEnd - w).coerceAtLeast(left))
                     val finalY = dragFreeY.coerceIn(84f, cardTop.coerceAtLeast(84f))
                     if (y >= cardTop - 50f || finalY + cardH * 0.65f >= cardTop) {
@@ -4763,12 +4926,21 @@ class ScenePage(context: Context) : View(context) {
                 return
             }
         }
+        // 快捷应用卡右上角「编辑 ›」入口
+        hits["quickConfig"]?.let { r ->
+            if (r.contains(x, y)) {
+                Logx.event(LogTags.SCENE, "快捷应用卡编辑入口点击", "x" to x, "y" to y)
+                onConfigureQuickApps?.invoke(-1)
+                performClick()
+                return
+            }
+        }
         // 快捷入口
         for (i in 0 until QUICK_SLOTS) {
             val r = hits["quick$i"] ?: continue
             if (!r.contains(x, y)) continue
             val app = quickApps.getOrNull(i)
-            if (app != null) {
+            if (app != null && app.pkg.isNotEmpty()) {
                 // 排障场景：「快捷入口图标点了没反应」——带上包名与槽位号。
                 Logx.event(
                     LogTags.SCENE,
@@ -4781,6 +4953,14 @@ class ScenePage(context: Context) : View(context) {
                     "y" to y,
                 )
                 if (onOpenApp != null) onOpenApp?.invoke(app.pkg, app.label) else launchApp(app.pkg)
+            } else if (app != null) {
+                // 自定义模式下的空槽：直接弹应用选择器往这一格填应用
+                Logx.event(LogTags.SCENE, "快捷入口空槽点击", "slot" to i, "x" to x, "y" to y)
+                if (onPickQuickAppSlot != null) {
+                    onPickQuickAppSlot?.invoke(i)
+                } else {
+                    onConfigureQuickApps?.invoke(i)
+                }
             } else {
                 Logx.event(
                     LogTags.SCENE,
@@ -5319,38 +5499,38 @@ class ScenePage(context: Context) : View(context) {
         //
         // 「车门车窗」卡和行程卡在底排并排，字号必须一致，否则一眼就看出来不对。
 
-        /** 底部卡片标题字号（第189轮：22 → 24）。 */
-        const val TRIP_TITLE_SP = 24f
+        /** 底部卡片标题字号：与「续航 / 快捷应用 / 快捷车控」统一为 16px，避免压到第一行标签。 */
+        const val TRIP_TITLE_SP = 16f
 
-        /** 底部卡片标题基线（相对卡顶）。 */
-        const val TRIP_TITLE_BASE = 31f
+        /** 底部卡片标题基线（相对卡顶，与快捷车控/快捷应用齐平）。 */
+        const val TRIP_TITLE_BASE = 23f
 
-        /** 单元格标签字号（第189轮：19 → 21）。 */
-        const val TRIP_LABEL_SP = 16f
+        /** 单元格标签字号。 */
+        const val TRIP_LABEL_SP = 14f
 
         /** 单元格标签基线（相对单元格顶）。 */
-        const val TRIP_LABEL_BASE = 14f
+        const val TRIP_LABEL_BASE = 13f
 
-        /** 单元格数值字号（第189轮：24 → 27；放不下会整卡一起降档）。 */
-        const val TRIP_VALUE_SP = 28f
+        /** 单元格数值字号（放不下会整卡一起降档）。 */
+        const val TRIP_VALUE_SP = 26f
 
         /** 单元格数值字号下限。 */
-        const val TRIP_VALUE_SP_MIN = 20f
+        const val TRIP_VALUE_SP_MIN = 18f
 
-        /** 卡片被压窄时的数值字号（原来是 24）。 */
-        const val TRIP_VALUE_SP_NARROW = 24f
+        /** 卡片被压窄时的数值字号。 */
+        const val TRIP_VALUE_SP_NARROW = 22f
 
-        /** 卡片被压窄时的标签字号（原来是 19）。 */
-        const val TRIP_LABEL_SP_NARROW = 15f
+        /** 卡片被压窄时的标签字号。 */
+        const val TRIP_LABEL_SP_NARROW = 13f
 
         /** 数值基线（相对单元格顶）。 */
-        const val TRIP_VALUE_BASE = 40f
+        const val TRIP_VALUE_BASE = 39f
 
-        /** 第一行单元格顶（相对卡顶）。 */
-        const val TRIP_CELL_TOP_1 = 37f
+        /** 第一行单元格顶（相对卡顶，与 23px 标题基线留出呼吸间距）。 */
+        const val TRIP_CELL_TOP_1 = 41f
 
-        /** 第二行单元格顶（相对卡顶）。 */
-        const val TRIP_CELL_TOP_2 = 90f
+        /** 第二行单元格顶（相对卡顶，底部留出 ~18px 余白）。 */
+        const val TRIP_CELL_TOP_2 = 93f
 
         /** 行程/车门车窗卡的列位置（第244轮按画板实测）：左列距卡左、右列起点占比。 */
         const val TRIP_COL_LEFT = 14f
@@ -5490,8 +5670,8 @@ class ScenePage(context: Context) : View(context) {
         /** 快捷入口卡宽（第五十轮对齐设计板 s01：与通用音乐 / 快捷车控同宽 338）。 */
         const val QUICK_CARD_W = 338f
 
-        /** 媒体卡宽。第四十九轮「浮屿」从 400 收到 338，与快捷卡 / 车控卡同宽。 */
-        const val MUSIC_CARD_W = 600f
+        /** 媒体卡基准宽：与车门车窗（380）/ 车况卡（388）同档，小/中/大（312/380/475）紧凑均衡、无多余留白。 */
+        const val MUSIC_CARD_W = 380f
 
         /**
          * 媒体卡里标题 / 歌手那一列的宽度。
@@ -5574,6 +5754,7 @@ class ScenePage(context: Context) : View(context) {
             "seatHeat",
             "seatVent",
             "maxFan",
+            "quickConfig",
         ) + (0 until QUICK_SLOTS).map { "quick$it" } +
             (0 until WALLPAPER_NAMES.size).map { "wp$it" }
     }

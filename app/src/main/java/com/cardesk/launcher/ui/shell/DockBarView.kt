@@ -497,11 +497,15 @@ class DockBarView(context: Context) : View(context) {
      * 参与圆角，下面两个是直角（贴底后若圆下角，屏幕最底部两侧会露出三角缺口，
      * 第183轮的结论继续有效）。
      */
+    /** Dock 在设计坐标系下的纵向起点，使玻璃背景采样与屏幕底部壁纸对齐。 */
+    private fun dockGlassOffsetY(): Float = (com.cardesk.launcher.core.Design.H - height).coerceAtLeast(0f)
+
     private fun drawBackdrop(canvas: Canvas, w: Float, h: Float) {
         val radius = cornerRadius.coerceIn(0f, minOf(h, w) / 2f)
         val rect = RectF(0f, 0f, w, h)
+        val oy = dockGlassOffsetY()
         if (radius <= 0f) {
-            Glass.card(canvas, rect, 0f, Skin.NAV_BG, shadow = false, sheen = true, stroke = Skin.GLASS_STROKE)
+            Glass.card(canvas, rect, 0f, Skin.NAV_BG, shadow = false, sheen = true, stroke = Skin.GLASS_STROKE, offsetY = oy)
             return
         }
         // 有圆角时：先裁成「上圆下方」的形状，再让玻璃按整块矩形去画
@@ -514,7 +518,7 @@ class DockBarView(context: Context) : View(context) {
         )
         canvas.save()
         canvas.clipPath(bgPath)
-        Glass.card(canvas, rect, 0f, Skin.NAV_BG, shadow = false, sheen = true, stroke = 0)
+        Glass.card(canvas, rect, 0f, Skin.NAV_BG, shadow = false, sheen = true, stroke = 0, offsetY = oy)
         canvas.restore()
         stroke.color = Skin.GLASS_STROKE
         stroke.strokeWidth = 1f
@@ -556,6 +560,7 @@ class DockBarView(context: Context) : View(context) {
                 canvas, tile, HOME_RADIUS,
                 if (active) Skin.ACCENT_SOFT else Skin.surfaceStrong,
                 shadow = false, sheen = true, stroke = Skin.GLASS_STROKE,
+                offsetY = dockGlassOffsetY(),
             )
             stroke.color = if (active) Skin.ACCENT else Skin.TEXT_SOFT
             stroke.strokeWidth = 2.6f
@@ -579,6 +584,7 @@ class DockBarView(context: Context) : View(context) {
                 Glass.card(
                     canvas, tile, HOME_RADIUS, Skin.ACCENT_SOFT,
                     shadow = false, sheen = true, stroke = Skin.GLASS_STROKE,
+                    offsetY = dockGlassOffsetY(),
                 )
             }
             fill.color = if (active) Skin.ACCENT else Skin.TEXT_SOFT
@@ -655,7 +661,7 @@ class DockBarView(context: Context) : View(context) {
     private fun drawMediaCard(canvas: Canvas, left: Float, top: Float, w: Float, h: Float) {
         val cy = top + h / 2f
         r.set(left, top, left + w, top + h)
-        Glass.card(canvas, r, MEDIA_RADIUS, Skin.surfaceStrong, shadow = false, sheen = true, stroke = Skin.GLASS_STROKE)
+        Glass.card(canvas, r, MEDIA_RADIUS, Skin.surfaceStrong, shadow = false, sheen = true, stroke = Skin.GLASS_STROKE, offsetY = dockGlassOffsetY())
 
         // —— 封面（56×56，圆角 14）——
         val coverTop = cy - COVER_SIZE / 2f
@@ -798,7 +804,7 @@ class DockBarView(context: Context) : View(context) {
      */
     private fun drawTempPill(canvas: Canvas, left: Float, cy: Float, w: Float, passenger: Boolean) {
         val rect = RectF(left, cy - TEMP_PILL_H / 2f, left + w, cy + TEMP_PILL_H / 2f)
-        Glass.card(canvas, rect, TEMP_PILL_RADIUS, Skin.surfaceStrong, shadow = false, sheen = true, stroke = Skin.GLASS_STROKE)
+        Glass.card(canvas, rect, TEMP_PILL_RADIUS, Skin.surfaceStrong, shadow = false, sheen = true, stroke = Skin.GLASS_STROKE, offsetY = dockGlassOffsetY())
 
         val cx = rect.centerX()
         val state = hvac
@@ -911,7 +917,7 @@ class DockBarView(context: Context) : View(context) {
         val rect = RectF(left, top, left + size, top + size)
 
         withPress(canvas, "fan", cx, cy) {
-            Glass.card(canvas, rect, FAN_RADIUS, Skin.surfaceStrong, shadow = false, sheen = true, stroke = Skin.GLASS_STROKE)
+            Glass.card(canvas, rect, FAN_RADIUS, Skin.surfaceStrong, shadow = false, sheen = true, stroke = Skin.GLASS_STROKE, offsetY = dockGlassOffsetY())
             val glyphColor = if (on) Skin.ACCENT else Skin.TEXT_SOFT
             val pulse = fanPulse.scale
             canvas.save()
@@ -977,18 +983,20 @@ class DockBarView(context: Context) : View(context) {
     // ================================================================
 
     /**
-     * A/C 与 AUTO（画板：A/C 白玻璃胶囊 x1416..1472、AUTO accent-soft 胶囊 x1483..1547，高 44）。
+     * A/C 与 AUTO 胶囊（高 56、圆角 22）。
      *
-     * AUTO 的 accent-soft 底是**画板固定的**，不随开关变化；开关状态改的是字色
-     * （开 = accent，关 = 弱色），这样「按了有反应」但版式不走样。
+     * 底板与右侧空调/功能键保持一致的 `Skin.surfaceStrong` 玻璃面，
+     * 通过文字颜色区分开关态（开 = `Skin.ACCENT`，关 = `Skin.TEXT_SOFT`），
+     * 避免 AUTO 未开启时因特殊底色显得与其它图标风格不统一。
      */
     private fun drawClimateChip(canvas: Canvas, left: Float, cy: Float, w: Float, label: String, active: Boolean) {
         val rect = RectF(left, cy - CLIMATE_CHIP_H / 2f, left + w, cy + CLIMATE_CHIP_H / 2f)
         withPress(canvas, label, rect.centerX(), cy) {
             Glass.card(
                 canvas, rect, CLIMATE_CHIP_RADIUS,
-                if (label == "AUTO") Skin.ACCENT_SOFT else Skin.surfaceStrong,
+                Skin.surfaceStrong,
                 shadow = false, sheen = true, stroke = Skin.GLASS_STROKE,
+                offsetY = dockGlassOffsetY(),
             )
             text.textAlign = Paint.Align.CENTER
             text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
@@ -1033,7 +1041,7 @@ class DockBarView(context: Context) : View(context) {
             val quick = if (key.startsWith("quick")) quickApps.getOrNull(key.removePrefix("quick").toIntOrNull() ?: 0) else null
             val hasIcon = quick?.icon != null
             if (!hasIcon) {
-                Glass.card(canvas, rect, RIGHT_RADIUS, Skin.surfaceStrong, shadow = false, sheen = true, stroke = Skin.GLASS_STROKE)
+                Glass.card(canvas, rect, RIGHT_RADIUS, Skin.surfaceStrong, shadow = false, sheen = true, stroke = Skin.GLASS_STROKE, offsetY = dockGlassOffsetY())
             }
             when {
                 hasIcon -> drawAppIcon(canvas, quick!!.icon!!, cx, cy, RIGHT_KEY - 16f)

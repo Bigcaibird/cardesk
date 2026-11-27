@@ -233,6 +233,9 @@ class SettingsOverlay(
      */
     var onShowDockQuickApps: (() -> Unit)? = null
 
+    /** 「桌面快捷应用」卡片配置面板（4 槽位自由更换与排序）。 */
+    var onShowSceneQuickApps: (() -> Unit)? = null
+
     /** 进入 Dock 栏按钮与控件拖动排序模式。 */
     var onReorderDock: (() -> Unit)? = null
 
@@ -714,24 +717,19 @@ class SettingsOverlay(
         //   - 条目行距 34 → [TREE_ITEM_STEP]（行高 [TREE_ITEM_H] + 间隙）；
         //   - 组标题 → 首条目 28 → [TREE_GROUP_STEP]（分组因此一眼能分开）；
         //   - 组尾 → 下一组组标题 10 → [TREE_GROUP_END]。
+        val itemW = (leftWidth - NAV_PAD * 2).coerceAtLeast(180)
         var y = TREE_TOP
         for (group in groups) {
-            // 第149轮：组标题 16f → 17f，颜色 textFaint → textDim。
-            // 组标题 14px 弱字（画板：14px、字距略松、与首条目只隔 26）。
-            // 第246轮：用户说「分类标题不明显」—— 16px 半粗 + 更松的字距，
-            // 和 21px 的条目拉开层级（组标题是「分区」，条目才是可点的项）。
-            // 第247轮：用户说「分类标题既不是左对齐又不是居中、也不明显」。
-            // 对齐问题出在组标题 x=32 而条目 x=17，正文左边线差 15px —— 现在同一条线；
-            // 层级靠「强调色 + 17px 半粗 + 松字距」对「正文色 + 21px 常规」，不靠缩进。
             val title = Ui.text(context, group.title, NAV_LABEL, pal.accent, bold = true).apply {
-                letterSpacing = 0.14f
+                gravity = Gravity.CENTER
+                letterSpacing = 0.16f
             }
-            navList.addView(title, abs(TREE_GROUP_X, y - TREE_TOP, -1, 24))
+            navList.addView(title, abs(TREE_GROUP_X, y - TREE_TOP, itemW, 30))
             y += TREE_GROUP_STEP
             for (item in group.items) {
                 val row = Ui.text(context, item.label, NAV_ITEM, pal.text).apply {
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(NAV_PAD - TREE_ITEM_X, 0, NAV_PAD - TREE_ITEM_X, 0)
+                    gravity = Gravity.CENTER
+                    setPadding(12, 0, 12, 0)
                     // 背景**始终存在**（未选中时是透明底 + 透明描边，画出来等于没有）：
                     // 选中态要渐变过去，就需要一个能改颜色的 drawable 可改。
                     // 圆角 [PILL]：画板的选中态是整条胶囊，不是小圆角块。
@@ -740,7 +738,7 @@ class SettingsOverlay(
                     Motion.press(this, MotionSpec.PRESS_SCALE_ROW)
                     setOnClickListener { select(item.key) }
                 }
-                navList.addView(row, abs(TREE_ITEM_X, y - TREE_TOP, TREE_ITEM_W, TREE_ITEM_H))
+                navList.addView(row, abs(TREE_ITEM_X, y - TREE_TOP, itemW, TREE_ITEM_H))
                 navRows[item.key] = row
                 // 初始一律按「未选中」记账 —— 下面的 select() 会把它渐变到真正的选中态。
                 navRowPaints[item.key] = NavRowPaint(pal.textDim, TRANSPARENT, TRANSPARENT)
@@ -748,14 +746,10 @@ class SettingsOverlay(
             }
             y += TREE_GROUP_END
         }
-        // 第248轮：最后一条「诊断日志」滚不出来。
-        // 子 View 全靠 topMargin 定位，FrameLayout 的 wrap_content 在 ScrollView 里
-        // 量出来比实际内容矮一截，于是最大滚动位置差一行 —— 那颗节点在 dump 里就是
-        // `bounds=[0,0][0,0]`（完全在裁切区外）。这里按累加出来的 y 直接定高，
-        // 保证滚动范围一定覆盖到最后一条。
+        // 子 View 全靠 topMargin 定位，按累加高度直接定高并留足底部呼吸空间，确保最后一项完整可滚可点。
         navList.layoutParams = (navList.layoutParams as? FrameLayout.LayoutParams
             ?: FrameLayout.LayoutParams(-1, -2)).also {
-            it.height = (y - TREE_TOP).toInt() + 8
+            it.height = (y - TREE_TOP).toInt() + 16
         }
         navList.requestLayout()
         select(selectedKey.takeIf { key -> groups.any { g -> g.items.any { it.key == key } } } ?: groups.first().items.first().key)
@@ -1103,7 +1097,8 @@ class SettingsOverlay(
             onChange(toggle.checked)
             onApply?.invoke()
         }
-        row(toggle, label, subtitle, height)
+        // 整行点击也可触发开关切换，避免车载触屏仅点 64×36 滑块难以命中。
+        row(toggle, label, subtitle, height, onRowClick = { toggle.performClick() })
     }
 
     /** 一行选择：左侧标题 + 右侧横向滚动的选项条（选项多时也能滚）。 */
@@ -3470,6 +3465,10 @@ class SettingsOverlay(
             // 画板这一行说明不是白名单文案（[note] 会被 SettingsCopyTest 数进去），走 noteRaw。
             noteRaw("卡片库仅列出未上桌（显示=关）的卡片；快捷应用、车门车窗默认收起。")
         }
+        actionButton("配置快捷应用卡…", full = true) {
+            Logx.event(LogTags.SETTING, "打开桌面快捷应用配置")
+            onShowSceneQuickApps?.invoke()
+        }
         actionButton("恢复默认布局", full = true) {
             store.save(com.cardesk.launcher.core.CardLayout.DEFAULT)
             prefs.carStatusCardPosX = -1f
@@ -4420,6 +4419,8 @@ class SettingsOverlay(
             // 重建整页最省事，也不容易漏掉某一行。
             select("clusterlyric")
         }
+        // 首次进入歌词页时立刻显示当前投射状态，不再空白等待点「刷新状态」。
+        refreshClusterStatus()
     }
 
     /**
@@ -6691,14 +6692,14 @@ class SettingsOverlay(
         /** 导航内边距（画板选中胶囊距面板左右各 ~17）。 */
         const val NAV_PAD = 17
 
-        /** 导航树起点（相对导航面板顶；第246轮 75 → 64，给字号放大让出空间）。 */
-        const val TREE_TOP = 62
+        /** 导航树起点（相对导航面板顶，与右栏标题上边距对齐）。 */
+        const val TREE_TOP = 28
 
-        /** 导航组标题字号（第246轮 14 → 16：用户说分组标题不明显）。 */
-        const val NAV_LABEL = 17f
+        /** 导航组标题字号（居中强调色分组头）。 */
+        const val NAV_LABEL = 19f
 
-        /** 导航条目字号（第246轮 18 → 21：用户说字太小、左栏留白过多）。 */
-        const val NAV_ITEM = 21f
+        /** 导航条目字号（放大至 25px，配合 52px 触控行高降低车机行车误触）。 */
+        const val NAV_ITEM = 25f
 
         /** 导航组标题左边距（相对面板）。 */
         const val TREE_GROUP_X = NAV_PAD
@@ -6709,23 +6710,17 @@ class SettingsOverlay(
         /** 导航条目宽（面板宽 - 左右各 17）。 */
         const val TREE_ITEM_W = NAV_W - NAV_PAD * 2
 
-        /**
-         * 导航条目行高。
-         *
-         * 画板 29 / 字号 18；第246轮按用户「字太小、留白过多」放大到 31 / 21。
-         * 5 组 × 25 条 + 组标题 ≈ 965，比可视区（约 900）略高，尾部靠滚动 —— 
-         * 宁可滚一点，也不把字缩回去。
-         */
-        const val TREE_ITEM_H = 34
+        /** 导航条目行高（车机防误触热区 52px）。 */
+        const val TREE_ITEM_H = 52
 
-        /** 导航条目行距（与行高一一对应，条目之间没有额外空隙）。 */
-        const val TREE_ITEM_STEP = 36
+        /** 导航条目行距（52px 行高 + 6px 间距，避免相邻项粘连误触）。 */
+        const val TREE_ITEM_STEP = 58
 
-        /** 组标题 → 首条目（第246轮 26 → 26，字号放大后总高刚好放得下）。 */
-        const val TREE_GROUP_STEP = 30
+        /** 组标题 → 首条目间距。 */
+        const val TREE_GROUP_STEP = 38
 
-        /** 组尾 → 下一组组标题（2：25 条 × 30 + 5 组 × 28 + 起点 64 = 954，放得下且不滚）。 */
-        const val TREE_GROUP_END = 16
+        /** 组尾 → 下一组组标题间距。 */
+        const val TREE_GROUP_END = 22
 
         /** 按钮左右内边距（整行按钮的文字缩进）。 */
         const val BUTTON_PAD = 24
