@@ -858,6 +858,10 @@ class LauncherView(context: Context) : FrameLayout(context) {
         }
         handler.removeCallbacks(carouselTicker)
         handler.postDelayed(carouselTicker, 1000L)
+        if (::navPage.isInitialized) {
+            navPage.pip.onHostStarted()
+            navPage.pipSecondary.onHostStarted()
+        }
     }
 
     /**
@@ -874,6 +878,10 @@ class LauncherView(context: Context) : FrameLayout(context) {
         systemStatusSampler = null
         slotsBar?.setVisibleOnScreen(false)
         pauseVideoWallpaper()
+        if (::navPage.isInitialized) {
+            navPage.pip.onHostStopped()
+            navPage.pipSecondary.onHostStopped()
+        }
     }
 
     private val ticker = object : Runnable {

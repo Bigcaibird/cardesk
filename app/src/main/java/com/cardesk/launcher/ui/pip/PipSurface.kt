@@ -26,6 +26,7 @@ import com.cardesk.launcher.core.HomeForeground
 import com.cardesk.launcher.core.HostTaskDisplay
 import com.cardesk.launcher.core.Palette
 import com.cardesk.launcher.core.PipRenderPlan
+import com.cardesk.launcher.core.PipResumeWake
 import com.cardesk.launcher.core.Shape
 import com.cardesk.launcher.core.Skin
 import com.cardesk.launcher.core.log.LogTags
@@ -215,6 +216,18 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
 
     /** 承载层当前是否处于可见页（导航页在前台）；离屏预热停放时为 false，避免看门狗误检。 */
     private var contentVisible: Boolean = false
+
+    /**
+     * 承载应用是否需要「补一次 onResume 唤醒」（Android 9 单 resumed 限制）。
+     *
+     * 桌面走 `onStop()` 或 `ActivityView`/`TextureView` 的 surface 销毁重建后，
+     * 虚拟屏从 OFF 回到 ON，高德 `MainMapActivity` 只走到 `onStart()`（停在 `PAUSED`），
+     * 其 `MapSurfaceView` 在 `onStop()` 被销毁后仅在 `onResume()` 重建 ⇒ 切到导航页会纯黑，
+     * 直到手动点击画中画。这里置位后，在导航页可见且桌面在屏上时自动聚焦虚拟屏栈一次。
+     */
+    private var needsResumeWake: Boolean = false
+    private var resumeWakeTag: String = ""
+    private var resumeWakeRetries: Int = 0
 
     /**
      * 占位层。
@@ -456,6 +469,9 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
         frameProbe = PipFrameProbe(view)
         // 第130轮：本轮还没自愈过（分级自愈的起点）。
         blackHealStage = PipBlackHeal.STAGE_NONE
+        // 离屏预热阶段建出的承载面：首次切到导航页时补一次 onResume，避免首切黑屏。
+        if (!contentVisible) needsResumeWake = true
+        bindSurfaceWakeListeners(view, null)
         post { syncVirtualDisplay() }
         startWatchdog()
         // 排障场景：「画中画不显示」——嵌入成功 / 降级必须能一眼看出来。
@@ -490,6 +506,8 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
         RoundClip.apply(host.view, cornerRadius)
         frameProbe = PipFrameProbe(host.view)
         blackHealStage = PipBlackHeal.STAGE_NONE
+        if (!contentVisible) needsResumeWake = true
+        bindSurfaceWakeListeners(host.view, host)
         host.start(pkg, launchIntent) { displayId ->
             // 登记到 ActivityEmbed：搬移守护 / 黑屏自愈都靠它拿「我们的虚拟屏 id」
             ActivityEmbed.bindHostedDisplay(host.view, displayId)
@@ -614,6 +632,7 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
         RoundClip.applySurfaceZOrder(view)
         frameProbe = PipFrameProbe(view)
         blackHealStage = PipBlackHeal.STAGE_NONE
+        bindSurfaceWakeListeners(view, host)
         post { syncVirtualDisplay() }
         startWatchdog()
         Logx.event(
@@ -678,13 +697,19 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
         // 第三百零六轮：输出面体检的缓存跟着承载面一起清掉
         lastSurfaceHealth = null
         surfaceLostStreak = 0
+        needsResumeWake = false
+        resumeWakeRetries = 0
+        handler.removeCallbacks(resumeWakeRunnable)
         // 第226轮：镜像路线自己建的虚拟屏要自己释放（`ActivityView.release` 管不到它）
         mirrorHost?.let { host ->
+            host.onSurfaceDestroyed = null
+            host.onSurfaceReattached = null
             ActivityEmbed.unbindHostedDisplay(host.view)
             host.release()
             mirrorHost = null
         }
         if (v != null) {
+            ActivityEmbed.setSurfaceLifecycleListener(v, null, null)
             ActivityEmbed.release(v)
             (v.parent as? ViewGroup)?.removeView(v)
         }
@@ -724,9 +749,13 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
             // 镜像路线离屏停放时触摸排除区在屏外；切页动画落位后刷新成屏内坐标。
             handler.removeCallbacks(tapExcludeRefresh)
             handler.postDelayed(tapExcludeRefresh, TAP_EXCLUDE_SETTLE_MS)
+            if (needsResumeWake && HomeForeground.isOnScreen) {
+                scheduleResumeWake("切回导航页", 0L)
+            }
         } else {
             handler.removeCallbacks(surfaceRecheck)
             handler.removeCallbacks(tapExcludeRefresh)
+            handler.removeCallbacks(resumeWakeRunnable)
         }
         // **不要改 visibility**：实测 `INVISIBLE` 会让 `ActivityView` 把
         // VirtualDisplay 的 surface 拆掉，切回来画面**再也回不来**（一直黑）。
@@ -879,6 +908,84 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
             .onFailure { Logx.w(LogTags.NAV_UI, "画中画输出面体检异常", it, "role" to role) }
     }
 
+    /** 宿主 Activity 离开屏幕（`onStop`）：虚拟屏即将变 OFF，下次回到导航页需补一次 onResume。 */
+    fun onHostStopped() {
+        handler.removeCallbacks(resumeWakeRunnable)
+        if (ready && content != null && packageName.isNotBlank()) {
+            needsResumeWake = true
+        }
+    }
+
+    /** 宿主 Activity 回到屏幕（`onStart`）：若此刻就在导航页，延迟补一次 onResume 唤醒。 */
+    fun onHostStarted() {
+        if (contentVisible && needsResumeWake && ready && content != null && packageName.isNotBlank()) {
+            scheduleResumeWake("回桌面", RESUME_WAKE_REBUILD_DELAY_MS)
+        }
+    }
+
+    private fun bindSurfaceWakeListeners(view: View, host: PipMirrorHost?) {
+        val onDestroyed = {
+            needsResumeWake = true
+            handler.removeCallbacks(resumeWakeRunnable)
+        }
+        val onRebuilt = {
+            needsResumeWake = true
+            if (contentVisible && HomeForeground.isOnScreen) {
+                scheduleResumeWake("承载面重建", RESUME_WAKE_REBUILD_DELAY_MS)
+            }
+        }
+        if (host != null) {
+            host.onSurfaceDestroyed = onDestroyed
+            host.onSurfaceReattached = onRebuilt
+        } else {
+            ActivityEmbed.setSurfaceLifecycleListener(view, onDestroyed, onRebuilt)
+        }
+    }
+
+    private fun scheduleResumeWake(tag: String, delayMs: Long) {
+        resumeWakeTag = tag
+        resumeWakeRetries = 0
+        handler.removeCallbacks(resumeWakeRunnable)
+        if (delayMs <= 0L) {
+            handler.post(resumeWakeRunnable)
+        } else {
+            handler.postDelayed(resumeWakeRunnable, delayMs)
+        }
+    }
+
+    private val resumeWakeRunnable: Runnable = object : Runnable {
+        override fun run() {
+            val v = content
+            val should = PipResumeWake.shouldWake(
+                needsWake = needsResumeWake,
+                contentVisible = contentVisible,
+                hostOnScreen = HomeForeground.isOnScreen,
+                hasContent = v != null,
+                pkgBlank = packageName.isBlank(),
+            )
+            if (!should || v == null) return
+            val woke = runCatching { ActivityEmbed.resumeHostedTask(v, packageName) }
+                .onFailure { Logx.w(LogTags.NAV_UI, "唤醒画中画承载任务异常", it, "role" to role, "tag" to resumeWakeTag) }
+                .getOrDefault(false)
+            if (woke) {
+                needsResumeWake = false
+                resumeWakeRetries = 0
+                Logx.i(
+                    LogTags.NAV_UI,
+                    "画中画可见唤醒完成",
+                    "pkg" to packageName,
+                    "role" to role,
+                    "tag" to resumeWakeTag,
+                )
+                return
+            }
+            if (resumeWakeRetries < RESUME_WAKE_MAX_RETRIES) {
+                resumeWakeRetries++
+                handler.postDelayed(this, RESUME_WAKE_RETRY_MS)
+            }
+        }
+    }
+
     private val tapExcludeRefresh = Runnable {
         if (!isShown || !contentVisible) return@Runnable
         mirrorHost?.refreshTapExcludeRegion()
@@ -893,6 +1000,7 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
         handler.removeCallbacks(watchdog)
         handler.removeCallbacks(surfaceRecheck)
         handler.removeCallbacks(tapExcludeRefresh)
+        handler.removeCallbacks(resumeWakeRunnable)
         watchdogMisses = 0
         noTaskMisses = 0
     }
@@ -1742,6 +1850,13 @@ class PipSurface(context: Context, private val pal: Palette) : FrameLayout(conte
 
         /** 切页动画落位后再刷新镜像路线的触摸排除区（动画时长 260ms，留 60ms 余量）。 */
         const val TAP_EXCLUDE_SETTLE_MS = 320L
+
+        /** surface 重建后等 VirtualDisplay.setSurface 与 onStart 完成再补一次 onResume。 */
+        const val RESUME_WAKE_REBUILD_DELAY_MS = 180L
+
+        /** 首次唤醒未拿到虚拟屏栈时的重试间隔与上限。 */
+        const val RESUME_WAKE_RETRY_MS = 350L
+        const val RESUME_WAKE_MAX_RETRIES = 2
 
         /** 连续几次没找到进程才动手（是 miss 1 软恢复、miss 2 重建；这里更保守）。 */
         const val WATCHDOG_MISS_LIMIT = 3

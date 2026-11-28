@@ -97,6 +97,12 @@ class PipMirrorHost(private val context: Context) {
     /** 虚拟屏就绪回调（拿 displayId），在 [start] 里传。 */
     private var onReady: ((Int) -> Unit)? = null
 
+    /** TextureView surface 销毁回调（虚拟屏变 OFF，承载应用进 onStop）。 */
+    var onSurfaceDestroyed: (() -> Unit)? = null
+
+    /** TextureView surface 重新接回既有虚拟屏回调（承载应用需在可见时补一次 onResume）。 */
+    var onSurfaceReattached: (() -> Unit)? = null
+
     init {
         view.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
             override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
@@ -121,6 +127,7 @@ class PipMirrorHost(private val context: Context) {
                 // （`ensureDisplay` 一看虚拟屏已存在就 return）⇒
                 // 切一次全屏，承载画面就变成**全黑**。
                 runCatching { virtualDisplay?.javaClass?.getMethod("setSurface", Surface::class.java)?.invoke(virtualDisplay, null) }
+                onSurfaceDestroyed?.invoke()
                 return true
             }
 
@@ -271,6 +278,7 @@ class PipMirrorHost(private val context: Context) {
             // displayId 没变，但登记可能被清过（承载面重建过）⇒ 再登记一次（幂等）。
             displayId?.let { onReady?.invoke(it) }
             updateTapExcludeRegion(force = true)
+            if (ok) onSurfaceReattached?.invoke()
             return
         }
 

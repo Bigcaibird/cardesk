@@ -10,6 +10,7 @@ import android.os.Looper
 import android.view.Surface
 import android.view.View
 import com.cardesk.launcher.core.HostTaskDisplay
+import com.cardesk.launcher.core.PipResumeWake
 import com.cardesk.launcher.core.VirtualDisplayIdResolver
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
@@ -375,6 +376,116 @@ object ActivityEmbed {
     }
 
     /**
+     * 注册承载面 surface 销毁 / 重建监听（用于 Android 9 单 resumed 限制下的补唤醒）。
+     *
+     * `ActivityView` 的 surface 销毁时 `VirtualDisplay` 会变 `OFF`、承载应用走 `onStop()` 销毁
+     * `MapSurfaceView`；重建后若不重新拉起，应用只走到 `onStart()`（`PAUSED`），必须在可见时补
+     * 一次焦点唤醒触发 `onResume()`。
+     */
+    fun setSurfaceLifecycleListener(
+        view: View,
+        onDestroyed: (() -> Unit)?,
+        onRebuilt: (() -> Unit)?,
+    ) {
+        val starter = synchronized(starters) { starters[view] } ?: return
+        starter.onSurfaceDestroyedListener = onDestroyed
+        starter.onSurfaceRebuiltListener = onRebuilt
+    }
+
+    /**
+     * 唤醒**已经挂在当前虚拟屏上**的承载任务（补一次 `onResume()`，不重发 Intent）。
+     *
+     * 通过 `IActivityManager.getAllStackInfos()` 严格筛选 `displayId == ourDisplayId` 的栈
+     * （绝不碰 display 0 主屏或其它显示器），再调用 `setFocusedStack(stackId)`（兜底
+     * `setFocusedTask(taskId)`）让 AMS 触发 `resumeFocusedStackTopActivityLocked()`，
+     * 从而让处于 `PAUSED` 且已销毁渲染面的高德执行 `onResume()` 重建 `MapSurfaceView`，
+     * 效果等同于用户点一下画中画，但不发触摸事件、不重启应用、不中断导航路线。
+     */
+    fun resumeHostedTask(view: View, pkg: String): Boolean {
+        val ourId = virtualDisplayIdOf(view) ?: return false
+        if (ourId <= 0) return false
+        val svc = runCatching {
+            ActivityManager::class.java.getMethod("getService").invoke(null)
+        }.getOrNull() ?: return false
+        val rawStacks = runCatching {
+            svc.javaClass.getMethod("getAllStackInfos").invoke(svc) as? List<*>
+        }.getOrNull() ?: return false
+
+        val targets = rawStacks.mapNotNull { info ->
+            if (info == null) return@mapNotNull null
+            val stackId = runCatching { info.javaClass.getField("stackId").getInt(info) }.getOrNull()
+                ?: return@mapNotNull null
+            val displayId = runCatching { info.javaClass.getField("displayId").getInt(info) }.getOrNull()
+                ?: return@mapNotNull null
+            val topActivity = runCatching {
+                info.javaClass.getField("topActivity").get(info) as? android.content.ComponentName
+            }.getOrNull()
+            val taskIds = runCatching {
+                (info.javaClass.getField("taskIds").get(info) as? IntArray)?.toList()
+            }.getOrNull().orEmpty()
+            val taskNames = runCatching {
+                (info.javaClass.getField("taskNames").get(info) as? Array<*>)
+                    ?.mapNotNull { it as? String }
+            }.getOrNull().orEmpty()
+            PipResumeWake.StackTarget(
+                stackId = stackId,
+                displayId = displayId,
+                topPackage = topActivity?.packageName,
+                taskIds = taskIds,
+                taskNames = taskNames,
+            )
+        }
+
+        val picked = PipResumeWake.pickStackOnDisplay(ourId, pkg, targets) ?: return false
+
+        val focusedByStack = runCatching {
+            svc.javaClass.getMethod("setFocusedStack", Int::class.javaPrimitiveType)
+                .invoke(svc, picked.stackId)
+            true
+        }.getOrDefault(false)
+        if (focusedByStack) {
+            Logx.i(
+                LogTags.NAV_UI,
+                "唤醒画中画承载任务（补一次 onResume）",
+                "pkg" to pkg,
+                "display" to ourId,
+                "stack" to picked.stackId,
+                "task" to picked.topTaskId,
+                "api" to "setFocusedStack",
+            )
+            return true
+        }
+
+        val taskId = picked.topTaskId ?: return false
+        val focusedByTask = runCatching {
+            svc.javaClass.getMethod("setFocusedTask", Int::class.javaPrimitiveType)
+                .invoke(svc, taskId)
+            true
+        }.getOrDefault(false)
+        if (focusedByTask) {
+            Logx.i(
+                LogTags.NAV_UI,
+                "唤醒画中画承载任务（补一次 onResume）",
+                "pkg" to pkg,
+                "display" to ourId,
+                "stack" to picked.stackId,
+                "task" to taskId,
+                "api" to "setFocusedTask",
+            )
+            return true
+        }
+        Logx.w(
+            LogTags.NAV_UI,
+            "唤醒画中画承载任务失败",
+            "pkg" to pkg,
+            "display" to ourId,
+            "stack" to picked.stackId,
+            "task" to taskId,
+        )
+        return false
+    }
+
+    /**
      * 承载面就绪后启动承载应用（**只启动一次**）。
      *
      * 启动 API 的顺序见类注释：带 displayId 的优先。
@@ -512,6 +623,12 @@ object ActivityEmbed {
         /** surface 回调（用于 surface 重建时自愈）。 */
         var surfaceCallback: android.view.SurfaceHolder.Callback? = null
 
+        /** 宿主监听：surface 销毁（虚拟屏变 OFF，承载应用会进 onStop）。 */
+        var onSurfaceDestroyedListener: (() -> Unit)? = null
+
+        /** 宿主监听：surface 重建且跳过重发 startActivity（需在可见时补一次 onResume）。 */
+        var onSurfaceRebuiltListener: (() -> Unit)? = null
+
         private val handler = Handler(Looper.getMainLooper())
         private var started = false
         private var cancelled = false
@@ -617,6 +734,7 @@ object ActivityEmbed {
                         "pkg" to pkg,
                         "times" to surfaceCreatedCount,
                     )
+                    onSurfaceRebuiltListener?.invoke()
                     return
                 }
             }
@@ -662,6 +780,7 @@ object ActivityEmbed {
                     "state" to state,
                     "vid" to virtualDisplayIdOf(view),
                 )
+                onSurfaceRebuiltListener?.invoke()
                 return
             }
             Logx.i(
@@ -677,6 +796,7 @@ object ActivityEmbed {
         /** surface 被销毁（切页 / 桌面退到后台）。 */
         fun onSurfaceDestroyed() {
             Logx.d(LogTags.NAV_UI, "承载面销毁", "pkg" to pkg, "times" to surfaceCreatedCount)
+            onSurfaceDestroyedListener?.invoke()
         }
 
         /** 挂回调之前 surface 就已经建好了 → 记成「已经创建过一次」。 */
