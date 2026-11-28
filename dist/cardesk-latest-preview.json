@@ -1,16 +1,16 @@
 {
   "schema": 1,
   "channel": "preview",
-  "version": "1.0.1264-preview",
-  "versionCode": 4360,
-  "tag": "v1.0.1264-preview",
-  "name": "CarDesk 4360 / 1.0.1264-preview（开发版）",
-  "notes": "1. 修复设置页关闭时左侧导航栏与右侧内容区不同步退场的卡顿感：两块玻璃面板改由统一硬件层容器同步滑出淡出，关闭末帧不再闪回，打开同步淡入\n2. 沿用上一版性能优化：日夜判定短路与后台缓存、release 非 debuggable 单 DEX 构建、后台暂停 1Hz UI 心跳",
-  "publishedAt": "2026-11-27T08:40:59Z",
+  "version": "2.0.2-preview",
+  "versionCode": 4363,
+  "tag": "v2.0.2-preview",
+  "name": "CarDesk 4363 / 2.0.2-preview（开发版）",
+  "notes": "1. 修复 Android 9（API 28）上从首页切回导航页（或从其它应用返回导航页）时画中画高德黑屏、需手动点击才恢复的问题：经历 onStop / 承载面销毁重建后，切回导航页自动唤醒虚拟屏栈补发 onResume 重建地图渲染层，不重启应用、不打断导航路线\n2. 同步补齐视频壁纸半透明窗口镜像路线（TextureView）的承载面重建唤醒",
+  "publishedAt": "2026-11-28T04:52:47Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4360-preview.apk",
-    "url": "cardesk/preview/CarDesk-platform-ecarx-cardesk-4360-preview.apk",
-    "size": 2156220,
-    "sha256": "d48cf380921ec30cadfae80dde40fb63c63c129ab42df231d0e61f344430bcc3"
+    "name": "CarDesk-platform-ecarx-cardesk-4363-preview.apk",
+    "url": "cardesk/preview/CarDesk-platform-ecarx-cardesk-4363-preview.apk",
+    "size": 2175200,
+    "sha256": "3ed642b9d73f1483d3b2973cf909a582819b9c6ef7875a7378ff1ebda1a7c939"
   }
 }
