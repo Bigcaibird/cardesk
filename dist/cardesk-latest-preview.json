@@ -1,16 +1,16 @@
 {
   "schema": 1,
   "channel": "preview",
-  "version": "2.0.2-preview",
-  "versionCode": 4363,
-  "tag": "v2.0.2-preview",
-  "name": "CarDesk 4363 / 2.0.2-preview（开发版）",
-  "notes": "1. 修复 Android 9（API 28）上从首页切回导航页（或从其它应用返回导航页）时画中画高德黑屏、需手动点击才恢复的问题：经历 onStop / 承载面销毁重建后，切回导航页自动唤醒虚拟屏栈补发 onResume 重建地图渲染层，不重启应用、不打断导航路线\n2. 同步补齐视频壁纸半透明窗口镜像路线（TextureView）的承载面重建唤醒",
-  "publishedAt": "2026-11-28T04:52:47Z",
+  "version": "2.0.3-preview",
+  "versionCode": 4364,
+  "tag": "v2.0.3-preview",
+  "name": "CarDesk 4364 / 2.0.3-preview（开发版）",
+  "notes": "- 新增「快捷车控」自定义编辑：支持在设置 → 桌面卡片中自由增删与排序 1~4 项一键车控，覆盖全车 19 项真实车控（主副驾座椅加热/通风、最大风挡、空调电源/A/C/AUTO/内外循环/前后除霜/双区同步、360 全景、一键关窗/透气、自动启停、驾驶模式循环、音乐氛围灯、车载热点）\n- 优化日间模式桌面卡片文字与磨砂面对比度：加深次/弱级文字与强调色，修复续航油量条与音乐进度环白底不可见问题\n- 修复动态视频壁纸日夜双槽独立导入与自动切换，并新增日夜视频封面缩略图显示\n- 重新整理优化「壁纸设置」页面两栏分组卡片布局\n- 清理快捷应用与快捷车控卡片右上角编辑入口，统一收口至设置 → 桌面卡片",
+  "publishedAt": "2026-11-28T12:30:39Z",
   "apk": {
-    "name": "CarDesk-platform-ecarx-cardesk-4363-preview.apk",
-    "url": "cardesk/preview/CarDesk-platform-ecarx-cardesk-4363-preview.apk",
-    "size": 2175200,
-    "sha256": "3ed642b9d73f1483d3b2973cf909a582819b9c6ef7875a7378ff1ebda1a7c939"
+    "name": "CarDesk-platform-ecarx-cardesk-4364-preview.apk",
+    "url": "cardesk/preview/CarDesk-platform-ecarx-cardesk-4364-preview.apk",
+    "size": 2200216,
+    "sha256": "d879f7ced0add945ef26c7c29206b7e13702d928770c00c18a985cb4293c6755"
   }
 }

@@ -6,7 +6,7 @@
 
 | 文件 | 包名 | versionCode | versionName | 签名 | SHA-256 |
 | --- | --- | --- | --- | --- | --- |
-| `CarDesk-platform-ecarx-cardesk-4363-preview.apk` | `com.ecarx.cardesk` | **4363** | `2.0.2-preview` | AOSP platform 签名 | `3ed642b9d73f1483d3b2973cf909a582819b9c6ef7875a7378ff1ebda1a7c939` |
+| `CarDesk-platform-ecarx-cardesk-4364-preview.apk` | `com.ecarx.cardesk` | **4364** | `2.0.3-preview` | AOSP platform 签名 | `d879f7ced0add945ef26c7c29206b7e13702d928770c00c18a985cb4293c6755` |
 
 > 更新通道：**开发版**（`preview`）—— R2 清单 `cardesk/preview/latest.json`
 
@@ -242,5 +242,6 @@
 | `CarDesk-platform-ecarx-cardesk-4360-preview.apk` | 旧包（com.ecarx.cardesk /4360），**不要装** |
 | `CarDesk-platform-ecarx-cardesk-4361.apk` | 旧包（com.ecarx.cardesk /4361），**不要装** |
 | `CarDesk-platform-ecarx-cardesk-4362.apk` | 旧包（com.ecarx.cardesk /4362），**不要装** |
+| `CarDesk-platform-ecarx-cardesk-4363-preview.apk` | 旧包（com.ecarx.cardesk /4363），**不要装** |
 | `CarDesk-replace-ecarx-4123.apk` | 旧包（com.ecarx.qq.tool /4354），**不要装** |
 | `probe-app.apk` | 旧包（com.cardesk.mediaprobe /1），**不要装** |
