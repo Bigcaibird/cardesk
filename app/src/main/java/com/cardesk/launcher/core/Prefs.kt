@@ -676,6 +676,11 @@ class Prefs(context: Context) {
         get() = flag(SceneQuickApps.CONFIGURED_KEY, false)
         set(value) = setFlag(SceneQuickApps.CONFIGURED_KEY, value)
 
+    /** 桌面「快捷车控」卡片自定义按钮列表（1..4 项车控 ID，空时回落默认 3 项）。 */
+    var sceneQuickControls: List<String>
+        get() = SceneQuickControls.parse(stringValue(SceneQuickControls.KEY, ""))
+        set(value) = setStringValue(SceneQuickControls.KEY, SceneQuickControls.toCsv(value))
+
     /** Dock 栏按钮与控件的自定义顺序（16 项 ID 逗号分隔）。 */
     var dockOrder: List<String>
         get() = DockOrder.parse(stringValue(DockOrder.KEY, ""))

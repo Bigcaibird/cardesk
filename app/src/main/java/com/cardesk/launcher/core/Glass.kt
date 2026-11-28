@@ -110,7 +110,7 @@ object Glass {
         canvas: Canvas,
         rect: RectF,
         radius: Float,
-        fill: Int = if (Skin.isNight) 0xA8161B22.toInt() else 0x9EFFFFFF.toInt(),
+        fill: Int = if (Skin.isNight) 0xA8161B22.toInt() else 0xBAFFFFFF.toInt(),
         shadow: Boolean = true,
         sheen: Boolean = true,
         stroke: Int = if (Skin.isNight) 0x1FFFFFFF else 0x59FFFFFF,

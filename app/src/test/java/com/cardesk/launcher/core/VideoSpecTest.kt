@@ -109,6 +109,13 @@ class VideoSpecTest {
         assertNull(VideoSpec.chooseFile(null, null, nightNow = true))
     }
 
+    @Test
+    fun `仅有夜间版时日间与夜间都兜底选夜间版`() {
+        val night = file("wallpaper_night.mp4")
+        assertEquals(night, VideoSpec.chooseFile(null, night, nightNow = true))
+        assertEquals(night, VideoSpec.chooseFile(null, night, nightNow = false))
+    }
+
     // ---------------------------------------------------------------- 格式化
 
     @Test

@@ -169,9 +169,7 @@ class ThreeFixesRegressionTest {
                 val rect = RectF(20f, 20f, 20f + w, 20f + 150f)
                 drawQuick.invoke(page, canvas, rect)
 
-                val cfg = hits["quickConfig"]
-                assertNotNull("宽度 $w 下应有编辑入口命中区", cfg)
-                assertTrue("宽度 $w 下编辑入口不能越界：$cfg vs $rect", rect.contains(cfg!!))
+                assertEquals("宽度 $w 下卡片右上角不应再显示编辑入口", null, hits["quickConfig"])
 
                 val slotRects = (0 until 4).map { idx ->
                     val r = hits["quick$idx"]

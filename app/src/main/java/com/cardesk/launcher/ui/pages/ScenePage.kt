@@ -809,6 +809,58 @@ class ScenePage(context: Context) : View(context) {
     /** 点击快捷应用卡空槽「+」回调：直接打开该槽位的应用选择器。 */
     var onPickQuickAppSlot: ((slotIndex: Int) -> Unit)? = null
 
+    /** 点击快捷车控卡右上角「编辑 ›」回调。 */
+    var onConfigureQuickControls: (() -> Unit)? = null
+
+    /** 点击快捷车控卡中任意一键车控项回调（参数为 [com.cardesk.launcher.core.SceneQuickControls] 中的 ID）。 */
+    var onQuickControl: ((id: String) -> Unit)? = null
+
+    /** 快捷车控卡的实时附加状态（非 HvacState 覆盖的 360 / 氛围灯 / 热点 / 启停）。 */
+    var quickCam360On: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            sceneDirty = true
+            invalidate()
+        }
+    var quickAmbientOn: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            sceneDirty = true
+            invalidate()
+        }
+    var quickHotspotOn: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            sceneDirty = true
+            invalidate()
+        }
+    var quickIssOn: Boolean? = null
+        set(value) {
+            if (field == value) return
+            field = value
+            sceneDirty = true
+            invalidate()
+        }
+
+    /** 当前快捷车控卡配置的动作 ID 列表（1..4 项）。 */
+    var quickControls: List<String> = com.cardesk.launcher.core.SceneQuickControls.DEFAULT_SLOTS
+        set(value) {
+            val norm = com.cardesk.launcher.core.SceneQuickControls.normalize(value)
+            if (field == norm) return
+            field = norm
+            sceneDirty = true
+            invalidate()
+        }
+
+    /** 从偏好重新加载快捷车控槽位列表。 */
+    fun refreshQuickControls() {
+        val prefs = com.cardesk.launcher.core.Prefs(context.applicationContext)
+        quickControls = prefs.sceneQuickControls
+    }
+
     private var quickApps: List<QuickApp> = emptyList()
 
     /** 当前卡片展示的包名列表（配置面板在未自定义时用于预览当前默认槽位）。 */
@@ -1153,6 +1205,7 @@ class ScenePage(context: Context) : View(context) {
 
     init {
         refreshQuickApps()
+        refreshQuickControls()
     }
 
     override fun onAttachedToWindow() {
@@ -2456,7 +2509,7 @@ class ScenePage(context: Context) : View(context) {
     /**
      * 快捷应用卡：自适应所有卡片尺寸（极窄 160px / 小 / 中 / 自适应 / 大），严禁图标与文字溢出。
      *
-     * - 顶栏与「快捷车控」/「车况」卡统一：左侧 16px 标题「快捷应用」，右侧「编辑 ›」入口；
+     * - 顶栏与「快捷车控」/「车况」卡统一：左侧 16px 标题「快捷应用」（配置入口统一收口到设置页）；
      * - 宽 ≥ 220px：单行均分 N 个圆角槽位（图标底板 + 缩放图标 + 单行省略文案，或空槽「+ 添加」）；
      * - 宽 < 220px（极窄小卡）：自动切换 2×2 紧凑图标网格，避免 4 列挤爆导致溢出或裁字。
      */
@@ -2465,19 +2518,6 @@ class ScenePage(context: Context) : View(context) {
         canvas.save()
         canvas.clipRect(rect.left + 2f, rect.top + 2f, rect.right - 2f, rect.bottom - 2f)
         cardTitle(canvas, rect, "快捷应用", size = 16f, baseline = 23f)
-
-        // 右上角「编辑 ›」快捷配置入口（与车况卡「详情 ›」同一视觉语言）
-        val configLabel = if (rect.width() >= 195f) "编辑 ›" else "编辑"
-        val cfgRight = rect.right - 14f
-        val cfgLeft = (rect.right - 74f).coerceAtLeast(rect.left + 96f)
-        hits["quickConfig"] = RectF(cfgLeft, rect.top, rect.right, rect.top + 34f)
-        withPress(canvas, "quickConfig") {
-            text.textAlign = Paint.Align.RIGHT
-            text.typeface = Typeface.DEFAULT
-            text.textSize = 13f
-            text.color = Skin.ACCENT
-            canvas.drawText(configLabel, cfgRight, rect.top + 23f, text)
-        }
 
         val apps = quickApps
         if (apps.isEmpty()) {
@@ -3033,13 +3073,9 @@ class ScenePage(context: Context) : View(context) {
     }
 
     /**
-     * 快捷车控卡（设计板 s01 左下第 3 张，338×150）。
+     * 快捷车控卡（设计板 s01 左下第 3 张，自然宽 338×150）。
      *
-     * 版式：标题「快捷车控」21px 弱文字（左 18 / 上 10），下面三个位（主驾加热 / 主驾通风 / 最大风挡）。
-     *
-     * 第九十五轮 C2 修复：卡片宽度不再固定 338——卡片库/尺寸档位/加满 7 张卡时会被压窄，
-     * 所以这里按 `rect.width()` 等比缩放内边距、三个位的宽度、图标与文字，
-     * 再窄也不会画到卡片外面（[k] 是相对 338 的缩放系数）。
+     * 支持用户通过设置页自定义 1~4 个一键车控槽位（默认：主驾加热 / 主驾通风 / 最大风挡）。
      */
     private fun drawClimateCard(canvas: Canvas, rect: RectF) {
         val x = rect.left
@@ -3047,72 +3083,348 @@ class ScenePage(context: Context) : View(context) {
         card(canvas, rect)
         canvas.save()
         canvas.clipRect(rect.left + 2f, rect.top + 2f, rect.right - 2f, rect.bottom - 2f)
-        // 第248轮：用户指出「快捷车控」压住下面的按钮。
-        // 原因是标题用 21px、基线 top+27，而 chip 从 top+26 起 —— 字的下缘正好落在 chip 上。
-        // 这里改成 16px、基线 top+23，并把 chip 整体下移到 top+34。
         cardTitle(canvas, rect, "快捷车控", size = 16f, baseline = 23f)
+
+        val controls = com.cardesk.launcher.core.SceneQuickControls.normalize(quickControls)
+        val n = controls.size
         val k = (rect.width() / CLIMATE_CARD_W).coerceIn(0.55f, 1.25f)
         val pad = (CLIMATE_CARD_PAD * k).coerceIn(10f, CLIMATE_CARD_PAD)
         val gap = (CLIMATE_SEAT_GAP * k).coerceIn(6f, CLIMATE_SEAT_GAP)
-        val seatW = ((rect.width() - pad * 2f - gap * 2f) / 3f).coerceAtLeast(24f)
-        val s = state
-        // 纵向范围按卡片实际高度铺满（车况卡缩成小卡并入底排导致本卡变窄时，
-        // 高度仍为 cardH，不能再拿横向缩放系数 k 去缩 seatTop / seatH，否则按钮偏上、底部大片留白）。
         val contentTop = 34f
         val seatTop = top + contentTop
-        val seatH = (rect.height() - contentTop - pad).coerceAtLeast(56f)
-        val iconK = minOf(k.coerceAtLeast(0.76f), seatH / 96f, seatW / 64f).coerceIn(0.58f, 1.15f)
-        val chipRadius = (18f * k).coerceIn(10f, 18f)
-        // 命中区**先登记再画**（`hits` 每帧开头是清空的，[withPress] 要靠它算缩放中心）。
-        hits["seatHeat"] = RectF(x + pad, seatTop, x + pad + seatW, seatTop + seatH)
-        hits["seatVent"] = RectF(x + pad + seatW + gap, seatTop, x + pad + seatW * 2f + gap, seatTop + seatH)
-        // 座椅加热 / 通风：按下时各自缩一点。
-        withPress(canvas, "seatHeat") {
-            seat(
-                canvas, x + pad, seatTop, seatW, seatH,
-                "主驾加热", s?.seatHeatDriver ?: 0, Skin.WARN, k, iconK, chipRadius,
-            )
-        }
-        withPress(canvas, "seatVent") {
-            seat(
-                canvas, x + pad + seatW + gap, seatTop, seatW, seatH,
-                "主驾通风", s?.seatVentDriver ?: 0, Skin.ACCENT_LIGHT, k, iconK, chipRadius,
-            )
-        }
-        // MAX 风量：`HvacController.isPower() && getFanSpeed() >= 7`
-        val mx = x + pad + (seatW + gap) * 2f
-        val mxR = RectF(mx, seatTop, mx + seatW, seatTop + seatH)
-        val maxOn = s?.power == true && (s.fanLevel ?: 0) >= 7
-        hits["maxFan"] = mxR
-        // MAX 风挡：按下时整块缩一点。
-        withPress(canvas, "maxFan") {
-            // 画板 `Main.png` 1024..1422 的 chip 是「浅灰底 + 深色线稿」，不是白玻璃：
-            // 底色 = 主文字色 9.4%（日间 ≈ #E7EAEA，夜间自动变成比卡面浅一档的灰）。
-            canvas.drawRoundRect(mxR, chipRadius, chipRadius, Paint(fill).apply { color = chipFill() })
-            val mxColor = if (maxOn) Skin.ACCENT else Skin.TEXT_SOFT
-            stroke.color = mxColor
-            stroke.strokeWidth = (2f * iconK).coerceAtLeast(1.3f)
-            val fcx = mxR.centerX()
-            // 画板的「最大风挡」图标：上一条出风格栅（圆角矩形）+ 下面三条风线。
-            // 纵向与座椅按钮居中对齐：图标落在上半区中线，文案落在统一基线。
-            val ventTotalH = 29f * iconK
-            val ventTop = seatTop + ((seatH * 0.56f) - ventTotalH) / 2f + 2f
-            canvas.drawRoundRect(
-                RectF(fcx - 16f * iconK, ventTop, fcx + 16f * iconK, ventTop + 13f * iconK),
-                3f * iconK, 3f * iconK, stroke,
-            )
-            for (i in 0..2) {
-                val y = ventTop + 19f * iconK + i * 5f * iconK
-                canvas.drawLine(fcx - 13f * iconK, y, fcx + 13f * iconK, y, stroke)
+        val availH = (rect.height() - contentTop - pad).coerceAtLeast(56f)
+
+        // 4 项且卡片极窄（< 260px）时自动切 2×2 网格，避免单行挤爆溢出。
+        val grid2x2 = n == 4 && rect.width() < 260f
+        if (grid2x2) {
+            val gPad = 10f
+            val gGap = 6f
+            val cellW = ((rect.width() - gPad * 2f - gGap) / 2f).coerceAtLeast(32f)
+            val cellH = ((rect.height() - contentTop - gPad - gGap) / 2f).coerceAtLeast(36f)
+            val iconK = minOf(cellW / 80f, cellH / 54f).coerceIn(0.45f, 0.78f)
+            val chipRadius = 10f
+            controls.forEachIndexed { idx, id ->
+                val col = idx % 2
+                val row = idx / 2
+                val cx = x + gPad + col * (cellW + gGap)
+                val cy = seatTop + row * (cellH + gGap)
+                val r = RectF(cx, cy, cx + cellW, cy + cellH)
+                val hitKey = com.cardesk.launcher.core.SceneQuickControls.hitKeyFor(id)
+                hits[hitKey] = r
+                withPress(canvas, hitKey) {
+                    drawQuickControlChip(canvas, r, id, k * 0.82f, iconK, chipRadius, compact = true)
+                }
             }
-            text.textAlign = Paint.Align.CENTER
-            text.typeface = Typeface.DEFAULT
-            text.textSize = (15f * k).coerceIn(12f, 15f)
-            text.color = mxColor
-            val fanLabelY = seatTop + seatH * 0.73f
-            canvas.drawText(fitText("最大风挡", seatW - 8f * k), mxR.centerX(), fanLabelY, text)
+        } else {
+            val seatW = ((rect.width() - pad * 2f - gap * (n - 1)) / n.toFloat()).coerceAtLeast(24f)
+            val iconK = minOf(k.coerceAtLeast(0.76f), availH / 96f, seatW / 64f).coerceIn(0.54f, 1.15f)
+            val chipRadius = (18f * k).coerceIn(10f, 18f)
+            controls.forEachIndexed { idx, id ->
+                val cx = x + pad + idx * (seatW + gap)
+                val r = RectF(cx, seatTop, cx + seatW, seatTop + availH)
+                val hitKey = com.cardesk.launcher.core.SceneQuickControls.hitKeyFor(id)
+                hits[hitKey] = r
+                withPress(canvas, hitKey) {
+                    drawQuickControlChip(canvas, r, id, k, iconK, chipRadius, compact = false)
+                }
+            }
         }
         canvas.restore()
+    }
+
+    /** 绘制单个自定义快捷车控按钮（含全部 19 项一键车控的图标、激活态与三档指示）。 */
+    private fun drawQuickControlChip(
+        canvas: Canvas,
+        r: RectF,
+        id: String,
+        k: Float,
+        iconK: Float,
+        chipRadius: Float,
+        compact: Boolean,
+    ) {
+        val s = state
+        when (id) {
+            com.cardesk.launcher.core.SceneQuickControls.SEAT_HEAT_DRIVER -> {
+                seat(canvas, r.left, r.top, r.width(), r.height(), "主驾加热", s?.seatHeatDriver ?: 0, Skin.WARN, k, iconK, chipRadius, compact)
+                return
+            }
+            com.cardesk.launcher.core.SceneQuickControls.SEAT_VENT_DRIVER -> {
+                seat(canvas, r.left, r.top, r.width(), r.height(), "主驾通风", s?.seatVentDriver ?: 0, Skin.ACCENT_LIGHT, k, iconK, chipRadius, compact)
+                return
+            }
+            com.cardesk.launcher.core.SceneQuickControls.SEAT_HEAT_PASSENGER -> {
+                seat(canvas, r.left, r.top, r.width(), r.height(), "副驾加热", s?.seatHeatPassenger ?: 0, Skin.WARN, k, iconK, chipRadius, compact)
+                return
+            }
+            com.cardesk.launcher.core.SceneQuickControls.SEAT_VENT_PASSENGER -> {
+                seat(canvas, r.left, r.top, r.width(), r.height(), "副驾通风", s?.seatVentPassenger ?: 0, Skin.ACCENT_LIGHT, k, iconK, chipRadius, compact)
+                return
+            }
+        }
+
+        // 通用开关 / 动作按钮
+        val active: Boolean
+        val activeColor: Int
+        val label: String
+        when (id) {
+            com.cardesk.launcher.core.SceneQuickControls.MAX_FAN -> {
+                active = s?.power == true && (s.fanLevel ?: 0) >= 7
+                activeColor = Skin.ACCENT
+                label = "最大风挡"
+            }
+            com.cardesk.launcher.core.SceneQuickControls.HVAC_POWER -> {
+                active = s?.power == true
+                activeColor = Skin.ACCENT
+                label = "空调电源"
+            }
+            com.cardesk.launcher.core.SceneQuickControls.HVAC_AC -> {
+                active = s?.ac == true
+                activeColor = Skin.ACCENT
+                label = "A/C 制冷"
+            }
+            com.cardesk.launcher.core.SceneQuickControls.HVAC_AUTO -> {
+                active = s?.auto == true
+                activeColor = Skin.ACCENT
+                label = "AUTO 自动"
+            }
+            com.cardesk.launcher.core.SceneQuickControls.HVAC_CIRC -> {
+                val inner = (s?.circulation ?: 1) == 0
+                active = inner
+                activeColor = Skin.ACCENT
+                label = if (inner) "内循环" else "外循环"
+            }
+            com.cardesk.launcher.core.SceneQuickControls.DEFROST_FRONT -> {
+                active = s?.defrostFront == true
+                activeColor = Skin.WARN
+                label = "前除霜"
+            }
+            com.cardesk.launcher.core.SceneQuickControls.DEFROST_REAR -> {
+                active = s?.defrostRear == true
+                activeColor = Skin.WARN
+                label = "后除霜"
+            }
+            com.cardesk.launcher.core.SceneQuickControls.HVAC_SYNC -> {
+                active = s?.tempSynced == true
+                activeColor = Skin.ACCENT
+                label = "双区同步"
+            }
+            com.cardesk.launcher.core.SceneQuickControls.CAM_360 -> {
+                active = quickCam360On
+                activeColor = Skin.ACCENT
+                label = "360 全景"
+            }
+            com.cardesk.launcher.core.SceneQuickControls.WINDOWS_CLOSE -> {
+                active = false
+                activeColor = Skin.ACCENT
+                label = "一键关窗"
+            }
+            com.cardesk.launcher.core.SceneQuickControls.WINDOWS_OPEN -> {
+                active = false
+                activeColor = Skin.ACCENT
+                label = "一键透气"
+            }
+            com.cardesk.launcher.core.SceneQuickControls.ISS_TOGGLE -> {
+                active = quickIssOn == true
+                activeColor = Skin.ACCENT
+                label = if (quickIssOn == false) "启停已关" else "自动启停"
+            }
+            com.cardesk.launcher.core.SceneQuickControls.DRIVE_MODE_CYCLE -> {
+                val raw = info?.driveModeRaw
+                val modeShort = (info?.driveModeLabel
+                    ?: raw?.let { com.cardesk.launcher.vehicle.DriveMode.shortLabelForValue(it) })
+                    ?.takeIf { it.isNotBlank() && it != com.cardesk.launcher.vehicle.DriveMode.UNKNOWN_LABEL }
+                active = modeShort != null
+                activeColor = Skin.ACCENT
+                label = if (modeShort != null) "驾驶·$modeShort" else "驾驶模式"
+            }
+            com.cardesk.launcher.core.SceneQuickControls.AMBIENT_TOGGLE -> {
+                active = quickAmbientOn
+                activeColor = Skin.ACCENT
+                label = "氛围灯"
+            }
+            com.cardesk.launcher.core.SceneQuickControls.HOTSPOT_TOGGLE -> {
+                active = quickHotspotOn
+                activeColor = Skin.ACCENT
+                label = "车载热点"
+            }
+            else -> {
+                active = false
+                activeColor = Skin.ACCENT
+                label = com.cardesk.launcher.core.SceneQuickControls.defOf(id)?.label ?: id
+            }
+        }
+
+        val bg = if (active) Skin.ACCENT_SOFT else chipFill()
+        canvas.drawRoundRect(r, chipRadius, chipRadius, Paint(fill).apply { color = bg })
+        val tint = if (active) activeColor else Skin.TEXT_SOFT
+        val cx = r.centerX()
+        val iconCy = r.top + (if (compact) r.height() * 0.38f else r.height() * 0.30f + 2f)
+        drawQuickControlIcon(canvas, id, cx, iconCy, iconK, tint, active)
+
+        text.textAlign = Paint.Align.CENTER
+        text.typeface = Typeface.DEFAULT
+        text.textSize = (if (compact) 11.5f else 15f * k).coerceIn(10.5f, 15f)
+        text.color = tint
+        val labelY = r.top + (if (compact) r.height() * 0.82f else r.height() * 0.73f)
+        canvas.drawText(fitText(label, r.width() - 8f * k.coerceAtLeast(0.7f)), cx, labelY, text)
+    }
+
+    /** 绘制非座椅类 15 项一键车控的矢量线稿图标（风格与座椅/风挡图标统一）。 */
+    private fun drawQuickControlIcon(
+        canvas: Canvas,
+        id: String,
+        cx: Float,
+        cy: Float,
+        s: Float,
+        color: Int,
+        active: Boolean,
+    ) {
+        stroke.color = color
+        stroke.strokeWidth = (2f * s).coerceAtLeast(1.3f)
+        stroke.strokeCap = Paint.Cap.ROUND
+        stroke.strokeJoin = Paint.Join.ROUND
+        when (id) {
+            com.cardesk.launcher.core.SceneQuickControls.MAX_FAN -> {
+                val top = cy - 14.5f * s
+                canvas.drawRoundRect(RectF(cx - 16f * s, top, cx + 16f * s, top + 13f * s), 3f * s, 3f * s, stroke)
+                for (i in 0..2) {
+                    val y = top + 19f * s + i * 5f * s
+                    canvas.drawLine(cx - 13f * s, y, cx + 13f * s, y, stroke)
+                }
+            }
+            com.cardesk.launcher.core.SceneQuickControls.HVAC_POWER -> {
+                val r = 13f * s
+                canvas.drawArc(RectF(cx - r, cy - r, cx + r, cy + r), -55f, 290f, false, stroke)
+                canvas.drawLine(cx, cy - r - 2f * s, cx, cy - 1f * s, stroke)
+            }
+            com.cardesk.launcher.core.SceneQuickControls.HVAC_AC -> {
+                text.textAlign = Paint.Align.CENTER
+                text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                text.textSize = (18f * s).coerceAtLeast(11f)
+                text.color = color
+                canvas.drawText("A/C", cx, cy + 6.5f * s, text)
+            }
+            com.cardesk.launcher.core.SceneQuickControls.HVAC_AUTO -> {
+                val rw = 24f * s
+                val rh = 12f * s
+                canvas.drawRoundRect(RectF(cx - rw, cy - rh, cx + rw, cy + rh), 6f * s, 6f * s, stroke)
+                text.textAlign = Paint.Align.CENTER
+                text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                text.textSize = (12.5f * s).coerceAtLeast(9.5f)
+                text.color = color
+                canvas.drawText("AUTO", cx, cy + 4.5f * s, text)
+            }
+            com.cardesk.launcher.core.SceneQuickControls.HVAC_CIRC -> {
+                // 简笔车廓 + 内/外循环箭头
+                val bw = 18f * s
+                val bh = 10f * s
+                canvas.drawRoundRect(RectF(cx - bw, cy - bh * 0.4f, cx + bw, cy + bh), 4f * s, 4f * s, stroke)
+                if (active) {
+                    // 内循环 U 形回流箭
+                    val ar = 6f * s
+                    canvas.drawArc(RectF(cx - ar, cy - 3f * s, cx + ar, cy + 7f * s), -90f, 240f, false, stroke)
+                    canvas.drawLine(cx - 2f * s, cy - 3f * s, cx + 2f * s, cy - 6f * s, stroke)
+                } else {
+                    // 外循环由外向内箭
+                    canvas.drawLine(cx - 10f * s, cy - 13f * s, cx + 4f * s, cy + 3f * s, stroke)
+                    canvas.drawLine(cx + 4f * s, cy + 3f * s, cx - 2f * s, cy + 3f * s, stroke)
+                    canvas.drawLine(cx + 4f * s, cy + 3f * s, cx + 4f * s, cy - 3f * s, stroke)
+                }
+            }
+            com.cardesk.launcher.core.SceneQuickControls.DEFROST_FRONT -> {
+                // 弧形前挡 + 三道热浪
+                val p = Path().apply {
+                    moveTo(cx - 16f * s, cy + 7f * s)
+                    lineTo(cx - 11f * s, cy - 10f * s)
+                    quadTo(cx, cy - 15f * s, cx + 11f * s, cy - 10f * s)
+                    lineTo(cx + 16f * s, cy + 7f * s)
+                    quadTo(cx, cy + 3f * s, cx - 16f * s, cy + 7f * s)
+                }
+                canvas.drawPath(p, stroke)
+                for (dx in -1..1) {
+                    val wx = cx + dx * 6.5f * s
+                    canvas.drawLine(wx, cy + 13f * s, wx + 1.5f * s, cy - 2f * s, stroke)
+                }
+            }
+            com.cardesk.launcher.core.SceneQuickControls.DEFROST_REAR -> {
+                canvas.drawRoundRect(RectF(cx - 15f * s, cy - 10f * s, cx + 15f * s, cy + 8f * s), 3f * s, 3f * s, stroke)
+                for (dx in -1..1) {
+                    val wx = cx + dx * 6.5f * s
+                    canvas.drawLine(wx, cy + 13f * s, wx + 1.5f * s, cy - 3f * s, stroke)
+                }
+            }
+            com.cardesk.launcher.core.SceneQuickControls.HVAC_SYNC -> {
+                val r = 11f * s
+                canvas.drawArc(RectF(cx - r, cy - r, cx + r, cy + r), -35f, 150f, false, stroke)
+                canvas.drawArc(RectF(cx - r, cy - r, cx + r, cy + r), 145f, 150f, false, stroke)
+                canvas.drawLine(cx + r - 1f * s, cy - 5f * s, cx + r + 3f * s, cy - 1f * s, stroke)
+                canvas.drawLine(cx - r + 1f * s, cy + 5f * s, cx - r - 3f * s, cy + 1f * s, stroke)
+            }
+            com.cardesk.launcher.core.SceneQuickControls.CAM_360 -> {
+                canvas.drawRoundRect(RectF(cx - 17f * s, cy - 11f * s, cx + 17f * s, cy + 11f * s), 6f * s, 6f * s, stroke)
+                text.textAlign = Paint.Align.CENTER
+                text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                text.textSize = (13f * s).coerceAtLeast(10f)
+                text.color = color
+                canvas.drawText("360", cx, cy + 4.8f * s, text)
+            }
+            com.cardesk.launcher.core.SceneQuickControls.WINDOWS_CLOSE,
+            com.cardesk.launcher.core.SceneQuickControls.WINDOWS_OPEN -> {
+                // 车窗梯形轮廓 + 升/降箭头
+                val p = Path().apply {
+                    moveTo(cx - 14f * s, cy + 11f * s)
+                    lineTo(cx - 14f * s, cy - 2f * s)
+                    lineTo(cx - 4f * s, cy - 12f * s)
+                    lineTo(cx + 14f * s, cy - 12f * s)
+                    lineTo(cx + 14f * s, cy + 11f * s)
+                    close()
+                }
+                canvas.drawPath(p, stroke)
+                val up = id == com.cardesk.launcher.core.SceneQuickControls.WINDOWS_CLOSE
+                canvas.drawLine(cx + 1f * s, cy - 5f * s, cx + 1f * s, cy + 6f * s, stroke)
+                if (up) {
+                    canvas.drawLine(cx - 3.5f * s, cy - 0.5f * s, cx + 1f * s, cy - 5f * s, stroke)
+                    canvas.drawLine(cx + 5.5f * s, cy - 0.5f * s, cx + 1f * s, cy - 5f * s, stroke)
+                } else {
+                    canvas.drawLine(cx - 3.5f * s, cy + 1.5f * s, cx + 1f * s, cy + 6f * s, stroke)
+                    canvas.drawLine(cx + 5.5f * s, cy + 1.5f * s, cx + 1f * s, cy + 6f * s, stroke)
+                }
+            }
+            com.cardesk.launcher.core.SceneQuickControls.ISS_TOGGLE -> {
+                val r = 13f * s
+                canvas.drawArc(RectF(cx - r, cy - r, cx + r, cy + r), -40f, 280f, false, stroke)
+                text.textAlign = Paint.Align.CENTER
+                text.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                text.textSize = (14f * s).coerceAtLeast(10f)
+                text.color = color
+                canvas.drawText("A", cx, cy + 5f * s, text)
+            }
+            com.cardesk.launcher.core.SceneQuickControls.DRIVE_MODE_CYCLE -> {
+                val r = 14f * s
+                canvas.drawArc(RectF(cx - r, cy - r + 3f * s, cx + r, cy + r + 3f * s), 180f, 180f, false, stroke)
+                canvas.drawLine(cx, cy + 5f * s, cx + 7.5f * s, cy - 5.5f * s, stroke)
+                canvas.drawCircle(cx, cy + 5f * s, 2.2f * s, Paint(fill).apply { this.color = color })
+            }
+            com.cardesk.launcher.core.SceneQuickControls.AMBIENT_TOGGLE -> {
+                val r = 8f * s
+                canvas.drawCircle(cx, cy, r, stroke)
+                for (deg in 0 until 360 step 60) {
+                    val rad = Math.toRadians(deg.toDouble())
+                    val cos = kotlin.math.cos(rad).toFloat()
+                    val sin = kotlin.math.sin(rad).toFloat()
+                    canvas.drawLine(cx + cos * 11f * s, cy + sin * 11f * s, cx + cos * 15f * s, cy + sin * 15f * s, stroke)
+                }
+            }
+            com.cardesk.launcher.core.SceneQuickControls.HOTSPOT_TOGGLE -> {
+                canvas.drawCircle(cx, cy + 6f * s, 2.5f * s, Paint(fill).apply { this.color = color })
+                val r1 = 8f * s
+                val r2 = 14f * s
+                canvas.drawArc(RectF(cx - r1, cy + 6f * s - r1, cx + r1, cy + 6f * s + r1), 215f, 110f, false, stroke)
+                canvas.drawArc(RectF(cx - r2, cy + 6f * s - r2, cx + r2, cy + 6f * s + r2), 215f, 110f, false, stroke)
+            }
+        }
+        stroke.strokeCap = Paint.Cap.BUTT
+        stroke.strokeJoin = Paint.Join.MITER
     }
 
     /**
@@ -3136,6 +3448,7 @@ class ScenePage(context: Context) : View(context) {
         k: Float = 1f,
         iconK: Float = k,
         chipRadius: Float = (18f * k).coerceIn(12f, 18f),
+        compact: Boolean = false,
     ) {
         val r = RectF(x, top, x + w, top + h)
         // 浅灰底（画板 chip 比卡面暗一档），不是白玻璃。
@@ -3146,26 +3459,22 @@ class ScenePage(context: Context) : View(context) {
         val sw = 26f * iconK
         val sh = 30f * iconK
         val cx = r.centerX()
-        val sy = top + ((h * 0.56f) - sh) / 2f + 2f
+        val sy = top + ((h * (if (compact) 0.48f else 0.56f)) - sh) / 2f + 2f
         canvas.drawRoundRect(RectF(cx - sw / 2f, sy, cx + sw / 2f, sy + sh), 8f * iconK, 8f * iconK, stroke)
         canvas.drawLine(cx - sw / 2f - 5f * iconK, sy + 6f * iconK, cx - sw / 2f, sy + sh - 4f * iconK, stroke)
         canvas.drawLine(cx + sw / 2f + 5f * iconK, sy + 6f * iconK, cx + sw / 2f, sy + sh - 4f * iconK, stroke)
         // 文案按按钮实际高度落基线，与「最大风挡」平齐。
         text.textAlign = Paint.Align.CENTER
         text.typeface = Typeface.DEFAULT
-        text.textSize = (15f * k).coerceIn(12f, 15f)
+        text.textSize = (if (compact) 11.5f else 15f * k).coerceIn(10.5f, 15f)
         text.color = if (level > 0) tint else Skin.TEXT_SOFT
-        val labelY = top + h * 0.73f
+        val labelY = top + h * (if (compact) 0.78f else 0.73f)
         // 卡片被压得很窄时，长标签按卡宽裁剪，避免文字跑出卡外。
-        canvas.drawText(fitText(label, w - 8f * k), cx, labelY, text)
-        // 三档档位（第248轮：用户要求「通风加热是三档，现在没有档位体现」；
-        // 第249轮再改：用户要求「放到按钮的底部，改成 --- 这种形式」）。
-        // 形制与空调弹窗里的 ChipButton 完全一致：三根横杠、整组居中、离底边 12px，
-        // 亮 = 已开档数，暗 = 剩余档位。两处必须同形，否则同一个信息在首页和弹窗里长得不一样。
-        val dashW = (12f * iconK).coerceAtMost((w - 16f) / 3.6f).coerceAtLeast(6f)
-        val dashH = (3.2f * iconK).coerceAtLeast(2.4f)
-        val dashGap = (4f * iconK).coerceAtLeast(2.5f)
-        val dashCy = top + h - 12f
+        canvas.drawText(fitText(label, w - 8f * k.coerceAtLeast(0.7f)), cx, labelY, text)
+        val dashW = (12f * iconK).coerceAtMost((w - 16f) / 3.6f).coerceAtLeast(5f)
+        val dashH = (3.2f * iconK).coerceAtLeast(2.2f)
+        val dashGap = (4f * iconK).coerceAtLeast(2.2f)
+        val dashCy = top + h - (if (compact) 6f else 12f)
         val totalW = 3 * dashW + 2 * dashGap
         for (i in 0 until 3) {
             fill.color = if (i < level) tint else CardStyle.scaleAlpha(Skin.TEXT_SOFT, 0.45f)
@@ -3369,11 +3678,11 @@ class ScenePage(context: Context) : View(context) {
         text.color = Skin.TEXT_DIM
         canvas.drawText("km", x + padX + shownW + 6f, top + 80f, text)
 
-        // 油量条 6px
+        // 油量条 6px（未填充轨道走 chipFill 浅灰底，避免日间白底上画近白轨道看不见）
         val barY = top + 100f
         val barX = x + padX
         val barW = innerW
-        fill.color = Skin.surfaceStrong
+        fill.color = chipFill()
         canvas.drawRoundRect(RectF(barX, barY, barX + barW, barY + 6f), 3f, 3f, fill)
         val fuel = fuelPercent
         if (fuel != null && barW > 0f) {
@@ -4878,62 +5187,32 @@ class ScenePage(context: Context) : View(context) {
                 return
             }
         }
-        // 空调快捷
-        hits["seatHeat"]?.let { r ->
-            if (r.contains(x, y)) {
-                Logx.event(
-                    LogTags.SCENE,
-                    "空调快捷卡点击",
-                    "card" to "climate",
-                    "action" to "主驾加热",
-                    "level" to (state?.seatHeatDriver ?: 0),
-                    "x" to x,
-                    "y" to y,
-                )
-                onSeatHeat?.invoke()
-                performClick()
-                return
+        // 快捷车控自定义按钮
+        for (id in com.cardesk.launcher.core.SceneQuickControls.normalize(quickControls)) {
+            val hitKey = com.cardesk.launcher.core.SceneQuickControls.hitKeyFor(id)
+            val r = hits[hitKey] ?: continue
+            if (!r.contains(x, y)) continue
+            val def = com.cardesk.launcher.core.SceneQuickControls.defOf(id)
+            Logx.event(
+                LogTags.SCENE,
+                "快捷车控卡点击",
+                "card" to "climate",
+                "id" to id,
+                "action" to (def?.label ?: id),
+                "x" to x,
+                "y" to y,
+            )
+            if (onQuickControl != null) {
+                onQuickControl?.invoke(id)
+            } else {
+                when (id) {
+                    com.cardesk.launcher.core.SceneQuickControls.SEAT_HEAT_DRIVER -> onSeatHeat?.invoke()
+                    com.cardesk.launcher.core.SceneQuickControls.SEAT_VENT_DRIVER -> onSeatVent?.invoke()
+                    com.cardesk.launcher.core.SceneQuickControls.MAX_FAN -> onMaxFan?.invoke()
+                }
             }
-        }
-        hits["seatVent"]?.let { r ->
-            if (r.contains(x, y)) {
-                Logx.event(
-                    LogTags.SCENE,
-                    "空调快捷卡点击",
-                    "card" to "climate",
-                    "action" to "主驾通风",
-                    "level" to (state?.seatVentDriver ?: 0),
-                    "x" to x,
-                    "y" to y,
-                )
-                onSeatVent?.invoke()
-                performClick()
-                return
-            }
-        }
-        hits["maxFan"]?.let { r ->
-            if (r.contains(x, y)) {
-                Logx.event(
-                    LogTags.SCENE,
-                    "空调快捷卡点击",
-                    "card" to "climate",
-                    "action" to "MAX 风挡",
-                    "x" to x,
-                    "y" to y,
-                )
-                onMaxFan?.invoke()
-                performClick()
-                return
-            }
-        }
-        // 快捷应用卡右上角「编辑 ›」入口
-        hits["quickConfig"]?.let { r ->
-            if (r.contains(x, y)) {
-                Logx.event(LogTags.SCENE, "快捷应用卡编辑入口点击", "x" to x, "y" to y)
-                onConfigureQuickApps?.invoke(-1)
-                performClick()
-                return
-            }
+            performClick()
+            return
         }
         // 快捷入口
         for (i in 0 until QUICK_SLOTS) {
@@ -5210,12 +5489,10 @@ class ScenePage(context: Context) : View(context) {
         const val MUSIC_FAV_TEXT_GAP = 8f
 
         /**
-         * 进度环轨道色。
-         *
-         * 用的是 （半透明白）
-         * 第四十九轮「浮屿」改成**不透明**的 `--surfaceStrong`（见 `Skin.surfaceStrong`）。
+         * 进度环轨道色：夜间沿用深底高一层 `--surfaceStrong`，日间改用主字 14% 浅灰避免白底白圈不可见。
          */
-        val MUSIC_RING_TRACK: Int get() = Skin.surfaceStrong
+        val MUSIC_RING_TRACK: Int
+            get() = if (Skin.isNight) Skin.surfaceStrong else (Skin.TEXT and 0x00FFFFFF) or (0x24 shl 24)
 
         /**
          * 封面光晕的横向起点比例（`width * 0.1f`）。
@@ -5751,11 +6028,9 @@ class ScenePage(context: Context) : View(context) {
             PLAY_HIT_KEY,
             "musicCover",
             "nav",
-            "seatHeat",
-            "seatVent",
-            "maxFan",
-            "quickConfig",
-        ) + (0 until QUICK_SLOTS).map { "quick$it" } +
+        ) + com.cardesk.launcher.core.SceneQuickControls.ALL.map {
+            com.cardesk.launcher.core.SceneQuickControls.hitKeyFor(it.id)
+        } + (0 until QUICK_SLOTS).map { "quick$it" } +
             (0 until WALLPAPER_NAMES.size).map { "wp$it" }
     }
 }

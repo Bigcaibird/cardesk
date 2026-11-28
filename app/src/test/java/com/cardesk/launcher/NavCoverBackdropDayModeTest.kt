@@ -356,7 +356,8 @@ class NavCoverBackdropDayModeTest {
         )
         assertTrue(
             "日夜两套区间本来就不同（一个是上限、一个是下限），别拿它们直接比",
-            day.coverBackdropLayer.currentToneRange[0] > 0.4,
+            day.coverBackdropLayer.currentToneRange[0] > 0.2 &&
+                day.coverBackdropLayer.currentToneRange[1] == 1.0,
         )
     }
 

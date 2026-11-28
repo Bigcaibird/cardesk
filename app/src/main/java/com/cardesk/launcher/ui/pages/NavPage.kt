@@ -2223,11 +2223,10 @@ class NavPage(context: Context, private val pal: Palette) : FrameLayout(context)
         /**
          * 日间组合卡的强调色（当前歌词高亮 / 进度条填充）。
          *
-         * 日间是**白底深字**，封面被罩成一层很淡的灰调影子（最暗处 L=0.4340）——
-         * 日间主题那个强调色 `#0F9C8E`（L=0.2584）压在上面只有 1.57:1，读不出来。
-         * 这档加深到 `#0A6459`（L=0.0990）→ 3.25:1。
+         * 日间是**白底深字**，封面被罩成一层浅灰调衬底；取更深的 `#064D45`
+         * 保证在封面最暗区域上依然满足 ≥ 3.0:1 对比度。
          */
-        const val CARD_ACCENT_DAY = 0xFF0A6459.toInt()
+        const val CARD_ACCENT_DAY = 0xFF064D45.toInt()
 
         // —— 第四十九轮「浮屿」：导航页版面对齐设计板 s02-nav ——
 

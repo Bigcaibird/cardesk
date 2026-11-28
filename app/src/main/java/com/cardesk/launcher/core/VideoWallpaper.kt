@@ -1,6 +1,9 @@
 package com.cardesk.launcher.core
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import com.cardesk.launcher.core.log.LogTags
 import com.cardesk.launcher.core.log.Logx
@@ -8,6 +11,8 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
+import kotlin.math.min
+import kotlin.math.roundToInt
 
 /**
  * **视频壁纸**（第207轮）。
@@ -50,6 +55,19 @@ object VideoWallpaper {
      */
     private const val FILE_NIGHT = "wallpaper_night.mp4"
 
+    private const val THUMB_DIR = "video_wallpaper_thumbs"
+    private const val THUMB_DAY = "thumb_day.jpg"
+    private const val THUMB_NIGHT = "thumb_night.jpg"
+    private const val THUMB_MAX_W = 640
+    private const val THUMB_MAX_H = 360
+    private const val THUMB_QUALITY = 85
+
+    @Volatile
+    private var cachedDayThumb: Bitmap? = null
+
+    @Volatile
+    private var cachedNightThumb: Bitmap? = null
+
     /**
      * 视频文件所在目录。
      *
@@ -90,20 +108,160 @@ object VideoWallpaper {
     /** 夜间版文件（第三百一十八轮）。 */
     fun nightFile(context: Context): File = File(dir(context), FILE_NIGHT)
 
+    /** 封面缩略图目录（保存在私有 filesDir，小图不经过 mediaserver，避免污染共享目录）。 */
+    private fun thumbDir(context: Context): File = File(context.filesDir, THUMB_DIR)
+
+    /** 日间/夜间视频封面缩略图落盘文件。 */
+    fun thumbFile(context: Context, night: Boolean): File =
+        File(thumbDir(context), if (night) THUMB_NIGHT else THUMB_DAY)
+
+    /** 当前日夜模式下实际命中的是不是夜间视频槽位。 */
+    fun activeSlotIsNight(context: Context, night: Boolean): Boolean = when {
+        night && hasNight(context) -> true
+        hasDay(context) -> false
+        else -> true
+    }
+
+    /** 读取内存缓存里的视频封面缩略图（无缓存或已回收返回 null）。 */
+    fun cachedThumbnail(night: Boolean): Bitmap? =
+        (if (night) cachedNightThumb else cachedDayThumb)?.takeIf { !it.isRecycled }
+
+    /** 清理内存里的视频封面缩略图缓存（传 null 清两槽；传 true/false 只清对应槽位）。 */
+    fun invalidateThumbnail(night: Boolean? = null) {
+        if (night == null || !night) {
+            cachedDayThumb = null
+        }
+        if (night == null || night) {
+            cachedNightThumb = null
+        }
+    }
+
     /**
-     * 当前该播的那个文件：夜间且有夜间版 ⇒ 夜间版，否则日间版。
+     * 加载指定槽位的视频封面缩略图（建议在后台线程调用）。
+     *
+     * 优先读内存缓存 → 其次读落盘的 JPEG 缩略图（修改时间不早于视频文件）→
+     * 最后用 `MediaMetadataRetriever` 抽帧并等比缩放到 640×360 落盘缓存。
+     */
+    fun loadThumbnail(context: Context, night: Boolean): Bitmap? {
+        val video = if (night) nightFile(context) else dayFile(context)
+        if (!video.isFile || video.length() <= 0L) {
+            invalidateThumbnail(night)
+            deleteFile(thumbFile(context, night))
+            return null
+        }
+        cachedThumbnail(night)?.let { return it }
+        val thumb = thumbFile(context, night)
+        if (thumb.isFile && thumb.length() > 0L && thumb.lastModified() >= video.lastModified()) {
+            val decoded = runCatching { BitmapFactory.decodeFile(thumb.absolutePath) }.getOrNull()
+            if (decoded != null && decoded.width > 0 && decoded.height > 0 && !isAllBlack(decoded)) {
+                if (night) cachedNightThumb = decoded else cachedDayThumb = decoded
+                return decoded
+            }
+            if (decoded != null && !decoded.isRecycled) decoded.recycle()
+        }
+        val extracted = extractVideoFrame(video) ?: return null
+        val fitted = scaleThumbnail(extracted)
+        if (fitted !== extracted) extracted.recycle()
+        saveThumbnailToDisk(thumb, fitted)
+        if (night) cachedNightThumb = fitted else cachedDayThumb = fitted
+        return fitted
+    }
+
+    private fun extractVideoFrame(video: File): Bitmap? {
+        // 首选 MediaCodec -> ImageReader Surface 彩色解码（Android 9 / API 28 上
+        // MediaMetadataRetriever.getFrameAtTime 会返回全黑帧，走 Surface 才是真实播放链路）。
+        for (posMs in intArrayOf(500, 1500, 0)) {
+            val bmp = com.cardesk.launcher.ui.widget.VideoFrameLuma.colorFrame(
+                video, posMs, THUMB_MAX_W, THUMB_MAX_H,
+            )
+            if (bmp != null) {
+                if (!isAllBlack(bmp)) return bmp
+                bmp.recycle()
+            }
+        }
+        // 兜底：部分特殊封装退回 MediaMetadataRetriever（仅接受非全黑帧）。
+        val mmr = MediaMetadataRetriever()
+        return try {
+            mmr.setDataSource(video.absolutePath)
+            val candidate = mmr.getFrameAtTime(500_000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                ?: mmr.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                ?: mmr.getFrameAtTime(-1L)
+            if (candidate != null && !isAllBlack(candidate)) {
+                candidate
+            } else {
+                candidate?.recycle()
+                null
+            }
+        } catch (e: Throwable) {
+            Logx.w(LogTags.SETTING, "视频壁纸封面抽帧失败", e, "file" to video.name)
+            null
+        } finally {
+            runCatching { mmr.release() }
+        }
+    }
+
+    /** 抽样 6×6 网格判断是否为纯黑无效帧（如 API 28 MMR 软解返回的全 0xFF000000 帧）。 */
+    private fun isAllBlack(bmp: Bitmap): Boolean {
+        val w = bmp.width
+        val h = bmp.height
+        if (w <= 0 || h <= 0) return true
+        for (gy in 1..6) {
+            val y = (h * gy / 7).coerceIn(0, h - 1)
+            for (gx in 1..6) {
+                val x = (w * gx / 7).coerceIn(0, w - 1)
+                val px = bmp.getPixel(x, y)
+                val r = (px ushr 16) and 0xFF
+                val g = (px ushr 8) and 0xFF
+                val b = px and 0xFF
+                if (r > 8 || g > 8 || b > 8) return false
+            }
+        }
+        return true
+    }
+
+    private fun scaleThumbnail(src: Bitmap): Bitmap {
+        val w = src.width
+        val h = src.height
+        if (w <= 0 || h <= 0) return src
+        val ratio = min(THUMB_MAX_W.toFloat() / w, THUMB_MAX_H.toFloat() / h)
+        if (ratio >= 1f) return src
+        val tw = (w * ratio).roundToInt().coerceAtLeast(1)
+        val th = (h * ratio).roundToInt().coerceAtLeast(1)
+        return Bitmap.createScaledBitmap(src, tw, th, true)
+    }
+
+    private fun saveThumbnailToDisk(target: File, bmp: Bitmap) {
+        runCatching {
+            target.parentFile?.mkdirs()
+            val tmp = File(target.parentFile, "${target.name}.tmp")
+            FileOutputStream(tmp).use { out ->
+                bmp.compress(Bitmap.CompressFormat.JPEG, THUMB_QUALITY, out)
+            }
+            if (!tmp.renameTo(target)) tmp.delete()
+        }
+    }
+
+    /**
+     * 当前该播的那个文件：夜间且有夜间版 ⇒ 夜间版，否则日间版（仅导入夜间版时兜底夜间版）。
      *
      * 选择规则在 [VideoSpec.chooseFile] 里（纯函数，可单测）。
+     * ⚠️ 仅用于**播放/读取**，导入落盘必须直接取 [dayFile] / [nightFile]，不可用此函数。
      */
     fun videoFile(context: Context, night: Boolean): File {
         val chosen = VideoSpec.chooseFile(dayFile(context), nightFile(context), night)
-        return chosen ?: dayFile(context)
+        return chosen ?: if (night) nightFile(context) else dayFile(context)
+    }
+
+    /** 是否导入过**日间版**。 */
+    fun hasDay(context: Context): Boolean {
+        val f = dayFile(context)
+        return f.isFile && f.length() > 0L
     }
 
     /** 是否导入过**夜间版**。 */
     fun hasNight(context: Context): Boolean {
         val f = nightFile(context)
-        return f.isFile && f.length() > 0
+        return f.isFile && f.length() > 0L
     }
 
     /** 夜间版的字节数（没导入就 0）。 */
@@ -130,11 +288,8 @@ object VideoWallpaper {
         }
     }
 
-    /** 是否已经导入过视频壁纸。 */
-    fun has(context: Context): Boolean {
-        val f = file(context)
-        return f.isFile && f.length() > 0
-    }
+    /** 是否已经导入过视频壁纸（日间版或夜间版任一存在即为 true）。 */
+    fun has(context: Context): Boolean = hasDay(context) || hasNight(context)
 
     /** 已导入视频的字节数（没有就 0）。 */
     fun sizeBytes(context: Context): Long {
@@ -201,7 +356,9 @@ object VideoWallpaper {
      * （下次启动会拿它去播，MediaPlayer 直接报错）。
      */
     private fun copyToWallpaper(context: Context, input: InputStream, night: Boolean): Boolean {
-        val out = videoFile(context, night)
+        // 必须直接落到对应槽位文件：不能调 videoFile(context, night)（夜间文件尚未创建时
+        // videoFile 会回退到 dayFile，导致夜间导入永远覆盖日间视频、wallpaper_night.mp4 永不生成）。
+        val out = if (night) nightFile(context) else dayFile(context)
         out.parentFile?.mkdirs()
         val tmp = File(out.parentFile, "${out.name}.tmp")
         return try {
@@ -234,9 +391,14 @@ object VideoWallpaper {
                 Logx.w(LogTags.SETTING, "视频壁纸导入失败：落盘改名失败")
                 return false
             }
+            // 导入成功后立刻清理旧封面并预抽一帧缩略图落盘缓存，设置页刷新即可瞬显封面。
+            invalidateThumbnail(night)
+            deleteFile(thumbFile(context, night))
+            runCatching { loadThumbnail(context, night) }
             Logx.i(
                 LogTags.SETTING,
                 "视频壁纸已导入",
+                "night" to night,
                 "bytes" to total,
                 "path" to out.absolutePath,
             )
@@ -249,16 +411,20 @@ object VideoWallpaper {
         }
     }
 
-    /** 删除视频壁纸（日间 + 夜间两份都删）。 */
+    /** 删除视频壁纸（日间 + 夜间两份都删，同时清封面缓存）。 */
     fun delete(context: Context) {
         deleteNight(context)
+        invalidateThumbnail(night = false)
+        deleteFile(thumbFile(context, night = false))
         deleteFile(dayFile(context))
         // 旧目录（媒体服务读不到的那份）也一起清掉。
         deleteFile(File(File(context.filesDir, DIR), FILE_DAY))
     }
 
-    /** 只删**夜间版**（第三百一十八轮）。 */
+    /** 只删**夜间版**（第三百一十八轮，同时清夜间封面缓存）。 */
     fun deleteNight(context: Context) {
+        invalidateThumbnail(night = true)
+        deleteFile(thumbFile(context, night = true))
         deleteFile(nightFile(context))
     }
 

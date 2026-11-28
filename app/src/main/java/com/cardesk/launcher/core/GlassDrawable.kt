@@ -30,7 +30,7 @@ import android.graphics.drawable.Drawable
  */
 class GlassDrawable(
     private var radius: Float = Shape.CARD,
-    private var fill: Int = if (Skin.isNight) 0xA8161B22.toInt() else 0x9EFFFFFF.toInt(),
+    private var fill: Int = if (Skin.isNight) 0xA8161B22.toInt() else 0xBAFFFFFF.toInt(),
     private var strokeColor: Int = if (Skin.isNight) 0x1FFFFFFF else 0x59FFFFFF,
     private var shadow: Boolean = true,
     private var sheen: Boolean = true,

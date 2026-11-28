@@ -145,4 +145,40 @@ class WallpaperSettingsTest {
         assertTrue("点击默认日夜壁纸应落盘", prefs.wallpaperDefaultDayNight)
         assertTrue("点击默认日夜壁纸应触发回调", defaultClicked)
     }
+
+    @Test
+    fun 壁纸页正确显示已导入的日间与夜间动态视频状态() {
+        val a = activity()
+        val ctx = a.applicationContext
+        com.cardesk.launcher.core.VideoWallpaper.delete(ctx)
+        val tmpDay = java.io.File(ctx.cacheDir, "test_day.mp4").apply { writeBytes(ByteArray(2 * 1024 * 1024) { 1 }) }
+        val tmpNight = java.io.File(ctx.cacheDir, "test_night.mp4").apply { writeBytes(ByteArray(3 * 1024 * 1024) { 2 }) }
+        try {
+            assertTrue(com.cardesk.launcher.core.VideoWallpaper.importFromFile(ctx, tmpDay, night = false))
+            assertTrue(com.cardesk.launcher.core.VideoWallpaper.importFromFile(ctx, tmpNight, night = true))
+            val prefs = Prefs(ctx)
+            prefs.videoWallpaperEnabled = true
+            val overlay = SettingsOverlay(a, prefs, Palettes.night)
+            overlay.showPageKey("wallpaper")
+            shadowOf(Looper.getMainLooper()).idle()
+
+            val texts = findAll(overlay, android.widget.TextView::class.java).map { it.text.toString() }
+            val dayIdx = texts.indexOf("日间视频")
+            val nightIdx = texts.indexOf("夜间视频")
+            assertTrue("应展示「日间视频」行", dayIdx >= 0 && dayIdx + 1 < texts.size)
+            assertTrue("应展示「夜间视频」行", nightIdx >= 0 && nightIdx + 1 < texts.size)
+            assertEquals("日间视频应显示 2.0MB", "2.0MB", texts[dayIdx + 1])
+            assertEquals("夜间视频应显示 3.0MB 而非未导入", "3.0MB", texts[nightIdx + 1])
+            assertTrue("应显示更换夜间视频按钮", texts.contains("更换夜间视频…"))
+            assertTrue("应显示删除夜间视频按钮", texts.contains("删除夜间视频"))
+            assertTrue("应提示日夜双片自动切换，实际=$texts", texts.any { it.contains("日夜双片") })
+            assertTrue("应展示日间动态封面槽标签", texts.any { it == "日间动态" || it == "日间 · 生效" })
+            assertTrue("应展示夜间动态封面槽标签", texts.any { it == "夜间动态" || it == "夜间 · 生效" })
+            assertTrue("顶部当前壁纸与封面槽应渲染动态视频 ImageView", findAll(overlay, android.widget.ImageView::class.java).size >= 3)
+        } finally {
+            com.cardesk.launcher.core.VideoWallpaper.delete(ctx)
+            tmpDay.delete()
+            tmpNight.delete()
+        }
+    }
 }

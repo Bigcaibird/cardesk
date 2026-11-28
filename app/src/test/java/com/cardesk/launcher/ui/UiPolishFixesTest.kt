@@ -169,4 +169,43 @@ class UiPolishFixesTest {
             bmp.recycle()
         }
     }
+
+    @Test
+    fun `Day mode card text and secondary inks keep high contrast over bright and dark wallpapers`() {
+        val day = Palettes.day
+        val white = 0xFFFFFFFF.toInt()
+        val darkWall = 0xFF202428.toInt()
+
+        fun blendOver(fg: Int, bg: Int): Int {
+            val a = ((fg ushr 24) and 0xFF) / 255.0
+            val r = (((fg ushr 16) and 0xFF) * a + ((bg ushr 16) and 0xFF) * (1.0 - a)).toInt()
+            val g = (((fg ushr 8) and 0xFF) * a + ((bg ushr 8) and 0xFF) * (1.0 - a)).toInt()
+            val b = ((fg and 0xFF) * a + (bg and 0xFF) * (1.0 - a)).toInt()
+            return (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+        }
+
+        val glassOverDark = blendOver(day.surface, darkWall)
+        val glassOverLight = blendOver(day.surface, white)
+
+        // 卡片标题 / km / 燃料剩余 / 全车已关（textFaint）在白底与深壁纸磨砂玻璃上都要清晰可读
+        val faintOnLight = com.cardesk.launcher.core.WallpaperContrast.contrastRatio(day.textFaint, glassOverLight)
+        val faintOnDarkGlass = com.cardesk.launcher.core.WallpaperContrast.contrastRatio(day.textFaint, glassOverDark)
+        assertTrue("日间弱级文字在白卡面上对比度不足（$faintOnLight）", faintOnLight >= 6.5)
+        assertTrue("日间弱级文字在深壁纸玻璃卡面上对比度不足（$faintOnDarkGlass）", faintOnDarkGlass >= 4.0)
+
+        // 次级文字（textDim：车控标签 / bar / 副标题）对比度更高
+        val dimOnDarkGlass = com.cardesk.launcher.core.WallpaperContrast.contrastRatio(day.textDim, glassOverDark)
+        assertTrue("日间次级文字在深壁纸玻璃卡面上对比度不足（$dimOnDarkGlass）", dimOnDarkGlass >= 5.0)
+
+        // 强调色（详情 › / 编辑 › / 续航油量条）与告警色在白底上保持清晰
+        val accentOnLight = com.cardesk.launcher.core.WallpaperContrast.contrastRatio(day.accent, glassOverLight)
+        assertTrue("日间强调色在白卡面上对比度不足（$accentOnLight）", accentOnLight >= 4.2)
+
+        // 保持 主文字 < 次级文字 < 弱级文字 的明度层级
+        val lumText = com.cardesk.launcher.core.WallpaperContrast.relativeLuminance(day.text)
+        val lumDim = com.cardesk.launcher.core.WallpaperContrast.relativeLuminance(day.textDim)
+        val lumFaint = com.cardesk.launcher.core.WallpaperContrast.relativeLuminance(day.textFaint)
+        assertTrue("日间文字层级应递增: text($lumText) < textDim($lumDim) < textFaint($lumFaint)",
+            lumText < lumDim && lumDim < lumFaint)
+    }
 }

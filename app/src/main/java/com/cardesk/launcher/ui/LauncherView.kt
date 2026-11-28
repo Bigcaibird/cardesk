@@ -1614,6 +1614,9 @@ class LauncherView(context: Context) : FrameLayout(context) {
             onOpenDrawer = { showDrawer() }
             onConfigureQuickApps = { slot -> showSceneQuickApps(slot) }
             onPickQuickAppSlot = { slot -> showDirectSceneQuickAppPicker(slot) }
+            onConfigureQuickControls = { showSceneQuickControls() }
+            onQuickControl = { id -> executeSceneQuickControl(id) }
+            quickControls = prefs.sceneQuickControls
             onOpenMusic = { showPage(PAGE_NAV) }
             // 第三十二轮：**去掉**「左右滑换背景主题」手势
             // （原）。
@@ -3846,6 +3849,114 @@ fun toggleCam360() {
         content.addView(picker, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
+    /** 打开桌面「快捷车控」卡片自定义编辑面板（19 项一键车控自由勾选与排序）。 */
+    fun showSceneQuickControls() {
+        val dialog = com.cardesk.launcher.ui.dialogs.SceneQuickControlsDialog(
+            context,
+            pal,
+            com.cardesk.launcher.core.SceneQuickControls.PrefsStore(prefs),
+        )
+        dialog.onChanged = { next ->
+            if (::scenePage.isInitialized) scenePage.quickControls = next
+        }
+        dialog.onClose = { closeOverlayDialog(dialog) }
+        showOverlayDialog(dialog)
+    }
+
+    /** 执行桌面「快捷车控」卡片中的任意一键车控动作（共 19 项）。 */
+    private fun executeSceneQuickControl(id: String) {
+        when (id) {
+            com.cardesk.launcher.core.SceneQuickControls.SEAT_HEAT_DRIVER ->
+                VehicleController.cycleSeat(HvacIds.ZONE_DRIVER, true)
+            com.cardesk.launcher.core.SceneQuickControls.SEAT_VENT_DRIVER ->
+                VehicleController.cycleSeat(HvacIds.ZONE_DRIVER, false)
+            com.cardesk.launcher.core.SceneQuickControls.SEAT_HEAT_PASSENGER ->
+                VehicleController.cycleSeat(HvacIds.ZONE_PASSENGER, true)
+            com.cardesk.launcher.core.SceneQuickControls.SEAT_VENT_PASSENGER ->
+                VehicleController.cycleSeat(HvacIds.ZONE_PASSENGER, false)
+            com.cardesk.launcher.core.SceneQuickControls.MAX_FAN ->
+                VehicleController.toggleMaxFan()
+            com.cardesk.launcher.core.SceneQuickControls.HVAC_POWER ->
+                VehicleController.togglePower()
+            com.cardesk.launcher.core.SceneQuickControls.HVAC_AC ->
+                VehicleController.toggleAc()
+            com.cardesk.launcher.core.SceneQuickControls.HVAC_AUTO ->
+                VehicleController.toggleAuto()
+            com.cardesk.launcher.core.SceneQuickControls.HVAC_CIRC ->
+                VehicleController.toggleCirculation()
+            com.cardesk.launcher.core.SceneQuickControls.DEFROST_FRONT ->
+                VehicleController.toggleDefrostFront()
+            com.cardesk.launcher.core.SceneQuickControls.DEFROST_REAR ->
+                VehicleController.toggleDefrostRear()
+            com.cardesk.launcher.core.SceneQuickControls.HVAC_SYNC ->
+                VehicleController.toggleSync()
+            com.cardesk.launcher.core.SceneQuickControls.CAM_360 -> {
+                toggleCam360()
+                if (::scenePage.isInitialized) scenePage.quickCam360On = VehicleController.is360On
+            }
+            com.cardesk.launcher.core.SceneQuickControls.WINDOWS_CLOSE -> {
+                val handled = runCatching { VehicleController.gateway.setWindowsOpen(false) }.getOrDefault(false)
+                if (handled) {
+                    toast("已关闭四扇车窗")
+                } else {
+                    com.cardesk.launcher.vehicle.OemWindowController.setWindowsClosedAsync(context, closed = true) { ok ->
+                        toast(if (ok) "已发送一键关窗" else "车窗控制通道不可用")
+                    }
+                }
+            }
+            com.cardesk.launcher.core.SceneQuickControls.WINDOWS_OPEN -> {
+                val handled = runCatching { VehicleController.gateway.setWindowsOpen(true) }.getOrDefault(false)
+                if (handled) {
+                    toast("已打开四扇车窗透气")
+                } else {
+                    com.cardesk.launcher.vehicle.OemWindowController.setWindowsClosedAsync(context, closed = false) { ok ->
+                        toast(if (ok) "已发送一键透气" else "车窗控制通道不可用")
+                    }
+                }
+            }
+            com.cardesk.launcher.core.SceneQuickControls.ISS_TOGGLE -> {
+                val cur = if (::scenePage.isInitialized) scenePage.quickIssOn else null
+                val target = !(cur ?: true)
+                VehicleController.setIssEnabled(target) { ok, msg ->
+                    if (ok && ::scenePage.isInitialized) scenePage.quickIssOn = target
+                    toast(msg)
+                }
+            }
+            com.cardesk.launcher.core.SceneQuickControls.DRIVE_MODE_CYCLE -> {
+                val curRaw = lastVehicleInfo?.driveModeRaw
+                val supported = VehicleController.supportedDriveModes(curRaw)
+                if (supported.isEmpty()) {
+                    toast("当前无可用驾驶模式")
+                    return
+                }
+                val curNorm = curRaw?.let { com.cardesk.launcher.vehicle.DriveMode.normalizeModeId(it) }
+                val curIdx = supported.indexOfFirst {
+                    com.cardesk.launcher.vehicle.DriveMode.normalizeModeId(it) == curNorm
+                }
+                val nextMode = supported[(curIdx + 1) % supported.size]
+                VehicleController.setDriveMode(nextMode) { ok, msg ->
+                    toast(msg)
+                    if (ok) refresh()
+                }
+            }
+            com.cardesk.launcher.core.SceneQuickControls.AMBIENT_TOGGLE -> {
+                val next = !prefs.ambientEnabled
+                com.cardesk.launcher.core.ambient.AmbientLightController.setEnabled(context, next)
+                if (::scenePage.isInitialized) scenePage.quickAmbientOn = next
+                toast(if (next) "已开启音乐氛围灯" else "已关闭音乐氛围灯")
+            }
+            com.cardesk.launcher.core.SceneQuickControls.HOTSPOT_TOGGLE -> {
+                val target = !com.cardesk.launcher.core.HotspotController.isEnablingOrEnabled(context)
+                com.cardesk.launcher.core.HotspotController.setEnabledAsync(context, target, "桌面快捷车控") { res ->
+                    if (::scenePage.isInitialized) {
+                        scenePage.quickHotspotOn = com.cardesk.launcher.core.HotspotController.isEnablingOrEnabled(context)
+                    }
+                    toast(res.message)
+                }
+            }
+        }
+    }
+
     /** 打开桌面「快捷应用」卡片配置面板（4 槽位自由更换与排序）。 */
     fun showSceneQuickApps(focusSlot: Int = -1) {
         val defaults = if (::scenePage.isInitialized) scenePage.currentQuickAppPackages() else emptyList()
@@ -4472,6 +4583,7 @@ fun toggleCam360() {
         // Dock 快捷应用配置（第五十四轮）：与「长按 Dock 槽位」进同一个面板。
         overlay.onShowDockQuickApps = { showDockQuickApps() }
         overlay.onShowSceneQuickApps = { showSceneQuickApps(-1) }
+        overlay.onShowSceneQuickControls = { showSceneQuickControls() }
         overlay.onReorderDock = { enterDockReorderMode() }
         // 画中画应用选择器
         // 主画 / 副画各一个选择器；双画已开时**不能选同一个应用**。
@@ -4520,7 +4632,13 @@ fun toggleCam360() {
                 com.cardesk.launcher.core.wallpaperstore.WallpaperKind.VIDEO -> {
                     prefs.videoWallpaperEnabled = true
                     prefs.videoWallpaper = true
-                    startVideoWallpaper()
+                    val shouldReload = !isVideoWallpaperPlaying() ||
+                        night == pal.night ||
+                        !com.cardesk.launcher.core.VideoWallpaper.hasDay(context.applicationContext)
+                    if (shouldReload) {
+                        videoNightOverride = pal.night
+                        startVideoWallpaper()
+                    }
                     refreshSettingsWallpaper()
                 }
             }
@@ -4748,10 +4866,9 @@ fun toggleCam360() {
     fun startVideoWallpaper() {
         // 第208轮：旧版本把视频存在 `filesDir`（媒体服务读不到），先尝试迁移。
         com.cardesk.launcher.core.VideoWallpaper.migrateLegacyFile(context.applicationContext)
-        // 第三百一十八轮：日/夜各一段视频（夜间版没导入就用日间版，不黑屏）。
-        val nightNow = videoNightOverride ?: runCatching {
-            com.cardesk.launcher.core.NightResolver.resolve(prefs, context)
-        }.getOrDefault(false)
+        // 日/夜各一段视频：直接以当前生效的主题日夜态 pal.night 为准（含「立即切换」/ 跟随高德 / 光感），
+        // 避免 NightResolver 只看系统时间与当前界面日夜态脱节。
+        val nightNow = videoNightOverride ?: pal.night
         val file = com.cardesk.launcher.core.VideoWallpaper.videoFile(context.applicationContext, nightNow)
         videoNightPlaying = nightNow
         if (!file.isFile || file.length() <= 0L) {
@@ -4893,12 +5010,9 @@ fun toggleCam360() {
      * - `TextureView`：`Surface(surfaceTexture)`（**拉模式**，帧被画进窗口 buffer）。
      */
     private fun prepareVideoWallpaper() {
-        // 第三百一十八轮：日/夜各一段视频 —— 这里和 [startVideoWallpaper] 必须用**同一套**
-        // 选文件逻辑，否则「检查的是夜间版、播的还是日间版」。
-        val nightNow = videoNightOverride ?: runCatching {
-            com.cardesk.launcher.core.NightResolver.resolve(prefs, context)
-        }.getOrDefault(false)
-        // override 只作用于这一次切换，用完就清掉（否则之后按时间切回白天时会拿错版本）。
+        // 日/夜各一段视频：与 startVideoWallpaper 保持同一口径（优先 videoNightOverride，否则当前 pal.night）。
+        val nightNow = videoNightOverride ?: pal.night
+        // override 只作用于这一次切换，用完就清掉（否则之后切回另一模式时会拿错版本）。
         videoNightOverride = null
         val file = com.cardesk.launcher.core.VideoWallpaper.videoFile(context.applicationContext, nightNow)
         videoNightPlaying = nightNow
@@ -5405,12 +5519,15 @@ fun toggleCam360() {
      * 不做双播放器交叉淡入（车机上双解码不划算）。
      */
     private fun maybeSwitchVideoForNight() {
-        if (!prefs.videoWallpaperEnabled || videoPlayer == null) return
+        if (!prefs.videoWallpaperEnabled) return
+        if (videoPlayer == null && !pendingVideoWallpaperStart) return
         val nightNow = pal.night
         if (nightNow == videoNightPlaying) return
-        val hasNight = com.cardesk.launcher.core.VideoWallpaper.hasNight(context.applicationContext)
-        // 没有夜间版 ⇒ 继续播那段日间视频，不用重启。
-        if (!hasNight) {
+        val app = context.applicationContext
+        // 只有同时存在日间与夜间两段独立视频时才需要重启切换；仅有一段时日夜沿用同一文件。
+        if (!com.cardesk.launcher.core.VideoWallpaper.hasDay(app) ||
+            !com.cardesk.launcher.core.VideoWallpaper.hasNight(app)
+        ) {
             videoNightPlaying = nightNow
             return
         }
@@ -5573,7 +5690,15 @@ fun toggleCam360() {
             }
             post {
                 if (ok && !rejected) {
-                    startVideoWallpaper()
+                    prefs.videoWallpaperEnabled = true
+                    prefs.videoWallpaper = true
+                    val shouldReload = !isVideoWallpaperPlaying() ||
+                        night == pal.night ||
+                        !com.cardesk.launcher.core.VideoWallpaper.hasDay(ctx)
+                    if (shouldReload) {
+                        videoNightOverride = pal.night
+                        startVideoWallpaper()
+                    }
                     toast(when {
                         night -> "夜间视频已导入"
                         verdict is com.cardesk.launcher.core.VideoSpec.Verdict.Warn -> verdict.reason
@@ -5663,7 +5788,15 @@ fun toggleCam360() {
             val ok = if (rejected) false else com.cardesk.launcher.core.VideoWallpaper.importFromFile(ctx, source, night)
             post {
                 if (ok && !rejected) {
-                    startVideoWallpaper()
+                    prefs.videoWallpaperEnabled = true
+                    prefs.videoWallpaper = true
+                    val shouldReload = !isVideoWallpaperPlaying() ||
+                        night == pal.night ||
+                        !com.cardesk.launcher.core.VideoWallpaper.hasDay(ctx)
+                    if (shouldReload) {
+                        videoNightOverride = pal.night
+                        startVideoWallpaper()
+                    }
                     toast(when {
                         night -> "夜间视频已导入"
                         verdict is com.cardesk.launcher.core.VideoSpec.Verdict.Warn -> verdict.reason
@@ -6034,7 +6167,9 @@ fun toggleCam360() {
                 // 真车上视频是硬件解码直通 HWC 图层，`PixelCopy` 读不到那块 Surface ——
                 // 采样一直失败 ⇒ 墨色回落主题 ⇒ 日间深字压暗视频（用户报的那个病）。
                 videoFile = {
-                    runCatching { com.cardesk.launcher.core.VideoWallpaper.file(context) }.getOrNull()
+                    runCatching {
+                        com.cardesk.launcher.core.VideoWallpaper.videoFile(context, videoNightPlaying)
+                    }.getOrNull()
                 },
                 positionMs = { videoCurrentPositionMs() },
             ).also { videoBackdropSampler = it }
@@ -6498,6 +6633,11 @@ fun toggleCam360() {
         scenePage.fuelPercent = info.fuelPercent
         statusBar.fuelPercent = info.fuelPercent ?: ShellStatusBar.FUEL_UNKNOWN_VALUE
         lastVehicleInfo = info
+        scenePage.quickCam360On = VehicleController.is360On
+        scenePage.quickAmbientOn = prefs.ambientEnabled
+        scenePage.quickHotspotOn = runCatching {
+            com.cardesk.launcher.core.HotspotController.isEnablingOrEnabled(context)
+        }.getOrDefault(false)
         scenePage.bind(info, state, prefs.wallpaper)
         syncVehicleStatus(info)
         // 车辆页开着时跟着每秒数据刷新（画板 05 的续航 / 胎压 / 门态都是活的）。

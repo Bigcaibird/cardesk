@@ -54,7 +54,25 @@ object VideoFrameLuma {
      *
      * @return 位图（ARGB_8888，r=g=b=亮度）；取不到返回 null
      */
-    fun frame(file: File, positionMs: Int, targetW: Int, targetH: Int): Bitmap? {
+    fun frame(file: File, positionMs: Int, targetW: Int, targetH: Int): Bitmap? =
+        decodeFrame(file, positionMs, targetW, targetH, color = false)
+
+    /**
+     * 取 [positionMs] 附近的一帧彩色封面略缩图（用于壁纸设置页预览）。
+     *
+     * 走与播放器相同的 `MediaCodec -> ImageReader Surface` 路径，
+     * 规避 Android 9 / API 28 下 `MediaMetadataRetriever.getFrameAtTime` 返回全黑帧的问题。
+     */
+    fun colorFrame(file: File, positionMs: Int, maxW: Int, maxH: Int): Bitmap? =
+        decodeFrame(file, positionMs, maxW, maxH, color = true)
+
+    private fun decodeFrame(
+        file: File,
+        positionMs: Int,
+        targetW: Int,
+        targetH: Int,
+        color: Boolean,
+    ): Bitmap? {
         if (targetW <= 0 || targetH <= 0) return null
         var extractor: MediaExtractor? = null
         var codec: MediaCodec? = null
@@ -75,8 +93,6 @@ object VideoFrameLuma {
             codec.configure(format, reader.surface, null, 0)
             codec.start()
 
-            // 跳到目标位置附近（关键帧）—— 亮度只需要「这一刻差不多」，
-            // 不需要精确到帧，`SEEK_TO_PREVIOUS_SYNC` 比 CLOSEST 便宜。
             val posUs = positionMs.coerceAtLeast(0).toLong() * 1000L
             extractor.seekTo(posUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
 
@@ -108,11 +124,13 @@ object VideoFrameLuma {
                 val outIdx = codec.dequeueOutputBuffer(info, 10_000L)
                 when {
                     outIdx >= 0 -> {
-                        // 这一帧已经渲染到 ImageReader 的 Surface 上 ⇒ 把位图读回来。
                         codec.releaseOutputBuffer(outIdx, true)
-                        val bmp = readImage(reader, targetW, targetH)
+                        val bmp = if (color) {
+                            readColorImage(reader, targetW, targetH)
+                        } else {
+                            readImage(reader, targetW, targetH)
+                        }
                         if (bmp != null) return bmp
-                        // 渲染到 Surface 之后 Image 不会同步立刻可用，继续下一轮。
                     }
                     outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> Unit
                     outIdx == MediaCodec.INFO_TRY_AGAIN_LATER -> Unit
@@ -176,6 +194,75 @@ object VideoFrameLuma {
                     val sx = (x.toLong() * srcW / w).toInt().coerceIn(0, srcW - 1)
                     val yv = buf.get(rowBase + sx * pixelStride).toInt() and 0xFF
                     pixels[y * w + x] = (0xFF shl 24) or (yv shl 16) or (yv shl 8) or yv
+                }
+            }
+            return Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
+        } finally {
+            runCatching { image.close() }
+        }
+    }
+
+    /** 把 `ImageReader` 的 `YUV_420_888` 转为等比缩放后的彩色 `ARGB_8888` 略缩图（BT.601）。 */
+    private fun readColorImage(reader: ImageReader, maxW: Int, maxH: Int): Bitmap? {
+        var image: android.media.Image? = null
+        val deadline = SystemClock.uptimeMillis() + 200L
+        while (SystemClock.uptimeMillis() < deadline) {
+            image = reader.acquireLatestImage()
+            if (image != null) break
+            SystemClock.sleep(5L)
+        }
+        if (image == null) return null
+        try {
+            val crop = image.cropRect
+            val srcW = crop.width().takeIf { it > 0 } ?: image.width
+            val srcH = crop.height().takeIf { it > 0 } ?: image.height
+            if (srcW <= 0 || srcH <= 0 || image.planes.size < 3) return null
+            val scale = minOf(maxW.toFloat() / srcW, maxH.toFloat() / srcH, 1f)
+            val w = (srcW * scale).toInt().coerceAtLeast(1)
+            val h = (srcH * scale).toInt().coerceAtLeast(1)
+
+            val yPlane = image.planes[0]
+            val uPlane = image.planes[1]
+            val vPlane = image.planes[2]
+            val yBuf = yPlane.buffer
+            val uBuf = uPlane.buffer
+            val vBuf = vPlane.buffer
+            val yRow = yPlane.rowStride
+            val yPix = yPlane.pixelStride
+            val uRow = uPlane.rowStride
+            val uPix = uPlane.pixelStride
+            val vRow = vPlane.rowStride
+            val vPix = vPlane.pixelStride
+            val yLimit = yBuf.limit()
+            val uLimit = uBuf.limit()
+            val vLimit = vBuf.limit()
+            val left = crop.left.coerceAtLeast(0)
+            val top = crop.top.coerceAtLeast(0)
+            val maxX = image.width - 1
+            val maxY = image.height - 1
+
+            val pixels = IntArray(w * h)
+            for (y in 0 until h) {
+                val sy = (top + (y.toLong() * srcH / h).toInt()).coerceIn(0, maxY)
+                val cy = sy shr 1
+                val yBase = sy * yRow
+                val uBase = cy * uRow
+                val vBase = cy * vRow
+                val outRow = y * w
+                for (x in 0 until w) {
+                    val sx = (left + (x.toLong() * srcW / w).toInt()).coerceIn(0, maxX)
+                    val cx = sx shr 1
+                    val yIdx = (yBase + sx * yPix).coerceIn(0, yLimit - 1)
+                    val uIdx = (uBase + cx * uPix).coerceIn(0, uLimit - 1)
+                    val vIdx = (vBase + cx * vPix).coerceIn(0, vLimit - 1)
+                    val yv = (yBuf.get(yIdx).toInt() and 0xFF) - 16
+                    val c = if (yv < 0) 0 else yv
+                    val uv = (uBuf.get(uIdx).toInt() and 0xFF) - 128
+                    val vv = (vBuf.get(vIdx).toInt() and 0xFF) - 128
+                    val r = ((298 * c + 409 * vv + 128) shr 8).coerceIn(0, 255)
+                    val g = ((298 * c - 100 * uv - 208 * vv + 128) shr 8).coerceIn(0, 255)
+                    val b = ((298 * c + 516 * uv + 128) shr 8).coerceIn(0, 255)
+                    pixels[outRow + x] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
                 }
             }
             return Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)

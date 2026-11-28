@@ -235,6 +235,7 @@ class SettingsOverlay(
 
     /** 「桌面快捷应用」卡片配置面板（4 槽位自由更换与排序）。 */
     var onShowSceneQuickApps: (() -> Unit)? = null
+    var onShowSceneQuickControls: (() -> Unit)? = null
 
     /** 进入 Dock 栏按钮与控件拖动排序模式。 */
     var onReorderDock: (() -> Unit)? = null
@@ -2911,9 +2912,10 @@ class SettingsOverlay(
         val hasDayCustom = core.hasDay(context)
         val hasNightCustom = core.hasNight(context)
         val hasCustom = hasDayCustom || hasNightCustom
-        val hasVideo = com.cardesk.launcher.core.VideoWallpaper.has(context)
+        val hasDayVideo = com.cardesk.launcher.core.VideoWallpaper.hasDay(context)
         val hasNightVideo = com.cardesk.launcher.core.VideoWallpaper.hasNight(context)
-        val usingVideo = prefs.videoWallpaperEnabled && hasVideo
+        val hasAnyVideo = hasDayVideo || hasNightVideo
+        val usingVideo = prefs.videoWallpaperEnabled && hasAnyVideo
         val usingCustom = !usingVideo && prefs.wallpaperCustom && hasCustom
         val usingDefaultDayNight = !usingVideo && !usingCustom && prefs.wallpaperDefaultDayNight
 
@@ -2921,6 +2923,13 @@ class SettingsOverlay(
         val nightCustomBmp = if (hasNightCustom) (core.cachedBitmap(night = true) ?: core.loadScaled(context, night = true)) else null
         val activeCustomIsNight = hasCustom && core.activeSlotIsNight(context, pal.night)
         val activeCustomBmp = if (activeCustomIsNight) (nightCustomBmp ?: dayCustomBmp) else (dayCustomBmp ?: nightCustomBmp)
+
+        val activeVideoIsNight = hasAnyVideo && com.cardesk.launcher.core.VideoWallpaper.activeSlotIsNight(context, pal.night)
+        val dayVideoThumb = if (hasDayVideo) com.cardesk.launcher.core.VideoWallpaper.cachedThumbnail(night = false) else null
+        val nightVideoThumb = if (hasNightVideo) com.cardesk.launcher.core.VideoWallpaper.cachedThumbnail(night = true) else null
+        val activeVideoThumb = if (activeVideoIsNight) (nightVideoThumb ?: dayVideoThumb) else (dayVideoThumb ?: nightVideoThumb)
+        val videoThumbViews = ArrayList<Pair<Boolean, android.widget.ImageView>>()
+        val videoThumbPlaceholders = ArrayList<Pair<Boolean, View>>()
 
         var previewThumb: WallpaperThumbView? = null
         var captionView: TextView? = null
@@ -2996,6 +3005,82 @@ class SettingsOverlay(
             return slot
         }
 
+        /** 渲染动态视频壁纸的单个日/夜封面略缩图槽（左日间 / 右夜间，与静态双槽同视觉语言）。 */
+        fun buildVideoSlot(
+            nightSlot: Boolean,
+            badgeLabel: String,
+            hasSlot: Boolean,
+            sizeText: String,
+            cachedBmp: android.graphics.Bitmap?,
+            isActiveSlot: Boolean,
+            emptyHint: String,
+            onTap: () -> Unit,
+        ): FrameLayout {
+            val slot = FrameLayout(context).apply {
+                Motion.press(this, MotionSpec.PRESS_SCALE_ICON)
+                setOnClickListener { onTap() }
+            }
+            if (hasSlot) {
+                val iv = android.widget.ImageView(context).apply {
+                    scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                    background = Ui.round(Skin.surfaceSoft, com.cardesk.launcher.core.Shape.INNER, 1f, Skin.GLASS_STROKE)
+                    clipToOutline = true
+                    if (cachedBmp != null) setImageBitmap(cachedBmp)
+                }
+                slot.addView(iv, FrameLayout.LayoutParams(-1, -1))
+                val loadingHint = Ui.text(context, "正在加载封面…", 12f, pal.textDim).apply {
+                    gravity = Gravity.CENTER
+                    visibility = if (cachedBmp != null) View.GONE else View.VISIBLE
+                }
+                slot.addView(loadingHint, FrameLayout.LayoutParams(-1, -1))
+                if (cachedBmp == null) {
+                    videoThumbViews.add(nightSlot to iv)
+                    videoThumbPlaceholders.add(nightSlot to loadingHint)
+                }
+                // 右下角胶囊：播放三角 + 文件体积，清晰区分动态视频与静态图。
+                val metaBadge = Ui.text(context, "▶ $sizeText", 11f, 0xFFF4F8FC.toInt(), bold = true).apply {
+                    gravity = Gravity.CENTER
+                    background = Ui.round(0xB8121826.toInt(), com.cardesk.launcher.core.Shape.PILL)
+                    setPadding(10, 2, 10, 2)
+                }
+                slot.addView(
+                    metaBadge,
+                    FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END).also {
+                        it.rightMargin = 10
+                        it.bottomMargin = 10
+                    },
+                )
+                val border = View(context).apply {
+                    background = Ui.round(
+                        0x00000000,
+                        com.cardesk.launcher.core.Shape.INNER,
+                        if (isActiveSlot) 2.5f else 1f,
+                        if (isActiveSlot) pal.accent else Skin.GLASS_STROKE,
+                    )
+                }
+                slot.addView(border, FrameLayout.LayoutParams(-1, -1))
+            } else {
+                val dashed = Ui.round(TRANSPARENT, com.cardesk.launcher.core.Shape.INNER, 1f, Skin.GLASS_STROKE)
+                dashed.setStroke(1, Skin.GLASS_STROKE, 10f, 7f)
+                slot.background = dashed
+                slot.addView(
+                    Ui.text(context, emptyHint, 13f, pal.textDim).apply {
+                        gravity = Gravity.CENTER
+                        setPadding(12, 24, 12, 8)
+                    },
+                    FrameLayout.LayoutParams(-1, -1),
+                )
+            }
+            slot.addView(
+                modeBadge(badgeLabel, isActiveSlot),
+                FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).also {
+                    it.leftMargin = 10
+                    it.topMargin = 10
+                },
+            )
+            return slot
+        }
+
         /** 刷新「当前壁纸」预览 + 选中态（跨两栏）。 */
         fun refresh(index: Int, defaultMode: Boolean = usingDefaultDayNight) {
             val spec = com.cardesk.launcher.core.Wallpapers.spec(index)
@@ -3010,7 +3095,11 @@ class SettingsOverlay(
                 else -> "导入的照片"
             }
             captionView?.text = when {
-                usingVideo -> if (hasNightVideo) "当前：动态视频壁纸（日夜双片 · 自动切换）" else "当前：动态视频壁纸"
+                usingVideo -> when {
+                    hasDayVideo && hasNightVideo -> "当前：动态视频壁纸（日夜双片 · 自动切换）"
+                    hasNightVideo -> "当前：动态视频壁纸（夜间版）"
+                    else -> "当前：动态视频壁纸"
+                }
                 usingCustom -> "当前：自定义壁纸（$customDesc）"
                 defaultMode -> "当前：默认日夜壁纸 · 随日夜模式自动切换"
                 else -> "当前：${spec.name} · ${spec.desc}"
@@ -3028,271 +3117,548 @@ class SettingsOverlay(
             }
         }
 
-        twoColumns(WALLPAPER_COL_W) { left, right ->
-            // ------------------------------------------------------ 左栏：当前壁纸 / 自定义静态（日夜双模）/ 在线壁纸
-            inColumn(left) {
-                section("当前壁纸")
-                val previewHolder = FrameLayout(context)
-                if (usingCustom && activeCustomBmp != null) {
-                    val iv = android.widget.ImageView(context).apply {
-                        scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
-                        background = Ui.round(Skin.surfaceSoft, CARD_RADIUS, 1f, Skin.GLASS_STROKE)
-                        clipToOutline = true
-                        setImageBitmap(activeCustomBmp)
-                    }
-                    previewHolder.addView(iv, FrameLayout.LayoutParams(-1, -1))
-                    val border = View(context).apply {
-                        background = Ui.round(0x00000000, CARD_RADIUS, 2f, pal.accent)
-                    }
-                    previewHolder.addView(border, FrameLayout.LayoutParams(-1, -1))
-                } else {
-                    val p = WallpaperThumbView(
-                        context,
-                        com.cardesk.launcher.core.Wallpapers.spec(current),
-                        pal.night,
-                        pal.accent,
-                    ).apply {
-                        defaultDayNight = usingDefaultDayNight
-                        palette = pal
-                        chosen = true
-                    }
-                    previewThumb = p
-                    previewHolder.addView(p, FrameLayout.LayoutParams(-1, -1))
-                }
-                previewHolder.addView(
-                    modeBadge(if (pal.night) "当前 · 夜间模式" else "当前 · 日间模式", active = true),
-                    FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).also {
-                        it.leftMargin = 14
-                        it.topMargin = 14
+        /** 壁纸页模块化玻璃卡片容器：把逻辑上属于同一组的功能收敛成独立卡片，避免零散堆叠。 */
+        fun wpCard(topGap: Int = 14, block: () -> Unit) {
+            val card = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                background = Ui.round(Skin.surfaceSoft, CARD_RADIUS, 1f, Skin.GLASS_STROKE)
+                setPadding(18, 14, 18, 14)
+            }
+            hostCol.addView(card, LinearLayout.LayoutParams(-1, -2).also {
+                it.topMargin = topGap
+            })
+            inColumn(card) { block() }
+        }
+
+        /** 卡片内顶栏：左侧标题 + 可选副标签，右侧可选胶囊按钮或自定义控件。 */
+        fun wpCardHeader(
+            title: String,
+            tagText: String? = null,
+            rightView: View? = null,
+        ) {
+            val header = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            header.addView(
+                Ui.text(context, title, 18f, pal.text, bold = true),
+                LinearLayout.LayoutParams(-2, -2),
+            )
+            if (!tagText.isNullOrEmpty()) {
+                header.addView(
+                    Ui.text(context, tagText, 12f, pal.textDim).apply {
+                        setPadding(10, 2, 10, 2)
+                        background = Ui.round(Skin.surfaceStrong, com.cardesk.launcher.core.Shape.PILL)
                     },
+                    LinearLayout.LayoutParams(-2, -2).also { it.leftMargin = 10 },
                 )
-                hostCol.addView(previewHolder, LinearLayout.LayoutParams(-1, 224).also {
-                    it.topMargin = 8
-                })
+            }
+            header.addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
+            if (rightView != null) {
+                header.addView(rightView, LinearLayout.LayoutParams(-2, -2))
+            }
+            hostCol.addView(header, LinearLayout.LayoutParams(-1, -2).also {
+                it.bottomMargin = 10
+            })
+        }
 
-                val caption = Ui.text(
-                    context,
-                    "",
-                    ROW_SUB,
-                    if (usingCustom || usingVideo || usingDefaultDayNight) pal.accent else pal.textDim,
-                )
-                captionView = caption
-                hostCol.addView(caption, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 8 })
-
-                // 自定义静态壁纸：日间 + 夜间双槽并排预览，随日夜模式自动切换
-                section("自定义静态壁纸（随日夜切换）")
-                val slotsRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
-                val daySlot = buildStaticSlot(
-                    badgeLabel = if (usingCustom && !activeCustomIsNight) "日间 · 生效" else "日间静态",
-                    bmp = dayCustomBmp,
-                    isActiveSlot = usingCustom && !activeCustomIsNight,
-                    emptyHint = if (!hasCustom) "还没有导入壁纸" else "未导入日间照片",
-                    onTap = { (onPickWallpaper ?: onImportWallpaper)?.invoke() },
-                )
-                val nightSlot = buildStaticSlot(
-                    badgeLabel = if (usingCustom && activeCustomIsNight) "夜间 · 生效" else "夜间静态",
-                    bmp = nightCustomBmp,
-                    isActiveSlot = usingCustom && activeCustomIsNight,
-                    emptyHint = "未导入 · 夜间沿用日间",
-                    onTap = { (onPickNightWallpaper ?: onImportNightWallpaper)?.invoke() },
-                )
-                slotsRow.addView(daySlot, LinearLayout.LayoutParams(0, 146, 1f))
-                slotsRow.addView(
-                    nightSlot,
-                    LinearLayout.LayoutParams(0, 146, 1f).also { it.leftMargin = 14 },
-                )
-                hostCol.addView(slotsRow, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
-
-                actionPair(
-                    "导入照片…",
-                    if (hasNightCustom) "更换夜间照片…" else "导入夜间照片…",
-                    onLeft = { onImportWallpaper?.invoke() },
-                    onRight = { onImportNightWallpaper?.invoke() },
-                )
-                if (hasCustom && !usingCustom) {
-                    actionButton("使用自定义壁纸", full = true) { onUseCustomWallpaper?.invoke() }
+        /** 紧凑胶囊入口（卡片顶栏右侧使用，如「浏览在线壁纸 ›」「使用自定义壁纸」）。 */
+        fun wpHeaderPill(label: String, primary: Boolean = true, onClick: () -> Unit): TextView =
+            Ui.text(
+                context,
+                label,
+                14f,
+                if (primary) pal.accentInk else pal.text,
+                bold = true,
+            ).apply {
+                gravity = Gravity.CENTER
+                setPadding(16, 7, 16, 7)
+                background = if (primary) {
+                    Ui.round(pal.accent, com.cardesk.launcher.core.Shape.PILL)
+                } else {
+                    Ui.round(Skin.surfaceStrong, com.cardesk.launcher.core.Shape.PILL, 1f, Skin.GLASS_STROKE)
                 }
-                if (hasDayCustom) {
-                    actionButton("删除自定义壁纸", danger = true, full = true) { onDeleteCustomWallpaper?.invoke() }
-                }
-                if (hasNightCustom) {
-                    actionButton("删除夜间壁纸", danger = true, full = true) { onDeleteCustomNightWallpaper?.invoke() }
-                }
-
-                // 在线壁纸资源（Cloudflare R2：静态 + 动态，均支持日夜区分）
-                section("在线壁纸资源")
-                kvRow("资源源", "Cloudflare R2 · 支持日夜静态/动态壁纸", true)
-                actionButton("浏览在线壁纸…", full = true) { openOnlineWallpaperDialog() }
+                Motion.press(this)
+                setOnClickListener { onClick() }
             }
 
-            // ------------------------------------------------------ 右栏：默认日夜 / 预设风景 / 轮播 / 动态视频
-            inColumn(right) {
-                section("默认壁纸（随日夜切换）")
-                val dnCard = com.cardesk.launcher.ui.widget.DayNightWallpaperCardView(
-                    context,
-                    pal.accent,
-                ).apply {
-                    chosen = usingDefaultDayNight
-                    Motion.press(this, MotionSpec.PRESS_SCALE_ICON)
-                    setOnClickListener {
-                        if (usingDefaultDayNight) return@setOnClickListener
-                        prefs.wallpaperDefaultDayNight = true
-                        prefs.wallpaperCustom = false
-                        prefs.videoWallpaperEnabled = false
-                        prefs.videoWallpaper = false
-                        logSetting(
-                            "design_wallpaper_default_daynight", "壁纸", "preset/custom", "default_daynight",
-                            LogTags.SETTING,
-                        )
-                        refresh(current, defaultMode = true)
-                        onUseDefaultDayNightWallpaper?.invoke()
-                        select("wallpaper")
-                    }
-                }
-                val dnLbl = Ui.text(context, "默认日夜壁纸 · 自动跟随日间 / 夜间模式", 12f, pal.textDim).apply {
-                    gravity = Gravity.CENTER
-                }
-                defaultCard = dnCard
-                defaultLabel = dnLbl
-                hostCol.addView(dnCard, LinearLayout.LayoutParams(-1, 92).also {
-                    it.topMargin = 8
-                })
-                hostCol.addView(dnLbl, LinearLayout.LayoutParams(-1, WALLPAPER_THUMB_LABEL_H))
+        /** 卡片内紧凑操作按钮（普通 / 柔和次级 / 描边危险三档，克制清晰、不再堆大红块）。 */
+        fun wpButton(
+            label: String,
+            subtle: Boolean = false,
+            danger: Boolean = false,
+            onClick: () -> Unit,
+        ): TextView = Ui.text(
+            context,
+            label,
+            if (subtle || danger) 14f else 15f,
+            when {
+                danger -> pal.danger
+                subtle -> pal.textDim
+                else -> pal.text
+            },
+            bold = !subtle,
+        ).apply {
+            gravity = Gravity.CENTER
+            setPadding(14, 0, 14, 0)
+            tag = ACTION_BUTTON_MARK
+            background = when {
+                danger -> Ui.round(
+                    pal.withAlpha(pal.danger, 0x22),
+                    BUTTON_RADIUS,
+                    1f,
+                    pal.withAlpha(pal.danger, 0x70),
+                )
+                subtle -> Ui.round(TRANSPARENT, BUTTON_RADIUS, 1f, Skin.GLASS_STROKE)
+                else -> Ui.round(Skin.surfaceStrong, BUTTON_RADIUS, 1f, Skin.GLASS_STROKE)
+            }
+            Motion.press(this)
+            setOnClickListener { onClick() }
+        }
 
-                section("预设风景壁纸")
-                for (r in 0 until 3) {
-                    val line = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
-                    for (c in 0 until 3) {
-                        val index = r * 3 + c
-                        val spec = com.cardesk.launcher.core.Wallpapers.spec(index)
-                        val cell = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-                        val thumb = WallpaperThumbView(context, spec, pal.night, pal.accent).apply {
-                            Motion.press(this, MotionSpec.PRESS_SCALE_ICON)
+        /** 卡片内水平按钮组（1～2 枚并排均分，高 46/40px，底部留正间距满足按钮规范）。 */
+        fun wpButtonRow(
+            vararg buttons: TextView,
+            height: Int = 46,
+            topGap: Int = 10,
+            bottomGap: Int = 6,
+        ) {
+            if (buttons.isEmpty()) return
+            val row = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            buttons.forEachIndexed { idx, btn ->
+                row.addView(btn, LinearLayout.LayoutParams(0, height, 1f).also {
+                    it.bottomMargin = bottomGap
+                    if (idx > 0) it.leftMargin = 10
+                })
+            }
+            hostCol.addView(row, LinearLayout.LayoutParams(-1, -2).also {
+                it.topMargin = topGap
+            })
+        }
+
+        twoColumns(WALLPAPER_COL_W + 24) { left, right ->
+            // ------------------------------------------------------ 左栏：当前壁纸 / 自定义静态 / 壁纸轮播
+            inColumn(left) {
+                // ① 当前生效壁纸 + 在线壁纸入口
+                wpCard(topGap = 4) {
+                    wpCardHeader(
+                        title = "当前壁纸",
+                        rightView = wpHeaderPill("浏览在线壁纸 ›", primary = true) {
+                            openOnlineWallpaperDialog()
+                        },
+                    )
+                    val previewHolder = FrameLayout(context)
+                    if (usingVideo) {
+                        val iv = android.widget.ImageView(context).apply {
+                            scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                            background = Ui.round(Skin.surfaceSoft, CARD_RADIUS, 1f, Skin.GLASS_STROKE)
+                            clipToOutline = true
+                            if (activeVideoThumb != null) setImageBitmap(activeVideoThumb)
                         }
-                        val label = Ui.text(context, spec.name, 12f, pal.textDim).apply {
+                        previewHolder.addView(iv, FrameLayout.LayoutParams(-1, -1))
+                        val loadingHint = Ui.text(context, "动态视频封面加载中…", 13f, pal.textDim).apply {
                             gravity = Gravity.CENTER
+                            visibility = if (activeVideoThumb != null) View.GONE else View.VISIBLE
                         }
-                        cell.addView(thumb, LinearLayout.LayoutParams(-1, 90))
-                        cell.addView(label, LinearLayout.LayoutParams(-1, WALLPAPER_THUMB_LABEL_H))
-                        line.addView(cell, LinearLayout.LayoutParams(0, -2, 1f).also {
-                            if (c > 0) it.leftMargin = 14
-                        })
-                        thumbs.add(thumb)
-                        labels.add(label)
+                        previewHolder.addView(loadingHint, FrameLayout.LayoutParams(-1, -1))
+                        if (activeVideoThumb == null) {
+                            videoThumbViews.add(activeVideoIsNight to iv)
+                            videoThumbPlaceholders.add(activeVideoIsNight to loadingHint)
+                        }
+                        val videoBadge = Ui.text(context, "▶ 动态视频", 12f, 0xFFF4F8FC.toInt(), bold = true).apply {
+                            gravity = Gravity.CENTER
+                            background = Ui.round(0xB8121826.toInt(), com.cardesk.launcher.core.Shape.PILL)
+                            setPadding(12, 3, 12, 3)
+                        }
+                        previewHolder.addView(
+                            videoBadge,
+                            FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END).also {
+                                it.rightMargin = 14
+                                it.bottomMargin = 14
+                            },
+                        )
+                        val border = View(context).apply {
+                            background = Ui.round(0x00000000, CARD_RADIUS, 2f, pal.accent)
+                        }
+                        previewHolder.addView(border, FrameLayout.LayoutParams(-1, -1))
+                    } else if (usingCustom && activeCustomBmp != null) {
+                        val iv = android.widget.ImageView(context).apply {
+                            scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                            background = Ui.round(Skin.surfaceSoft, CARD_RADIUS, 1f, Skin.GLASS_STROKE)
+                            clipToOutline = true
+                            setImageBitmap(activeCustomBmp)
+                        }
+                        previewHolder.addView(iv, FrameLayout.LayoutParams(-1, -1))
+                        val border = View(context).apply {
+                            background = Ui.round(0x00000000, CARD_RADIUS, 2f, pal.accent)
+                        }
+                        previewHolder.addView(border, FrameLayout.LayoutParams(-1, -1))
+                    } else {
+                        val p = WallpaperThumbView(
+                            context,
+                            com.cardesk.launcher.core.Wallpapers.spec(current),
+                            pal.night,
+                            pal.accent,
+                        ).apply {
+                            defaultDayNight = usingDefaultDayNight
+                            palette = pal
+                            chosen = true
+                        }
+                        previewThumb = p
+                        previewHolder.addView(p, FrameLayout.LayoutParams(-1, -1))
                     }
-                    hostCol.addView(line, LinearLayout.LayoutParams(-1, -2).also {
-                        it.topMargin = if (r == 0) 8 else 12
+                    previewHolder.addView(
+                        modeBadge(if (pal.night) "当前 · 夜间模式" else "当前 · 日间模式", active = true),
+                        FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).also {
+                            it.leftMargin = 14
+                            it.topMargin = 14
+                        },
+                    )
+                    hostCol.addView(previewHolder, LinearLayout.LayoutParams(-1, 210))
+
+                    val caption = Ui.text(
+                        context,
+                        "",
+                        ROW_SUB,
+                        if (usingCustom || usingVideo || usingDefaultDayNight) pal.accent else pal.textDim,
+                    )
+                    captionView = caption
+                    hostCol.addView(caption, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
+                }
+
+                // ② 自定义静态壁纸（日间 + 夜间并排双槽）
+                wpCard(topGap = 14) {
+                    wpCardHeader(
+                        title = "自定义静态壁纸",
+                        tagText = "随日夜切换",
+                        rightView = if (hasCustom && !usingCustom) {
+                            wpHeaderPill("使用自定义壁纸", primary = true) { onUseCustomWallpaper?.invoke() }
+                        } else {
+                            null
+                        },
+                    )
+                    val slotsRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+                    val daySlot = buildStaticSlot(
+                        badgeLabel = if (usingCustom && !activeCustomIsNight) "日间 · 生效" else "日间静态",
+                        bmp = dayCustomBmp,
+                        isActiveSlot = usingCustom && !activeCustomIsNight,
+                        emptyHint = if (!hasCustom) "还没有导入壁纸" else "未导入日间照片",
+                        onTap = { (onPickWallpaper ?: onImportWallpaper)?.invoke() },
+                    )
+                    val nightSlot = buildStaticSlot(
+                        badgeLabel = if (usingCustom && activeCustomIsNight) "夜间 · 生效" else "夜间静态",
+                        bmp = nightCustomBmp,
+                        isActiveSlot = usingCustom && activeCustomIsNight,
+                        emptyHint = "未导入 · 夜间沿用日间",
+                        onTap = { (onPickNightWallpaper ?: onImportNightWallpaper)?.invoke() },
+                    )
+                    slotsRow.addView(daySlot, LinearLayout.LayoutParams(0, 134, 1f))
+                    slotsRow.addView(
+                        nightSlot,
+                        LinearLayout.LayoutParams(0, 134, 1f).also { it.leftMargin = 12 },
+                    )
+                    hostCol.addView(slotsRow, LinearLayout.LayoutParams(-1, -2))
+
+                    wpButtonRow(
+                        wpButton("导入照片…") { onImportWallpaper?.invoke() },
+                        wpButton(if (hasNightCustom) "更换夜间照片…" else "导入夜间照片…") {
+                            onImportNightWallpaper?.invoke()
+                        },
+                        height = 46,
+                        topGap = 12,
+                    )
+                    val staticDeletes = ArrayList<TextView>()
+                    if (hasDayCustom) {
+                        staticDeletes.add(wpButton("删除自定义壁纸", danger = true) { onDeleteCustomWallpaper?.invoke() })
+                    }
+                    if (hasNightCustom) {
+                        staticDeletes.add(wpButton("删除夜间壁纸", danger = true) { onDeleteCustomNightWallpaper?.invoke() })
+                    }
+                    if (staticDeletes.isNotEmpty()) {
+                        wpButtonRow(*staticDeletes.toTypedArray(), height = 40, topGap = 4)
+                    }
+                }
+
+                // ③ 静态壁纸轮播
+                wpCard(topGap = 14) {
+                    wpCardHeader(title = "壁纸轮播")
+                    switchRow(
+                        "自动轮播",
+                        prefs.wallpaperCarousel,
+                        "每隔一段时间自动换一张静态壁纸",
+                        height = 56,
+                    ) { on ->
+                        prefs.wallpaperCarousel = on
+                        logSetting(
+                            "design_wallpaper_carousel", "壁纸轮播",
+                            !on, on, LogTags.SETTING,
+                        )
+                        onWallpaperCarouselChange?.invoke(on)
+                    }
+                    val intervalOptions = com.cardesk.launcher.core.WallpaperCarousel.INTERVAL_SECONDS
+                        .map { if (it >= 60) "${it / 60} 分钟" else "$it 秒" }
+                    val currentInterval = com.cardesk.launcher.core.WallpaperCarousel
+                        .normalizeInterval(prefs.wallpaperCarouselIntervalSec)
+                    var selectedIdx = intervalOptions.indexOf(
+                        if (currentInterval >= 60) "${currentInterval / 60} 分钟" else "$currentInterval 秒",
+                    ).coerceAtLeast(0)
+                    val intervalRow = LinearLayout(context).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                    }
+                    intervalRow.addView(
+                        Ui.text(context, "轮播间隔", 16f, pal.text, bold = true),
+                        LinearLayout.LayoutParams(-2, -2),
+                    )
+                    intervalRow.addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
+                    val pillViews = ArrayList<TextView>()
+                    fun paintIntervalPills() {
+                        pillViews.forEachIndexed { idx, tv ->
+                            val on = idx == selectedIdx
+                            tv.setTextColor(if (on) pal.accent else pal.textDim)
+                            tv.background = if (on) {
+                                Ui.round(pal.accentSoft, PILL, 1f, pal.accent)
+                            } else {
+                                Ui.round(Skin.surfaceStrong, PILL, 1f, Skin.GLASS_STROKE)
+                            }
+                        }
+                    }
+                    intervalOptions.forEachIndexed { idx, label ->
+                        val tv = Ui.text(context, label, 13f, pal.textDim, bold = true).apply {
+                            gravity = Gravity.CENTER
+                            setPadding(14, 0, 14, 0)
+                            Motion.press(this)
+                            setOnClickListener {
+                                if (selectedIdx == idx) return@setOnClickListener
+                                selectedIdx = idx
+                                paintIntervalPills()
+                                val sec = com.cardesk.launcher.core.WallpaperCarousel.INTERVAL_SECONDS[idx]
+                                prefs.wallpaperCarouselIntervalSec = sec
+                                logSetting(
+                                    "design_wallpaper_carousel_interval", "轮播间隔",
+                                    currentInterval, sec, LogTags.SETTING,
+                                )
+                            }
+                        }
+                        pillViews.add(tv)
+                        intervalRow.addView(
+                            tv,
+                            LinearLayout.LayoutParams(-2, 36).also {
+                                if (idx > 0) it.leftMargin = 8
+                            },
+                        )
+                    }
+                    paintIntervalPills()
+                    hostCol.addView(intervalRow, LinearLayout.LayoutParams(-1, 48).also {
+                        it.topMargin = 4
                     })
                 }
+            }
 
-                thumbs.forEachIndexed { index, thumb ->
-                    thumb.setOnClickListener {
-                        val from = prefs.wallpaper
-                        val next = com.cardesk.launcher.core.Wallpapers.normalize(index)
-                        if (next == from && !usingDefaultDayNight && !usingCustom && !usingVideo) return@setOnClickListener
-                        prefs.wallpaperDefaultDayNight = false
-                        prefs.wallpaper = next
-                        logSetting(
-                            "design_wallpaper_index", "壁纸", from, next, LogTags.SETTING,
-                            "name" to com.cardesk.launcher.core.Wallpapers.name(next),
-                        )
-                        refresh(next, defaultMode = false)
-                        onWallpaperChange?.invoke(next)
-                        select("wallpaper")
+            // ------------------------------------------------------ 右栏：动态视频壁纸 / 默认与预设风景
+            inColumn(right) {
+                // ① 动态视频壁纸（首屏即见：顶栏内嵌开关 + 日/夜双封面略缩图 + 紧凑状态与操作）
+                wpCard(topGap = 4) {
+                    val videoOn = prefs.videoWallpaperEnabled && hasAnyVideo
+                    val videoSwitch = BoardSwitch(context).apply {
+                        tint = pal.accent
+                        checked = videoOn
+                        setOnClickListener {
+                            val next = !checked
+                            if (next && !hasAnyVideo) {
+                                com.cardesk.launcher.core.log.LogTools.toast(context, "请先导入视频")
+                                select("wallpaper")
+                                return@setOnClickListener
+                            }
+                            checked = next
+                            prefs.videoWallpaperEnabled = next
+                            logSetting("design_video_wallpaper_enabled", "视频壁纸", !next, next, LogTags.SETTING)
+                            onVideoWallpaperChange?.invoke(next)
+                        }
                     }
-                }
-
-                // ---------------------------------------------------------- 轮播
-                section("壁纸轮播")
-                switchRow(
-                    "自动轮播",
-                    prefs.wallpaperCarousel,
-                    "每隔一段时间自动换一张静态壁纸",
-                    height = ROW_H_TIGHT,
-                ) { on ->
-                    prefs.wallpaperCarousel = on
-                    logSetting(
-                        "design_wallpaper_carousel", "壁纸轮播",
-                        !on, on, LogTags.SETTING,
-                    )
-                    onWallpaperCarouselChange?.invoke(on)
-                }
-                val intervalOptions = com.cardesk.launcher.core.WallpaperCarousel.INTERVAL_SECONDS
-                    .map { if (it >= 60) "${it / 60} 分钟" else "$it 秒" }
-                val currentInterval = com.cardesk.launcher.core.WallpaperCarousel
-                    .normalizeInterval(prefs.wallpaperCarouselIntervalSec)
-                chipRow(
-                    "轮播间隔",
-                    intervalOptions,
-                    intervalOptions.indexOf(
-                        if (currentInterval >= 60) "${currentInterval / 60} 分钟" else "$currentInterval 秒",
-                    ),
-                    height = ROW_H_TIGHT,
-                ) { picked ->
-                    val sec = com.cardesk.launcher.core.WallpaperCarousel.INTERVAL_SECONDS[picked]
-                    prefs.wallpaperCarouselIntervalSec = sec
-                    logSetting(
-                        "design_wallpaper_carousel_interval", "轮播间隔",
-                        currentInterval, sec, LogTags.SETTING,
-                    )
-                }
-
-                // ---------------------------------------------------------- 动态视频壁纸（日夜双模）
-                section("动态视频壁纸（随日夜切换）")
-                val videoOn = prefs.videoWallpaperEnabled && hasVideo
-                switchRow(
-                    "启用视频壁纸",
-                    videoOn,
-                    null,
-                    height = ROW_H_TIGHT,
-                ) { on ->
-                    if (!hasVideo) {
-                        com.cardesk.launcher.core.log.LogTools.toast(context, "请先导入视频")
-                        select("wallpaper")
-                        return@switchRow
+                    val switchWrap = LinearLayout(context).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        setOnClickListener { videoSwitch.performClick() }
                     }
-                    prefs.videoWallpaperEnabled = on
-                    logSetting("design_video_wallpaper_enabled", "视频壁纸", !on, on, LogTags.SETTING)
-                    onVideoWallpaperChange?.invoke(on)
-                }
-                kvRow(
-                    "日间视频",
-                    if (hasVideo) {
-                        "${com.cardesk.launcher.core.VideoWallpaper.sizeBytes(context) / 1024 / 1024} MB"
-                    } else {
-                        "未导入"
-                    },
-                    hasVideo,
-                )
-                kvRow(
-                    "夜间视频",
+                    switchWrap.addView(
+                        Ui.text(context, "启用视频壁纸", 14f, pal.textDim),
+                        LinearLayout.LayoutParams(-2, -2).also { it.rightMargin = 10 },
+                    )
+                    switchWrap.addView(videoSwitch, LinearLayout.LayoutParams(-2, -2))
+                    wpCardHeader(
+                        title = "动态视频壁纸",
+                        tagText = "随日夜切换",
+                        rightView = switchWrap,
+                    )
+
+                    val dayVideoSizeText = com.cardesk.launcher.core.VideoSpec.formatBytes(
+                        com.cardesk.launcher.core.VideoWallpaper.sizeBytes(context),
+                    )
+                    val nightVideoSizeText = com.cardesk.launcher.core.VideoSpec.formatBytes(
+                        com.cardesk.launcher.core.VideoWallpaper.nightSizeBytes(context),
+                    )
+                    val videoSlotsRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+                    val dayVideoSlot = buildVideoSlot(
+                        nightSlot = false,
+                        badgeLabel = if (usingVideo && !activeVideoIsNight) "日间 · 生效" else "日间动态",
+                        hasSlot = hasDayVideo,
+                        sizeText = dayVideoSizeText,
+                        cachedBmp = dayVideoThumb,
+                        isActiveSlot = usingVideo && !activeVideoIsNight,
+                        emptyHint = if (!hasAnyVideo) "还没有导入视频" else "未导入日间视频",
+                        onTap = { onPickVideoWallpaper?.invoke() },
+                    )
+                    val nightVideoSlot = buildVideoSlot(
+                        nightSlot = true,
+                        badgeLabel = if (usingVideo && activeVideoIsNight) "夜间 · 生效" else "夜间动态",
+                        hasSlot = hasNightVideo,
+                        sizeText = nightVideoSizeText,
+                        cachedBmp = nightVideoThumb,
+                        isActiveSlot = usingVideo && activeVideoIsNight,
+                        emptyHint = "未导入 · 夜间沿用日间",
+                        onTap = { onPickNightVideoWallpaper?.invoke() },
+                    )
+                    videoSlotsRow.addView(dayVideoSlot, LinearLayout.LayoutParams(0, 148, 1f))
+                    videoSlotsRow.addView(
+                        nightVideoSlot,
+                        LinearLayout.LayoutParams(0, 148, 1f).also { it.leftMargin = 12 },
+                    )
+                    hostCol.addView(videoSlotsRow, LinearLayout.LayoutParams(-1, -2))
+
+                    // 紧凑一行状态条：左右各对应日间/夜间槽位，省去两行高 kvRow
+                    val metaRow = LinearLayout(context).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                    }
+                    fun buildMetaHalf(label: String, value: String, active: Boolean): LinearLayout =
+                        LinearLayout(context).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            gravity = Gravity.CENTER_VERTICAL
+                            addView(Ui.text(context, label, 13f, pal.textDim), LinearLayout.LayoutParams(-2, -2))
+                            addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
+                            addView(
+                                Ui.text(context, value, 13f, if (active) pal.accent else pal.textDim, bold = active),
+                                LinearLayout.LayoutParams(-2, -2),
+                            )
+                        }
+                    metaRow.addView(
+                        buildMetaHalf("日间视频", if (hasDayVideo) dayVideoSizeText else "未导入", hasDayVideo),
+                        LinearLayout.LayoutParams(0, -2, 1f),
+                    )
+                    metaRow.addView(
+                        buildMetaHalf(
+                            "夜间视频",
+                            if (hasNightVideo) nightVideoSizeText else "未导入 · 沿用日间",
+                            hasNightVideo,
+                        ),
+                        LinearLayout.LayoutParams(0, -2, 1f).also { it.leftMargin = 12 },
+                    )
+                    hostCol.addView(metaRow, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = 10 })
+
+                    wpButtonRow(
+                        wpButton(if (hasDayVideo) "更换日间视频…" else "导入日间视频…") {
+                            onPickVideoWallpaper?.invoke()
+                        },
+                        wpButton(if (hasNightVideo) "更换夜间视频…" else "导入夜间视频…") {
+                            onPickNightVideoWallpaper?.invoke()
+                        },
+                        height = 46,
+                        topGap = 10,
+                    )
+                    wpButtonRow(
+                        wpButton("系统选择日间视频…", subtle = true) { onImportVideoWallpaper?.invoke() },
+                        wpButton("系统选择夜间视频…", subtle = true) { onImportNightVideoWallpaper?.invoke() },
+                        height = 38,
+                        topGap = 4,
+                    )
+                    val videoDeletes = ArrayList<TextView>()
+                    if (hasAnyVideo) {
+                        videoDeletes.add(wpButton("删除视频壁纸", danger = true) { onDeleteVideoWallpaper?.invoke() })
+                    }
                     if (hasNightVideo) {
-                        "${com.cardesk.launcher.core.VideoWallpaper.nightSizeBytes(context) / 1024 / 1024} MB"
-                    } else {
-                        "未导入 · 夜间沿用日间"
-                    },
-                    hasNightVideo,
-                )
-                actionPair(
-                    "导入视频…",
-                    if (hasNightVideo) "更换夜间视频…" else "导入夜间视频…",
-                    onLeft = { onPickVideoWallpaper?.invoke() },
-                    onRight = { onPickNightVideoWallpaper?.invoke() },
-                )
-                actionPair(
-                    "用系统选择器导入…",
-                    "用系统选择器导入夜间…",
-                    onLeft = { onImportVideoWallpaper?.invoke() },
-                    onRight = { onImportNightVideoWallpaper?.invoke() },
-                )
-                if (hasVideo) {
-                    actionButton("删除视频壁纸", danger = true, full = true) {
-                        onDeleteVideoWallpaper?.invoke()
+                        videoDeletes.add(wpButton("删除夜间视频", danger = true) { onDeleteNightVideoWallpaper?.invoke() })
+                    }
+                    if (videoDeletes.isNotEmpty()) {
+                        wpButtonRow(*videoDeletes.toTypedArray(), height = 40, topGap = 4)
                     }
                 }
-                if (hasNightVideo) {
-                    actionButton("删除夜间视频", danger = true, full = true) {
-                        onDeleteNightVideoWallpaper?.invoke()
+
+                // ② 默认日夜壁纸 + 9 款预设风景
+                wpCard(topGap = 14) {
+                    wpCardHeader(title = "默认与预设壁纸", tagText = "点选即切换")
+                    val dnCard = com.cardesk.launcher.ui.widget.DayNightWallpaperCardView(
+                        context,
+                        pal.accent,
+                    ).apply {
+                        chosen = usingDefaultDayNight
+                        Motion.press(this, MotionSpec.PRESS_SCALE_ICON)
+                        setOnClickListener {
+                            if (usingDefaultDayNight) return@setOnClickListener
+                            prefs.wallpaperDefaultDayNight = true
+                            prefs.wallpaperCustom = false
+                            prefs.videoWallpaperEnabled = false
+                            prefs.videoWallpaper = false
+                            logSetting(
+                                "design_wallpaper_default_daynight", "壁纸", "preset/custom", "default_daynight",
+                                LogTags.SETTING,
+                            )
+                            refresh(current, defaultMode = true)
+                            onUseDefaultDayNightWallpaper?.invoke()
+                            select("wallpaper")
+                        }
+                    }
+                    val dnLbl = Ui.text(context, "默认日夜壁纸 · 自动跟随日间 / 夜间模式", 12f, pal.textDim).apply {
+                        gravity = Gravity.CENTER
+                    }
+                    defaultCard = dnCard
+                    defaultLabel = dnLbl
+                    hostCol.addView(dnCard, LinearLayout.LayoutParams(-1, 74))
+                    hostCol.addView(dnLbl, LinearLayout.LayoutParams(-1, WALLPAPER_THUMB_LABEL_H))
+
+                    for (r in 0 until 3) {
+                        val line = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+                        for (c in 0 until 3) {
+                            val index = r * 3 + c
+                            val spec = com.cardesk.launcher.core.Wallpapers.spec(index)
+                            val cell = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+                            val thumb = WallpaperThumbView(context, spec, pal.night, pal.accent).apply {
+                                Motion.press(this, MotionSpec.PRESS_SCALE_ICON)
+                            }
+                            val label = Ui.text(context, spec.name, 12f, pal.textDim).apply {
+                                gravity = Gravity.CENTER
+                            }
+                            cell.addView(thumb, LinearLayout.LayoutParams(-1, 82))
+                            cell.addView(label, LinearLayout.LayoutParams(-1, WALLPAPER_THUMB_LABEL_H))
+                            line.addView(cell, LinearLayout.LayoutParams(0, -2, 1f).also {
+                                if (c > 0) it.leftMargin = 12
+                            })
+                            thumbs.add(thumb)
+                            labels.add(label)
+                        }
+                        hostCol.addView(line, LinearLayout.LayoutParams(-1, -2).also {
+                            it.topMargin = 10
+                        })
+                    }
+
+                    thumbs.forEachIndexed { index, thumb ->
+                        thumb.setOnClickListener {
+                            val from = prefs.wallpaper
+                            val next = com.cardesk.launcher.core.Wallpapers.normalize(index)
+                            if (next == from && !usingDefaultDayNight && !usingCustom && !usingVideo) return@setOnClickListener
+                            prefs.wallpaperDefaultDayNight = false
+                            prefs.wallpaper = next
+                            logSetting(
+                                "design_wallpaper_index", "壁纸", from, next, LogTags.SETTING,
+                                "name" to com.cardesk.launcher.core.Wallpapers.name(next),
+                            )
+                            refresh(next, defaultMode = false)
+                            onWallpaperChange?.invoke(next)
+                            select("wallpaper")
+                        }
                     }
                 }
             }
@@ -3300,6 +3666,33 @@ class SettingsOverlay(
 
         // 两栏都建完再落一次选中态（网格是右栏建的，必须先有 thumb 才能刷）。
         refresh(current)
+
+        // 后台异步加载尚未进内存缓存的视频封面略缩图，抽帧不阻塞设置页打开。
+        if (videoThumbViews.isNotEmpty()) {
+            val needDay = videoThumbViews.any { !it.first }
+            val needNight = videoThumbViews.any { it.first }
+            val appCtx = context.applicationContext ?: context
+            Thread({
+                val dayBmp = if (needDay) com.cardesk.launcher.core.VideoWallpaper.loadThumbnail(appCtx, night = false) else null
+                val nightBmp = if (needNight) com.cardesk.launcher.core.VideoWallpaper.loadThumbnail(appCtx, night = true) else null
+                post {
+                    for ((isNight, iv) in videoThumbViews) {
+                        val bmp = if (isNight) nightBmp else dayBmp
+                        if (bmp != null && !bmp.isRecycled) {
+                            iv.setImageBitmap(bmp)
+                        }
+                    }
+                    for ((isNight, ph) in videoThumbPlaceholders) {
+                        val bmp = if (isNight) nightBmp else dayBmp
+                        if (bmp != null && !bmp.isRecycled) {
+                            ph.visibility = View.GONE
+                        } else if (ph is TextView) {
+                            ph.text = "已导入视频"
+                        }
+                    }
+                }
+            }, "video-thumb-loader").start()
+        }
     }
 
     /** 打开在线壁纸浏览弹窗（静态与动态壁纸均可在弹窗内直接从 R2 下载应用）。 */
@@ -3468,6 +3861,10 @@ class SettingsOverlay(
         actionButton("配置快捷应用卡…", full = true) {
             Logx.event(LogTags.SETTING, "打开桌面快捷应用配置")
             onShowSceneQuickApps?.invoke()
+        }
+        actionButton("配置快捷车控卡…", full = true) {
+            Logx.event(LogTags.SETTING, "打开桌面快捷车控配置")
+            onShowSceneQuickControls?.invoke()
         }
         actionButton("恢复默认布局", full = true) {
             store.save(com.cardesk.launcher.core.CardLayout.DEFAULT)

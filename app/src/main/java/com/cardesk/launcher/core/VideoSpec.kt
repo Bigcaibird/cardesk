@@ -88,13 +88,14 @@ object VideoSpec {
      *
      * 规则：
      * 1. 现在是夜间 **且** 夜间版存在且非空 ⇒ 播夜间版；
-     * 2. 其余情况一律播日间版（夜间版没导入时，夜间就用日间那段，不黑屏）。
-     *
-     * 日间版都没有 ⇒ null（调用方回退静态壁纸）。
+     * 2. 日间版存在且非空 ⇒ 播日间版（夜间版没导入时，夜间就用日间那段，不黑屏）；
+     * 3. 仅导入了夜间版而没导入日间版 ⇒ 兜底播夜间版；
+     * 4. 两段都没有 ⇒ null（调用方回退静态壁纸）。
      */
     fun chooseFile(day: File?, night: File?, nightNow: Boolean): File? {
         if (nightNow && isUsable(night)) return night
-        return if (isUsable(day)) day else null
+        if (isUsable(day)) return day
+        return if (isUsable(night)) night else null
     }
 
     private fun isUsable(file: File?): Boolean = file != null && file.isFile && file.length() > 0L
